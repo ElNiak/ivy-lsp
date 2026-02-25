@@ -1,16 +1,28 @@
 """Shared fixtures for Ivy LSP tests."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# Insert IVY_ROOT into sys.path so `import ivy` and `import ivy_lsp` work
-IVY_ROOT = Path(__file__).resolve().parent.parent
-if str(IVY_ROOT) not in sys.path:
-    sys.path.insert(0, str(IVY_ROOT))
+# Try to resolve QUIC_STACK_DIR from the ivy package (if installed),
+# otherwise fall back to a sibling layout (panther_ivy checkout).
+try:
+    import ivy
 
-QUIC_STACK_DIR = IVY_ROOT / "protocol-testing" / "quic" / "quic_stack"
+    _IVY_PKG_DIR = Path(ivy.__file__).resolve().parent
+except ImportError:
+    _IVY_PKG_DIR = None
+
+if _IVY_PKG_DIR is not None:
+    QUIC_STACK_DIR = _IVY_PKG_DIR.parent / "protocol-testing" / "quic" / "quic_stack"
+else:
+    # Fallback: when running from a panther_ivy checkout
+    QUIC_STACK_DIR = (
+        Path(__file__).resolve().parent.parent
+        / "protocol-testing"
+        / "quic"
+        / "quic_stack"
+    )
 
 
 # ---------------------------------------------------------------------------
