@@ -41,17 +41,17 @@ class IvyLanguageServer(LanguageServer):
         completion.register(self)
         diagnostics.register(self)
 
-    def initialized(self, params):
-        """Handle the initialized notification."""
-        logger.info("Ivy Language Server initialized")
-        self._setup_indexer()
-        mode = "full" if self._full_mode else "light"
-        self.window_log_message(
-            lsp.LogMessageParams(
-                type=lsp.MessageType.Info,
-                message=f"Ivy LSP running in {mode} mode",
+        @self.feature(lsp.INITIALIZED)
+        def on_initialized(params: lsp.InitializedParams) -> None:
+            logger.info("Ivy Language Server initialized")
+            self._setup_indexer()
+            mode = "full" if self._full_mode else "light"
+            self.window_log_message(
+                lsp.LogMessageParams(
+                    type=lsp.MessageType.Info,
+                    message=f"Ivy LSP running in {mode} mode",
+                )
             )
-        )
 
     def _setup_indexer(self):
         """Create and populate the workspace indexer."""
