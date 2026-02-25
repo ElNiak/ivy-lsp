@@ -212,7 +212,9 @@ def register(server) -> None:
         diags = compute_diagnostics(
             server._parser, doc.source or "", filepath, server._indexer
         )
-        server.publish_diagnostics(uri, diags)
+        server.text_document_publish_diagnostics(
+            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+        )
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
     def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
@@ -228,7 +230,9 @@ def register(server) -> None:
             diags = compute_diagnostics(
                 server._parser, doc.source or "", filepath, server._indexer
             )
-            server.publish_diagnostics(uri, diags)
+            server.text_document_publish_diagnostics(
+                lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+            )
 
         loop = asyncio.get_event_loop()
         _debounce_tasks[uri] = loop.create_task(_debounced())
@@ -241,11 +245,15 @@ def register(server) -> None:
         diags = compute_diagnostics(
             server._parser, doc.source or "", filepath, server._indexer
         )
-        server.publish_diagnostics(uri, diags)
+        server.text_document_publish_diagnostics(
+            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+        )
 
         async def _deep():
             deep = await run_deep_diagnostics(filepath)
-            server.publish_diagnostics(uri, diags + deep)
+            server.text_document_publish_diagnostics(
+                lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags + deep)
+            )
 
         loop = asyncio.get_event_loop()
         loop.create_task(_deep())

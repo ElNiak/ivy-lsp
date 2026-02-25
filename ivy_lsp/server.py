@@ -3,6 +3,7 @@
 import logging
 import os
 
+from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 
 from ivy_lsp import __version__
@@ -45,7 +46,12 @@ class IvyLanguageServer(LanguageServer):
         logger.info("Ivy Language Server initialized")
         self._setup_indexer()
         mode = "full" if self._full_mode else "light"
-        self.show_message_log(f"Ivy LSP running in {mode} mode")
+        self.window_log_message(
+            lsp.LogMessageParams(
+                type=lsp.MessageType.Info,
+                message=f"Ivy LSP running in {mode} mode",
+            )
+        )
 
     def _setup_indexer(self):
         """Create and populate the workspace indexer."""
