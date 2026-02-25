@@ -36,7 +36,7 @@ class TestBeforeBlockRequire:
         assert req.mixin_kind == "before"
         assert req.formula_text == "x ~= y"
         assert req.file == FILEPATH
-        assert req.bracket_tag is None
+        assert req.bracket_tags == []
 
     def test_before_block_line_number_is_set(self):
         source = (
@@ -238,7 +238,7 @@ class TestMultipleRequirements:
 
 
 class TestBracketTagParsing:
-    """Bracket tags (e.g. ``# [4]``) are parsed into bracket_tag."""
+    """Bracket tags (e.g. ``# [4]``) are parsed into bracket_tags."""
 
     def test_simple_numeric_tag(self):
         source = (
@@ -248,9 +248,9 @@ class TestBracketTagParsing:
         )
         reqs, _ = extract_requirements_light(source, FILEPATH)
         assert len(reqs) == 1
-        assert reqs[0].bracket_tag == "4"
+        assert reqs[0].bracket_tags == ["4"]
 
-    def test_no_tag_yields_none(self):
+    def test_no_tag_yields_empty_list(self):
         source = (
             "before foo.step {\n"
             "    require x > 0;\n"
@@ -258,7 +258,7 @@ class TestBracketTagParsing:
         )
         reqs, _ = extract_requirements_light(source, FILEPATH)
         assert len(reqs) == 1
-        assert reqs[0].bracket_tag is None
+        assert reqs[0].bracket_tags == []
 
     def test_compound_tag(self):
         """Tags with colons and dots like ``# [frame:ack.sent]``."""
@@ -269,7 +269,18 @@ class TestBracketTagParsing:
         )
         reqs, _ = extract_requirements_light(source, FILEPATH)
         assert len(reqs) == 1
-        assert reqs[0].bracket_tag == "frame:ack.sent"
+        assert reqs[0].bracket_tags == ["frame:ack.sent"]
+
+    def test_multi_tag(self):
+        """Comma-separated tags like ``# [rfc9000:4.1, rfc9000:8.1]``."""
+        source = (
+            "before foo.step {\n"
+            "    require x > 0; # [rfc9000:4.1, rfc9000:8.1]\n"
+            "}\n"
+        )
+        reqs, _ = extract_requirements_light(source, FILEPATH)
+        assert len(reqs) == 1
+        assert reqs[0].bracket_tags == ["rfc9000:4.1", "rfc9000:8.1"]
 
     def test_tag_with_formula_preserved(self):
         """Bracket tag does not corrupt the formula text."""

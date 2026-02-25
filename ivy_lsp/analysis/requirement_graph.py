@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -33,7 +33,7 @@ class RequirementNode:
     file: str  # absolute filepath
     monitor_action: str  # action being monitored (mixee)
     mixin_kind: str  # "before" | "after" | "implement" | "direct"
-    bracket_tag: Optional[str] = None  # parsed from "# [4]" comment suffix
+    bracket_tags: List[str] = field(default_factory=list)  # parsed from "# [4]" or "# [rfc9000:4.1, rfc9000:8.1]"
     ast_node: Any = None  # reference to original AST node
 
 

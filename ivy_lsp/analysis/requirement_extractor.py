@@ -224,7 +224,7 @@ def _add_requirement(
     line = _get_line(node)
     col = 0
     formula_text = _formula_to_text(node)
-    bracket_tag = _extract_bracket_tag(source_lines, line)
+    bracket_tags = _extract_bracket_tags(source_lines, line)
 
     req_id = f"{filepath}:{line}"
     requirements.append(
@@ -237,7 +237,7 @@ def _add_requirement(
             file=filepath,
             monitor_action=monitor_action,
             mixin_kind=mixin_kind,
-            bracket_tag=bracket_tag,
+            bracket_tags=bracket_tags,
             ast_node=node.args[0] if node.args else None,
         )
     )
@@ -279,17 +279,24 @@ def _formula_to_text(node: Any) -> str:
         return repr(formula)
 
 
-def _extract_bracket_tag(
+def _extract_bracket_tags(
     source_lines: List[str], line: int
-) -> Optional[str]:
-    """Parse bracket annotation from comment suffix like '# [4]' or '# [rfc:4.1]'."""
+) -> List[str]:
+    """Parse bracket annotations from comment suffix.
+
+    Supports single tags ``# [4]`` and comma-separated multi-tags
+    ``# [rfc9000:4.1, rfc9000:8.1]``.
+    """
     if line < 0 or line >= len(source_lines):
-        return None
+        return []
     line_text = source_lines[line]
-    m = re.search(r"#\s*\[(\w+(?::\w+(?:\.\w+)*)?)\]\s*$", line_text)
-    if m:
-        return m.group(1)
-    return None
+    m = re.search(r"#\s*\[([\w:.,\s]+)\]\s*$", line_text)
+    if not m:
+        return []
+    raw = m.group(1)
+    tags = [t.strip() for t in raw.split(",") if t.strip()]
+    tag_re = re.compile(r"^\w+(?::\w+(?:\.\w+)*)?$")
+    return [t for t in tags if tag_re.match(t)]
 
 
 def _build_mixin_map(ast_obj: Any) -> Dict[str, str]:

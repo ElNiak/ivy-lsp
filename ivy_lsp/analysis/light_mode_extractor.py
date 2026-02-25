@@ -21,7 +21,7 @@ MONITOR_RE = re.compile(
     re.MULTILINE,
 )
 REQUIRE_RE = re.compile(
-    r"^\s*(require|ensure|assume|assert)\s+(.+?);\s*(?:#\s*\[(\w+(?::\w+(?:\.\w+)*)?)\])?\s*$",
+    r"^\s*(require|ensure|assume|assert)\s+(.+?);\s*(?:#\s*\[([\w:.,\s]+)\])?\s*$",
     re.MULTILINE,
 )
 ASSIGN_RE = re.compile(r"^\s*([\w.]+(?:\([^)]*\))?)\s*:=", re.MULTILINE)
@@ -185,10 +185,16 @@ def _extract_from_block(
     mixin_kind = block["mixin_kind"]
 
     # Find require/ensure/assume/assert in the block
+    tag_re = re.compile(r"^\w+(?::\w+(?:\.\w+)*)?$")
     for m in REQUIRE_RE.finditer(body_text):
         kind = m.group(1)
         formula_text = m.group(2).strip()
-        bracket_tag = m.group(3)  # may be None
+        raw_tags = m.group(3)  # may be None
+
+        bracket_tags: List[str] = []
+        if raw_tags:
+            candidates = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            bracket_tags = [t for t in candidates if tag_re.match(t)]
 
         # Calculate absolute line number
         rel_offset = m.start()
@@ -206,7 +212,7 @@ def _extract_from_block(
                 file=filepath,
                 monitor_action=monitor_action,
                 mixin_kind=mixin_kind,
-                bracket_tag=bracket_tag,
+                bracket_tags=bracket_tags,
             )
         )
 

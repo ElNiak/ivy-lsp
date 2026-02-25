@@ -27,61 +27,67 @@ requires_ivy = pytest.mark.skipif(not HAS_IVY, reason="ivy not installed (requir
 # ===========================================================================
 
 
-class TestExtractBracketTag:
-    """Test _extract_bracket_tag with various comment patterns."""
+class TestExtractBracketTags:
+    """Test _extract_bracket_tags with various comment patterns."""
 
     def test_numeric_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [4]"]
-        assert _extract_bracket_tag(lines, 0) == "4"
+        assert _extract_bracket_tags(lines, 0) == ["4"]
 
     def test_rfc_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [rfc:4.1]"]
-        assert _extract_bracket_tag(lines, 0) == "rfc:4.1"
+        assert _extract_bracket_tags(lines, 0) == ["rfc:4.1"]
 
     def test_no_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0;"]
-        assert _extract_bracket_tag(lines, 0) is None
+        assert _extract_bracket_tags(lines, 0) == []
 
     def test_line_out_of_range_negative(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [4]"]
-        assert _extract_bracket_tag(lines, -1) is None
+        assert _extract_bracket_tags(lines, -1) == []
 
     def test_line_out_of_range_beyond(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [4]"]
-        assert _extract_bracket_tag(lines, 5) is None
+        assert _extract_bracket_tags(lines, 5) == []
 
     def test_empty_lines(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
-        assert _extract_bracket_tag([], 0) is None
+        assert _extract_bracket_tags([], 0) == []
 
     def test_tag_with_trailing_whitespace(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [7]   "]
-        assert _extract_bracket_tag(lines, 0) == "7"
+        assert _extract_bracket_tags(lines, 0) == ["7"]
 
     def test_multiple_lines_correct_index(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tag
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = [
             "    require a;",
             "    require b; # [10]",
             "    require c; # [rfc:9.2]",
         ]
-        assert _extract_bracket_tag(lines, 0) is None
-        assert _extract_bracket_tag(lines, 1) == "10"
-        assert _extract_bracket_tag(lines, 2) == "rfc:9.2"
+        assert _extract_bracket_tags(lines, 0) == []
+        assert _extract_bracket_tags(lines, 1) == ["10"]
+        assert _extract_bracket_tags(lines, 2) == ["rfc:9.2"]
+
+    def test_multi_tag(self):
+        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+
+        lines = ["    require x > 0; # [rfc9000:4.1, rfc9000:8.1]"]
+        assert _extract_bracket_tags(lines, 0) == ["rfc9000:4.1", "rfc9000:8.1"]
 
 
 class TestMixinNameRegex:
@@ -359,9 +365,11 @@ before foo.step {
         assert len(require_reqs) >= 1
 
         # At least one requirement should have the bracket tag
-        tags = [r.bracket_tag for r in require_reqs if r.bracket_tag is not None]
-        assert "42" in tags, (
-            f"Expected bracket tag '42' in tags, got {tags}"
+        all_tags = []
+        for r in require_reqs:
+            all_tags.extend(r.bracket_tags)
+        assert "42" in all_tags, (
+            f"Expected bracket tag '42' in tags, got {all_tags}"
         )
 
 

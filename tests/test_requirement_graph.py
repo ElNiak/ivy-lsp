@@ -175,7 +175,7 @@ def test_create_requirement_node():
     assert node.file == "/test/file.ivy"
     assert node.monitor_action == "some_action"
     assert node.mixin_kind == "before"
-    assert node.bracket_tag is None
+    assert node.bracket_tags == []
     assert node.ast_node is None
 
 
@@ -189,10 +189,10 @@ def test_create_requirement_node_with_optional_fields():
         file="/f",
         monitor_action="act",
         mixin_kind="after",
-        bracket_tag="4",
+        bracket_tags=["4"],
         ast_node="fake_ast",
     )
-    assert node.bracket_tag == "4"
+    assert node.bracket_tags == ["4"]
     assert node.ast_node == "fake_ast"
 
 
