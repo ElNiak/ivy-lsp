@@ -16,7 +16,7 @@ class TestPackageImportable:
 
         assert hasattr(ivy_lsp, "__version__")
         assert isinstance(ivy_lsp.__version__, str)
-        assert ivy_lsp.__version__ == "0.5.4"
+        assert ivy_lsp.__version__ == "0.5.5"
 
     def test_parsing_subpackage_importable(self):
         import ivy_lsp.parsing
