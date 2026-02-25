@@ -106,8 +106,16 @@ def _check_structural_issues(source: str, filepath: str) -> list[dict[str, Any]]
     return diags
 
 
-def start_mcp(workspace_root: str | None = None) -> None:
-    """Start the MCP server exposing Ivy tools."""
+def start_mcp(
+    workspace_root: str | None = None,
+    semantic_model: Any = None,
+) -> None:
+    """Start the MCP server exposing Ivy tools.
+
+    Args:
+        workspace_root: Root directory for the workspace.
+        semantic_model: Optional SemanticModel for shared-process mode.
+    """
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError:
@@ -123,7 +131,8 @@ def start_mcp(workspace_root: str | None = None) -> None:
         instructions=(
             "Ivy Language Server MCP tools for formal verification. "
             "Provides verification (ivy_check), compilation (ivyc), "
-            "model inspection (ivy_show), fast linting, and include graph analysis."
+            "model inspection (ivy_show), fast linting, include graph analysis, "
+            "and semantic traceability (RFC coverage, impact analysis, cross-references)."
         ),
     )
 
@@ -340,6 +349,339 @@ def start_mcp(workspace_root: str | None = None) -> None:
             "ivyc": shutil.which("ivyc") is not None,
             "ivy_show": shutil.which("ivy_show") is not None,
         })
+
+    # --- Semantic / Traceability Tools ---
+
+    def _get_model():
+        """Return the semantic model, building one if needed."""
+        nonlocal semantic_model
+        if semantic_model is not None:
+            return semantic_model
+
+        # Try to build a lightweight model from workspace files
+        try:
+            from ivy_lsp.semantic.model import SemanticModel
+            from ivy_lsp.semantic.rfc_annotations import (
+                find_manifests,
+                load_requirement_manifest,
+                parse_file_rfc_annotations,
+            )
+
+            model = SemanticModel()
+            # Load manifests
+            for manifest_path in find_manifests(root):
+                reqs = load_requirement_manifest(manifest_path)
+                for req in reqs.values():
+                    model.add_node(req)
+
+            # Scan for RFC annotations in .ivy files
+            for rel_path in _find_ivy_files(root):
+                abs_path = os.path.join(root, rel_path)
+                try:
+                    with open(abs_path, encoding="utf-8", errors="replace") as f:
+                        source = f.read()
+                    for ann in parse_file_rfc_annotations(source, abs_path):
+                        model.add_node(ann)
+                except OSError:
+                    continue
+
+            semantic_model = model
+            return model
+        except ImportError:
+            return None
+
+    @mcp.tool()
+    def ivy_traceability_matrix(relative_path: str | None = None) -> str:
+        """RFC requirement-to-assertion traceability matrix.
+
+        Shows which RFC requirements are covered by assertions in the codebase.
+
+        Args:
+            relative_path: Optional file to scope the matrix to.
+        """
+        model = _get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+        requirements = model.get_nodes_by_type(RfcRequirement)
+        annotations = model.get_nodes_by_type(RfcAnnotation)
+
+        if relative_path:
+            abs_path = os.path.join(root, relative_path)
+            annotations = [a for a in annotations if a.file == abs_path]
+
+        covered_tags: dict[str, list[dict]] = {}
+        for ann in annotations:
+            for tag in ann.tags:
+                if tag not in covered_tags:
+                    covered_tags[tag] = []
+                covered_tags[tag].append({
+                    "file": ann.file,
+                    "line": ann.line,
+                })
+
+        matrix = []
+        for req in requirements:
+            matrix.append({
+                "id": req.id,
+                "rfc": req.rfc,
+                "section": req.section,
+                "level": req.level,
+                "text": req.text[:120],
+                "covered": req.id in covered_tags,
+                "assertions": covered_tags.get(req.id, []),
+            })
+
+        return json.dumps({
+            "total_requirements": len(requirements),
+            "covered": sum(1 for m in matrix if m["covered"]),
+            "uncovered": sum(1 for m in matrix if not m["covered"]),
+            "matrix": matrix,
+        })
+
+    @mcp.tool()
+    def ivy_requirement_coverage(relative_path: str | None = None) -> str:
+        """RFC requirement coverage statistics by level (MUST/SHOULD/MAY) and layer.
+
+        Args:
+            relative_path: Optional file to scope the analysis to.
+        """
+        model = _get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+        requirements = model.get_nodes_by_type(RfcRequirement)
+        annotations = model.get_nodes_by_type(RfcAnnotation)
+
+        if relative_path:
+            abs_path = os.path.join(root, relative_path)
+            annotations = [a for a in annotations if a.file == abs_path]
+
+        covered_tags = set()
+        for ann in annotations:
+            covered_tags.update(ann.tags)
+
+        by_level: dict[str, dict] = {}
+        by_layer: dict[str, dict] = {}
+        for req in requirements:
+            level = req.level or "UNKNOWN"
+            layer = getattr(req, "layer", None) or "unspecified"
+
+            if level not in by_level:
+                by_level[level] = {"total": 0, "covered": 0}
+            by_level[level]["total"] += 1
+            if req.id in covered_tags:
+                by_level[level]["covered"] += 1
+
+            if layer not in by_layer:
+                by_layer[layer] = {"total": 0, "covered": 0}
+            by_layer[layer]["total"] += 1
+            if req.id in covered_tags:
+                by_layer[layer]["covered"] += 1
+
+        total = len(requirements)
+        covered = sum(1 for r in requirements if r.id in covered_tags)
+        return json.dumps({
+            "total": total,
+            "covered": covered,
+            "uncovered": total - covered,
+            "coverage_percent": round(100 * covered / total, 1) if total else 0,
+            "by_level": by_level,
+            "by_layer": by_layer,
+        })
+
+    @mcp.tool()
+    def ivy_impact_analysis(symbol_name: str) -> str:
+        """Analyze what requirements, tests, and monitors are affected by a symbol.
+
+        Args:
+            symbol_name: The name of the symbol to analyze.
+        """
+        model = _get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import SymbolNode
+
+        # Find matching symbol nodes
+        matches = [
+            sn for sn in model.get_nodes_by_type(SymbolNode)
+            if sn.name == symbol_name or sn.qualified_name == symbol_name
+        ]
+
+        if not matches:
+            return json.dumps({
+                "symbol": symbol_name,
+                "found": False,
+                "message": f"Symbol '{symbol_name}' not found in semantic model",
+            })
+
+        sn = matches[0]
+        incoming = model.get_incoming(sn.id)
+        outgoing = model.get_outgoing(sn.id)
+
+        return json.dumps({
+            "symbol": symbol_name,
+            "found": True,
+            "qualified_name": sn.qualified_name,
+            "kind": sn.kind,
+            "file": sn.file,
+            "line": sn.line,
+            "incoming_edges": [
+                {"type": etype.value, "source": src} for etype, src in incoming
+            ],
+            "outgoing_edges": [
+                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+            ],
+            "total_references": len(incoming) + len(outgoing),
+        })
+
+    @mcp.tool()
+    def ivy_extract_requirements(rfc_text: str) -> str:
+        """Parse RFC text to extract MUST/SHOULD/MAY structured requirements.
+
+        Args:
+            rfc_text: Raw RFC text to parse for normative requirements.
+        """
+        req_pattern = re.compile(
+            r"([^.]*?\b(MUST NOT|MUST|SHALL NOT|SHALL|SHOULD NOT|SHOULD|"
+            r"MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b[^.]*\.)",
+            re.MULTILINE,
+        )
+
+        results = []
+        for m in req_pattern.finditer(rfc_text):
+            text = m.group(1).strip()
+            level = m.group(2)
+            # Normalize level
+            if level in ("SHALL", "REQUIRED"):
+                level = "MUST"
+            elif level in ("SHALL NOT",):
+                level = "MUST NOT"
+            elif level in ("RECOMMENDED",):
+                level = "SHOULD"
+            elif level in ("OPTIONAL",):
+                level = "MAY"
+
+            results.append({
+                "text": text,
+                "level": level,
+                "offset": m.start(),
+            })
+
+        return json.dumps({
+            "requirements": results,
+            "total": len(results),
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        })
+
+    @mcp.tool()
+    def ivy_cross_references(node_id: str) -> str:
+        """Query cross-reference graph neighborhood of a node.
+
+        Args:
+            node_id: The node ID to query (e.g., "test.ivy:5:send").
+        """
+        model = _get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        node = model.get_node(node_id)
+        if node is None:
+            return json.dumps({
+                "node_id": node_id,
+                "found": False,
+                "message": f"Node '{node_id}' not found",
+            })
+
+        incoming = model.get_incoming(node_id)
+        outgoing = model.get_outgoing(node_id)
+
+        return json.dumps({
+            "node_id": node_id,
+            "found": True,
+            "node_type": type(node).__name__,
+            "incoming": [
+                {"type": etype.value, "source": src} for etype, src in incoming
+            ],
+            "outgoing": [
+                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+            ],
+        })
+
+    @mcp.tool()
+    def ivy_query_symbol(symbol_name: str) -> str:
+        """Query rich semantic info about a symbol: type, references, requirements.
+
+        Args:
+            symbol_name: The symbol name to query.
+        """
+        model = _get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+
+        # Search SymbolNode
+        symbol_matches = [
+            sn for sn in model.get_nodes_by_type(SymbolNode)
+            if sn.name == symbol_name or sn.qualified_name == symbol_name
+        ]
+        # Search TypeNode
+        type_matches = [
+            tn for tn in model.get_nodes_by_type(TypeNode)
+            if tn.name == symbol_name or tn.qualified_name == symbol_name
+        ]
+
+        if not symbol_matches and not type_matches:
+            return json.dumps({
+                "symbol": symbol_name,
+                "found": False,
+                "message": f"Symbol '{symbol_name}' not found",
+            })
+
+        result: dict[str, Any] = {
+            "symbol": symbol_name,
+            "found": True,
+        }
+
+        if symbol_matches:
+            sn = symbol_matches[0]
+            result["symbol_info"] = {
+                "qualified_name": sn.qualified_name,
+                "kind": sn.kind,
+                "file": sn.file,
+                "line": sn.line,
+                "params": sn.params,
+                "return_sort": sn.return_sort,
+                "sort_name": sn.sort_name,
+            }
+            incoming = model.get_incoming(sn.id)
+            outgoing = model.get_outgoing(sn.id)
+            result["references"] = {
+                "incoming": len(incoming),
+                "outgoing": len(outgoing),
+            }
+
+        if type_matches:
+            tn = type_matches[0]
+            result["type_info"] = {
+                "qualified_name": tn.qualified_name,
+                "file": tn.file,
+                "line": tn.line,
+                "sort_name": tn.sort_name,
+                "is_enum": tn.is_enum,
+                "variants": tn.variants,
+            }
+
+        return json.dumps(result)
 
     logger.info("Starting ivy-lsp MCP server (workspace: %s)", root)
     mcp.run(transport="stdio")

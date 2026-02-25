@@ -22,6 +22,8 @@ class IvyLanguageServer(LanguageServer):
         self._indexer = None
         self._parser = None
         self._full_mode = False
+        self._semantic_model = None
+        self._analysis_pipeline = None
 
         from ivy_lsp.features import (
             code_lens,
@@ -126,3 +128,37 @@ class IvyLanguageServer(LanguageServer):
             logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
         except Exception:
             logger.exception("Workspace indexing failed")
+
+        # Set up semantic model and analysis pipeline
+        try:
+            from ivy_lsp.adapters.null_adapter import (
+                NullAstEnrichmentAdapter,
+                NullCompilerAdapter,
+            )
+            from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
+            from ivy_lsp.semantic.model import SemanticModel
+
+            self._semantic_model = SemanticModel()
+
+            if self._full_mode:
+                try:
+                    from ivy_lsp.adapters.ast_enrichment_adapter import (
+                        AstEnrichmentAdapter,
+                    )
+                    from ivy_lsp.adapters.compiler_adapter import CompilerAdapter
+
+                    enrichment = AstEnrichmentAdapter()
+                    compiler = CompilerAdapter()
+                except ImportError:
+                    enrichment = NullAstEnrichmentAdapter()
+                    compiler = NullCompilerAdapter()
+            else:
+                enrichment = NullAstEnrichmentAdapter()
+                compiler = NullCompilerAdapter()
+
+            self._analysis_pipeline = AnalysisPipeline(
+                self._semantic_model, self._parser, enrichment, compiler
+            )
+            logger.info("Semantic model and analysis pipeline initialized")
+        except Exception:
+            logger.exception("Semantic model setup failed")

@@ -41,29 +41,33 @@ def compute_code_lenses(
     indexer: Any,
     filepath: str,
     source: str,
+    semantic_model: Any = None,
 ) -> List[lsp.CodeLens]:
     """Compute all code lenses for a file."""
     graph = getattr(indexer, "_requirement_graph", None)
-    if graph is None:
-        return []
-
     abs_path = os.path.abspath(filepath)
     lenses: List[lsp.CodeLens] = []
     lines = source.split("\n")
 
-    # 1. Monitor block lenses (before/after/around)
-    lenses.extend(_monitor_lenses(lines, abs_path, graph))
+    if graph is not None:
+        # 1. Monitor block lenses (before/after/around)
+        lenses.extend(_monitor_lenses(lines, abs_path, graph))
 
-    # 2. State variable lenses (relation/function/individual)
-    lenses.extend(_state_var_lenses(lines, abs_path, graph))
+        # 2. State variable lenses (relation/function/individual)
+        lenses.extend(_state_var_lenses(lines, abs_path, graph))
 
-    # 3. Property/axiom/conjecture lenses
-    lenses.extend(_property_lenses(lines, abs_path, graph))
+        # 3. Property/axiom/conjecture lenses
+        lenses.extend(_property_lenses(lines, abs_path, graph))
 
-    # 4. Include directive lenses
-    include_graph = getattr(indexer, "_include_graph", None)
-    if include_graph:
-        lenses.extend(_include_lenses(lines, abs_path, graph, include_graph))
+        # 4. Include directive lenses
+        include_graph = getattr(indexer, "_include_graph", None)
+        if include_graph:
+            lenses.extend(_include_lenses(lines, abs_path, graph, include_graph))
+
+    # 5. Semantic model lenses (RFC tags, coverage summary)
+    if semantic_model is not None:
+        lenses.extend(_rfc_tag_lenses(lines, abs_path, semantic_model))
+        lenses.extend(_coverage_summary_lens(abs_path, semantic_model))
 
     return lenses
 
@@ -275,6 +279,99 @@ def _include_lenses(
     return lenses
 
 
+def _rfc_tag_lenses(
+    lines: List[str],
+    filepath: str,
+    semantic_model: Any,
+) -> List[lsp.CodeLens]:
+    """Code lenses showing RFC bracket tags on monitor lines."""
+    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+    lenses = []
+    annotations = [
+        n
+        for n in semantic_model.get_nodes_by_type(RfcAnnotation)
+        if n.file and n.file.endswith(os.path.basename(filepath))
+    ]
+
+    for ann in annotations:
+        line = ann.line
+        if line < 0 or line >= len(lines):
+            continue
+
+        tag_parts = []
+        for tag in ann.tags:
+            req = semantic_model.get_node(tag)
+            if req and isinstance(req, RfcRequirement):
+                tag_parts.append(f"[{tag}] ({req.level})")
+            else:
+                tag_parts.append(f"[{tag}]")
+
+        if not tag_parts:
+            continue
+
+        title = "RFC: " + ", ".join(tag_parts)
+        lenses.append(
+            lsp.CodeLens(
+                range=lsp.Range(
+                    start=lsp.Position(line=line, character=0),
+                    end=lsp.Position(
+                        line=line,
+                        character=len(lines[line]) if line < len(lines) else 0,
+                    ),
+                ),
+                command=lsp.Command(title=title, command=""),
+            )
+        )
+
+    return lenses
+
+
+def _coverage_summary_lens(
+    filepath: str,
+    semantic_model: Any,
+) -> List[lsp.CodeLens]:
+    """File-level coverage summary lens at line 0."""
+    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+    requirements = semantic_model.get_nodes_by_type(RfcRequirement)
+    if not requirements:
+        return []
+
+    annotations = semantic_model.get_nodes_by_type(RfcAnnotation)
+    covered_tags = set()
+    for ann in annotations:
+        covered_tags.update(ann.tags)
+
+    # Group requirements by RFC
+    by_rfc: dict = {}
+    for req in requirements:
+        rfc = req.rfc
+        if rfc not in by_rfc:
+            by_rfc[rfc] = {"total": 0, "covered": 0}
+        by_rfc[rfc]["total"] += 1
+        if req.id in covered_tags:
+            by_rfc[rfc]["covered"] += 1
+
+    parts = []
+    for rfc, stats in sorted(by_rfc.items()):
+        parts.append(f"{rfc}: {stats['covered']}/{stats['total']} covered")
+
+    if not parts:
+        return []
+
+    title = " | ".join(parts)
+    return [
+        lsp.CodeLens(
+            range=lsp.Range(
+                start=lsp.Position(line=0, character=0),
+                end=lsp.Position(line=0, character=0),
+            ),
+            command=lsp.Command(title=title, command=""),
+        )
+    ]
+
+
 def register(server) -> None:
     """Register the code lens handler."""
 
@@ -288,8 +385,11 @@ def register(server) -> None:
         if not server._indexer:
             return []
 
+        model = getattr(server, "_semantic_model", None)
         try:
-            return compute_code_lenses(server._indexer, filepath, source)
+            return compute_code_lenses(
+                server._indexer, filepath, source, model
+            )
         except Exception:
             logger.warning(
                 "Code lens computation failed for %s",
