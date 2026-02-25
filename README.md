@@ -52,6 +52,23 @@ languages:
   - ivy
 ```
 
+## Configuration
+
+When running standalone (outside VS Code), configure workspace indexing via environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `IVY_LSP_INCLUDE_PATHS` | Comma-separated directories to include (whitelist). When set, only these directories are scanned. |
+| `IVY_LSP_EXCLUDE_PATHS` | Comma-separated directories to exclude, additive to the hardcoded exclusion list. |
+
+When using the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=elniak.ivy-language), these are set automatically from the `ivy.lsp.includePaths` and `ivy.lsp.excludePaths` settings.
+
+Standalone example:
+
+```bash
+IVY_LSP_EXCLUDE_PATHS=submodules,test python -m ivy_lsp
+```
+
 ## Requirements
 
 - Python 3.10+

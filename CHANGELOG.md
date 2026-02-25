@@ -5,6 +5,26 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-02-25
+
+### Added
+
+- **MCP server mode**: `--mcp` flag starts a Model Context Protocol server exposing Ivy verify/compile/show tools. Optional `mcp` extra dependency.
+
+### Changed
+
+- Updated README with configuration section documenting `IVY_LSP_INCLUDE_PATHS` and `IVY_LSP_EXCLUDE_PATHS` environment variables.
+- Updated internal README with IncludeResolver architecture, workspace filtering design, and four-step include resolution documentation.
+- Updated CHANGELOG with retroactive v0.5.1 entry.
+
+## [0.5.1] - 2026-02-25
+
+### Added
+
+- **Include/exclude path filtering**: `IVY_LSP_INCLUDE_PATHS` and `IVY_LSP_EXCLUDE_PATHS` environment variables control workspace indexing scope.
+- **IncludeResolver**: New `indexer/include_resolver.py` with 4-step include resolution (local → staging → workspace → stdlib), two-layer directory filtering (hardcoded + user-configurable), and flat staging directory with deterministic collision handling.
+- **Staging directory**: Flat symlink layout mirroring `ivyc`'s `include/1.7/` model. First sorted path wins on filename collisions.
+
 ## [0.5.0] - 2026-02-25
 
 ### Added
@@ -68,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace indexer with include resolution.
 - Dual parser: full `IvyParserWrapper` (z3) and `FallbackScanner` (lexer-only error recovery).
 
+[0.5.2]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.2
+[0.5.1]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.4.0
 [0.3.3]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.3.3

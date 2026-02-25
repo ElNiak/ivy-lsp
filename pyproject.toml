@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ivy-lsp"
-version = "0.5.1"
+version = "0.5.2"
 description = "Language Server Protocol implementation for the Ivy formal specification language"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 full = ["panther_ms_ivy[z3]"]
+mcp = ["mcp>=1.0"]
 dev = [
     "pytest",
     "pytest-asyncio",
