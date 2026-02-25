@@ -5,6 +5,16 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-25
+
+### Added
+
+- **LSP custom requests**: `ivy/verify`, `ivy/compile`, `ivy/showModel`, `ivy/capabilities` for triggering Ivy tools from VSCode.
+- **Smart isolate detection**: Automatically detects the isolate under cursor using document symbols for scoped verification.
+- **Progress reporting**: `$/progress` tokens for long-running operations with cancellation support.
+- **Diagnostic publishing**: `ivy/verify` parses `ivy_check` output and publishes results to the Problems panel.
+- Extracted reusable `parse_ivy_check_output()` from `run_deep_diagnostics` for shared use.
+
 ## [0.4.0] - 2026-02-25
 
 ### Added
@@ -58,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace indexer with include resolution.
 - Dual parser: full `IvyParserWrapper` (z3) and `FallbackScanner` (lexer-only error recovery).
 
+[0.5.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.4.0
 [0.3.3]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.3.3
 [0.3.2]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.3.2
