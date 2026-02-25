@@ -280,3 +280,116 @@ class TestVerifyHandler:
         assert "ivy/compile" in registered
         assert "ivy/showModel" in registered
         assert "ivy/capabilities" in registered
+
+
+# ---------------------------------------------------------------------------
+# Namedtuple params tests (pygls 2.0.1 sends namedtuples, not dicts)
+# ---------------------------------------------------------------------------
+
+
+def _make_registered_handlers():
+    """Register handlers on a mock server and return (server, handlers dict)."""
+    from ivy_lsp.features.commands import register
+
+    server = MagicMock()
+    registered = {}
+
+    def fake_feature(method):
+        def decorator(fn):
+            registered[method] = fn
+            return fn
+        return decorator
+
+    server.feature = fake_feature
+    register(server)
+    return server, registered
+
+
+def _make_namedtuple_params(fields: dict):
+    """Build a nested namedtuple mimicking pygls _dict_to_object() output."""
+    from collections import namedtuple
+
+    def _convert(obj):
+        if isinstance(obj, dict):
+            converted = {k: _convert(v) for k, v in obj.items()}
+            NT = namedtuple("Object", list(converted.keys()), rename=True)
+            return NT(**converted)
+        return obj
+
+    return _convert(fields)
+
+
+class TestShowModelHandlerParams:
+    """Verify handlers work with namedtuple params (as pygls actually sends)."""
+
+    @pytest.mark.asyncio
+    async def test_show_model_with_namedtuple_params(self):
+        """Reproduce the exact bug: pygls sends namedtuple, not dict."""
+        _server, registered = _make_registered_handlers()
+
+        params = _make_namedtuple_params(
+            {"textDocument": {"uri": "file:///test.ivy"}, "workDoneToken": None}
+        )
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/showModel"](params)
+
+        assert result["success"] is True
+
+
+class TestCompileHandlerParams:
+    @pytest.mark.asyncio
+    async def test_compile_with_namedtuple_params(self):
+        _server, registered = _make_registered_handlers()
+
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///test.ivy"},
+                "workDoneToken": None,
+                "target": "test",
+            }
+        )
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/compile"](params)
+
+        assert result["success"] is True
+
+
+class TestVerifyHandlerParams:
+    @pytest.mark.asyncio
+    async def test_verify_with_namedtuple_params(self):
+        server, registered = _make_registered_handlers()
+
+        # verify handler calls compute_diagnostics which needs doc.source as a string
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        server.workspace.get_text_document.return_value = doc
+        server._parser = MagicMock()
+        server._indexer = MagicMock()
+
+        params = _make_namedtuple_params(
+            {"textDocument": {"uri": "file:///test.ivy"}, "workDoneToken": None}
+        )
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/verify"](params)
+
+        assert result["success"] is True
+        assert "diagnosticCount" in result
+

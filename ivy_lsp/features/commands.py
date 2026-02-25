@@ -135,18 +135,18 @@ def register(server: Any) -> None:
     """Register custom Ivy command handlers."""
 
     @server.feature("ivy/verify")
-    async def ivy_verify(params: Dict[str, Any]) -> Dict[str, Any]:
-        uri = params["textDocument"]["uri"]
+    async def ivy_verify(params) -> Dict[str, Any]:
+        uri = params.textDocument.uri
         filepath = uri.replace("file://", "")
-        token = params.get("workDoneToken")
+        token = getattr(params, "workDoneToken", None)
 
         # Smart isolate detection
         position = None
-        if params.get("position") is not None:
-            p = params["position"]
-            position = lsp.Position(line=p["line"], character=p["character"])
+        raw_pos = getattr(params, "position", None)
+        if raw_pos is not None:
+            position = lsp.Position(line=raw_pos.line, character=raw_pos.character)
 
-        isolate = params.get("isolate")
+        isolate = getattr(params, "isolate", None)
         if isolate is None and position is not None:
             isolate = _detect_isolate_at_position(server, uri, position)
 
@@ -181,21 +181,21 @@ def register(server: Any) -> None:
         return result
 
     @server.feature("ivy/compile")
-    async def ivy_compile(params: Dict[str, Any]) -> Dict[str, Any]:
-        uri = params["textDocument"]["uri"]
+    async def ivy_compile(params) -> Dict[str, Any]:
+        uri = params.textDocument.uri
         filepath = uri.replace("file://", "")
-        token = params.get("workDoneToken")
-        target = params.get("target", "test")
+        token = getattr(params, "workDoneToken", None)
+        target = getattr(params, "target", "test")
 
         cmd = ["ivyc", f"target={target}", filepath]
         result = await _run_tool(cmd, DEFAULT_COMPILE_TIMEOUT, server, token)
         return result
 
     @server.feature("ivy/showModel")
-    async def ivy_show_model(params: Dict[str, Any]) -> Dict[str, Any]:
-        uri = params["textDocument"]["uri"]
+    async def ivy_show_model(params) -> Dict[str, Any]:
+        uri = params.textDocument.uri
         filepath = uri.replace("file://", "")
-        token = params.get("workDoneToken")
+        token = getattr(params, "workDoneToken", None)
 
         cmd = ["ivy_show", filepath]
         result = await _run_tool(
