@@ -425,7 +425,7 @@ async def run_deep_diagnostics(
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
     except FileNotFoundError:
-        logger.debug("%s not found on PATH", ivy_check_cmd)
+        logger.info("%s not found on PATH", ivy_check_cmd)
         return []
     except asyncio.TimeoutError:
         logger.warning("Deep diagnostics timed out for %s", filepath)
@@ -468,19 +468,30 @@ def register(server) -> None:
             old_task.cancel()
 
         async def _debounced():
-            await asyncio.sleep(DEBOUNCE_DELAY)
-            doc = server.workspace.get_text_document(uri)
-            filepath = uri.replace("file://", "")
-            diags = compute_diagnostics(
-                server._parser, doc.source or "", filepath,
-                server._indexer, _get_semantic_model(),
-            )
-            server.text_document_publish_diagnostics(
-                lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
-            )
+            try:
+                await asyncio.sleep(DEBOUNCE_DELAY)
+                doc = server.workspace.get_text_document(uri)
+                filepath = uri.replace("file://", "")
+                diags = compute_diagnostics(
+                    server._parser, doc.source or "", filepath,
+                    server._indexer, _get_semantic_model(),
+                )
+                server.text_document_publish_diagnostics(
+                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+                )
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.warning("Debounced diagnostics failed for %s", uri, exc_info=True)
 
-        loop = asyncio.get_event_loop()
-        _debounce_tasks[uri] = loop.create_task(_debounced())
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_debounced())
+        task.add_done_callback(
+            lambda t, u=uri: _debounce_tasks.pop(u, None)
+            if _debounce_tasks.get(u) is t
+            else None
+        )
+        _debounce_tasks[uri] = task
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
     def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
@@ -496,10 +507,15 @@ def register(server) -> None:
         )
 
         async def _deep():
-            deep = await run_deep_diagnostics(filepath)
-            server.text_document_publish_diagnostics(
-                lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags + deep)
-            )
+            try:
+                deep = await run_deep_diagnostics(filepath)
+                server.text_document_publish_diagnostics(
+                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags + deep)
+                )
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.warning("Deep diagnostics task failed for %s", uri, exc_info=True)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         loop.create_task(_deep())

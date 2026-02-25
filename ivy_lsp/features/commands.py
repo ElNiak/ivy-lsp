@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import time
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -11,6 +12,16 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from lsprotocol import types as lsp
 
 logger = logging.getLogger(__name__)
+
+_VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+
+
+def _validate_ivy_param(value: str) -> str:
+    """Validate an Ivy CLI parameter (isolate name, target, etc.)."""
+    if not value or not _VALID_IVY_PARAM.match(value):
+        raise ValueError(f"Invalid Ivy parameter: {value!r}")
+    return value
+
 
 DEFAULT_VERIFY_TIMEOUT = 120.0
 DEFAULT_COMPILE_TIMEOUT = 300.0
@@ -116,7 +127,10 @@ async def _run_tool(
             )
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.wait()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Process did not exit after kill; may be orphaned")
             return {
                 "success": False,
                 "message": f"Timed out after {timeout}s",
@@ -150,7 +164,7 @@ async def _run_tool(
                     token, lsp.WorkDoneProgressEnd(message="Done")
                 )
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Failed to end progress token %s",
                     token,
                     exc_info=True,
@@ -179,7 +193,7 @@ def register(server: Any) -> None:
         staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivy_check"]
         if isolate:
-            cmd.append(f"isolate={isolate}")
+            cmd.append(f"isolate={_validate_ivy_param(isolate)}")
         cmd.append(staged_filepath)
 
         result = await _run_tool(cmd, DEFAULT_VERIFY_TIMEOUT, server, token)
@@ -215,7 +229,7 @@ def register(server: Any) -> None:
         target = getattr(params, "target", "test")
 
         staged_filepath = _resolve_via_staging(server, filepath)
-        cmd = ["ivyc", f"target={target}", staged_filepath]
+        cmd = ["ivyc", f"target={_validate_ivy_param(target)}", staged_filepath]
         result = await _run_tool(cmd, DEFAULT_COMPILE_TIMEOUT, server, token)
         return result
 

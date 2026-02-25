@@ -45,7 +45,7 @@ def extract_requirements_full(
                 decl, filepath, source_lines, mixin_map, requirements, writes
             )
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Failed to extract requirements from %s in %s",
                 type(decl).__name__,
                 filepath,
@@ -331,7 +331,7 @@ def _build_mixin_map(ast_obj: Any) -> Dict[str, str]:
             if mixer_name and mixee_name:
                 mixin_map[mixer_name] = mixee_name
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Failed to extract mixin mapping from %s",
                 type(decl).__name__,
                 exc_info=True,

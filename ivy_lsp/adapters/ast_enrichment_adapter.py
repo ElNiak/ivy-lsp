@@ -40,7 +40,7 @@ class AstEnrichmentAdapter:
             try:
                 self._process_decl(decl, filename, annotations)
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Failed to extract type info from %s",
                     type(decl).__name__,
                     exc_info=True,

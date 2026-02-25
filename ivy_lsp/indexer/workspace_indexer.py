@@ -86,7 +86,7 @@ class WorkspaceIndexer:
             with open(filepath) as f:
                 source = f.read()
         except OSError:
-            logger.debug("Cannot read %s", filepath)
+            logger.warning("Cannot read %s; file will not be indexed", filepath)
             return []
 
         result = self._parser.parse(source, filepath)
@@ -200,7 +200,7 @@ class WorkspaceIndexer:
                 filepath, reqs, writes
             )
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Requirement extraction failed for %s", filepath, exc_info=True
             )
 

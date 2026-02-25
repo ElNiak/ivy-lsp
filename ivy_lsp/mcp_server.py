@@ -22,6 +22,25 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _validate_path(root: str, relative_path: str) -> str:
+    """Resolve *relative_path* under *root*, rejecting traversal escapes."""
+    abs_path = os.path.realpath(os.path.join(root, relative_path))
+    real_root = os.path.realpath(root)
+    if not abs_path.startswith(real_root + os.sep) and abs_path != real_root:
+        raise ValueError(f"Path escapes workspace root: {relative_path}")
+    return abs_path
+
+
+_VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+
+
+def _validate_ivy_param(value: str) -> str:
+    """Validate an Ivy CLI parameter (isolate name, target, etc.)."""
+    if not value or not _VALID_IVY_PARAM.match(value):
+        raise ValueError(f"Invalid Ivy parameter: {value!r}")
+    return value
+
+
 def _find_ivy_files(root: str, exclude_dirs: set[str] | None = None) -> list[str]:
     """Walk the project and return relative paths to all .ivy files."""
     if exclude_dirs is None:
@@ -151,12 +170,19 @@ def start_mcp(
         """
         import subprocess
 
-        abs_path = os.path.join(root, relative_path)
+        try:
+            abs_path = _validate_path(root, relative_path)
+        except ValueError as exc:
+            return json.dumps({"success": False, "message": str(exc)})
         if not os.path.isfile(abs_path):
             return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
 
         cmd = ["ivy_check"]
         if isolate:
+            try:
+                _validate_ivy_param(isolate)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
             cmd.append(f"isolate={isolate}")
         cmd.append(abs_path)
 
@@ -197,10 +223,19 @@ def start_mcp(
         """
         import subprocess
 
-        abs_path = os.path.join(root, relative_path)
+        try:
+            abs_path = _validate_path(root, relative_path)
+        except ValueError as exc:
+            return json.dumps({"success": False, "message": str(exc)})
         if not os.path.isfile(abs_path):
             return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
 
+        try:
+            _validate_ivy_param(target)
+            if isolate:
+                _validate_ivy_param(isolate)
+        except ValueError as exc:
+            return json.dumps({"success": False, "message": str(exc)})
         cmd = ["ivyc", f"target={target}"]
         if isolate:
             cmd.append(f"isolate={isolate}")
@@ -235,10 +270,18 @@ def start_mcp(
         """
         import subprocess
 
-        abs_path = os.path.join(root, relative_path)
+        try:
+            abs_path = _validate_path(root, relative_path)
+        except ValueError as exc:
+            return json.dumps({"success": False, "message": str(exc)})
         if not os.path.isfile(abs_path):
             return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
 
+        if isolate:
+            try:
+                _validate_ivy_param(isolate)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
         cmd = ["ivy_show"]
         if isolate:
             cmd.append(f"isolate={isolate}")
@@ -269,7 +312,10 @@ def start_mcp(
         Args:
             relative_path: Relative path to the .ivy file to lint.
         """
-        abs_path = os.path.join(root, relative_path)
+        try:
+            abs_path = _validate_path(root, relative_path)
+        except ValueError as exc:
+            return json.dumps({"success": False, "message": str(exc)})
         if not os.path.isfile(abs_path):
             return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
 

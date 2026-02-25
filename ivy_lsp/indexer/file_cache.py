@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -62,6 +65,7 @@ class FileCache:
         try:
             mtime = os.path.getmtime(filepath)
         except OSError:
+            logger.debug("Cannot stat %s; parse result not cached", filepath)
             return
         entry = CachedFile(
             filepath=filepath,

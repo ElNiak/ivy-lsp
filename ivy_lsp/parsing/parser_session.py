@@ -31,6 +31,11 @@ class ParserSession:
         import ivy.ivy_parser as ip
         import ivy.ivy_utils as iu
 
+        # Cache module refs for safe restore in __exit__
+        self._ip = ip
+        self._iu = iu
+        self._ia = ia
+
         # Save all 12 globals
         self._saved = {
             "ip.error_list": ip.error_list,
@@ -64,24 +69,26 @@ class ParserSession:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        import ivy.ivy_ast as ia
-        import ivy.ivy_parser as ip
-        import ivy.ivy_utils as iu
-
-        # Restore all globals unconditionally
-        ip.error_list = self._saved["ip.error_list"]
-        ip.stack = self._saved["ip.stack"]
-        ip.special_attribute = self._saved["ip.special_attribute"]
-        ip.parent_object = self._saved["ip.parent_object"]
-        ip.global_attribute = self._saved["ip.global_attribute"]
-        ip.common_attribute = self._saved["ip.common_attribute"]
-        ip.importer = self._saved["ip.importer"]
-        iu.filename = self._saved["iu.filename"]
-        iu.ivy_language_version = self._saved["iu.ivy_language_version"]
-        ia.lf_counter = self._saved["ia.lf_counter"]
-        ia.reference_lineno = self._saved["ia.reference_lineno"]
-        ia.always_clone_with_fresh_id = self._saved["ia.always_clone_with_fresh_id"]
-
+        try:
+            ip, iu, ia = self._ip, self._iu, self._ia
+            ip.error_list = self._saved["ip.error_list"]
+            ip.stack = self._saved["ip.stack"]
+            ip.special_attribute = self._saved["ip.special_attribute"]
+            ip.parent_object = self._saved["ip.parent_object"]
+            ip.global_attribute = self._saved["ip.global_attribute"]
+            ip.common_attribute = self._saved["ip.common_attribute"]
+            ip.importer = self._saved["ip.importer"]
+            iu.filename = self._saved["iu.filename"]
+            iu.ivy_language_version = self._saved["iu.ivy_language_version"]
+            ia.lf_counter = self._saved["ia.lf_counter"]
+            ia.reference_lineno = self._saved["ia.reference_lineno"]
+            ia.always_clone_with_fresh_id = self._saved["ia.always_clone_with_fresh_id"]
+        except Exception:
+            logger.error(
+                "CRITICAL: Failed to restore Ivy parser global state. "
+                "Subsequent parses may be corrupted.",
+                exc_info=True,
+            )
         return False  # don't suppress exceptions
 
 
@@ -102,7 +109,8 @@ class IvyParserWrapper:
             def _lsp_importer(name: str):
                 """Resolve and parse an included module."""
                 fname = name + ".ivy"
-                from_dir = os.path.dirname(os.path.abspath(filename))
+                current_file = iu.filename or filename
+                from_dir = os.path.dirname(os.path.abspath(current_file))
                 candidate = os.path.join(from_dir, fname)
                 if not os.path.isfile(candidate):
                     try:

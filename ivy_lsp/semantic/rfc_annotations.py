@@ -85,7 +85,7 @@ def load_requirement_manifest(path: str) -> Dict[str, RfcRequirement]:
     try:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
-    except Exception:
+    except (yaml.YAMLError, OSError):
         logger.warning("Failed to load manifest %s", path, exc_info=True)
         return {}
 

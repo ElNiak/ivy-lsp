@@ -16,6 +16,7 @@ from ivy_lsp.features.commands import (
     _detect_isolate_at_position,
     _find_tool,
     _run_tool,
+    _validate_ivy_param,
 )
 from ivy_lsp.features.diagnostics import parse_ivy_check_output
 
@@ -516,4 +517,35 @@ class TestCompileUsesStaging:
         call_args = mock_exec.call_args[0]
         assert "/tmp/staging/test.ivy" in call_args
         assert "/project/sub/test.ivy" not in call_args
+
+
+# ---------------------------------------------------------------------------
+# _validate_ivy_param
+# ---------------------------------------------------------------------------
+
+
+class TestValidateIvyParam:
+    def test_rejects_flags(self):
+        with pytest.raises(ValueError):
+            _validate_ivy_param("--malicious-flag")
+
+    def test_rejects_shell_metacharacters(self):
+        with pytest.raises(ValueError):
+            _validate_ivy_param("foo;rm -rf /")
+
+    def test_rejects_empty(self):
+        with pytest.raises(ValueError):
+            _validate_ivy_param("")
+
+    def test_accepts_simple_name(self):
+        assert _validate_ivy_param("quic_server") == "quic_server"
+
+    def test_accepts_dotted_name(self):
+        assert _validate_ivy_param("tcp.endpoint_1") == "tcp.endpoint_1"
+
+    def test_accepts_underscore_prefix(self):
+        assert _validate_ivy_param("_internal") == "_internal"
+
+    def test_accepts_alphanumeric(self):
+        assert _validate_ivy_param("frame_ack_v2") == "frame_ack_v2"
 

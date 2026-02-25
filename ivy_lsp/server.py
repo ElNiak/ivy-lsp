@@ -119,6 +119,13 @@ class IvyLanguageServer(LanguageServer):
             logger.info("Created staging directory: %s", staging_dir)
         except Exception:
             logger.exception("Failed to create staging, falling back to direct scan")
+            self.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="Ivy staging directory creation failed. "
+                    "Verify/compile may not resolve cross-directory includes.",
+                )
+            )
 
         self._indexer = WorkspaceIndexer(root, self._parser, resolver)
         try:
@@ -128,6 +135,13 @@ class IvyLanguageServer(LanguageServer):
             logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
         except Exception:
             logger.exception("Workspace indexing failed")
+            self.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="Ivy workspace indexing failed. "
+                    "Completion, go-to-definition, and other features may not work.",
+                )
+            )
 
         # Set up semantic model and analysis pipeline
         try:

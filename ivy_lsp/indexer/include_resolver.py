@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import fnmatch
 import logging
 import os
@@ -183,6 +184,7 @@ class IncludeResolver:
             Absolute path to the staging directory.
         """
         staging = tempfile.mkdtemp(prefix="ivy-lsp-stage-")
+        atexit.register(lambda d=staging: shutil.rmtree(d, ignore_errors=True))
         self._staging_dir = staging
         self._staged_files.clear()
         source_files = self._find_source_files()
@@ -199,7 +201,11 @@ class IncludeResolver:
                     filepath,
                 )
                 continue
-            os.symlink(filepath, link_path)
+            try:
+                os.symlink(filepath, link_path)
+            except OSError as exc:
+                logger.warning("Failed to create symlink for %s: %s", filepath, exc)
+                continue
             self._staged_files[basename] = filepath
         logger.info(
             "Staged %d files in %s (%d collisions skipped)",
@@ -212,7 +218,10 @@ class IncludeResolver:
     def cleanup_staging(self) -> None:
         """Remove the staging directory and clear the staged file map."""
         if self._staging_dir and os.path.isdir(self._staging_dir):
-            shutil.rmtree(self._staging_dir, ignore_errors=True)
+            def _on_error(func, path, exc_info):
+                logger.warning("Staging cleanup error: %s on %s", func.__name__, path)
+
+            shutil.rmtree(self._staging_dir, onerror=_on_error)
             self._staging_dir = None
             self._staged_files.clear()
 
@@ -273,5 +282,7 @@ class IncludeResolver:
             if best is not None:
                 return os.path.join(inc_base, best)
         except ImportError:
-            pass
+            logger.debug("ivy package not importable; no standard include dir")
+        except (AttributeError, OSError) as exc:
+            logger.warning("Failed to locate ivy standard include directory: %s", exc)
         return None
