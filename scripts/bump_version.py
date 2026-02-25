@@ -15,6 +15,11 @@ VERSION_FILES = [
         r'^__version__\s*=\s*"[^"]+"',
         '__version__ = "{version}"',
     ),
+    (
+        "tests/test_task_1_1_scaffolding.py",
+        r'ivy_lsp\.__version__\s*==\s*"[^"]+"',
+        'ivy_lsp.__version__ == "{version}"',
+    ),
 ]
 
 
