@@ -68,8 +68,8 @@ async def _run_tool(
 
     if token is not None:
         try:
-            await server.progress.create_async(token)
-            server.progress.begin(
+            await server.work_done_progress.create_async(token)
+            server.work_done_progress.begin(
                 token,
                 lsp.WorkDoneProgressBegin(
                     title="Ivy",
@@ -124,7 +124,7 @@ async def _run_tool(
     finally:
         if token is not None:
             try:
-                server.progress.end(
+                server.work_done_progress.end(
                     token, lsp.WorkDoneProgressEnd(message="Done")
                 )
             except Exception:

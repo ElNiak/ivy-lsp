@@ -217,8 +217,8 @@ class TestRunTool:
         mock_proc.returncode = 0
 
         server = MagicMock()
-        server.progress = MagicMock()
-        server.progress.create_async = AsyncMock()
+        server.work_done_progress = MagicMock()
+        server.work_done_progress.create_async = AsyncMock()
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await _run_tool(
@@ -226,9 +226,9 @@ class TestRunTool:
             )
 
         assert result["success"] is True
-        server.progress.create_async.assert_called_once_with("tok-1")
-        server.progress.begin.assert_called_once()
-        server.progress.end.assert_called_once()
+        server.work_done_progress.create_async.assert_called_once_with("tok-1")
+        server.work_done_progress.begin.assert_called_once()
+        server.work_done_progress.end.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
