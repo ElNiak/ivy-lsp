@@ -25,10 +25,10 @@ classifiers = [
 dependencies = [
     "pygls>=1.0",
     "lsprotocol",
+    "panther_ms_ivy",
 ]
 
 [project.optional-dependencies]
-ivy = ["panther_ms_ivy"]
 dev = [
     "pytest",
     "pytest-asyncio",
