@@ -77,11 +77,74 @@ def format_hover_content(symbol: Optional[IvySymbol]) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _enrich_with_semantic_model(
+    content: str,
+    symbol_name: str,
+    filepath: str,
+    position: lsp.Position,
+    source_lines: List[str],
+    semantic_model,
+) -> str:
+    """Add SemanticModel info (type details, RFC annotations, xrefs) to hover."""
+    if semantic_model is None:
+        return content
+
+    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
+
+    extra_parts: List[str] = []
+
+    # Check if cursor line has RFC annotation
+    line = position.line
+    annotations = [
+        n
+        for n in semantic_model.get_nodes_by_type(RfcAnnotation)
+        if n.file and n.file.endswith(os.path.basename(filepath)) and n.line == line
+    ]
+    if annotations:
+        for ann in annotations:
+            for tag in ann.tags:
+                req = semantic_model.get_node(tag)
+                if req and isinstance(req, RfcRequirement):
+                    extra_parts.append(
+                        f"\n**{req.rfc} {req.section}** ({req.level}): {req.text[:120]}"
+                    )
+
+    # Enrich with sort/arity from SymbolNode
+    symbol_nodes = semantic_model.get_nodes_by_type(SymbolNode)
+    for sn in symbol_nodes:
+        if sn.name == symbol_name or sn.qualified_name == symbol_name:
+            if sn.params:
+                param_str = ", ".join(sn.params)
+                extra_parts.append(f"\n*Params:* `({param_str})`")
+            if sn.return_sort:
+                extra_parts.append(f"*Returns:* `{sn.return_sort}`")
+            if sn.sort_name and sn.sort_name != "action":
+                extra_parts.append(f"*Sort:* `{sn.sort_name}`")
+            break
+
+    # Cross-reference summary
+    for sn in symbol_nodes:
+        if sn.name == symbol_name:
+            incoming = semantic_model.get_incoming(sn.id)
+            outgoing = semantic_model.get_outgoing(sn.id)
+            if incoming or outgoing:
+                extra_parts.append(
+                    f"\n*References:* {len(incoming)} incoming, {len(outgoing)} outgoing"
+                )
+            break
+
+    if extra_parts:
+        content += "\n\n---\n" + "\n".join(extra_parts)
+
+    return content
+
+
 def get_hover_info(
     indexer,
     filepath: str,
     position: lsp.Position,
     source_lines: List[str],
+    semantic_model=None,
 ) -> Optional[lsp.Hover]:
     """Look up symbol at cursor and return formatted Hover."""
     word = word_at_position(source_lines, position)
@@ -100,6 +163,10 @@ def get_hover_info(
     content = format_hover_content(sym)
     if content is None:
         return None
+
+    content = _enrich_with_semantic_model(
+        content, word, filepath, position, source_lines, semantic_model
+    )
 
     return lsp.Hover(
         contents=lsp.MarkupContent(
@@ -120,4 +187,7 @@ def register(server) -> None:
             return None
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri.replace("file://", "")
-        return get_hover_info(server._indexer, filepath, params.position, lines)
+        model = getattr(server, "_semantic_model", None)
+        return get_hover_info(
+            server._indexer, filepath, params.position, lines, model
+        )

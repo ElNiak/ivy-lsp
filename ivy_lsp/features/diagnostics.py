@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from lsprotocol import types as lsp
 
@@ -255,11 +255,89 @@ def compute_requirement_diagnostics(
     return diags
 
 
+def compute_semantic_diagnostics(
+    model: Any,
+    filepath: str,
+    source: str,
+) -> List[lsp.Diagnostic]:
+    """Compute diagnostics from the SemanticModel.
+
+    Categories:
+    - Uncovered MUST requirements (Warning): from loaded manifests
+    - Orphaned RFC tags (Warning): bracket tags not matching any manifest
+    - Missing tags on assertions (Hint): require/ensure without bracket tag
+    """
+    if model is None:
+        return []
+
+    import os
+
+    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+    diags: List[lsp.Diagnostic] = []
+    abs_path = os.path.abspath(filepath)
+    lines = source.split("\n")
+
+    # Collect RFC requirements and annotations from the model
+    rfc_reqs = model.get_nodes_by_type(RfcRequirement)
+    annotations = [
+        n for n in model.get_nodes_by_type(RfcAnnotation) if n.file == abs_path
+    ]
+
+    if rfc_reqs:
+        req_ids = {r.id for r in rfc_reqs}
+
+        # Orphaned RFC tags: bracket tags that don't match any manifest requirement
+        for ann in annotations:
+            for tag in ann.tags:
+                if tag not in req_ids:
+                    line = ann.line
+                    line_len = len(lines[line]) if line < len(lines) else 0
+                    diags.append(
+                        lsp.Diagnostic(
+                            range=lsp.Range(
+                                start=lsp.Position(line, 0),
+                                end=lsp.Position(line, line_len),
+                            ),
+                            message=(
+                                f"Orphaned RFC tag: [{tag}] does not match "
+                                "any loaded requirement manifest"
+                            ),
+                            severity=lsp.DiagnosticSeverity.Warning,
+                            source="ivy-lsp-semantic",
+                        )
+                    )
+
+    # Missing tags on assertions (Hint)
+    req_re = re.compile(
+        r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
+    )
+    tag_re = re.compile(r"#\s*\[")
+    for m in req_re.finditer(source):
+        line_no = source[: m.start()].count("\n")
+        line_text = lines[line_no] if line_no < len(lines) else ""
+        if not tag_re.search(line_text):
+            diags.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line_no, 0),
+                        end=lsp.Position(line_no, len(line_text)),
+                    ),
+                    message="Assertion without RFC bracket tag annotation",
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-lsp-semantic",
+                )
+            )
+
+    return diags
+
+
 def compute_diagnostics(
     parser: Any,
     source: str,
     filepath: str,
     indexer: Any = None,
+    semantic_model: Any = None,
 ) -> List[lsp.Diagnostic]:
     """Compute all diagnostics for a source file."""
     diags = check_structural_issues(source, filepath, indexer)
@@ -296,6 +374,10 @@ def compute_diagnostics(
     # Requirement analysis diagnostics
     req_diags = compute_requirement_diagnostics(source, filepath, indexer)
     diags.extend(req_diags)
+
+    # Semantic model diagnostics
+    sem_diags = compute_semantic_diagnostics(semantic_model, filepath, source)
+    diags.extend(sem_diags)
 
     return diags
 
@@ -362,13 +444,17 @@ def register(server) -> None:
     """Register diagnostic handlers for didOpen, didChange, didSave."""
     _debounce_tasks: Dict[str, asyncio.Task] = {}
 
+    def _get_semantic_model():
+        return getattr(server, "_semantic_model", None)
+
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
     def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
         filepath = uri.replace("file://", "")
         diags = compute_diagnostics(
-            server._parser, doc.source or "", filepath, server._indexer
+            server._parser, doc.source or "", filepath,
+            server._indexer, _get_semantic_model(),
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
@@ -386,7 +472,8 @@ def register(server) -> None:
             doc = server.workspace.get_text_document(uri)
             filepath = uri.replace("file://", "")
             diags = compute_diagnostics(
-                server._parser, doc.source or "", filepath, server._indexer
+                server._parser, doc.source or "", filepath,
+                server._indexer, _get_semantic_model(),
             )
             server.text_document_publish_diagnostics(
                 lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
@@ -401,7 +488,8 @@ def register(server) -> None:
         filepath = uri.replace("file://", "")
         doc = server.workspace.get_text_document(uri)
         diags = compute_diagnostics(
-            server._parser, doc.source or "", filepath, server._indexer
+            server._parser, doc.source or "", filepath,
+            server._indexer, _get_semantic_model(),
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)

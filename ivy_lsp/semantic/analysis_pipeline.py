@@ -134,10 +134,30 @@ class AnalysisPipeline:
     # -- Tier 3 ----------------------------------------------------------------
 
     def run_tier3_background(self, source: str, filepath: str) -> None:
-        """Schedule Tier 3 compiler analysis in thread pool.
+        """Schedule Tier 3 compiler analysis in background thread."""
+        from ivy_lsp.adapters.protocols import CompileResult
 
-        Placeholder for Task 10.
-        """
+        def _on_result(result: CompileResult) -> None:
+            if not result.success:
+                logger.debug(
+                    "Tier 3 compilation failed for %s: %s",
+                    filepath,
+                    [e.message for e in result.errors],
+                )
+                return
+            nodes: List[Any] = []
+            edges: List[Tuple[str, SemanticEdgeType, str]] = []
+            # Tier 3 nodes would come from compiler snapshots
+            # For now, just mark the file as tier3-analyzed
+            self._model.update_file(filepath, nodes, edges, "tier3")
+            logger.debug("Tier 3 complete for %s", filepath)
+
+        if hasattr(self._compiler, "compile_background"):
+            self._compiler.compile_background(source, filepath, _on_result)
+        else:
+            # Synchronous fallback
+            result = self._compiler.compile(source, filepath)
+            _on_result(result)
 
     # -- Orchestration ---------------------------------------------------------
 
