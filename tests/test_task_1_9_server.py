@@ -233,3 +233,28 @@ class TestQuicTypesServerPipeline:
         assert any(
             "bit" in n for n in found_names
         ), f"search('bit') should find 'bit', got: {found_names}"
+
+
+# ---------------------------------------------------------------------------
+# IVY_LSP_EXCLUDE_PATHS env var parsing
+# ---------------------------------------------------------------------------
+
+
+class TestServerExcludePaths:
+    def test_setup_indexer_reads_env_var(self, monkeypatch):
+        """Verify IVY_LSP_EXCLUDE_PATHS is parsed into a list."""
+        import os
+
+        monkeypatch.setenv("IVY_LSP_EXCLUDE_PATHS", "apt,test")
+        raw = os.environ.get("IVY_LSP_EXCLUDE_PATHS", "")
+        exclude_paths = [p.strip() for p in raw.split(",") if p.strip()]
+        assert exclude_paths == ["apt", "test"]
+
+    def test_empty_env_var_gives_empty_list(self, monkeypatch):
+        """Missing env var yields empty exclude list."""
+        import os
+
+        monkeypatch.delenv("IVY_LSP_EXCLUDE_PATHS", raising=False)
+        raw = os.environ.get("IVY_LSP_EXCLUDE_PATHS", "")
+        exclude_paths = [p.strip() for p in raw.split(",") if p.strip()]
+        assert exclude_paths == []

@@ -198,3 +198,246 @@ class TestIncludeResolverQuicStack:
         resolver = IncludeResolver(str(quic_stack))
         files = resolver.find_all_ivy_files()
         assert len(files) >= 15
+
+
+class TestExcludePaths:
+    def test_exclude_paths_skips_directory(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "keep.ivy").write_text("")
+        excluded = tmp_path / "apt" / "sub"
+        excluded.mkdir(parents=True)
+        (excluded / "skip.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path), exclude_paths=["apt"])
+        files = resolver.find_all_ivy_files()
+        names = {os.path.basename(f) for f in files}
+        assert names == {"keep.ivy"}
+
+    def test_exclude_paths_nested(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        quic = tmp_path / "protocol-testing" / "quic"
+        quic.mkdir(parents=True)
+        (quic / "model.ivy").write_text("")
+        apt = tmp_path / "protocol-testing" / "apt"
+        apt.mkdir(parents=True)
+        (apt / "model.ivy").write_text("")
+        resolver = IncludeResolver(
+            str(tmp_path),
+            exclude_paths=["protocol-testing/apt"],
+        )
+        files = resolver.find_all_ivy_files()
+        names = {os.path.basename(f) for f in files}
+        assert names == {"model.ivy"}
+        assert any("quic" in f for f in files)
+
+    def test_exclude_paths_empty_keeps_all(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "a.ivy").write_text("")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "b.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path), exclude_paths=[])
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 2
+
+    def test_exclude_submodules_and_test_by_default_basenames(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "real.ivy").write_text("")
+        sm = tmp_path / "submodules"
+        sm.mkdir()
+        (sm / "z3.ivy").write_text("")
+        td = tmp_path / "test"
+        td.mkdir()
+        (td / "lang_test.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path))
+        files = resolver.find_all_ivy_files()
+        names = {os.path.basename(f) for f in files}
+        assert names == {"real.ivy"}
+
+
+class TestStagingDirectory:
+    def test_create_staging_creates_symlinks(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "a.ivy").write_text("# file a")
+        sub = tmp_path / "stack"
+        sub.mkdir()
+        (sub / "b.ivy").write_text("# file b")
+        resolver = IncludeResolver(str(tmp_path))
+        staging = resolver.create_staging_directory()
+        assert os.path.isdir(staging)
+        assert os.path.islink(os.path.join(staging, "a.ivy"))
+        assert os.path.islink(os.path.join(staging, "b.ivy"))
+        assert os.path.realpath(os.path.join(staging, "a.ivy")) == str(
+            tmp_path / "a.ivy"
+        )
+        assert os.path.realpath(os.path.join(staging, "b.ivy")) == str(sub / "b.ivy")
+        resolver.cleanup_staging()
+
+    def test_staging_excludes_paths(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "keep.ivy").write_text("")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "skip.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path), exclude_paths=["apt"])
+        staging = resolver.create_staging_directory()
+        assert os.path.exists(os.path.join(staging, "keep.ivy"))
+        assert not os.path.exists(os.path.join(staging, "skip.ivy"))
+        resolver.cleanup_staging()
+
+    def test_staging_collision_first_wins(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        d1 = tmp_path / "aa"
+        d1.mkdir()
+        (d1 / "dup.ivy").write_text("# first")
+        d2 = tmp_path / "bb"
+        d2.mkdir()
+        (d2 / "dup.ivy").write_text("# second")
+        resolver = IncludeResolver(str(tmp_path))
+        staging = resolver.create_staging_directory()
+        # sorted walk: aa/ comes before bb/, so first wins
+        target = os.path.realpath(os.path.join(staging, "dup.ivy"))
+        assert target == str(d1 / "dup.ivy")
+        resolver.cleanup_staging()
+
+    def test_find_all_returns_original_paths_when_staged(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        sub = tmp_path / "stack"
+        sub.mkdir()
+        (sub / "model.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 1
+        assert files[0] == str(sub / "model.ivy")
+        resolver.cleanup_staging()
+
+    def test_cleanup_removes_staging(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "a.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path))
+        staging = resolver.create_staging_directory()
+        assert os.path.isdir(staging)
+        resolver.cleanup_staging()
+        assert not os.path.isdir(staging)
+
+    def test_resolve_uses_staging_for_disambiguation(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        quic = tmp_path / "quic"
+        quic.mkdir()
+        (quic / "types.ivy").write_text("# quic version")
+        (quic / "user.ivy").write_text("include types")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "types.ivy").write_text("# apt version")
+        resolver = IncludeResolver(str(tmp_path), exclude_paths=["apt"])
+        resolver.create_staging_directory()
+        # Resolve from a file NOT in same dir as types.ivy
+        result = resolver.resolve("types", str(tmp_path / "other.ivy"))
+        assert result is not None
+        assert "quic" in result
+        assert "apt" not in result
+        resolver.cleanup_staging()
+
+
+class TestIncludePaths:
+    def test_include_paths_restricts_to_specified_dirs(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        quic = tmp_path / "protocol-testing" / "quic"
+        quic.mkdir(parents=True)
+        (quic / "model.ivy").write_text("")
+        http = tmp_path / "protocol-testing" / "http"
+        http.mkdir(parents=True)
+        (http / "model.ivy").write_text("")
+        (tmp_path / "root.ivy").write_text("")
+        resolver = IncludeResolver(
+            str(tmp_path),
+            include_paths=["protocol-testing/quic"],
+        )
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 1
+        assert "quic" in files[0]
+
+    def test_include_paths_multiple(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        quic = tmp_path / "quic"
+        quic.mkdir()
+        (quic / "a.ivy").write_text("")
+        http = tmp_path / "http"
+        http.mkdir()
+        (http / "b.ivy").write_text("")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "c.ivy").write_text("")
+        resolver = IncludeResolver(
+            str(tmp_path),
+            include_paths=["quic", "http"],
+        )
+        files = resolver.find_all_ivy_files()
+        names = {os.path.basename(f) for f in files}
+        assert names == {"a.ivy", "b.ivy"}
+
+    def test_include_paths_empty_includes_all(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "a.ivy").write_text("")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "b.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path), include_paths=[])
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 2
+
+    def test_include_and_exclude_combined(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        quic = tmp_path / "protocol-testing" / "quic"
+        quic.mkdir(parents=True)
+        (quic / "model.ivy").write_text("")
+        quic_test = quic / "test_stuff"
+        quic_test.mkdir()
+        (quic_test / "skip.ivy").write_text("")
+        apt = tmp_path / "protocol-testing" / "apt"
+        apt.mkdir(parents=True)
+        (apt / "apt_model.ivy").write_text("")
+        resolver = IncludeResolver(
+            str(tmp_path),
+            include_paths=["protocol-testing/quic"],
+            exclude_paths=["protocol-testing/quic/test_stuff"],
+        )
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 1
+        assert "model.ivy" in files[0]
+
+    def test_include_paths_with_staging(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        quic = tmp_path / "quic"
+        quic.mkdir()
+        (quic / "types.ivy").write_text("# quic")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "types.ivy").write_text("# apt")
+        resolver = IncludeResolver(
+            str(tmp_path),
+            include_paths=["quic"],
+        )
+        staging = resolver.create_staging_directory()
+        assert os.path.islink(os.path.join(staging, "types.ivy"))
+        target = os.path.realpath(os.path.join(staging, "types.ivy"))
+        assert "quic" in target
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 1
+        assert "quic" in files[0]
+        resolver.cleanup_staging()

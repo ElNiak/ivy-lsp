@@ -57,6 +57,19 @@ class IvyLanguageServer(LanguageServer):
                 )
             )
 
+        @self.feature(lsp.SHUTDOWN)
+        def on_shutdown(params) -> None:
+            self._cleanup_staging()
+
+    def _cleanup_staging(self) -> None:
+        """Clean up the staging directory on shutdown."""
+        if self._indexer and hasattr(self._indexer, "_resolver"):
+            try:
+                self._indexer._resolver.cleanup_staging()
+                logger.info("Staging directory cleaned up")
+            except Exception:
+                logger.exception("Failed to clean up staging directory")
+
     def _setup_indexer(self):
         """Create and populate the workspace indexer."""
         from ivy_lsp.indexer.include_resolver import IncludeResolver
@@ -82,7 +95,29 @@ class IvyLanguageServer(LanguageServer):
             self._full_mode = False
             logger.info("z3 not available (%s); running in light mode", e)
 
-        resolver = IncludeResolver(root)
+        # Read include/exclude paths from environment
+        raw_includes = os.environ.get("IVY_LSP_INCLUDE_PATHS", "")
+        include_paths = [p.strip() for p in raw_includes.split(",") if p.strip()]
+        raw_excludes = os.environ.get("IVY_LSP_EXCLUDE_PATHS", "")
+        exclude_paths = [p.strip() for p in raw_excludes.split(",") if p.strip()]
+        if include_paths:
+            logger.info("Include paths: %s", include_paths)
+        if exclude_paths:
+            logger.info("Exclude paths: %s", exclude_paths)
+
+        resolver = IncludeResolver(
+            root,
+            exclude_paths=exclude_paths,
+            include_paths=include_paths,
+        )
+
+        # Create flat staging directory (mirrors ivyc's include/1.7/ model)
+        try:
+            staging_dir = resolver.create_staging_directory()
+            logger.info("Created staging directory: %s", staging_dir)
+        except Exception:
+            logger.exception("Failed to create staging, falling back to direct scan")
+
         self._indexer = WorkspaceIndexer(root, self._parser, resolver)
         try:
             self._indexer.index_workspace()

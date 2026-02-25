@@ -5,7 +5,9 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
-from typing import List, Optional
+import shutil
+import tempfile
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,8 @@ _EXCLUDED_DIR_BASENAMES = frozenset({
     ".pytest_cache",
     ".venv",
     "venv",
+    "submodules",
+    "test",
 })
 
 # Glob-style patterns matched against directory basenames.
@@ -39,17 +43,24 @@ class IncludeResolver:
 
     Search order:
     1. Same directory as the including file
-    2. Workspace root directory
-    3. Standard library (``ivy/include/1.7/``)
+    2. Staging directory (flat symlinks, when active)
+    3. Workspace root directory
+    4. Standard library (``ivy/include/1.7/``)
     """
 
     def __init__(
         self,
         workspace_root: str,
         ivy_include_path: Optional[str] = None,
+        exclude_paths: Optional[List[str]] = None,
+        include_paths: Optional[List[str]] = None,
     ) -> None:
         self._workspace_root = os.path.abspath(workspace_root)
         self._ivy_include_path = ivy_include_path
+        self._exclude_paths = [p.rstrip(os.sep) for p in (exclude_paths or [])]
+        self._include_paths = [p.rstrip(os.sep) for p in (include_paths or [])]
+        self._staging_dir: Optional[str] = None
+        self._staged_files: Dict[str, str] = {}
 
     def resolve(self, include_name: str, from_file: str) -> Optional[str]:
         """Resolve an include name to an absolute file path.
@@ -69,12 +80,18 @@ class IncludeResolver:
         if os.path.isfile(candidate):
             return os.path.abspath(candidate)
 
-        # 2. Workspace root
+        # 2. Staging directory (flat, unique per basename)
+        if self._staging_dir:
+            candidate = os.path.join(self._staging_dir, fname)
+            if os.path.isfile(candidate):
+                return os.path.realpath(candidate)
+
+        # 3. Workspace root
         candidate = os.path.join(self._workspace_root, fname)
         if os.path.isfile(candidate):
             return os.path.abspath(candidate)
 
-        # 3. Standard library
+        # 4. Standard library
         std_dir = self._get_std_include_dir()
         if std_dir is not None:
             candidate = os.path.join(std_dir, fname)
@@ -83,12 +100,67 @@ class IncludeResolver:
 
         return None
 
-    def find_all_ivy_files(self, root: Optional[str] = None) -> List[str]:
+    def _find_source_files(self, search_root: Optional[str] = None) -> List[str]:
         """Walk the directory tree and return all .ivy file paths, sorted.
 
-        Directories matching :data:`_EXCLUDED_DIR_BASENAMES` or
-        :data:`_EXCLUDED_DIR_PATTERNS` are pruned to avoid indexing
-        build artifacts, VCS internals, and transient test outputs.
+        When ``include_paths`` is set and no explicit *search_root* is given,
+        only the specified subdirectories are walked.  Exclusions from
+        ``exclude_paths`` and :data:`_EXCLUDED_DIR_BASENAMES` still apply
+        within each included path.
+
+        Args:
+            search_root: Directory to search. Defaults to workspace_root
+                (or each include_path when set).
+
+        Returns:
+            Sorted list of absolute paths to .ivy files.
+        """
+        # Determine which root(s) to walk.
+        if search_root:
+            roots = [search_root]
+        elif self._include_paths:
+            roots = [
+                os.path.join(self._workspace_root, ip)
+                for ip in self._include_paths
+            ]
+        else:
+            roots = [self._workspace_root]
+
+        result: List[str] = []
+        for root in roots:
+            if not os.path.isdir(root):
+                logger.warning("Include path does not exist: %s", root)
+                continue
+            for dirpath, dirnames, filenames in os.walk(root):
+                # Prune excluded directories in-place.
+                dirnames[:] = [
+                    d for d in dirnames
+                    if d not in _EXCLUDED_DIR_BASENAMES
+                    and not any(
+                        fnmatch.fnmatch(d, pat)
+                        for pat in _EXCLUDED_DIR_PATTERNS
+                    )
+                ]
+                # Path-based exclusions (relative to workspace root).
+                if self._exclude_paths:
+                    rel_dir = os.path.relpath(dirpath, self._workspace_root)
+                    if any(
+                        rel_dir == ep or rel_dir.startswith(ep + os.sep)
+                        for ep in self._exclude_paths
+                    ):
+                        dirnames.clear()
+                        continue
+                for fn in filenames:
+                    if fn.endswith(".ivy"):
+                        result.append(os.path.join(dirpath, fn))
+        return sorted(result)
+
+    def find_all_ivy_files(self, root: Optional[str] = None) -> List[str]:
+        """Return all .ivy file paths in the workspace, sorted.
+
+        When a staging directory is active and *root* is ``None``, returns
+        the original (dereferenced) source paths from the staging map
+        instead of re-walking the filesystem.
 
         Args:
             root: Directory to search. Defaults to workspace_root.
@@ -96,23 +168,53 @@ class IncludeResolver:
         Returns:
             Sorted list of absolute paths to .ivy files.
         """
-        search_root = root or self._workspace_root
-        result: List[str] = []
-        for dirpath, dirnames, filenames in os.walk(search_root):
-            # Prune excluded directories in-place to prevent os.walk
-            # from descending into them.
-            dirnames[:] = [
-                d for d in dirnames
-                if d not in _EXCLUDED_DIR_BASENAMES
-                and not any(
-                    fnmatch.fnmatch(d, pat)
-                    for pat in _EXCLUDED_DIR_PATTERNS
+        if self._staging_dir and root is None:
+            return sorted(self._staged_files.values())
+        return self._find_source_files(root)
+
+    def create_staging_directory(self) -> str:
+        """Create a flat temp directory with one symlink per .ivy file.
+
+        Mirrors how ``ivyc`` prepares ``include/1.7/`` -- a flat directory
+        where each basename maps to exactly one file.  When multiple source
+        files share the same basename, the first one (sorted path order) wins.
+
+        Returns:
+            Absolute path to the staging directory.
+        """
+        staging = tempfile.mkdtemp(prefix="ivy-lsp-stage-")
+        self._staging_dir = staging
+        self._staged_files.clear()
+        source_files = self._find_source_files()
+        collisions = 0
+        for filepath in source_files:
+            basename = os.path.basename(filepath)
+            link_path = os.path.join(staging, basename)
+            if os.path.exists(link_path):
+                collisions += 1
+                logger.debug(
+                    "Staging collision: %s (keeping %s, skipping %s)",
+                    basename,
+                    self._staged_files[basename],
+                    filepath,
                 )
-            ]
-            for fn in filenames:
-                if fn.endswith(".ivy"):
-                    result.append(os.path.join(dirpath, fn))
-        return sorted(result)
+                continue
+            os.symlink(filepath, link_path)
+            self._staged_files[basename] = filepath
+        logger.info(
+            "Staged %d files in %s (%d collisions skipped)",
+            len(self._staged_files),
+            staging,
+            collisions,
+        )
+        return staging
+
+    def cleanup_staging(self) -> None:
+        """Remove the staging directory and clear the staged file map."""
+        if self._staging_dir and os.path.isdir(self._staging_dir):
+            shutil.rmtree(self._staging_dir, ignore_errors=True)
+            self._staging_dir = None
+            self._staged_files.clear()
 
     def _get_std_include_dir(self) -> Optional[str]:
         """Locate the Ivy standard library include directory.
