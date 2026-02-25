@@ -8,6 +8,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, List, Tuple
 
+from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
+from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
+from ivy_lsp.analysis.requirement_graph import RequirementGraph
 from ivy_lsp.indexer.file_cache import FileCache
 from ivy_lsp.indexer.include_resolver import IncludeResolver
 from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
@@ -45,6 +48,7 @@ class WorkspaceIndexer:
         self._cache = FileCache()
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
+        self._requirement_graph = RequirementGraph()
 
     # ------------------------------------------------------------------
     # Full workspace indexing
@@ -54,10 +58,14 @@ class WorkspaceIndexer:
         """Reset indices and parse every ``.ivy`` file in the workspace."""
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
+        self._requirement_graph = RequirementGraph()
 
         files = self._resolver.find_all_ivy_files()
         for filepath in files:
             self._index_single_file(filepath)
+
+        # Post-indexing: wire state var edges now that all vars are known
+        self._wire_requirement_graph()
 
     # ------------------------------------------------------------------
     # Single-file indexing
@@ -96,6 +104,9 @@ class WorkspaceIndexer:
             if resolved:
                 self._include_graph.add_edge(filepath, resolved)
 
+        # Requirement extraction
+        self._extract_file_requirements(filepath, result, source)
+
         return symbols
 
     # ------------------------------------------------------------------
@@ -114,9 +125,11 @@ class WorkspaceIndexer:
         """Re-index a single file after it has been modified on disk."""
         abs_path = os.path.abspath(filepath)
         self._remove_file_symbols(abs_path)
+        self._requirement_graph.remove_file(abs_path)
         self._cache.invalidate(abs_path)
         self._cache.invalidate_dependents(abs_path, self._include_graph)
         self._index_single_file(abs_path)
+        self._wire_requirement_graph()
 
     def _remove_file_symbols(self, filepath: str) -> None:
         """Rebuild the symbol table excluding all symbols from *filepath*."""
@@ -165,3 +178,38 @@ class WorkspaceIndexer:
         for included_file in transitive:
             own_symbols.extend(self._symbol_table.symbols_in_file(included_file))
         return own_symbols
+
+    # ------------------------------------------------------------------
+    # Requirement graph
+    # ------------------------------------------------------------------
+
+    def _extract_file_requirements(
+        self, filepath: str, result: Any, source: str
+    ) -> None:
+        """Extract requirements from a single file and add to the graph."""
+        try:
+            if result.success:
+                reqs, writes = extract_requirements_full(
+                    result.ast, filepath, source
+                )
+            else:
+                reqs, writes = extract_requirements_light(source, filepath)
+            self._requirement_graph.add_file_requirements(
+                filepath, reqs, writes
+            )
+        except Exception:
+            logger.debug(
+                "Requirement extraction failed for %s", filepath, exc_info=True
+            )
+
+    def _wire_requirement_graph(self) -> None:
+        """Wire state-variable READS edges and property DEPENDS_ON edges."""
+        known_vars = self._requirement_graph.get_all_state_var_names()
+        # Also gather variable names from the symbol table
+        from lsprotocol.types import SymbolKind
+
+        for sym in self._symbol_table.all_symbols():
+            if sym.kind in (SymbolKind.Variable, SymbolKind.Function):
+                known_vars.add(sym.name)
+        self._requirement_graph.wire_state_var_edges(known_vars)
+        self._requirement_graph.wire_dependency_edges()

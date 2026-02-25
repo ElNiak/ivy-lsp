@@ -1,0 +1,517 @@
+"""Tests for code lens feature (ivy_lsp.features.code_lens)."""
+
+import os
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from lsprotocol import types as lsp
+
+IVY_ROOT = Path(__file__).resolve().parent.parent
+if str(IVY_ROOT) not in sys.path:
+    sys.path.insert(0, str(IVY_ROOT))
+
+from ivy_lsp.analysis.requirement_graph import (
+    EdgeType,
+    PropertyNode,
+    RequirementGraph,
+    RequirementNode,
+    StateVarNode,
+)
+from ivy_lsp.features.code_lens import compute_code_lenses
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_indexer(graph=None, include_graph=None, resolver=None):
+    """Build a mock indexer with the required attributes."""
+    indexer = MagicMock()
+    indexer._requirement_graph = graph
+    indexer._include_graph = include_graph
+    indexer._resolver = resolver
+    return indexer
+
+
+def _abs(name: str) -> str:
+    """Return an absolute path for a virtual test file."""
+    return os.path.abspath(name)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestComputeCodeLensesBasic:
+    """Basic behaviour and edge cases for compute_code_lenses."""
+
+    def test_no_indexer_returns_empty(self):
+        """When indexer is None, no lenses are returned."""
+        result = compute_code_lenses(None, "test.ivy", "before foo.step {\n}")
+        assert result == []
+
+    def test_indexer_without_graph_returns_empty(self):
+        """When indexer has no _requirement_graph attribute, no lenses."""
+        indexer = MagicMock(spec=[])  # no attributes at all
+        del indexer._requirement_graph  # ensure getattr returns None
+        result = compute_code_lenses(indexer, "test.ivy", "before foo.step {\n}")
+        assert result == []
+
+    def test_empty_graph_no_lenses(self):
+        """An empty graph produces no lenses even with matching source."""
+        graph = RequirementGraph()
+        indexer = _make_indexer(graph=graph)
+        source = "before foo.step {\n    require true;\n}\n"
+        result = compute_code_lenses(indexer, "test.ivy", source)
+        assert result == []
+
+
+class TestMonitorLenses:
+    """Test code lenses on before/after/around blocks."""
+
+    def test_before_block_lens(self):
+        """A before block with matching requirements produces a lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:1",
+            kind="require",
+            formula_text="x ~= x",
+            line=1,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.CONSTRAINS, "foo.step")
+
+        indexer = _make_indexer(graph=graph)
+        source = "before foo.step {\n    require x ~= x;\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        lens = lenses[0]
+        assert isinstance(lens, lsp.CodeLens)
+        assert lens.range.start.line == 0
+        assert "require" in lens.command.title.lower() or "1" in lens.command.title
+
+    def test_after_block_lens_with_ensure(self):
+        """An after block with an ensure requirement shows the kind in title."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:2",
+            kind="ensure",
+            formula_text="true",
+            line=2,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="after",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.CONSTRAINS, "foo.step")
+
+        indexer = _make_indexer(graph=graph)
+        source = "after foo.step {\n    ensure true;\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        assert "ensure" in lenses[0].command.title.lower()
+
+    def test_monitor_lens_with_state_var_reads(self):
+        """Monitor lens shows state var read count when READS edges exist."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:1",
+            kind="require",
+            formula_text="connected(X,Y)",
+            line=1,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.CONSTRAINS, "foo.step")
+        graph.add_edge(req.id, EdgeType.READS, "connected")
+
+        sv = StateVarNode(
+            id="connected",
+            name="connected",
+            qualified_name="connected",
+            file=filepath,
+            line=0,
+            is_relation=True,
+        )
+        graph.add_state_var(sv)
+
+        indexer = _make_indexer(graph=graph)
+        source = "before foo.step {\n    require connected(X,Y);\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        title = lenses[0].command.title
+        assert "reads" in title.lower() and "state var" in title.lower()
+
+    def test_multiple_monitors_multiple_lenses(self):
+        """Each monitor block gets its own lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        for action in ("foo.step", "bar.step"):
+            req = RequirementNode(
+                id=f"{filepath}:0:{action}",
+                kind="require",
+                formula_text="true",
+                line=0,
+                col=0,
+                file=filepath,
+                monitor_action=action,
+                mixin_kind="before",
+            )
+            graph.add_requirement(req)
+            graph.add_edge(req.id, EdgeType.CONSTRAINS, action)
+
+        indexer = _make_indexer(graph=graph)
+        source = "before foo.step {\n    require true;\n}\nbefore bar.step {\n    require true;\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) == 2
+
+
+class TestStateVarLenses:
+    """Test code lenses on relation/function/individual declarations."""
+
+    def test_relation_read_by_requirements(self):
+        """A relation with readers gets a 'read by N requirements' lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        sv = StateVarNode(
+            id="connected",
+            name="connected",
+            qualified_name="connected",
+            file=filepath,
+            line=0,
+            is_relation=True,
+        )
+        graph.add_state_var(sv)
+
+        req1 = RequirementNode(
+            id=f"{filepath}:5",
+            kind="require",
+            formula_text="connected(X,Y)",
+            line=5,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        req2 = RequirementNode(
+            id="/other/file.ivy:10",
+            kind="ensure",
+            formula_text="connected(A,B)",
+            line=10,
+            col=0,
+            file="/other/file.ivy",
+            monitor_action="bar.step",
+            mixin_kind="after",
+        )
+        graph.add_requirement(req1)
+        graph.add_requirement(req2)
+        graph.add_edge(req1.id, EdgeType.READS, "connected")
+        graph.add_edge(req2.id, EdgeType.READS, "connected")
+
+        indexer = _make_indexer(graph=graph)
+        source = "relation connected(X:cid, Y:cid)\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        title = lenses[0].command.title
+        assert "read by" in title.lower()
+        assert "2" in title  # 2 requirements
+        assert "2 files" in title  # 2 different files
+
+    def test_relation_no_readers_no_lens(self):
+        """A relation with no readers produces no lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        sv = StateVarNode(
+            id="lonely",
+            name="lonely",
+            qualified_name="lonely",
+            file=filepath,
+            line=0,
+            is_relation=True,
+        )
+        graph.add_state_var(sv)
+
+        indexer = _make_indexer(graph=graph)
+        source = "relation lonely(X:t)\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+        assert len(lenses) == 0
+
+    def test_function_declaration_lens(self):
+        """A function declaration with readers gets a lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:5",
+            kind="require",
+            formula_text="count > 0",
+            line=5,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.READS, "count")
+
+        indexer = _make_indexer(graph=graph)
+        source = "function count(X:t) : nat\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        assert "read by" in lenses[0].command.title.lower()
+
+
+class TestPropertyLenses:
+    """Test code lenses on axiom/property/invariant/conjecture declarations."""
+
+    def test_axiom_with_shared_state(self):
+        """An axiom at the correct line sharing state produces a lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        prop = PropertyNode(
+            id=f"{filepath}:0",
+            kind="axiom",
+            name="sym",
+            formula_text="r(X,Y) -> r(Y,X)",
+            file=filepath,
+            line=0,
+        )
+        graph.add_property(prop)
+        graph.add_edge(prop.id, EdgeType.READS, "r")
+
+        # A requirement also reads "r"
+        req = RequirementNode(
+            id=f"{filepath}:5",
+            kind="require",
+            formula_text="r(A,B)",
+            line=5,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.READS, "r")
+
+        indexer = _make_indexer(graph=graph)
+        source = "axiom [sym] r(X,Y) -> r(Y,X)\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        title = lenses[0].command.title
+        assert "shares state" in title.lower() or "requirement" in title.lower()
+
+    def test_property_no_match_when_line_differs(self):
+        """A property node at a different line produces no lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        prop = PropertyNode(
+            id=f"{filepath}:99",
+            kind="axiom",
+            name="sym",
+            formula_text="r(X,Y) -> r(Y,X)",
+            file=filepath,
+            line=99,  # does not match line 0 of the source
+        )
+        graph.add_property(prop)
+
+        indexer = _make_indexer(graph=graph)
+        source = "axiom [sym] r(X,Y) -> r(Y,X)\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+        assert len(lenses) == 0
+
+    def test_invariant_lens(self):
+        """An invariant at the correct line with shared state produces a lens."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        prop = PropertyNode(
+            id=f"{filepath}:0",
+            kind="invariant",
+            name="inv1",
+            formula_text="connected(X,Y) -> connected(Y,X)",
+            file=filepath,
+            line=0,
+        )
+        graph.add_property(prop)
+        graph.add_edge(prop.id, EdgeType.READS, "connected")
+
+        req = RequirementNode(
+            id=f"{filepath}:10",
+            kind="require",
+            formula_text="connected(A,B)",
+            line=10,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.READS, "connected")
+
+        indexer = _make_indexer(graph=graph)
+        source = "invariant [inv1] connected(X,Y) -> connected(Y,X)\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+
+
+class TestIncludeLenses:
+    """Test code lenses on include directives."""
+
+    def test_include_with_inherited_requirements(self):
+        """An include line shows inherited requirement count."""
+        filepath = _abs("main.ivy")
+        other_file = _abs("types.ivy")
+        graph = RequirementGraph()
+
+        # Requirement in the included file
+        req = RequirementNode(
+            id=f"{other_file}:5",
+            kind="require",
+            formula_text="x > 0",
+            line=5,
+            col=0,
+            file=other_file,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = {other_file}
+
+        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        source = "include quic_types\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        title = lenses[0].command.title
+        assert "brings" in title.lower()
+        assert "1" in title  # 1 inherited requirement
+
+    def test_include_no_inherited_requirements_no_lens(self):
+        """When include brings 0 new requirements, no lens is shown."""
+        filepath = _abs("main.ivy")
+        graph = RequirementGraph()
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = set()
+
+        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        source = "include quic_types\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+        assert len(lenses) == 0
+
+    def test_no_include_graph_skips_include_lenses(self):
+        """When indexer has no _include_graph, include lenses are skipped."""
+        filepath = _abs("main.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id="/other.ivy:1",
+            kind="require",
+            formula_text="true",
+            line=1,
+            col=0,
+            file="/other.ivy",
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+
+        indexer = _make_indexer(graph=graph, include_graph=None)
+        source = "include quic_types\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+        # No include lenses because include_graph is None
+        include_lenses = [l for l in lenses if "brings" in (l.command.title or "").lower()]
+        assert len(include_lenses) == 0
+
+    def test_multiple_includes_each_get_lens(self):
+        """Multiple include lines each get a lens when inherited reqs exist."""
+        filepath = _abs("main.ivy")
+        other_file = _abs("types.ivy")
+        graph = RequirementGraph()
+
+        for i in range(3):
+            req = RequirementNode(
+                id=f"{other_file}:{i}",
+                kind="require",
+                formula_text=f"cond_{i}",
+                line=i,
+                col=0,
+                file=other_file,
+                monitor_action="foo.step",
+                mixin_kind="before",
+            )
+            graph.add_requirement(req)
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = {other_file}
+
+        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        source = "include types\ninclude other\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        # Both include lines should get a lens (same inherited count)
+        include_lenses = [l for l in lenses if "brings" in l.command.title.lower()]
+        assert len(include_lenses) == 2
+
+
+class TestLensRange:
+    """Verify that lens ranges cover the correct source lines."""
+
+    def test_monitor_lens_range_matches_source_line(self):
+        """The lens range starts at the correct line for a monitor block."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:3",
+            kind="require",
+            formula_text="true",
+            line=3,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.CONSTRAINS, "foo.step")
+
+        indexer = _make_indexer(graph=graph)
+        # The 'before' is on line 2 (0-indexed)
+        source = "# comment\n# comment\nbefore foo.step {\n    require true;\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        assert lenses[0].range.start.line == 2

@@ -1,0 +1,346 @@
+"""Full-mode requirement extraction from Ivy AST bodies.
+
+Walks ``ActionDecl`` bodies in the parsed AST to find ``RequiresAction``,
+``EnsuresAction``, ``AssumeAction``, ``AssertAction`` and ``AssignAction``
+nodes.  Cross-references ``MixinDecl`` entries to resolve which action
+each monitor is attached to.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+from ivy_lsp.analysis.requirement_graph import RequirementNode
+
+logger = logging.getLogger(__name__)
+
+# Pattern to detect mangled mixin action names: "foo[before1]", "bar[after2]"
+_MIXIN_NAME_RE = re.compile(r"^(.+)\[(before|after)(\d+)\]$")
+
+
+def extract_requirements_full(
+    ast_obj: Any,
+    filepath: str,
+    source: str,
+) -> Tuple[List[RequirementNode], List[Tuple[str, str, int]]]:
+    """Extract all requirements from AST using full parser.
+
+    Returns:
+        A tuple of (requirements, writes) where writes are
+        ``(var_name, filepath, line)`` triples for assignments.
+    """
+    if ast_obj is None or not hasattr(ast_obj, "decls"):
+        return [], []
+
+    mixin_map = _build_mixin_map(ast_obj)
+    source_lines = source.split("\n")
+    requirements: List[RequirementNode] = []
+    writes: List[Tuple[str, str, int]] = []
+
+    for decl in ast_obj.decls:
+        try:
+            _process_decl(
+                decl, filepath, source_lines, mixin_map, requirements, writes
+            )
+        except Exception:
+            logger.debug(
+                "Failed to extract requirements from %s in %s",
+                type(decl).__name__,
+                filepath,
+                exc_info=True,
+            )
+
+    return requirements, writes
+
+
+def _process_decl(
+    decl: Any,
+    filepath: str,
+    source_lines: List[str],
+    mixin_map: Dict[str, str],
+    requirements: List[RequirementNode],
+    writes: List[Tuple[str, str, int]],
+) -> None:
+    """Process a single declaration, extracting requirements if applicable."""
+    import ivy.ivy_ast as ia
+
+    if not isinstance(decl, ia.ActionDecl):
+        return
+
+    defs = decl.defines()
+    if not defs:
+        return
+
+    action_name = defs[0][0]
+
+    # Determine if this is a mixin action
+    m = _MIXIN_NAME_RE.match(action_name)
+    if m:
+        base_name = m.group(1)
+        mixin_kind = m.group(2)  # "before" or "after"
+        monitor_action = mixin_map.get(action_name, base_name)
+    else:
+        mixin_kind = "direct"
+        monitor_action = action_name
+
+    # Get the action body
+    body = _get_action_body(decl)
+    if body is None:
+        return
+
+    # Walk the body
+    _walk_body(
+        body,
+        filepath,
+        source_lines,
+        monitor_action,
+        mixin_kind,
+        requirements,
+        writes,
+    )
+
+
+def _get_action_body(decl: Any) -> Any:
+    """Extract the body from an ActionDecl."""
+    try:
+        action_def = decl.args[0]  # ActionDef
+        body = getattr(action_def, "body", None)
+        if body is not None:
+            return body
+        # Some action defs store body in args
+        if hasattr(action_def, "args") and len(action_def.args) > 0:
+            return action_def.args[-1]
+    except (IndexError, AttributeError):
+        pass
+    return None
+
+
+def _walk_body(
+    node: Any,
+    filepath: str,
+    source_lines: List[str],
+    monitor_action: str,
+    mixin_kind: str,
+    requirements: List[RequirementNode],
+    writes: List[Tuple[str, str, int]],
+) -> None:
+    """Recursively walk an action body collecting requirements and writes."""
+    if node is None:
+        return
+
+    try:
+        import ivy.ivy_actions as iact
+    except ImportError:
+        logger.debug("ivy.ivy_actions not available for body walking")
+        return
+
+    # Requirement statements
+    if isinstance(node, iact.RequiresAction):
+        _add_requirement(
+            node, "require", filepath, source_lines, monitor_action,
+            mixin_kind, requirements,
+        )
+        return
+
+    if isinstance(node, iact.EnsuresAction):
+        _add_requirement(
+            node, "ensure", filepath, source_lines, monitor_action,
+            mixin_kind, requirements,
+        )
+        return
+
+    if isinstance(node, iact.AssumeAction):
+        _add_requirement(
+            node, "assume", filepath, source_lines, monitor_action,
+            mixin_kind, requirements,
+        )
+        return
+
+    if isinstance(node, iact.AssertAction):
+        _add_requirement(
+            node, "assert", filepath, source_lines, monitor_action,
+            mixin_kind, requirements,
+        )
+        return
+
+    # Assignment: track state variable writes
+    if isinstance(node, iact.AssignAction):
+        _add_write(node, filepath, writes)
+        # Don't return — assignment may not have sub-actions but be safe
+        return
+
+    # Compound: Sequence, IfAction, WhileAction, LocalAction
+    if isinstance(node, iact.Sequence):
+        for arg in node.args:
+            _walk_body(
+                arg, filepath, source_lines, monitor_action,
+                mixin_kind, requirements, writes,
+            )
+        return
+
+    if isinstance(node, iact.IfAction):
+        # args[0] = condition, args[1] = then branch, args[2]? = else
+        for arg in node.args[1:]:
+            _walk_body(
+                arg, filepath, source_lines, monitor_action,
+                mixin_kind, requirements, writes,
+            )
+        return
+
+    if isinstance(node, iact.LocalAction):
+        # args[:-1] = local vars, args[-1] = body
+        if node.args:
+            _walk_body(
+                node.args[-1], filepath, source_lines, monitor_action,
+                mixin_kind, requirements, writes,
+            )
+        return
+
+    # CallAction: walk into callee's body if inline
+    if isinstance(node, iact.CallAction):
+        return
+
+    # Generic: try to walk args for any other compound type
+    for arg in getattr(node, "args", ()):
+        if hasattr(arg, "args"):
+            _walk_body(
+                arg, filepath, source_lines, monitor_action,
+                mixin_kind, requirements, writes,
+            )
+
+
+def _add_requirement(
+    node: Any,
+    kind: str,
+    filepath: str,
+    source_lines: List[str],
+    monitor_action: str,
+    mixin_kind: str,
+    requirements: List[RequirementNode],
+) -> None:
+    """Create a RequirementNode from an AST node and add to the list."""
+    line = _get_line(node)
+    col = 0
+    formula_text = _formula_to_text(node)
+    bracket_tag = _extract_bracket_tag(source_lines, line)
+
+    req_id = f"{filepath}:{line}"
+    requirements.append(
+        RequirementNode(
+            id=req_id,
+            kind=kind,
+            formula_text=formula_text,
+            line=line,
+            col=col,
+            file=filepath,
+            monitor_action=monitor_action,
+            mixin_kind=mixin_kind,
+            bracket_tag=bracket_tag,
+            ast_node=node.args[0] if node.args else None,
+        )
+    )
+
+
+def _add_write(
+    node: Any,
+    filepath: str,
+    writes: List[Tuple[str, str, int]],
+) -> None:
+    """Record an assignment target as a state variable write."""
+    if not node.args:
+        return
+    lhs = node.args[0]
+    var_name = getattr(lhs, "relname", None) or getattr(lhs, "rep", None)
+    if var_name:
+        line = _get_line(node)
+        writes.append((var_name, filepath, line))
+
+
+def _get_line(node: Any) -> int:
+    """Get 0-based line number from an AST node."""
+    lineno = getattr(node, "lineno", None)
+    if lineno is not None:
+        line = getattr(lineno, "line", None)
+        if isinstance(line, int) and line > 0:
+            return line - 1
+    return 0
+
+
+def _formula_to_text(node: Any) -> str:
+    """Convert a requirement node's formula to text."""
+    if not node.args:
+        return str(node)
+    formula = node.args[0]
+    try:
+        return str(formula)
+    except Exception:
+        return repr(formula)
+
+
+def _extract_bracket_tag(
+    source_lines: List[str], line: int
+) -> Optional[str]:
+    """Parse bracket annotation from comment suffix like '# [4]' or '# [rfc:4.1]'."""
+    if line < 0 or line >= len(source_lines):
+        return None
+    line_text = source_lines[line]
+    m = re.search(r"#\s*\[(\w+(?::\w+(?:\.\w+)*)?)\]\s*$", line_text)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _build_mixin_map(ast_obj: Any) -> Dict[str, str]:
+    """Map mangled mixer names to mixee (monitored action) names.
+
+    Scans ``MixinDecl`` entries in ``ast.decls``.  Each ``MixinDecl``
+    contains a ``MixinBeforeDef`` or ``MixinAfterDef`` linking the
+    mixer action to the mixee action.
+    """
+    import ivy.ivy_ast as ia
+
+    mixin_map: Dict[str, str] = {}
+
+    for decl in ast_obj.decls:
+        if not isinstance(decl, ia.MixinDecl):
+            continue
+
+        try:
+            mixin_def = decl.args[0]  # MixinBeforeDef or MixinAfterDef
+            mixer = getattr(mixin_def, "mixer", None)
+            mixee = getattr(mixin_def, "mixee", None)
+
+            if mixer is None or mixee is None:
+                # Try args: args[0] = mixer, args[1] = mixee
+                if hasattr(mixin_def, "args") and len(mixin_def.args) >= 2:
+                    mixer = mixin_def.args[0]
+                    mixee = mixin_def.args[1]
+
+            mixer_name = _atom_to_name(mixer)
+            mixee_name = _atom_to_name(mixee)
+
+            if mixer_name and mixee_name:
+                mixin_map[mixer_name] = mixee_name
+        except Exception:
+            logger.debug(
+                "Failed to extract mixin mapping from %s",
+                type(decl).__name__,
+                exc_info=True,
+            )
+
+    return mixin_map
+
+
+def _atom_to_name(atom: Any) -> Optional[str]:
+    """Extract a name string from an Atom-like AST node."""
+    if atom is None:
+        return None
+    relname = getattr(atom, "relname", None)
+    if relname:
+        return relname
+    rep = getattr(atom, "rep", None)
+    if rep:
+        return rep
+    return str(atom) if atom else None

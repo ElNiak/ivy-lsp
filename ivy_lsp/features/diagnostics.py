@@ -130,6 +130,131 @@ def check_structural_issues(
     return diags
 
 
+def compute_requirement_diagnostics(
+    source: str,
+    filepath: str,
+    indexer: Any = None,
+) -> List[lsp.Diagnostic]:
+    """Compute requirement-analysis diagnostics for a source file.
+
+    Emits diagnostics for:
+    1. Include chain propagation (Info)
+    2. Unmonitored actions (Hint)
+    3. High-impact state variables (Info)
+    """
+    if indexer is None:
+        return []
+
+    graph = getattr(indexer, "_requirement_graph", None)
+    include_graph = getattr(indexer, "_include_graph", None)
+    if graph is None:
+        return []
+
+    import os
+
+    diags: List[lsp.Diagnostic] = []
+    abs_path = os.path.abspath(filepath)
+    lines = source.split("\n")
+
+    # 1. Include chain propagation
+    if include_graph:
+        for match in re.finditer(r"^include\s+(\w+)", source, re.MULTILINE):
+            inc_name = match.group(1)
+            line_no = source[: match.start()].count("\n")
+            line_text = lines[line_no] if line_no < len(lines) else ""
+
+            # Count requirements brought in via this include chain
+            active = graph.get_active_requirements_for_file(
+                abs_path, include_graph
+            )
+            own = graph.get_all_requirements_in_file(abs_path)
+            inherited = len(active) - len(own)
+
+            if inherited > 0:
+                related = []
+                for req in active:
+                    if req.file != abs_path:
+                        related.append(
+                            lsp.DiagnosticRelatedInformation(
+                                location=lsp.Location(
+                                    uri=f"file://{req.file}",
+                                    range=lsp.Range(
+                                        start=lsp.Position(req.line, 0),
+                                        end=lsp.Position(req.line, 80),
+                                    ),
+                                ),
+                                message=f"{req.kind}: {req.formula_text[:60]}",
+                            )
+                        )
+
+                diags.append(
+                    lsp.Diagnostic(
+                        range=lsp.Range(
+                            start=lsp.Position(line_no, 0),
+                            end=lsp.Position(line_no, len(line_text)),
+                        ),
+                        message=(
+                            f"Brings {inherited} requirements into scope "
+                            f"from {inc_name} (and transitive includes)"
+                        ),
+                        severity=lsp.DiagnosticSeverity.Information,
+                        source="ivy-lsp-reqs",
+                        related_information=related[:10],
+                    )
+                )
+
+    # 2. Unmonitored actions (Hint)
+    for match in re.finditer(
+        r"^\s*action\s+([\w.]+)", source, re.MULTILINE
+    ):
+        action_name = match.group(1)
+        line_no = source[: match.start()].count("\n")
+        line_text = lines[line_no] if line_no < len(lines) else ""
+
+        reqs = graph.get_requirements_for_action(action_name)
+        if not reqs:
+            diags.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line_no, 0),
+                        end=lsp.Position(line_no, len(line_text)),
+                    ),
+                    message=f"Action '{action_name}' has no before/after monitors in scope",
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-lsp-reqs",
+                )
+            )
+
+    # 3. High-impact state variables (Info, threshold: 5+ readers)
+    impact_threshold = 5
+    for match in re.finditer(
+        r"^\s*relation\s+([\w.]+)", source, re.MULTILINE
+    ):
+        var_name = match.group(1)
+        line_no = source[: match.start()].count("\n")
+        line_text = lines[line_no] if line_no < len(lines) else ""
+
+        readers = graph.get_requirements_sharing_state_var(var_name)
+        if len(readers) >= impact_threshold:
+            files = {r.file for r in readers}
+            diags.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line_no, 0),
+                        end=lsp.Position(line_no, len(line_text)),
+                    ),
+                    message=(
+                        f"High-impact state variable: read by "
+                        f"{len(readers)} requirements across {len(files)} files"
+                    ),
+                    severity=lsp.DiagnosticSeverity.Information,
+                    source="ivy-lsp-reqs",
+                )
+            )
+
+    return diags
+
+
 def compute_diagnostics(
     parser: Any,
     source: str,
@@ -146,6 +271,10 @@ def compute_diagnostics(
     if not result.success:
         for error in result.errors:
             diags.append(_convert_error_to_diagnostic(error, source))
+
+    # Requirement analysis diagnostics
+    req_diags = compute_requirement_diagnostics(source, filepath, indexer)
+    diags.extend(req_diags)
 
     return diags
 

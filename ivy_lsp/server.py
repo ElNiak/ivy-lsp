@@ -24,6 +24,7 @@ class IvyLanguageServer(LanguageServer):
         self._full_mode = False
 
         from ivy_lsp.features import (
+            code_lens,
             completion,
             definition,
             diagnostics,
@@ -40,6 +41,7 @@ class IvyLanguageServer(LanguageServer):
         hover.register(self)
         completion.register(self)
         diagnostics.register(self)
+        code_lens.register(self)
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
