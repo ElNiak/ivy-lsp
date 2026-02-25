@@ -393,3 +393,61 @@ class TestVerifyHandlerParams:
         assert result["success"] is True
         assert "diagnosticCount" in result
 
+
+# ---------------------------------------------------------------------------
+# _resolve_via_staging
+# ---------------------------------------------------------------------------
+
+
+class TestResolveViaStaging:
+    def test_staging_available(self):
+        from ivy_lsp.features.commands import _resolve_via_staging
+
+        server = MagicMock()
+        server._indexer._resolver.get_staged_path.return_value = "/tmp/staging/foo.ivy"
+        assert _resolve_via_staging(server, "/project/sub/foo.ivy") == "/tmp/staging/foo.ivy"
+
+    def test_staging_returns_none(self):
+        from ivy_lsp.features.commands import _resolve_via_staging
+
+        server = MagicMock()
+        server._indexer._resolver.get_staged_path.return_value = None
+        assert _resolve_via_staging(server, "/project/sub/foo.ivy") == "/project/sub/foo.ivy"
+
+    def test_no_indexer(self):
+        from ivy_lsp.features.commands import _resolve_via_staging
+
+        server = MagicMock(spec=[])
+        assert _resolve_via_staging(server, "/project/foo.ivy") == "/project/foo.ivy"
+
+    def test_indexer_is_none(self):
+        from ivy_lsp.features.commands import _resolve_via_staging
+
+        server = MagicMock()
+        server._indexer = None
+        assert _resolve_via_staging(server, "/project/foo.ivy") == "/project/foo.ivy"
+
+
+class TestShowModelUsesStaging:
+    @pytest.mark.asyncio
+    async def test_show_model_passes_staged_path(self):
+        server, registered = _make_registered_handlers()
+        server._indexer = MagicMock()
+        server._indexer._resolver.get_staged_path.return_value = "/tmp/staging/test.ivy"
+
+        params = _make_namedtuple_params(
+            {"textDocument": {"uri": "file:///project/sub/test.ivy"}, "workDoneToken": None}
+        )
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/showModel"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "/tmp/staging/test.ivy" in call_args
+        assert "/project/sub/test.ivy" not in call_args
+

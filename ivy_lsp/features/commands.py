@@ -22,6 +22,22 @@ def _find_tool(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+def _resolve_via_staging(server: Any, filepath: str) -> str:
+    """Return the staging-directory path for *filepath* if available.
+
+    Falls back to the original path when staging is not active or
+    the file is not present in the staging map.
+    """
+    try:
+        resolver = server._indexer._resolver
+        staged = resolver.get_staged_path(filepath)
+        if staged is not None:
+            return staged
+    except (AttributeError, TypeError):
+        pass
+    return filepath
+
+
 def _detect_isolate_at_position(
     server: Any,
     uri: str,
@@ -150,10 +166,11 @@ def register(server: Any) -> None:
         if isolate is None and position is not None:
             isolate = _detect_isolate_at_position(server, uri, position)
 
+        staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivy_check"]
         if isolate:
             cmd.append(f"isolate={isolate}")
-        cmd.append(filepath)
+        cmd.append(staged_filepath)
 
         result = await _run_tool(cmd, DEFAULT_VERIFY_TIMEOUT, server, token)
         result["isolate"] = isolate
@@ -187,7 +204,8 @@ def register(server: Any) -> None:
         token = getattr(params, "workDoneToken", None)
         target = getattr(params, "target", "test")
 
-        cmd = ["ivyc", f"target={target}", filepath]
+        staged_filepath = _resolve_via_staging(server, filepath)
+        cmd = ["ivyc", f"target={target}", staged_filepath]
         result = await _run_tool(cmd, DEFAULT_COMPILE_TIMEOUT, server, token)
         return result
 
@@ -197,7 +215,8 @@ def register(server: Any) -> None:
         filepath = uri.replace("file://", "")
         token = getattr(params, "workDoneToken", None)
 
-        cmd = ["ivy_show", filepath]
+        staged_filepath = _resolve_via_staging(server, filepath)
+        cmd = ["ivy_show", staged_filepath]
         result = await _run_tool(
             cmd, DEFAULT_SHOW_MODEL_TIMEOUT, server, token
         )
