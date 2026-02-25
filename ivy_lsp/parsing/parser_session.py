@@ -126,6 +126,12 @@ class IvyParserWrapper:
                 ast = ip.parse(source)
                 return ParseResult(ast=ast, errors=[], success=True, filename=filename)
             except iu.ErrorList as e:
+                logger.debug(
+                    "Parse errors for %s (%d error(s)): %s",
+                    filename,
+                    len(e.errors),
+                    "; ".join(str(err) for err in e.errors),
+                )
                 return ParseResult(
                     ast=None,
                     errors=list(e.errors),
@@ -133,6 +139,7 @@ class IvyParserWrapper:
                     filename=filename,
                 )
             except iu.IvyError as e:
+                logger.debug("Parse error for %s: %s", filename, e)
                 return ParseResult(
                     ast=None,
                     errors=[e],

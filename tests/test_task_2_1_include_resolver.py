@@ -120,6 +120,48 @@ class TestFindAllIvyFiles:
         resolver = IncludeResolver(str(tmp_path))
         assert resolver.find_all_ivy_files() == []
 
+    def test_excludes_build_directory(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "real.ivy").write_text("")
+        build = tmp_path / "build" / "lib"
+        build.mkdir(parents=True)
+        (build / "duplicate.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path))
+        files = resolver.find_all_ivy_files()
+        names = {os.path.basename(f) for f in files}
+        assert names == {"real.ivy"}
+
+    def test_excludes_git_and_pycache(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "src.ivy").write_text("")
+        git_dir = tmp_path / ".git" / "objects"
+        git_dir.mkdir(parents=True)
+        (git_dir / "stray.ivy").write_text("")
+        cache_dir = tmp_path / "__pycache__"
+        cache_dir.mkdir()
+        (cache_dir / "cached.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path))
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 1
+        assert files[0].endswith("src.ivy")
+
+    def test_excludes_pytest_temp_dirs(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "main.ivy").write_text("")
+        pytest_dir = tmp_path / "pytest-of-user"
+        pytest_dir.mkdir()
+        (pytest_dir / "a.ivy").write_text("")
+        pytest_dir2 = tmp_path / "pytest-123"
+        pytest_dir2.mkdir()
+        (pytest_dir2 / "b.ivy").write_text("")
+        resolver = IncludeResolver(str(tmp_path))
+        files = resolver.find_all_ivy_files()
+        assert len(files) == 1
+        assert files[0].endswith("main.ivy")
+
 
 class TestIncludeResolverQuicStack:
     def test_quic_frame_includes_resolve(self):

@@ -300,6 +300,35 @@ def compute_diagnostics(
     return diags
 
 
+def parse_ivy_check_output(output: str) -> List[lsp.Diagnostic]:
+    """Parse ivy_check stderr/stdout into LSP diagnostics.
+
+    Looks for lines matching: filename:LINE: error|warning: message
+    """
+    diags: List[lsp.Diagnostic] = []
+    for line in output.splitlines():
+        m = re.match(r".*?:(\d+):\s*(error|warning):\s*(.*)", line)
+        if m:
+            lineno = max(0, int(m.group(1)) - 1)
+            severity = (
+                lsp.DiagnosticSeverity.Error
+                if m.group(2) == "error"
+                else lsp.DiagnosticSeverity.Warning
+            )
+            diags.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(lineno, 0),
+                        end=lsp.Position(lineno, 999),
+                    ),
+                    message=m.group(3),
+                    severity=severity,
+                    source="ivy_check",
+                )
+            )
+    return diags
+
+
 async def run_deep_diagnostics(
     filepath: str,
     ivy_check_cmd: str = "ivy_check",
@@ -323,31 +352,10 @@ async def run_deep_diagnostics(
         logger.warning("Deep diagnostics failed for %s", filepath, exc_info=True)
         return []
 
-    diags: List[lsp.Diagnostic] = []
     output = stderr.decode("utf-8", errors="replace") + stdout.decode(
         "utf-8", errors="replace"
     )
-    for line in output.splitlines():
-        m = re.match(r".*?:(\d+):\s*(error|warning):\s*(.*)", line)
-        if m:
-            lineno = max(0, int(m.group(1)) - 1)
-            severity = (
-                lsp.DiagnosticSeverity.Error
-                if m.group(2) == "error"
-                else lsp.DiagnosticSeverity.Warning
-            )
-            diags.append(
-                lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(lineno, 0),
-                        end=lsp.Position(lineno, 999),
-                    ),
-                    message=m.group(3),
-                    severity=severity,
-                    source="ivy_check",
-                )
-            )
-    return diags
+    return parse_ivy_check_output(output)
 
 
 def register(server) -> None:

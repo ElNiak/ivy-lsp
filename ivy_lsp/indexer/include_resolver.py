@@ -2,8 +2,36 @@
 
 from __future__ import annotations
 
+import fnmatch
+import logging
 import os
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+# Directory basenames that should be excluded from workspace scanning.
+# These patterns avoid indexing build artifacts, VCS internals, and
+# transient test outputs that produce noisy parse warnings.
+_EXCLUDED_DIR_BASENAMES = frozenset({
+    "build",
+    "dist",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".venv",
+    "venv",
+})
+
+# Glob-style patterns matched against directory basenames.
+_EXCLUDED_DIR_PATTERNS = [
+    "pytest-of-*",
+    "pytest-*",
+]
 
 
 class IncludeResolver:
@@ -58,6 +86,10 @@ class IncludeResolver:
     def find_all_ivy_files(self, root: Optional[str] = None) -> List[str]:
         """Walk the directory tree and return all .ivy file paths, sorted.
 
+        Directories matching :data:`_EXCLUDED_DIR_BASENAMES` or
+        :data:`_EXCLUDED_DIR_PATTERNS` are pruned to avoid indexing
+        build artifacts, VCS internals, and transient test outputs.
+
         Args:
             root: Directory to search. Defaults to workspace_root.
 
@@ -66,7 +98,17 @@ class IncludeResolver:
         """
         search_root = root or self._workspace_root
         result: List[str] = []
-        for dirpath, _dirnames, filenames in os.walk(search_root):
+        for dirpath, dirnames, filenames in os.walk(search_root):
+            # Prune excluded directories in-place to prevent os.walk
+            # from descending into them.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in _EXCLUDED_DIR_BASENAMES
+                and not any(
+                    fnmatch.fnmatch(d, pat)
+                    for pat in _EXCLUDED_DIR_PATTERNS
+                )
+            ]
             for fn in filenames:
                 if fn.endswith(".ivy"):
                     result.append(os.path.join(dirpath, fn))

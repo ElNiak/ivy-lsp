@@ -25,6 +25,7 @@ class IvyLanguageServer(LanguageServer):
 
         from ivy_lsp.features import (
             code_lens,
+            commands,
             completion,
             definition,
             diagnostics,
@@ -42,6 +43,7 @@ class IvyLanguageServer(LanguageServer):
         completion.register(self)
         diagnostics.register(self)
         code_lens.register(self)
+        commands.register(self)
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
