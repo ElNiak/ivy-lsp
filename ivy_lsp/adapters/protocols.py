@@ -9,9 +9,12 @@ the Protocols, never on ivy internals directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ivy_lsp.parsing.parser_session import ParseResult
+
+if TYPE_CHECKING:
+    from ivy_lsp.semantic.snapshots import ModuleSnapshot, SignatureSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -51,8 +54,8 @@ class CompileResult:
 
     success: bool = False
     errors: List[CompileError] = field(default_factory=list)
-    module_snapshot: Optional[Any] = None
-    signature_snapshot: Optional[Any] = None
+    module_snapshot: Optional["ModuleSnapshot"] = None
+    signature_snapshot: Optional["SignatureSnapshot"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +88,7 @@ class ICompilerAdapter(Protocol):
 
 @runtime_checkable
 class ISemanticModelQuery(Protocol):
-    """Query interface for the unified semantic model."""
+    """Future query facade -- not yet implemented."""
 
     def get_symbol_info(self, name: str) -> Optional[Dict[str, Any]]: ...
 

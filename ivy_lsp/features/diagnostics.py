@@ -263,7 +263,6 @@ def compute_semantic_diagnostics(
     """Compute diagnostics from the SemanticModel.
 
     Categories:
-    - Uncovered MUST requirements (Warning): from loaded manifests
     - Orphaned RFC tags (Warning): bracket tags not matching any manifest
     - Missing tags on assertions (Hint): require/ensure without bracket tag
     """
@@ -447,11 +446,20 @@ def register(server) -> None:
     def _get_semantic_model():
         return getattr(server, "_semantic_model", None)
 
+    def _run_pipeline(source: str, filepath: str, trigger: str) -> None:
+        pipeline = getattr(server, "_analysis_pipeline", None)
+        if pipeline:
+            try:
+                pipeline.analyze(source, filepath, trigger)
+            except Exception:
+                logger.debug("Pipeline analysis failed for %s", filepath, exc_info=True)
+
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
     def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
         filepath = uri.replace("file://", "")
+        _run_pipeline(doc.source or "", filepath, "change")
         diags = compute_diagnostics(
             server._parser, doc.source or "", filepath,
             server._indexer, _get_semantic_model(),
@@ -498,6 +506,7 @@ def register(server) -> None:
         uri = params.text_document.uri
         filepath = uri.replace("file://", "")
         doc = server.workspace.get_text_document(uri)
+        _run_pipeline(doc.source or "", filepath, "save")
         diags = compute_diagnostics(
             server._parser, doc.source or "", filepath,
             server._indexer, _get_semantic_model(),

@@ -166,6 +166,10 @@ class IvyLanguageServer(LanguageServer):
                 except ImportError:
                     enrichment = NullAstEnrichmentAdapter()
                     compiler = NullCompilerAdapter()
+                    logger.warning(
+                        "Full-mode adapters unavailable; falling back to null adapters. "
+                        "Tier 2/3 analysis will be inactive."
+                    )
             else:
                 enrichment = NullAstEnrichmentAdapter()
                 compiler = NullCompilerAdapter()
@@ -176,3 +180,10 @@ class IvyLanguageServer(LanguageServer):
             logger.info("Semantic model and analysis pipeline initialized")
         except Exception:
             logger.exception("Semantic model setup failed")
+            self.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="Semantic analysis initialization failed. "
+                    "Hover enrichment, RFC code lenses, and semantic diagnostics unavailable.",
+                )
+            )

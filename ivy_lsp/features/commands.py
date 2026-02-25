@@ -17,7 +17,10 @@ _VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
 
 
 def _validate_ivy_param(value: str) -> str:
-    """Validate an Ivy CLI parameter (isolate name, target, etc.)."""
+    """Validate an Ivy CLI parameter (isolate name, target, etc.).
+
+    NOTE: Duplicated in mcp_server.py — keep both in sync.
+    """
     if not value or not _VALID_IVY_PARAM.match(value):
         raise ValueError(f"Invalid Ivy parameter: {value!r}")
     return value

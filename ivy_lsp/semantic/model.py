@@ -84,9 +84,9 @@ class SemanticModel:
                         type_dict.pop(nid, None)
                 self._node_tiers.pop(nid, None)
             self._edges = [
-                (s, t, d)
-                for s, t, d in self._edges
-                if s not in node_ids and d not in node_ids
+                (src, etype, dst)
+                for src, etype, dst in self._edges
+                if src not in node_ids and dst not in node_ids
             ]
             self._rebuild_adjacency()
 
@@ -130,9 +130,9 @@ class SemanticModel:
             # Remove old edges involving removed ids
             if ids_to_remove:
                 self._edges = [
-                    (s, t, d)
-                    for s, t, d in self._edges
-                    if s not in ids_to_remove and d not in ids_to_remove
+                    (src, etype, dst)
+                    for src, etype, dst in self._edges
+                    if src not in ids_to_remove and dst not in ids_to_remove
                 ]
 
             # Add new nodes (skip if existing node at higher tier)
@@ -156,9 +156,9 @@ class SemanticModel:
         """Rebuild adjacency indices from the edge list."""
         self._outgoing = defaultdict(list)
         self._incoming = defaultdict(list)
-        for s, t, d in self._edges:
-            self._outgoing[s].append((t, d))
-            self._incoming[d].append((t, s))
+        for src, etype, dst in self._edges:
+            self._outgoing[src].append((etype, dst))
+            self._incoming[dst].append((etype, src))
 
     # -- Queries ------------------------------------------------------------
 

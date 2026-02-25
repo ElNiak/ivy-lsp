@@ -30,7 +30,7 @@ class AstEnrichmentAdapter:
         """Walk *ast*.decls and return a :class:`TypeAnnotation` per declaration.
 
         Returns an empty list when *ast* is ``None`` or has no ``decls``.
-        Individual declaration failures are logged at DEBUG and skipped.
+        Individual declaration failures are logged at WARNING and skipped.
         """
         if ast is None or not hasattr(ast, "decls"):
             return []
@@ -159,7 +159,7 @@ class AstEnrichmentAdapter:
                 if ret_sort:
                     return_sort = str(ret_sort)
         except (IndexError, AttributeError):
-            pass
+            logger.debug("Failed to extract action params for %s", name, exc_info=True)
 
         line = _extract_line(decl)
 

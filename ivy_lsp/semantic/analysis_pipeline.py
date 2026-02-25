@@ -2,7 +2,7 @@
 
 Tier 1 (syntactic, <50ms): structural checks + RFC annotation parsing
 Tier 2 (AST-enriched, <200ms): parser + type info + requirement extraction
-Tier 3 (compiler, background): full compiler analysis (placeholder)
+Tier 3 (compiler, background): full compiler analysis (background thread)
 """
 
 from __future__ import annotations
@@ -74,6 +74,8 @@ class AnalysisPipeline:
         # Parse
         result = self._parser.parse(source, filepath)
 
+        if not result.success or result.ast is None:
+            logger.debug("Tier 2 parse failure for %s, RFC-only mode", filepath)
         if result.success and result.ast is not None:
             # Extract type info
             type_annotations = self._enrichment.extract_type_info(
@@ -147,8 +149,6 @@ class AnalysisPipeline:
                 return
             nodes: List[Any] = []
             edges: List[Tuple[str, SemanticEdgeType, str]] = []
-            # Tier 3 nodes would come from compiler snapshots
-            # For now, just mark the file as tier3-analyzed
             self._model.update_file(filepath, nodes, edges, "tier3")
             logger.debug("Tier 3 complete for %s", filepath)
 

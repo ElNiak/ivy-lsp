@@ -95,10 +95,13 @@ def _enrich_with_semantic_model(
 
     # Check if cursor line has RFC annotation
     line = position.line
+    abs_path = os.path.abspath(filepath)
     annotations = [
         n
         for n in semantic_model.get_nodes_by_type(RfcAnnotation)
-        if n.file and n.file.endswith(os.path.basename(filepath)) and n.line == line
+        if n.file
+        and (n.file == abs_path or n.file == filepath or os.path.abspath(n.file) == abs_path)
+        and n.line == line
     ]
     if annotations:
         for ann in annotations:

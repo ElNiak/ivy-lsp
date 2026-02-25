@@ -246,6 +246,47 @@ class TestRequirementGraphRfcCoverage:
         uncovered_ids = {r.id for r in uncovered}
         assert uncovered_ids == {"rfc9000:8.1", "rfc9000:17.2"}
 
+    def test_wire_coverage_edges_idempotent(self):
+        from ivy_lsp.analysis.requirement_graph import RequirementNode
+
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id="/test/file.ivy:8",
+            kind="require",
+            formula_text="true",
+            line=8,
+            col=0,
+            file="/test/file.ivy",
+            monitor_action="act",
+            mixin_kind="before",
+            bracket_tags=["rfc9000:4.1"],
+        )
+        graph.add_requirement(req)
+
+        rfc1 = RfcRequirement(
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
+        )
+        graph.add_rfc_requirement(rfc1)
+
+        # Call wire_coverage_edges twice
+        graph.wire_coverage_edges()
+        covers_after_first = [
+            e for e in graph.edges if e[1] == EdgeType.COVERS
+        ]
+        graph.wire_coverage_edges()
+        covers_after_second = [
+            e for e in graph.edges if e[1] == EdgeType.COVERS
+        ]
+
+        # Should have the same number of COVERS edges (no duplicates)
+        assert len(covers_after_first) == len(covers_after_second)
+        assert len(covers_after_second) == 1
+
     def test_get_uncovered_requirements_all_covered(self):
         from ivy_lsp.analysis.requirement_graph import RequirementNode
 

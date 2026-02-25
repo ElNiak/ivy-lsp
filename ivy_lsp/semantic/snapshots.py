@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-@dataclass
+@dataclass(frozen=True)
 class SortInfo:
     """Information about an Ivy sort (type)."""
 
@@ -20,7 +20,7 @@ class SortInfo:
     is_uninterpreted: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class SymbolInfo:
     """Information about a symbol in the Ivy signature."""
 
@@ -31,7 +31,7 @@ class SymbolInfo:
     is_relation: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class SignatureSnapshot:
     """Snapshot of the Ivy module signature after compilation."""
 
@@ -41,7 +41,7 @@ class SignatureSnapshot:
     relations: List[str] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ModuleSnapshot:
     """Snapshot of a compiled Ivy module."""
 

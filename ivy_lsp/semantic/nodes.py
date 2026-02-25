@@ -45,7 +45,7 @@ class SymbolNode:
     id: str
     name: str
     qualified_name: str
-    kind: str  # "action" | "relation" | "function" | "individual" | "module" | ...
+    kind: Literal["action", "relation", "function", "individual", "module", "destructor", "constructor", "instance"]
     file: str
     line: int
     col: int = 0
@@ -77,7 +77,7 @@ class MonitorNode:
 
     id: str
     action_name: str
-    mixin_kind: str  # "before" | "after" | "around"
+    mixin_kind: Literal["before", "after", "around"]
     file: str
     line: int
     requirement_ids: List[str] = field(default_factory=list)
@@ -91,7 +91,7 @@ class RfcRequirement:
     rfc: str  # e.g. "RFC9000"
     section: str  # e.g. "4.1"
     text: str
-    level: str  # "MUST" | "SHOULD" | "MAY" | "MUST NOT" | "SHOULD NOT"
+    level: Literal["MUST", "SHOULD", "MAY", "MUST NOT", "SHOULD NOT"]
     layer: str = ""  # e.g. "frame", "connection", "transport"
     testable: bool = True
 
@@ -100,7 +100,7 @@ class RfcRequirement:
 class RfcAnnotation:
     """An RFC bracket-tag annotation found in source code."""
 
-    id: str  # "filepath:line:tag_index"
+    id: str  # "filepath:line:0" (unique per source line)
     file: str
     line: int
     tags: List[str] = field(default_factory=list)  # e.g. ["rfc9000:4.1", "rfc9000:8.1"]

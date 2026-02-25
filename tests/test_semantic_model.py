@@ -126,6 +126,29 @@ class TestSemanticModelCounts:
         assert model.edge_count() == 1
 
 
+class TestSemanticModelUpdateFileEdgeCleanup:
+    def test_update_file_removes_old_edges(self):
+        model = SemanticModel()
+        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
+        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="relation", file="a.ivy", line=2)
+        edges = [("s1", SemanticEdgeType.READS, "s2")]
+        model.update_file("a.ivy", [s1, s2], edges, "tier1")
+        assert model.edge_count() == 1
+        assert model.get_outgoing("s1") == [(SemanticEdgeType.READS, "s2")]
+
+        # Update with different nodes/edges - old edges should be removed
+        s3 = SymbolNode(id="s3", name="c", qualified_name="c", kind="action", file="a.ivy", line=3)
+        new_edges = [("s3", SemanticEdgeType.WRITES, "ext")]
+        model.update_file("a.ivy", [s3], new_edges, "tier2")
+
+        # Old s1->s2 READS edge should be gone
+        assert model.get_outgoing("s1") == []
+        # New s3->ext WRITES edge should be present
+        outgoing = model.get_outgoing("s3")
+        assert len(outgoing) == 1
+        assert outgoing[0] == (SemanticEdgeType.WRITES, "ext")
+
+
 class TestSemanticModelThreadSafety:
     def test_concurrent_reads_during_update(self):
         model = SemanticModel()
@@ -163,3 +186,35 @@ class TestSemanticModelThreadSafety:
             t.join()
 
         assert not errors, f"Thread safety errors: {errors}"
+
+    def test_concurrent_update_file(self):
+        model = SemanticModel()
+        errors = []
+
+        def updater(file_suffix):
+            try:
+                filepath = f"file_{file_suffix}.ivy"
+                for i in range(20):
+                    nodes = [SymbolNode(
+                        id=f"n{file_suffix}_{i}", name=f"sym{i}",
+                        qualified_name=f"sym{i}", kind="action",
+                        file=filepath, line=i,
+                    )]
+                    edges = [
+                        (f"n{file_suffix}_{i}", SemanticEdgeType.READS, f"ext_{i}")
+                    ]
+                    model.update_file(filepath, nodes, edges, "tier1")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=updater, args=(j,)) for j in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Concurrent update_file errors: {errors}"
+        # All 4 files should have exactly 1 node each (last update wins)
+        for j in range(4):
+            nodes = model.get_nodes_in_file(f"file_{j}.ivy")
+            assert len(nodes) == 1

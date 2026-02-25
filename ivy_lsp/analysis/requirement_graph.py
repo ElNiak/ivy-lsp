@@ -225,9 +225,10 @@ class RequirementGraph:
 
     def wire_coverage_edges(self) -> None:
         """Match bracket_tags on RequirementNodes to rfc_requirements keys, add COVERS edges."""
+        existing = {(s, t) for s, et, t in self.edges if et == EdgeType.COVERS}
         for req in self.requirements.values():
             for tag in req.bracket_tags:
-                if tag in self.rfc_requirements:
+                if tag in self.rfc_requirements and (req.id, tag) not in existing:
                     self.add_edge(req.id, EdgeType.COVERS, tag)
 
     def get_coverage_stats(self) -> Dict[str, int]:

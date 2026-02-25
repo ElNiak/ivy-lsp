@@ -1,8 +1,9 @@
-"""Code lens provider for Ivy requirement analysis.
+"""Code lens provider for Ivy requirement and RFC traceability analysis.
 
 Displays inline annotations above monitor blocks, state variable declarations,
-property/axiom/invariant declarations, and include directives showing
-requirement counts, state variable reads, and cross-file propagation.
+property/axiom/invariant declarations, include directives, and RFC bracket tags
+showing requirement counts, state variable reads, cross-file propagation,
+and workspace-level RFC coverage summaries.
 """
 
 from __future__ import annotations
@@ -288,10 +289,12 @@ def _rfc_tag_lenses(
     from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
     lenses = []
+    abs_path = os.path.abspath(filepath)
     annotations = [
         n
         for n in semantic_model.get_nodes_by_type(RfcAnnotation)
-        if n.file and n.file.endswith(os.path.basename(filepath))
+        if n.file
+        and (n.file == abs_path or n.file == filepath or os.path.abspath(n.file) == abs_path)
     ]
 
     for ann in annotations:
@@ -355,7 +358,7 @@ def _coverage_summary_lens(
 
     parts = []
     for rfc, stats in sorted(by_rfc.items()):
-        parts.append(f"{rfc}: {stats['covered']}/{stats['total']} covered")
+        parts.append(f"Workspace {rfc}: {stats['covered']}/{stats['total']} covered")
 
     if not parts:
         return []

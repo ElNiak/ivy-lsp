@@ -1,12 +1,13 @@
 """Compiler adapter for Tier 3 full-compiler analysis.
 
 Wraps ``ivy_compiler.ivy_from_string()`` with global state isolation
-extending the ParserSession pattern to also save/restore compiler and
+composing a ParserSession to also save/restore compiler and
 module globals.
 """
 
 from __future__ import annotations
 
+import atexit
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
@@ -22,6 +23,7 @@ from ivy_lsp.semantic.snapshots import (
 logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ivy-compiler")
+atexit.register(_executor.shutdown, wait=False)
 
 
 class CompilerSession:
@@ -62,7 +64,7 @@ class CompilerSession:
             if "il.sig" in self._compiler_saved:
                 il.sig = self._compiler_saved["il.sig"]
         except ImportError:
-            pass
+            logger.warning("Cannot restore compiler state: ivy modules no longer importable")
 
         self._parser_session.__exit__(exc_type, exc_val, exc_tb)
         return False
@@ -94,22 +96,32 @@ class CompilerAdapter:
 
                 iu.filename = filename
                 ic.ivy_from_string(source)
-
-                # Extract snapshots
-                module_snap = _extract_module_snapshot()
-                sig_snap = _extract_signature_snapshot()
-
-                return CompileResult(
-                    success=True,
-                    module_snapshot=module_snap,
-                    signature_snapshot=sig_snap,
-                )
             except Exception as e:
                 error = CompileError(
                     message=str(e),
                     file=filename,
                 )
                 return CompileResult(success=False, errors=[error])
+
+            try:
+                module_snap = _extract_module_snapshot()
+                sig_snap = _extract_signature_snapshot()
+            except Exception:
+                logger.warning(
+                    "Snapshot extraction failed after successful compile",
+                    exc_info=True,
+                )
+                return CompileResult(
+                    success=True,
+                    module_snapshot=None,
+                    signature_snapshot=None,
+                )
+
+            return CompileResult(
+                success=True,
+                module_snapshot=module_snap,
+                signature_snapshot=sig_snap,
+            )
 
     def compile_background(
         self, source: str, filename: str, callback: Optional[Callable] = None
@@ -122,7 +134,10 @@ class CompilerAdapter:
                 callback(result)
             return result
 
-        _executor.submit(_run)
+        future = _executor.submit(_run)
+        future.add_done_callback(
+            lambda f: f.result() if not f.cancelled() else None
+        )
 
 
 def _extract_module_snapshot() -> Optional[ModuleSnapshot]:
@@ -143,6 +158,7 @@ def _extract_module_snapshot() -> Optional[ModuleSnapshot]:
             raw_module=mod,
         )
     except (ImportError, AttributeError):
+        logger.debug("Module snapshot extraction unavailable", exc_info=True)
         return None
 
 
@@ -174,4 +190,5 @@ def _extract_signature_snapshot() -> Optional[SignatureSnapshot]:
             ],
         )
     except (ImportError, AttributeError):
+        logger.debug("Signature snapshot extraction unavailable", exc_info=True)
         return None

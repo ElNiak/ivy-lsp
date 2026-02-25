@@ -35,14 +35,21 @@ _VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
 
 
 def _validate_ivy_param(value: str) -> str:
-    """Validate an Ivy CLI parameter (isolate name, target, etc.)."""
+    """Validate an Ivy CLI parameter (isolate name, target, etc.).
+
+    NOTE: Duplicated in features/commands.py — keep both in sync.
+    """
     if not value or not _VALID_IVY_PARAM.match(value):
         raise ValueError(f"Invalid Ivy parameter: {value!r}")
     return value
 
 
 def _find_ivy_files(root: str, exclude_dirs: set[str] | None = None) -> list[str]:
-    """Walk the project and return relative paths to all .ivy files."""
+    """Walk the project and return relative paths to all .ivy files.
+
+    NOTE: Default exclude_dirs overlaps with _EXCLUDED_DIR_BASENAMES in
+    indexer/include_resolver.py — keep in sync when adding new entries.
+    """
     if exclude_dirs is None:
         exclude_dirs = {
             ".git", ".venv", "venv", "node_modules", "__pycache__",
@@ -154,6 +161,9 @@ def start_mcp(
             "and semantic traceability (RFC coverage, impact analysis, cross-references)."
         ),
     )
+
+    import threading
+    _model_lock = threading.Lock()
 
     @mcp.tool()
     def ivy_verify(
@@ -404,7 +414,16 @@ def start_mcp(
         if semantic_model is not None:
             return semantic_model
 
-        # Try to build a lightweight model from workspace files
+        with _model_lock:
+            # Double-check after acquiring lock
+            if semantic_model is not None:
+                return semantic_model
+
+            return _build_model()
+
+    def _build_model():
+        """Build a lightweight semantic model from workspace files."""
+        nonlocal semantic_model
         try:
             from ivy_lsp.semantic.model import SemanticModel
             from ivy_lsp.semantic.rfc_annotations import (
@@ -438,9 +457,9 @@ def start_mcp(
 
     @mcp.tool()
     def ivy_traceability_matrix(relative_path: str | None = None) -> str:
-        """RFC requirement-to-assertion traceability matrix.
+        """RFC requirement-to-annotation traceability matrix.
 
-        Shows which RFC requirements are covered by assertions in the codebase.
+        Shows which RFC requirements are covered by bracket-tag annotations in the codebase.
 
         Args:
             relative_path: Optional file to scope the matrix to.
@@ -455,7 +474,10 @@ def start_mcp(
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
         if relative_path:
-            abs_path = os.path.join(root, relative_path)
+            try:
+                abs_path = _validate_path(root, relative_path)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
             annotations = [a for a in annotations if a.file == abs_path]
 
         covered_tags: dict[str, list[dict]] = {}
@@ -504,7 +526,10 @@ def start_mcp(
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
         if relative_path:
-            abs_path = os.path.join(root, relative_path)
+            try:
+                abs_path = _validate_path(root, relative_path)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
             annotations = [a for a in annotations if a.file == abs_path]
 
         covered_tags = set()
@@ -542,7 +567,7 @@ def start_mcp(
 
     @mcp.tool()
     def ivy_impact_analysis(symbol_name: str) -> str:
-        """Analyze what requirements, tests, and monitors are affected by a symbol.
+        """Analyze incoming and outgoing edges for a symbol in the semantic model.
 
         Args:
             symbol_name: The name of the symbol to analyze.

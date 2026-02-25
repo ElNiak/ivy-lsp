@@ -344,10 +344,28 @@ class TestTier2:
 # ---------------------------------------------------------------------------
 
 
-class TestTier3:
-    """Tier 3 is a placeholder -- verify it does not crash."""
+class StubCompilerAdapter:
+    """Compiler adapter returning configurable CompileResult."""
 
-    def test_tier3_is_noop(self):
+    def __init__(self, success: bool = True) -> None:
+        self._success = success
+        self._callback_called = False
+
+    def compile(self, source: str, filename: str):
+        from ivy_lsp.adapters.protocols import CompileResult
+        return CompileResult(success=self._success)
+
+    def compile_background(self, source, filename, callback=None):
+        result = self.compile(source, filename)
+        if callback:
+            self._callback_called = True
+            callback(result)
+
+
+class TestTier3:
+    """Tier 3 tests -- verify callback behavior."""
+
+    def test_tier3_is_noop_with_null_adapter(self):
         model = SemanticModel()
         pipeline = AnalysisPipeline(
             model=model,
@@ -359,6 +377,37 @@ class TestTier3:
         # Should not raise
         pipeline.run_tier3_background("type cid\n", "test.ivy")
         assert model.node_count() == 0
+
+    def test_tier3_callback_on_success(self):
+        model = SemanticModel()
+        compiler = StubCompilerAdapter(success=True)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+        )
+
+        pipeline.run_tier3_background("type cid\n", "test.ivy")
+        assert compiler._callback_called
+
+    def test_tier3_callback_on_failure_does_not_update_model(self):
+        model = SemanticModel()
+        # Pre-populate with tier1 data
+        from ivy_lsp.semantic.nodes import RfcAnnotation
+        model.add_node(RfcAnnotation(id="test.ivy:0:0", file="test.ivy", line=0, tags=["x"]))
+
+        compiler = StubCompilerAdapter(success=False)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+        )
+
+        pipeline.run_tier3_background("bad code\n", "test.ivy")
+        # Pre-existing node should still be there (failure doesn't clear)
+        assert model.node_count() == 1
 
 
 # ---------------------------------------------------------------------------
