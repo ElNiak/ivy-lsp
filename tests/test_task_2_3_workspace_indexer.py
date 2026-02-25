@@ -78,7 +78,8 @@ class TestLookupSymbol:
         indexer.index_workspace()
         results = indexer.lookup_symbol("cid")
         assert len(results) >= 1
-        assert results[0].filepath == str(tmp_path / "types.ivy")
+        filepaths = [r.filepath for r in results]
+        assert str(tmp_path / "types.ivy") in filepaths
 
     def test_lookup_qualified_name(self, tmp_path):
         from ivy_lsp.indexer.include_resolver import IncludeResolver

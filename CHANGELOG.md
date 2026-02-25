@@ -5,6 +5,14 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-02-25
+
+### Fixed
+
+- Fixed `NameError: name 'importer' is not defined` crash when parsing `.ivy` files containing `include` or `using` directives. The parser wrapper now sets `ip.importer` before calling `ip.parse()`, matching upstream `ivy_compiler` behavior.
+- `ParserSession` now saves/restores `ip.importer` (12 globals total) to prevent state leakage between files.
+- `ast_to_symbols` now filters out declarations originating from included files, ensuring symbols are attributed to their original source file for correct go-to-definition and workspace symbol lookup.
+
 ## [0.3.2] - 2026-02-25
 
 ### Fixed

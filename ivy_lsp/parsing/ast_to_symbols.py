@@ -9,6 +9,7 @@ into a parent/child hierarchy via :func:`_reconstruct_hierarchy`.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
@@ -39,8 +40,11 @@ def ast_to_symbols(ivy_obj: Any, filename: str, source: str) -> List[IvySymbol]:
         return []
 
     flat_symbols: List[IvySymbol] = []
+    abs_filename = os.path.abspath(filename) if filename else filename
     for decl in ivy_obj.decls:
         try:
+            if _is_from_included_file(decl, abs_filename):
+                continue
             syms = _convert_decl(decl, filename, source)
             flat_symbols.extend(syms)
         except Exception:
@@ -580,6 +584,54 @@ def _convert_instantiate(decl: Any, filename: str, source: str) -> List[IvySymbo
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_from_included_file(decl: Any, abs_filename: Optional[str]) -> bool:
+    """Return True if *decl* originated from a different file via ``include``.
+
+    When the Ivy parser processes ``include foo``, declarations from
+    ``foo.ivy`` are merged into the importing file's AST.  Each AST
+    node preserves its original source file in location objects returned
+    by ``defines()`` and on inner AST nodes (``lineno.filename``).
+    We skip those foreign declarations here because the workspace
+    indexer will index the included file separately.
+    """
+    if abs_filename is None:
+        return False
+
+    # Strategy 1: check location from defines() — most reliable
+    try:
+        defs = decl.defines()
+        if defs and len(defs[0]) >= 2:
+            loc = defs[0][1]
+            decl_filename = getattr(loc, "filename", None)
+            if decl_filename is not None:
+                return os.path.abspath(decl_filename) != abs_filename
+    except (AttributeError, IndexError, TypeError, ValueError):
+        pass
+
+    # Strategy 2: check decl.lineno directly
+    lineno = getattr(decl, "lineno", None)
+    if lineno is not None:
+        decl_filename = getattr(lineno, "filename", None)
+        if decl_filename is not None:
+            try:
+                return os.path.abspath(decl_filename) != abs_filename
+            except (TypeError, ValueError):
+                pass
+
+    # Strategy 3: check inner args for lineno (TypeDecl wraps TypeDef)
+    for arg in getattr(decl, "args", ()):
+        lineno = getattr(arg, "lineno", None)
+        if lineno is not None:
+            decl_filename = getattr(lineno, "filename", None)
+            if decl_filename is not None:
+                try:
+                    return os.path.abspath(decl_filename) != abs_filename
+                except (TypeError, ValueError):
+                    pass
+
+    return False
 
 
 def _loc_to_tuple(loc: Any, source: str) -> Tuple[int, int, int, int]:
