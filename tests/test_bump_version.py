@@ -29,7 +29,11 @@ class TestBumpVersionConfig:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        for filepath, pattern, _template in mod.VERSION_FILES:
+        for entry in mod.VERSION_FILES:
+            filepath, handler_type = entry[0], entry[1]
+            if handler_type != "regex":
+                continue
+            pattern = entry[2]
             text = (base / filepath).read_text()
             assert re.search(pattern, text, re.MULTILINE), (
                 f"Pattern {pattern!r} did not match in {filepath}"
