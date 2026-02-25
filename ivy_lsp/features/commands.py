@@ -25,16 +25,22 @@ def _find_tool(name: str) -> Optional[str]:
 def _resolve_via_staging(server: Any, filepath: str) -> str:
     """Return the staging-directory path for *filepath* if available.
 
-    Falls back to the original path when staging is not active or
-    the file is not present in the staging map.
+    Ivy CLI tools resolve ``include`` directives relative to the input
+    file's directory.  By redirecting the tool to the staging directory
+    -- where every workspace .ivy file has a flat symlink -- the tool
+    can find all includes regardless of the original directory structure.
+
+    Falls back to the original path when the server has no active
+    staging directory or the file's basename is not in the staging map.
     """
     try:
         resolver = server._indexer._resolver
-        staged = resolver.get_staged_path(filepath)
-        if staged is not None:
-            return staged
-    except (AttributeError, TypeError):
-        pass
+    except AttributeError:
+        return filepath
+
+    staged = resolver.get_staged_path(filepath)
+    if staged is not None:
+        return staged
     return filepath
 
 
@@ -144,7 +150,11 @@ async def _run_tool(
                     token, lsp.WorkDoneProgressEnd(message="Done")
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to end progress token %s",
+                    token,
+                    exc_info=True,
+                )
 
 
 def register(server: Any) -> None:

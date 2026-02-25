@@ -326,6 +326,7 @@ class TestShowModelHandlerParams:
     async def test_show_model_with_namedtuple_params(self):
         """Reproduce the exact bug: pygls sends namedtuple, not dict."""
         _server, registered = _make_registered_handlers()
+        _server._indexer._resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params(
             {"textDocument": {"uri": "file:///test.ivy"}, "workDoneToken": None}
@@ -346,6 +347,7 @@ class TestCompileHandlerParams:
     @pytest.mark.asyncio
     async def test_compile_with_namedtuple_params(self):
         _server, registered = _make_registered_handlers()
+        _server._indexer._resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params(
             {
@@ -377,6 +379,7 @@ class TestVerifyHandlerParams:
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
         server._indexer = MagicMock()
+        server._indexer._resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params(
             {"textDocument": {"uri": "file:///test.ivy"}, "workDoneToken": None}
@@ -446,6 +449,69 @@ class TestShowModelUsesStaging:
             mock_exec.return_value = mock_proc
 
             result = await registered["ivy/showModel"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "/tmp/staging/test.ivy" in call_args
+        assert "/project/sub/test.ivy" not in call_args
+
+
+class TestVerifyUsesStaging:
+    @pytest.mark.asyncio
+    async def test_verify_passes_staged_path(self):
+        server, registered = _make_registered_handlers()
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        server.workspace.get_text_document.return_value = doc
+        server._parser = MagicMock()
+        server._indexer = MagicMock()
+        server._indexer._resolver.get_staged_path.return_value = (
+            "/tmp/staging/test.ivy"
+        )
+
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///project/sub/test.ivy"},
+                "workDoneToken": None,
+            }
+        )
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/verify"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "/tmp/staging/test.ivy" in call_args
+        assert "/project/sub/test.ivy" not in call_args
+
+
+class TestCompileUsesStaging:
+    @pytest.mark.asyncio
+    async def test_compile_passes_staged_path(self):
+        server, registered = _make_registered_handlers()
+        server._indexer = MagicMock()
+        server._indexer._resolver.get_staged_path.return_value = (
+            "/tmp/staging/test.ivy"
+        )
+
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///project/sub/test.ivy"},
+                "workDoneToken": None,
+                "target": "test",
+            }
+        )
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/compile"](params)
 
         call_args = mock_exec.call_args[0]
         assert "/tmp/staging/test.ivy" in call_args

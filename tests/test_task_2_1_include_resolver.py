@@ -354,6 +354,23 @@ class TestStagingDirectory:
         assert resolver.get_staged_path("/elsewhere/unknown.ivy") is None
         resolver.cleanup_staging()
 
+    def test_get_staged_path_collision_victim(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        d1 = tmp_path / "aa"
+        d1.mkdir()
+        (d1 / "dup.ivy").write_text("# first wins")
+        d2 = tmp_path / "bb"
+        d2.mkdir()
+        (d2 / "dup.ivy").write_text("# second loses")
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+        # First file (sorted) was staged, should return staging path
+        assert resolver.get_staged_path(str(d1 / "dup.ivy")) is not None
+        # Second file (collision victim) must return None, not the wrong file
+        assert resolver.get_staged_path(str(d2 / "dup.ivy")) is None
+        resolver.cleanup_staging()
+
     def test_resolve_uses_staging_for_disambiguation(self, tmp_path):
         from ivy_lsp.indexer.include_resolver import IncludeResolver
 

@@ -217,15 +217,31 @@ class IncludeResolver:
             self._staged_files.clear()
 
     def get_staged_path(self, filepath: str) -> Optional[str]:
-        """Return the staging symlink path for a file, or None."""
+        """Return the staging symlink path for a file, or None.
+
+        Looks up *filepath*'s basename in the staging directory.  Only
+        returns a path when *filepath* is the file that was actually
+        staged under that basename (not a collision victim with the
+        same name).  Returns None when staging is inactive, the basename
+        was not staged, the file is a collision victim, or the symlink
+        no longer exists on disk.
+        """
         if not self._staging_dir:
             return None
         basename = os.path.basename(filepath)
-        if basename not in self._staged_files:
+        original = self._staged_files.get(basename)
+        if original is None:
+            return None
+        if os.path.abspath(filepath) != os.path.abspath(original):
             return None
         staged = os.path.join(self._staging_dir, basename)
         if os.path.isfile(staged):
             return staged
+        logger.warning(
+            "Staged symlink missing for %s (expected at %s)",
+            filepath,
+            staged,
+        )
         return None
 
     def _get_std_include_dir(self) -> Optional[str]:
