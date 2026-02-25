@@ -216,6 +216,18 @@ class IncludeResolver:
             self._staging_dir = None
             self._staged_files.clear()
 
+    def get_staged_path(self, filepath: str) -> Optional[str]:
+        """Return the staging symlink path for a file, or None."""
+        if not self._staging_dir:
+            return None
+        basename = os.path.basename(filepath)
+        if basename not in self._staged_files:
+            return None
+        staged = os.path.join(self._staging_dir, basename)
+        if os.path.isfile(staged):
+            return staged
+        return None
+
     def _get_std_include_dir(self) -> Optional[str]:
         """Locate the Ivy standard library include directory.
 

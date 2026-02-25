@@ -329,6 +329,31 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
         assert not os.path.isdir(staging)
 
+    def test_get_staged_path_returns_symlink(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "a.ivy").write_text("#lang ivy1.7\n")
+        resolver = IncludeResolver(str(tmp_path))
+        staging = resolver.create_staging_directory()
+        result = resolver.get_staged_path(str(tmp_path / "a.ivy"))
+        assert result == os.path.join(staging, "a.ivy")
+        resolver.cleanup_staging()
+
+    def test_get_staged_path_no_staging(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        resolver = IncludeResolver(str(tmp_path))
+        assert resolver.get_staged_path("/foo/a.ivy") is None
+
+    def test_get_staged_path_unknown_file(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "a.ivy").write_text("#lang ivy1.7\n")
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+        assert resolver.get_staged_path("/elsewhere/unknown.ivy") is None
+        resolver.cleanup_staging()
+
     def test_resolve_uses_staging_for_disambiguation(self, tmp_path):
         from ivy_lsp.indexer.include_resolver import IncludeResolver
 
