@@ -55,26 +55,45 @@ _DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER"}
 # ---------------------------------------------------------------------------
 
 
-def _tokenize(source: str) -> list:
+def _tokenize(
+    source: str, filename: str = "<string>"
+) -> Tuple[list, Optional[dict]]:
     """Tokenize *source* using the Ivy PLY lexer.
 
-    Returns a (possibly partial) list of tokens.  If the lexer raises on
-    an illegal character the tokens collected so far are returned -- this
-    provides best-effort results for broken files.
+    Returns ``(tokens, error_info)`` where *error_info* is ``None`` on
+    success or ``{"line": int, "message": str}`` when the lexer fails on
+    an illegal character.  The token list is always best-effort (partial
+    results are returned on failure).
     """
     from ivy.ivy_lexer import LexerVersion
     from ivy.ivy_lexer import lexer as ivy_lexer
 
     lex_copy = copy.copy(ivy_lexer)
     tokens: list = []
+    error_info: Optional[dict] = None
     with LexerVersion([1, 7]):
         lex_copy.input(source)
         while True:
             try:
                 tok = lex_copy.token()
-            except Exception:
+            except Exception as exc:
+                # Extract line number from exception.  IvyError.lineno
+                # may be a LocationTuple with a .line attribute rather
+                # than a plain int.
+                line = 1
+                lineno = getattr(exc, "lineno", None)
+                if lineno is not None:
+                    if hasattr(lineno, "line") and isinstance(lineno.line, int):
+                        line = lineno.line
+                    elif isinstance(lineno, int):
+                        line = lineno
+                error_info = {
+                    "line": line,
+                    "message": str(exc),
+                }
                 logger.warning(
-                    "Lexer error after %d tokens; returning partial results",
+                    "Lexer error in %s after %d tokens; returning partial results",
+                    filename,
                     len(tokens),
                     exc_info=True,
                 )
@@ -82,7 +101,7 @@ def _tokenize(source: str) -> list:
             if tok is None:
                 break
             tokens.append(tok)
-    return tokens
+    return tokens, error_info
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +157,9 @@ def _read_dotted_name(tokens: list, start: int) -> Tuple[Optional[str], int]:
 # ---------------------------------------------------------------------------
 
 
-def fallback_scan(source: str, filename: str = "<string>") -> List[IvySymbol]:
+def fallback_scan(
+    source: str, filename: str = "<string>"
+) -> Tuple[List[IvySymbol], Optional[dict]]:
     """Extract symbol declarations from Ivy source using lexer tokens only.
 
     Parameters
@@ -150,25 +171,28 @@ def fallback_scan(source: str, filename: str = "<string>") -> List[IvySymbol]:
 
     Returns
     -------
-    List of ``IvySymbol`` instances with correct parent/child nesting for
-    ``object`` and ``module`` scopes.  If the source is empty or the lexer
-    fails completely, an empty list is returned.
+    A tuple ``(symbols, error_info)`` where *symbols* is a list of
+    ``IvySymbol`` instances with correct parent/child nesting for
+    ``object`` and ``module`` scopes, and *error_info* is ``None`` on
+    success or ``{"line": int, "message": str}`` when the lexer
+    encountered an illegal character.  If the source is empty or the
+    lexer fails completely, ``([], None)`` is returned.
     """
     if not source or not source.strip():
-        return []
+        return [], None
 
     try:
-        tokens = _tokenize(source)
+        tokens, error_info = _tokenize(source, filename)
     except Exception:
         logger.warning(
             "Lexer failed entirely for %s, returning empty symbol list",
             filename,
             exc_info=True,
         )
-        return []
+        return [], None
 
     if not tokens:
-        return []
+        return [], error_info
 
     lines = source.split("\n")
     symbols: List[IvySymbol] = []
@@ -295,4 +319,4 @@ def fallback_scan(source: str, filename: str = "<string>") -> List[IvySymbol]:
         # -- Unhandled token: skip --------------------------------------
         i += 1
 
-    return symbols
+    return symbols, error_info

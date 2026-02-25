@@ -1,14 +1,16 @@
 """Entry point for running the Ivy Language Server over stdio."""
 
 import logging
+import os
 import sys
 
 
 def main():
     """Start the Ivy Language Server over stdio."""
+    log_level = os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         stream=sys.stderr,
-        level=logging.INFO,
+        level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
     log = logging.getLogger("ivy_lsp")

@@ -15,7 +15,7 @@ class TestFallbackScanSingleDeclarations:
         """``type cid`` produces a Class symbol named 'cid'."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("type cid", "test.ivy")
+        symbols, _error_info = fallback_scan("type cid", "test.ivy")
         assert len(symbols) == 1
         sym = symbols[0]
         assert sym.name == "cid"
@@ -26,7 +26,7 @@ class TestFallbackScanSingleDeclarations:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "object foo = {\n    type this\n}\n"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         sym = symbols[0]
         assert sym.name == "foo"
@@ -39,7 +39,7 @@ class TestFallbackScanSingleDeclarations:
         """``action send(src:cid)`` produces a Function symbol."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("action send(src:cid)", "test.ivy")
+        symbols, _error_info = fallback_scan("action send(src:cid)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "send"
         assert symbols[0].kind == SymbolKind.Function
@@ -48,7 +48,7 @@ class TestFallbackScanSingleDeclarations:
         """``relation r(X,Y)`` produces a Function symbol."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("relation r(X,Y)", "test.ivy")
+        symbols, _error_info = fallback_scan("relation r(X,Y)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "r"
         assert symbols[0].kind == SymbolKind.Function
@@ -58,7 +58,7 @@ class TestFallbackScanSingleDeclarations:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "module counter(t) = {\n    action up = { }\n}\n"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         # Should have at least the module symbol
         module_syms = [s for s in symbols if s.name == "counter"]
         assert len(module_syms) == 1
@@ -68,7 +68,7 @@ class TestFallbackScanSingleDeclarations:
         """``include quic_types`` is tracked with SymbolKind.File."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("include quic_types", "test.ivy")
+        symbols, _error_info = fallback_scan("include quic_types", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "quic_types"
         assert symbols[0].kind == SymbolKind.File
@@ -77,7 +77,7 @@ class TestFallbackScanSingleDeclarations:
         """``isolate iso_foo = foo`` produces a Namespace symbol."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("isolate iso_foo = foo", "test.ivy")
+        symbols, _error_info = fallback_scan("isolate iso_foo = foo", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "iso_foo"
         assert symbols[0].kind == SymbolKind.Namespace
@@ -86,7 +86,7 @@ class TestFallbackScanSingleDeclarations:
         """``property [p1] r(X,X)`` uses the label as name."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("property [p1] r(X,X)", "test.ivy")
+        symbols, _error_info = fallback_scan("property [p1] r(X,X)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "p1"
         assert symbols[0].kind == SymbolKind.Property
@@ -95,7 +95,7 @@ class TestFallbackScanSingleDeclarations:
         """``alias aid = cid`` produces a Variable symbol."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("alias aid = cid", "test.ivy")
+        symbols, _error_info = fallback_scan("alias aid = cid", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "aid"
         assert symbols[0].kind == SymbolKind.Variable
@@ -105,7 +105,7 @@ class TestFallbackScanSingleDeclarations:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "before foo.step {\n    require true;\n}\n"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "foo.step"
         assert symbols[0].kind == SymbolKind.Function
@@ -115,7 +115,7 @@ class TestFallbackScanSingleDeclarations:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "after foo.step {\n    ensure true;\n}\n"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "foo.step"
         assert symbols[0].kind == SymbolKind.Function
@@ -124,7 +124,7 @@ class TestFallbackScanSingleDeclarations:
         """``instance idx : unbounded_sequence`` produces a Variable."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("instance idx : unbounded_sequence", "test.ivy")
+        symbols, _error_info = fallback_scan("instance idx : unbounded_sequence", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "idx"
         assert symbols[0].kind == SymbolKind.Variable
@@ -133,7 +133,7 @@ class TestFallbackScanSingleDeclarations:
         """``axiom [sym] r(X,Y) -> r(Y,X)`` uses label as name."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("axiom [sym] r(X,Y) -> r(Y,X)", "test.ivy")
+        symbols, _error_info = fallback_scan("axiom [sym] r(X,Y) -> r(Y,X)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "sym"
         assert symbols[0].kind == SymbolKind.Property
@@ -142,7 +142,7 @@ class TestFallbackScanSingleDeclarations:
         """``conjecture [c1] true`` uses label as name."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("conjecture [c1] true", "test.ivy")
+        symbols, _error_info = fallback_scan("conjecture [c1] true", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "c1"
         assert symbols[0].kind == SymbolKind.Property
@@ -161,7 +161,7 @@ class TestFallbackScanNesting:
             "    action inner_action(x:t)\n"
             "}\n"
         )
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         outer = symbols[0]
         assert outer.name == "outer"
@@ -181,7 +181,7 @@ class TestFallbackScanNesting:
             "    }\n"
             "}\n"
         )
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         parent = symbols[0]
         assert parent.name == "parent_obj"
@@ -197,7 +197,7 @@ class TestFallbackScanNesting:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "module counter(t) = {\n" "    action up\n" "    action down\n" "}\n"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         mod = symbols[0]
         assert mod.name == "counter"
@@ -218,7 +218,7 @@ class TestFallbackScanEdgeCases:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "type cid\n!!! broken\ntype pkt_num"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         # Should get at least the first symbol before the error
         assert len(symbols) >= 1
         assert symbols[0].name == "cid"
@@ -227,13 +227,13 @@ class TestFallbackScanEdgeCases:
         """Empty source returns empty list."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        assert fallback_scan("", "test.ivy") == []
+        assert fallback_scan("", "test.ivy") == ([], None)
 
     def test_whitespace_only_source(self):
         """Whitespace-only source returns empty list."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        assert fallback_scan("   \n\n  \t  ", "test.ivy") == []
+        assert fallback_scan("   \n\n  \t  ", "test.ivy") == ([], None)
 
 
 class TestFallbackScanMetadata:
@@ -244,7 +244,7 @@ class TestFallbackScanMetadata:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "type cid\naction send(x:t)"
-        symbols = fallback_scan(source, "quic_types.ivy")
+        symbols, _error_info = fallback_scan(source, "quic_types.ivy")
         assert len(symbols) == 2
         for sym in symbols:
             assert sym.file_path == "quic_types.ivy"
@@ -254,7 +254,7 @@ class TestFallbackScanMetadata:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         # Line 0: type cid
-        symbols = fallback_scan("type cid", "test.ivy")
+        symbols, _error_info = fallback_scan("type cid", "test.ivy")
         assert len(symbols) == 1
         start_line = symbols[0].range[0]
         assert start_line == 0  # 0-based
@@ -264,7 +264,7 @@ class TestFallbackScanMetadata:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "\n\ntype cid\n"  # cid is on line index 2
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].range[0] == 2
 
@@ -272,7 +272,7 @@ class TestFallbackScanMetadata:
         """The detail field contains the lowercase keyword that produced the symbol."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("type cid", "test.ivy")
+        symbols, _error_info = fallback_scan("type cid", "test.ivy")
         assert symbols[0].detail is not None
         assert "type" in symbols[0].detail
 
@@ -296,7 +296,7 @@ class TestFallbackScanComplex:
             "include quic_types\n"
             "isolate iso_foo = protocol\n"
         )
-        symbols = fallback_scan(source, "complex.ivy")
+        symbols, _error_info = fallback_scan(source, "complex.ivy")
         top_names = {s.name for s in symbols}
         assert "cid" in top_names
         assert "pkt_num" in top_names
@@ -313,7 +313,7 @@ class TestFallbackScanComplex:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "#lang ivy1.7\n\ntype cid\n"
-        symbols = fallback_scan(source, "test.ivy")
+        symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "cid"
 
@@ -321,7 +321,7 @@ class TestFallbackScanComplex:
         """``property r(X,X)`` (no label) uses the first name token."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("property r(X,X)", "test.ivy")
+        symbols, _error_info = fallback_scan("property r(X,X)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "r"
         assert symbols[0].kind == SymbolKind.Property
@@ -330,7 +330,7 @@ class TestFallbackScanComplex:
         """``axiom r(X,Y) -> r(Y,X)`` (no label) uses the first name token."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols = fallback_scan("axiom r(X,Y) -> r(Y,X)", "test.ivy")
+        symbols, _error_info = fallback_scan("axiom r(X,Y) -> r(Y,X)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "r"
         assert symbols[0].kind == SymbolKind.Property

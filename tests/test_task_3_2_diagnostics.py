@@ -140,6 +140,30 @@ class TestStructuralDiagnostics:
         assert len(include_diags) == 0
 
 
+class TestFallbackScannerDiagnostics:
+    """Tests for surfacing fallback scanner lexer errors as diagnostics."""
+
+    def test_lexer_error_produces_diagnostic(self):
+        """A file with illegal characters should produce an error diagnostic
+        when the parser fails and the fallback scanner encounters the error."""
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        parser = IvyParserWrapper()
+        # Smart quote (U+2019) is an illegal character for the Ivy lexer
+        source = "#lang ivy1.7\n\ntype cid\naction foo\u2019s_thing\n"
+        diags = compute_diagnostics(parser, source, "smart_quote.ivy")
+        lexer_errors = [
+            d
+            for d in diags
+            if d.source == "ivy-lsp" and "Lexer error" in d.message
+        ]
+        assert len(lexer_errors) > 0, (
+            "Expected a diagnostic for the illegal smart quote character"
+        )
+        assert lexer_errors[0].severity == DiagnosticSeverity.Error
+
+
 class TestComputeDiagnostics:
     def test_full_pipeline_valid(self):
         from ivy_lsp.features.diagnostics import compute_diagnostics

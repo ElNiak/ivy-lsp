@@ -100,7 +100,7 @@ def compute_document_symbols(
         if result.success and result.ast is not None:
             symbols = ast_to_symbols(result.ast, filepath, source)
         else:
-            symbols = fallback_scan(source, filepath)
+            symbols, _error_info = fallback_scan(source, filepath)
     elif indexer is not None:
         symbols = indexer.get_symbols(filepath) or []
 

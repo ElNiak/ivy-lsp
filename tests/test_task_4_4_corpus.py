@@ -96,7 +96,7 @@ class TestFullCorpusParsing:
             source = f.read_text(errors="replace")
             result = parser.parse(source, str(f))
             if not result.success:
-                symbols = fallback_scan(source, str(f))
+                symbols, _error_info = fallback_scan(source, str(f))
                 # Only flag if the file has actual content (not empty/header-only)
                 lines = [
                     line

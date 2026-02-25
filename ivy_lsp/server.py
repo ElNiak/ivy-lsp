@@ -84,6 +84,8 @@ class IvyLanguageServer(LanguageServer):
         self._indexer = WorkspaceIndexer(root, self._parser, resolver)
         try:
             self._indexer.index_workspace()
-            logger.info("Workspace indexing complete")
+            n_files = len(self._indexer._cache._cache)
+            n_symbols = sum(1 for _ in self._indexer._symbol_table.all_symbols())
+            logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
         except Exception:
             logger.exception("Workspace indexing failed")

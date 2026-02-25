@@ -272,6 +272,27 @@ def compute_diagnostics(
         for error in result.errors:
             diags.append(_convert_error_to_diagnostic(error, source))
 
+        # Surface fallback scanner lexer errors as diagnostics.
+        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
+        _symbols, error_info = fallback_scan(source, filepath)
+        if error_info is not None:
+            err_line = max(0, error_info.get("line", 1) - 1)
+            err_msg = error_info.get("message", "Lexer error")
+            lines = source.split("\n")
+            line_len = len(lines[err_line]) if err_line < len(lines) else 0
+            diags.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line=err_line, character=0),
+                        end=lsp.Position(line=err_line, character=line_len),
+                    ),
+                    message=f"Lexer error: {err_msg}",
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source="ivy-lsp",
+                )
+            )
+
     # Requirement analysis diagnostics
     req_diags = compute_requirement_diagnostics(source, filepath, indexer)
     diags.extend(req_diags)

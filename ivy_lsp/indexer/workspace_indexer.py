@@ -91,7 +91,7 @@ class WorkspaceIndexer:
         if result.success:
             symbols = ast_to_symbols(result.ast, filepath, source)
         else:
-            symbols = fallback_scan(source, filepath)
+            symbols, _error_info = fallback_scan(source, filepath)
 
         includes = self._extract_includes(source)
         self._cache.put(filepath, result, symbols, includes)

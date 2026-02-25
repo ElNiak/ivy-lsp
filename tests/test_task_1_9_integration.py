@@ -289,7 +289,7 @@ object broken = {
 }
 type pkt_num
 """
-        symbols = fallback_scan(source, "broken.ivy")
+        symbols, _error_info = fallback_scan(source, "broken.ivy")
         assert isinstance(symbols, list)
         all_names = _collect_all_names(symbols)
         # Should find at least 'cid' and/or 'pkt_num' from valid declarations
@@ -301,14 +301,14 @@ type pkt_num
     def test_empty_file_no_crash(self):
         """Empty file (just lang header + newline) returns empty list."""
         source = "#lang ivy1.7\n"
-        symbols = fallback_scan(source, "empty.ivy")
+        symbols, _error_info = fallback_scan(source, "empty.ivy")
         assert isinstance(symbols, list)
         assert len(symbols) == 0
 
     def test_lang_header_only_no_crash(self):
         """File with only '#lang ivy1.7' (no trailing newline) returns empty."""
         source = "#lang ivy1.7"
-        symbols = fallback_scan(source, "header_only.ivy")
+        symbols, _error_info = fallback_scan(source, "header_only.ivy")
         assert isinstance(symbols, list)
         assert len(symbols) == 0
 
@@ -344,7 +344,7 @@ class TestCorpusParsing:
                     assert isinstance(symbols, list)
                     full_parse_success += 1
                 else:
-                    symbols = fallback_scan(source, filename)
+                    symbols, _error_info = fallback_scan(source, filename)
                     assert isinstance(symbols, list)
                     fallback_used += 1
             except Exception as exc:
@@ -412,7 +412,7 @@ class TestCorpusParsing:
                 if result.success:
                     symbols = ast_to_symbols(result.ast, filename, source)
                 else:
-                    symbols = fallback_scan(source, filename)
+                    symbols, _error_info = fallback_scan(source, filename)
                 all_names = _collect_all_names(symbols)
                 file_symbol_counts[ivy_file.name] = len(all_names)
             except Exception:
