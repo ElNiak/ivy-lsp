@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "pygls>=1.0",
     "lsprotocol",
-    "panther_ms_ivy",
+    "panther_ms_ivy[z3]",
 ]
 
 [project.optional-dependencies]
