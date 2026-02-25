@@ -11,7 +11,10 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+
+if TYPE_CHECKING:
+    from ivy_lsp.semantic.nodes import RfcRequirement
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,7 @@ class EdgeType(Enum):
     CONSTRAINS = "constrains"  # requirement -> action (before/after)
     DEPENDS_ON = "depends_on"  # invariant -> axiom (shared state vars)
     PROPAGATED_FROM = "propagated_from"  # cross-file via include chain
+    COVERS = "covers"  # requirement node -> RFC requirement (bracket tag match)
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +107,7 @@ class RequirementGraph:
         self.state_vars: Dict[str, StateVarNode] = {}
         self.actions: Dict[str, ActionNode] = {}
         self.properties: Dict[str, PropertyNode] = {}
+        self.rfc_requirements: Dict[str, RfcRequirement] = {}
 
         self.edges: List[Tuple[str, EdgeType, str]] = []
         self._outgoing: Dict[str, List[Tuple[EdgeType, str]]] = defaultdict(list)
@@ -121,6 +126,9 @@ class RequirementGraph:
 
     def add_property(self, node: PropertyNode) -> None:
         self.properties[node.id] = node
+
+    def add_rfc_requirement(self, node: RfcRequirement) -> None:
+        self.rfc_requirements[node.id] = node
 
     def add_edge(self, source_id: str, edge_type: EdgeType, target_id: str) -> None:
         self.edges.append((source_id, edge_type, target_id))
@@ -214,6 +222,35 @@ class RequirementGraph:
                             self.add_edge(pid_b, EdgeType.DEPENDS_ON, pid_a)
                         elif pb.kind == "axiom" and pa.kind != "axiom":
                             self.add_edge(pid_a, EdgeType.DEPENDS_ON, pid_b)
+
+    def wire_coverage_edges(self) -> None:
+        """Match bracket_tags on RequirementNodes to rfc_requirements keys, add COVERS edges."""
+        for req in self.requirements.values():
+            for tag in req.bracket_tags:
+                if tag in self.rfc_requirements:
+                    self.add_edge(req.id, EdgeType.COVERS, tag)
+
+    def get_coverage_stats(self) -> Dict[str, int]:
+        """Compute covered/uncovered/total by level."""
+        covered_ids: Set[str] = set()
+        for req in self.requirements.values():
+            for tag in req.bracket_tags:
+                if tag in self.rfc_requirements:
+                    covered_ids.add(tag)
+        return {
+            "total": len(self.rfc_requirements),
+            "covered": len(covered_ids),
+            "uncovered": len(self.rfc_requirements) - len(covered_ids),
+        }
+
+    def get_uncovered_requirements(self) -> List[RfcRequirement]:
+        """Return RfcRequirement nodes with no COVERS edge."""
+        covered_ids: Set[str] = set()
+        for req in self.requirements.values():
+            for tag in req.bracket_tags:
+                if tag in self.rfc_requirements:
+                    covered_ids.add(tag)
+        return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
 
     def _rebuild_adjacency(self) -> None:
         self._outgoing = defaultdict(list)

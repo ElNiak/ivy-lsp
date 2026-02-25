@@ -66,6 +66,8 @@ class WorkspaceIndexer:
 
         # Post-indexing: wire state var edges now that all vars are known
         self._wire_requirement_graph()
+        self._load_requirement_manifests()
+        self._wire_coverage_edges()
 
     # ------------------------------------------------------------------
     # Single-file indexing
@@ -213,3 +215,17 @@ class WorkspaceIndexer:
                 known_vars.add(sym.name)
         self._requirement_graph.wire_state_var_edges(known_vars)
         self._requirement_graph.wire_dependency_edges()
+
+    def _load_requirement_manifests(self) -> None:
+        """Load RFC requirement manifests from the workspace and add to the graph."""
+        from ivy_lsp.semantic.rfc_annotations import find_manifests, load_requirement_manifest
+
+        manifests = find_manifests(self._workspace_root)
+        for path in manifests:
+            reqs = load_requirement_manifest(path)
+            for req in reqs.values():
+                self._requirement_graph.add_rfc_requirement(req)
+
+    def _wire_coverage_edges(self) -> None:
+        """Wire COVERS edges from requirement bracket tags to RFC requirements."""
+        self._requirement_graph.wire_coverage_edges()

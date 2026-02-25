@@ -363,6 +363,40 @@ def _extract_action_detail(decl: Any) -> Optional[str]:
     return None
 
 
+def _extract_constant_detail(atom: Any) -> Optional[str]:
+    """Build a detail string from a constant/relation's sort and parameter sorts.
+
+    For a relation ``connected(X:cid, Y:cid)`` returns
+    ``"(X:cid, Y:cid) : bool"``.  For a plain constant ``val : nat``
+    returns ``": nat"``.
+    """
+    try:
+        parts = []
+        # Extract parameter sorts (args of the atom, if any)
+        args = getattr(atom, "args", None)
+        if args and len(args) > 0:
+            param_strs = []
+            for p in args:
+                p_name = getattr(p, "rep", None) or getattr(p, "relname", None) or str(p)
+                p_sort = getattr(p, "sort", None)
+                if p_sort:
+                    param_strs.append(f"{p_name}:{p_sort}")
+                else:
+                    param_strs.append(str(p_name))
+            parts.append("(" + ", ".join(param_strs) + ")")
+
+        # Extract the sort of the atom itself
+        sort = getattr(atom, "sort", None)
+        if sort:
+            parts.append(f": {sort}")
+
+        if parts:
+            return " ".join(parts)
+    except (IndexError, AttributeError):
+        logger.debug("Could not extract constant detail")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Constant declarations (including relations)
 # ---------------------------------------------------------------------------
@@ -382,12 +416,15 @@ def _convert_constant_or_relation(
 
     # Detect relation: ConstantDecl whose atom has args and bool sort
     kind = SymbolKind.Variable
+    detail: Optional[str] = None
     try:
         arg0 = decl.args[0]
         has_args = hasattr(arg0, "args") and len(arg0.args) > 0
         sort = getattr(arg0, "sort", None)
         if has_args and str(sort) == "bool":
             kind = SymbolKind.Function
+        # Extract sort info for the detail string
+        detail = _extract_constant_detail(arg0)
     except (IndexError, AttributeError):
         logger.debug("Could not determine relation kind for %s", type(decl).__name__)
 
@@ -396,6 +433,7 @@ def _convert_constant_or_relation(
             name=name,
             kind=kind,
             range=rng,
+            detail=detail,
             file_path=filename,
         )
     ]
