@@ -145,10 +145,13 @@ class WorkspaceIndexer:
         abs_path = os.path.abspath(filepath)
         self._remove_file_symbols(abs_path)
         self._requirement_graph.remove_file(abs_path)
+        self._requirement_graph.invalidate_file(abs_path)
+        self._file_export_imports.pop(abs_path, None)
         self._cache.invalidate(abs_path)
         self._cache.invalidate_dependents(abs_path, self._include_graph)
         self._index_single_file(abs_path)
         self._wire_requirement_graph()
+        self._compute_test_scopes()
 
     def _remove_file_symbols(self, filepath: str) -> None:
         """Rebuild the symbol table excluding all symbols from *filepath*."""

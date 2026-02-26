@@ -361,3 +361,72 @@ class TestScopeComputation:
                 indexer.index_workspace()
 
         assert call_order.index("wire_coverage") < call_order.index("compute_scopes")
+
+
+# ===================================================================
+# TestReindexInvalidation
+# ===================================================================
+
+
+class TestReindexInvalidation:
+    """Verify reindex_file invalidates caches and recomputes scopes."""
+
+    def test_reindex_clears_scope_cache_for_affected_tests(self):
+        """Scope cache entries for tests including the reindexed file are cleared."""
+        indexer, _, _ = _make_indexer()
+        target = os.path.abspath("/fake/workspace/shared.ivy")
+        test_f = os.path.abspath("/fake/workspace/test.ivy")
+
+        scope = TestScope(
+            test_file=test_f,
+            include_closure=frozenset({test_f, target}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        indexer._requirement_graph.register_test_scope(scope)
+        indexer._requirement_graph.get_scoped_requirements(test_f)
+        assert test_f in indexer._requirement_graph._scope_cache
+
+        with patch.object(indexer, "_index_single_file", return_value=[]):
+            indexer.reindex_file(target)
+
+        assert test_f not in indexer._requirement_graph._scope_cache
+
+    def test_reindex_removes_old_export_import_info(self):
+        indexer, _, _ = _make_indexer()
+        target = os.path.abspath("/fake/workspace/test.ivy")
+        indexer._file_export_imports[target] = _make_export_import_info(
+            target, exports=["old.action"]
+        )
+
+        with patch.object(indexer, "_index_single_file", return_value=[]):
+            indexer.reindex_file(target)
+
+        assert target not in indexer._file_export_imports
+
+    def test_reindex_preserves_other_file_export_imports(self):
+        indexer, _, _ = _make_indexer()
+        target = os.path.abspath("/fake/workspace/target.ivy")
+        other = os.path.abspath("/fake/workspace/other.ivy")
+        indexer._file_export_imports[target] = _make_export_import_info(target)
+        indexer._file_export_imports[other] = _make_export_import_info(
+            other, exports=["keep.this"]
+        )
+
+        with patch.object(indexer, "_index_single_file", return_value=[]):
+            indexer.reindex_file(target)
+
+        assert other in indexer._file_export_imports
+        assert indexer._file_export_imports[other].exports == ["keep.this"]
+
+    def test_reindex_calls_compute_test_scopes(self):
+        indexer, _, _ = _make_indexer()
+
+        with patch.object(indexer, "_index_single_file", return_value=[]):
+            with patch.object(
+                indexer, "_compute_test_scopes"
+            ) as mock_compute:
+                indexer.reindex_file("/fake/workspace/file.ivy")
+
+        mock_compute.assert_called_once()
