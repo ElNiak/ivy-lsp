@@ -93,7 +93,23 @@ def _monitor_lenses(
         action_name = m.group(2)
         line = source[: m.start()].count("\n")
 
+        # --- NCT-aware count retrieval ---
+        nct_entries = None
         if active_scope is not None:
+            nct_entries = graph.get_scoped_nct_counts(
+                active_scope.test_file, action_name
+            )
+
+        if nct_entries:
+            # NCT path: covers both exported (GUARANTEE) and imported (ASSUMPTION)
+            counts = {e["kind"]: e["count"] for e in nct_entries}
+            reqs = [
+                r
+                for r in graph.get_scoped_requirements(active_scope.test_file)
+                if r.monitor_action == action_name
+            ]
+        elif active_scope is not None:
+            # Scoped, no NCT entries (internal action) — try regular scoped counts
             counts = graph.get_scoped_counts(active_scope.test_file, action_name)
             if not counts:
                 continue
@@ -103,10 +119,14 @@ def _monitor_lenses(
                 if r.monitor_action == action_name
             ]
         else:
+            # Unscoped: original behavior
             reqs = graph.get_requirements_for_action(action_name)
             if not reqs:
                 continue
             counts = graph.get_requirement_counts_for_action(action_name)
+
+        if not counts:
+            continue
 
         # Count state vars read
         var_ids: set = set()
@@ -117,10 +137,17 @@ def _monitor_lenses(
                 if etype == EdgeType.READS:
                     var_ids.add(target)
 
+        # --- Title building ---
         parts = []
-        for kind in ("require", "ensure", "assume", "assert"):
-            if kind in counts:
-                parts.append(f"{counts[kind]} {kind}")
+        if nct_entries:
+            for entry in nct_entries:
+                parts.append(
+                    f"{entry['count']} {entry['kind']} [{entry['nct_tag']}]"
+                )
+        else:
+            for kind in ("require", "ensure", "assume", "assert"):
+                if kind in counts:
+                    parts.append(f"{counts[kind]} {kind}")
         if var_ids:
             parts.append(f"reads {len(var_ids)} state vars")
 

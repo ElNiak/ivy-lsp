@@ -240,3 +240,135 @@ class TestScopedStateVarReads:
         titles = [l.command.title for l in lenses if l.command]
         assert len(titles) == 1
         assert "reads 1 state var" in titles[0]
+
+
+class TestNctCodeLensLabels:
+    """Tests for NCT classification tags in code lens titles."""
+
+    def test_scoped_lens_shows_nct_guarantee_tag(self):
+        """Exported action requirements should show [GUARANTEE] tag."""
+        model = ScopedRequirementModel()
+        req = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "quic.send")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "quic.send")
+
+        scope = TestScope(
+            test_file=_abs("/test.ivy"),
+            include_closure=frozenset({_abs("/test.ivy"), _abs("/f.ivy")}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+        model.set_active_test(_abs("/test.ivy"))
+
+        indexer = _make_indexer(graph=model)
+        source = "before quic.send {\n    require x > 0;\n}\n"
+        lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
+        titles = [l.command.title for l in lenses if l.command]
+        assert any("[GUARANTEE]" in t for t in titles), f"Expected [GUARANTEE] in titles: {titles}"
+
+    def test_scoped_lens_shows_nct_assumption_tag(self):
+        """Imported action requirements should show [ASSUMPTION] tag."""
+        model = ScopedRequirementModel()
+        req = _make_req(_abs("/f.ivy"), 10, "require", "tls_ready", "tls.handshake")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "tls.handshake")
+
+        scope = TestScope(
+            test_file=_abs("/test.ivy"),
+            include_closure=frozenset({_abs("/test.ivy"), _abs("/f.ivy")}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset({"tls.handshake"}),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+        model.set_active_test(_abs("/test.ivy"))
+
+        indexer = _make_indexer(graph=model)
+        source = "before tls.handshake {\n    require tls_ready;\n}\n"
+        lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
+        titles = [l.command.title for l in lenses if l.command]
+        assert any("[ASSUMPTION]" in t for t in titles), f"Expected [ASSUMPTION] in titles: {titles}"
+
+    def test_nct_label_format_kind_then_tag(self):
+        """Label should be 'N kind [TAG]' not '[TAG] N kind'."""
+        model = ScopedRequirementModel()
+        req1 = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "quic.send")
+        req2 = _make_req(_abs("/f.ivy"), 20, "ensure", "y > 0", "quic.send")
+        model.add_requirement(req1)
+        model.add_requirement(req2)
+        model.add_edge(req1.id, EdgeType.CONSTRAINS, "quic.send")
+        model.add_edge(req2.id, EdgeType.CONSTRAINS, "quic.send")
+
+        scope = TestScope(
+            test_file=_abs("/test.ivy"),
+            include_closure=frozenset({_abs("/test.ivy"), _abs("/f.ivy")}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+        model.set_active_test(_abs("/test.ivy"))
+
+        indexer = _make_indexer(graph=model)
+        source = "before quic.send {\n    require x > 0;\n}\nafter quic.send {\n    ensure y > 0;\n}\n"
+        lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
+        titles = [l.command.title for l in lenses if l.command]
+        assert any(
+            "require [GUARANTEE]" in t and "ensure [GUARANTEE]" in t
+            for t in titles
+        ), f"Expected NCT format in titles: {titles}"
+
+    def test_unscoped_lens_has_no_nct_tags(self):
+        """Without active scope, no NCT tags should appear."""
+        model = ScopedRequirementModel()
+        req = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "quic.send")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "quic.send")
+
+        indexer = _make_indexer(graph=model)
+        source = "before quic.send {\n    require x > 0;\n}\n"
+        lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
+        titles = [l.command.title for l in lenses if l.command]
+        for t in titles:
+            assert "[GUARANTEE]" not in t, f"Unexpected NCT tag in unscoped lens: {t}"
+            assert "[ASSUMPTION]" not in t, f"Unexpected NCT tag in unscoped lens: {t}"
+
+    def test_internal_action_produces_no_lens(self):
+        """Internal action (neither exported nor imported) should produce no lens."""
+        model = ScopedRequirementModel()
+        req = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "internal.action")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "internal.action")
+
+        scope = TestScope(
+            test_file=_abs("/test.ivy"),
+            include_closure=frozenset({_abs("/test.ivy"), _abs("/f.ivy")}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset({"tls.handshake"}),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+        model.set_active_test(_abs("/test.ivy"))
+
+        indexer = _make_indexer(graph=model)
+        source = "before internal.action {\n    require x > 0;\n}\n"
+        lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
+        titles = [l.command.title for l in lenses if l.command]
+        assert len(titles) == 0, f"Internal action should produce no lens, got: {titles}"
+
+    def test_plain_graph_no_nct_tags(self):
+        """Plain RequirementGraph (not scoped) should never show NCT tags."""
+        graph = RequirementGraph()
+        req = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "quic.send")
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.CONSTRAINS, "quic.send")
+
+        indexer = _make_indexer(graph=graph)
+        source = "before quic.send {\n    require x > 0;\n}\n"
+        lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
+        titles = [l.command.title for l in lenses if l.command]
+        for t in titles:
+            assert "[GUARANTEE]" not in t, f"Unexpected NCT tag in plain graph lens: {t}"
+            assert "[ASSUMPTION]" not in t, f"Unexpected NCT tag in plain graph lens: {t}"
