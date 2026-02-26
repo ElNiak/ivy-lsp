@@ -1,5 +1,8 @@
 """Tests for ExportImportInfo data structure and light-mode extraction."""
 import pytest
+from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+
 from ivy_lsp.analysis.test_scope import ExportImportInfo
 from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
 
@@ -134,6 +137,93 @@ class TestLightModeExportExtraction:
 
 
 # ---------------------------------------------------------------------------
+# Fake ivy.ivy_ast types for isinstance dispatch (full-mode tests)
+# Pattern from tests/test_ast_enrichment.py:288-327
+# ---------------------------------------------------------------------------
+
+
+class _FakeExportDecl:
+    """Stand-in for ivy.ivy_ast.ExportDecl."""
+
+    pass
+
+
+class _FakeExportDef:
+    """Stand-in for ExportDef (child of ExportDecl.args)."""
+
+    pass
+
+
+class _FakeImportDecl:
+    """Stand-in for ivy.ivy_ast.ImportDecl."""
+
+    pass
+
+
+class _FakeImportDef:
+    """Stand-in for ImportDef (child of ImportDecl.args)."""
+
+    pass
+
+
+def _make_lineno(line: int) -> SimpleNamespace:
+    """Create a fake lineno with 1-based .line attribute."""
+    return SimpleNamespace(line=line)
+
+
+def _make_fake_ia_module() -> SimpleNamespace:
+    """Fake ivy.ivy_ast with ExportDecl and ImportDecl."""
+    return SimpleNamespace(
+        ExportDecl=_FakeExportDecl,
+        ImportDecl=_FakeImportDecl,
+    )
+
+
+def _patch_ivy_ast_for_exports():
+    """Context manager patching sys.modules for import ivy.ivy_ast."""
+    ia_module = _make_fake_ia_module()
+    ivy_mock = SimpleNamespace(ivy_ast=ia_module)
+    return patch.dict(
+        "sys.modules", {"ivy": ivy_mock, "ivy.ivy_ast": ia_module}
+    )
+
+
+def _make_export_decl(names_and_lines):
+    """Build _FakeExportDecl with ExportDef children.
+
+    Args:
+        names_and_lines: list of (name, 1_based_line) tuples.
+            All defs in one decl share the decl's line number (last tuple's line).
+    """
+    decl = _FakeExportDecl()
+    defs = []
+    last_line = 1
+    for name, line_1based in names_and_lines:
+        defn = _FakeExportDef()
+        defn.args = [SimpleNamespace(relname=name)]
+        defs.append(defn)
+        last_line = line_1based
+    decl.args = defs
+    decl.lineno = _make_lineno(last_line)
+    return decl
+
+
+def _make_import_decl(names_and_lines):
+    """Build _FakeImportDecl with ImportDef children."""
+    decl = _FakeImportDecl()
+    defs = []
+    last_line = 1
+    for name, line_1based in names_and_lines:
+        defn = _FakeImportDef()
+        defn.args = [SimpleNamespace(relname=name)]
+        defs.append(defn)
+        last_line = line_1based
+    decl.args = defs
+    decl.lineno = _make_lineno(last_line)
+    return decl
+
+
+# ---------------------------------------------------------------------------
 # Full-mode AST-based export/import extraction tests
 # ---------------------------------------------------------------------------
 
@@ -175,8 +265,6 @@ class TestFullModeExportExtraction:
         assert info.file == "/custom/path.ivy"
 
     def test_falls_back_to_light_mode_when_ivy_unavailable(self):
-        from unittest.mock import MagicMock, patch
-
         source = "export quic.send\nimport tls.handshake\n"
         ast_obj = MagicMock()
         ast_obj.decls = [MagicMock()]
@@ -187,3 +275,60 @@ class TestFullModeExportExtraction:
         assert info.exports == ["quic.send"]
         assert info.imports == ["tls.handshake"]
         assert info.file == FILEPATH
+
+    def test_single_export_from_ast(self):
+        export_decl = _make_export_decl([("quic.send", 5)])
+        ast_obj = SimpleNamespace(decls=[export_decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == ["quic.send"]
+        assert info.export_lines == {"quic.send": 4}  # 0-based
+        assert info.imports == []
+
+    def test_single_import_from_ast(self):
+        import_decl = _make_import_decl([("tls.handshake", 10)])
+        ast_obj = SimpleNamespace(decls=[import_decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.imports == ["tls.handshake"]
+        assert info.import_lines == {"tls.handshake": 9}  # 0-based
+        assert info.exports == []
+
+    def test_multiple_exports_same_decl(self):
+        export_decl = _make_export_decl([
+            ("quic.send", 3),
+            ("quic.recv", 3),  # same decl -> same line
+        ])
+        ast_obj = SimpleNamespace(decls=[export_decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == ["quic.send", "quic.recv"]
+        assert len(info.export_lines) == 2
+
+    def test_mixed_exports_and_imports(self):
+        export_decl = _make_export_decl([("quic.send", 5)])
+        import_decl = _make_import_decl([("tls.handshake", 10)])
+        ast_obj = SimpleNamespace(decls=[export_decl, import_decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == ["quic.send"]
+        assert info.imports == ["tls.handshake"]
+        assert info.file == FILEPATH
+
+    def test_non_export_import_decls_ignored(self):
+        other_decl = MagicMock()  # not a _FakeExportDecl or _FakeImportDecl
+        ast_obj = SimpleNamespace(decls=[other_decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == []
+        assert info.imports == []

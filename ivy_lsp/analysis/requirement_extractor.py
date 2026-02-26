@@ -82,7 +82,45 @@ def extract_exports_imports_full(
         )
         return extract_exports_imports_light(source, filepath)
 
-    return ExportImportInfo(file=filepath)
+    exports: List[str] = []
+    imports: List[str] = []
+    export_lines: Dict[str, int] = {}
+    import_lines: Dict[str, int] = {}
+
+    for decl in ast_obj.decls:
+        try:
+            if isinstance(decl, ia.ExportDecl):
+                line = _get_line(decl)
+                for defn in decl.args:
+                    atom = defn.args[0] if defn.args else None
+                    name = _atom_to_name(atom) if atom else None
+                    if name:
+                        exports.append(name)
+                        export_lines[name] = line
+
+            elif isinstance(decl, ia.ImportDecl):
+                line = _get_line(decl)
+                for defn in decl.args:
+                    atom = defn.args[0] if defn.args else None
+                    name = _atom_to_name(atom) if atom else None
+                    if name:
+                        imports.append(name)
+                        import_lines[name] = line
+        except Exception:
+            logger.warning(
+                "Failed to extract export/import from %s in %s",
+                type(decl).__name__,
+                filepath,
+                exc_info=True,
+            )
+
+    return ExportImportInfo(
+        file=filepath,
+        exports=exports,
+        imports=imports,
+        export_lines=export_lines,
+        import_lines=import_lines,
+    )
 
 
 def _process_decl(
