@@ -86,3 +86,74 @@ class TestInitializationWithScopedModel:
         indexer._file_export_imports["/old.ivy"] = _make_export_import_info("/old.ivy")
         indexer.index_workspace()
         assert indexer._file_export_imports == {}
+
+
+# ===================================================================
+# TestExportImportExtraction
+# ===================================================================
+
+
+class TestExportImportExtraction:
+    """Verify _extract_file_exports_imports() delegates and stores correctly."""
+
+    def test_full_mode_on_successful_parse(self):
+        indexer, _, _ = _make_indexer()
+        result = _make_parse_result(success=True, ast=MagicMock())
+        filepath = "/fake/test.ivy"
+        source = "export quic.send\n"
+        expected = _make_export_import_info(filepath, exports=["quic.send"])
+
+        with patch(
+            "ivy_lsp.indexer.workspace_indexer.extract_exports_imports_full",
+            return_value=expected,
+        ) as mock_full:
+            indexer._extract_file_exports_imports(filepath, result, source)
+
+        mock_full.assert_called_once_with(result.ast, filepath, source)
+        assert indexer._file_export_imports[filepath] is expected
+
+    def test_light_mode_on_failed_parse(self):
+        indexer, _, _ = _make_indexer()
+        result = _make_parse_result(success=False)
+        filepath = "/fake/test.ivy"
+        source = "export quic.send\n"
+        expected = _make_export_import_info(filepath, exports=["quic.send"])
+
+        with patch(
+            "ivy_lsp.indexer.workspace_indexer.extract_exports_imports_light",
+            return_value=expected,
+        ) as mock_light:
+            indexer._extract_file_exports_imports(filepath, result, source)
+
+        mock_light.assert_called_once_with(source, filepath)
+        assert indexer._file_export_imports[filepath] is expected
+
+    def test_exception_logged_not_raised(self, caplog):
+        indexer, _, _ = _make_indexer()
+        result = _make_parse_result(success=False)
+
+        with patch(
+            "ivy_lsp.indexer.workspace_indexer.extract_exports_imports_light",
+            side_effect=RuntimeError("boom"),
+        ):
+            with caplog.at_level(logging.WARNING):
+                indexer._extract_file_exports_imports("/bad.ivy", result, "bad")
+
+        assert "/bad.ivy" not in indexer._file_export_imports
+        assert "Export/import extraction failed" in caplog.text
+
+    def test_called_during_index_single_file(self, tmp_path):
+        """After _index_single_file, the file's ExportImportInfo is stored."""
+        source = "export quic_send_event\ntype t\n"
+        f = tmp_path / "test.ivy"
+        f.write_text(source)
+        filepath = str(f)
+
+        indexer, parser, _ = _make_indexer(str(tmp_path))
+        parser.parse.return_value = _make_parse_result(success=False)
+
+        indexer._index_single_file(filepath)
+
+        assert filepath in indexer._file_export_imports
+        info = indexer._file_export_imports[filepath]
+        assert "quic_send_event" in info.exports

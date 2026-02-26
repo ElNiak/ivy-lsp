@@ -122,6 +122,9 @@ class WorkspaceIndexer:
         # Requirement extraction
         self._extract_file_requirements(filepath, result, source)
 
+        # Export/import extraction
+        self._extract_file_exports_imports(filepath, result, source)
+
         return symbols
 
     # ------------------------------------------------------------------
@@ -215,6 +218,23 @@ class WorkspaceIndexer:
         except Exception:
             logger.warning(
                 "Requirement extraction failed for %s", filepath, exc_info=True
+            )
+
+    def _extract_file_exports_imports(
+        self, filepath: str, result: Any, source: str
+    ) -> None:
+        """Extract export/import declarations and store in the index."""
+        try:
+            if result.success:
+                info = extract_exports_imports_full(result.ast, filepath, source)
+            else:
+                info = extract_exports_imports_light(source, filepath)
+            self._file_export_imports[filepath] = info
+        except Exception:
+            logger.warning(
+                "Export/import extraction failed for %s",
+                filepath,
+                exc_info=True,
             )
 
     def _wire_requirement_graph(self) -> None:
