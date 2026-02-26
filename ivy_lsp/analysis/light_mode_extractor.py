@@ -32,6 +32,16 @@ ACTION_RE = re.compile(
     re.MULTILINE,
 )
 
+# Export/import declaration patterns (bare and action forms)
+EXPORT_RE = re.compile(
+    r"^\s*(?:action\s+)?export\s+([\w.]+)",
+    re.MULTILINE,
+)
+IMPORT_RE = re.compile(
+    r"^\s*(?:action\s+)?import\s+([\w.]+)",
+    re.MULTILINE,
+)
+
 
 def extract_requirements_light(
     source: str,
@@ -240,3 +250,39 @@ def _offset_to_line(offset: int, source_lines: List[str]) -> int:
         if running > offset:
             return i
     return max(0, len(source_lines) - 1)
+
+
+def extract_exports_imports_light(
+    source: str,
+    filepath: str,
+) -> "ExportImportInfo":
+    """Extract export/import declarations from Ivy source text.
+
+    Returns an ExportImportInfo with names and 0-based line numbers.
+    """
+    from ivy_lsp.analysis.test_scope import ExportImportInfo
+
+    exports: List[str] = []
+    imports: List[str] = []
+    export_lines: Dict[str, int] = {}
+    import_lines: Dict[str, int] = {}
+
+    for m in EXPORT_RE.finditer(source):
+        name = m.group(1)
+        line = source[: m.start()].count("\n")
+        exports.append(name)
+        export_lines[name] = line
+
+    for m in IMPORT_RE.finditer(source):
+        name = m.group(1)
+        line = source[: m.start()].count("\n")
+        imports.append(name)
+        import_lines[name] = line
+
+    return ExportImportInfo(
+        file=filepath,
+        exports=exports,
+        imports=imports,
+        export_lines=export_lines,
+        import_lines=import_lines,
+    )
