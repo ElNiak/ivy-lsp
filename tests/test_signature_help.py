@@ -129,3 +129,60 @@ class TestComputeSignatureHelp:
         )
         assert result is not None
         assert result.signatures[0].active_parameter == 2
+
+    def test_active_parameter_clamped_when_excess_commas(self, tmp_path):
+        """Extra commas beyond parameter count clamp active_parameter."""
+        from ivy_lsp.features.signature_help import compute_signature_help
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        source = "#lang ivy1.7\ntype cid\naction send(dst:cid)\n"
+        (tmp_path / "a.ivy").write_text(source)
+        parser = IvyParserWrapper()
+        resolver = IncludeResolver(str(tmp_path))
+        indexer = WorkspaceIndexer(str(tmp_path), parser, resolver)
+        indexer.index_workspace()
+
+        # send has 1 param, but cursor is after 3 commas
+        editing_lines = [
+            "#lang ivy1.7",
+            "type cid",
+            "action send(dst:cid)",
+            "after init { send(a, b, c, }",
+        ]
+        filepath = str(tmp_path / "a.ivy")
+        result = compute_signature_help(
+            indexer, filepath, editing_lines, Position(line=3, character=27)
+        )
+        assert result is not None
+        # active_parameter on SignatureHelp must be clamped to max valid index (0)
+        assert result.active_parameter <= 0
+
+
+class TestFindCallContext:
+    def test_simple_call(self):
+        from ivy_lsp.features.signature_help import _find_call_context
+
+        assert _find_call_context("send(x", 6) == ("send", 0)
+
+    def test_second_param(self):
+        from ivy_lsp.features.signature_help import _find_call_context
+
+        assert _find_call_context("send(x, y", 9) == ("send", 1)
+
+    def test_nested_parens(self):
+        from ivy_lsp.features.signature_help import _find_call_context
+
+        result = _find_call_context("foo(bar(x), ", 12)
+        assert result == ("foo", 1)
+
+    def test_no_open_paren(self):
+        from ivy_lsp.features.signature_help import _find_call_context
+
+        assert _find_call_context("type cid", 5) is None
+
+    def test_no_function_name(self):
+        from ivy_lsp.features.signature_help import _find_call_context
+
+        assert _find_call_context("(x + y)", 4) is None

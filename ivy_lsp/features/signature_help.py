@@ -109,23 +109,22 @@ def compute_signature_help(
     sym = locations[0].symbol
     params = _parse_parameters(sym.detail)
 
-    # Build the signature label
-    if sym.detail and "(" in sym.detail:
-        paren_match = re.search(r"\(.*\)", sym.detail)
-        label = f"{func_name}{paren_match.group(0)}" if paren_match else func_name
-    else:
-        label = func_name
+    # Build the signature label from the original detail string
+    paren_match = re.search(r"\(.*\)", sym.detail) if sym.detail else None
+    label = f"{func_name}{paren_match.group(0)}" if paren_match else func_name
+
+    clamped = min(active_param, max(0, len(params) - 1)) if params else 0
 
     sig = lsp.SignatureInformation(
         label=label,
         parameters=params if params else None,
-        active_parameter=min(active_param, len(params) - 1) if params else 0,
+        active_parameter=clamped,
     )
 
     return lsp.SignatureHelp(
         signatures=[sig],
         active_signature=0,
-        active_parameter=active_param,
+        active_parameter=clamped,
     )
 
 
