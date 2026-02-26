@@ -4,7 +4,7 @@ from ivy_lsp.analysis.requirement_graph import (
     ActionNode, EdgeType, RequirementGraph, RequirementNode, StateVarNode,
 )
 from ivy_lsp.analysis.test_scope import (
-    ExportImportInfo, ScopedRequirementModel, TestScope,
+    ExportImportInfo, ScopedRequirementModel, TestScope, ActionClassification,
 )
 
 
@@ -139,3 +139,150 @@ class TestCacheInvalidation:
         scoped_model.get_scoped_requirements("/test/test_a.ivy")
         scoped_model.invalidate_file("/test/file_b.ivy")
         assert "/test/test_a.ivy" in scoped_model._scope_cache
+
+
+class TestScopedNctCounts:
+    """Tests for get_scoped_nct_counts() method."""
+
+    def test_exported_action_tagged_guarantee(self, scoped_model):
+        """Requirements on exported actions are tagged GUARANTEE."""
+        entries = scoped_model.get_scoped_nct_counts(
+            "/test/test_a.ivy", "quic.send"
+        )
+        assert len(entries) == 1
+        assert entries[0] == {"kind": "require", "count": 2, "nct_tag": "GUARANTEE"}
+
+    def test_imported_action_tagged_assumption(self):
+        """Requirements on imported actions are tagged ASSUMPTION."""
+        model = ScopedRequirementModel()
+        req = _make_req("/f.ivy", 10, "require", "x > 0", "tls.handshake")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "tls.handshake")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset({"tls.handshake"}),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "tls.handshake")
+        assert len(entries) == 1
+        assert entries[0]["nct_tag"] == "ASSUMPTION"
+        assert entries[0]["kind"] == "require"
+        assert entries[0]["count"] == 1
+
+    def test_internal_action_excluded(self):
+        """Internal actions (neither exported nor imported) return empty list."""
+        model = ScopedRequirementModel()
+        req = _make_req("/f.ivy", 10, "require", "x > 0", "internal.helper")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "internal.helper")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "internal.helper")
+        assert entries == []
+
+    def test_multiple_kinds_same_action(self):
+        """An exported action with both require and ensure gets separate entries."""
+        model = ScopedRequirementModel()
+        req1 = _make_req("/f.ivy", 10, "require", "x > 0", "quic.send")
+        req2 = _make_req("/f.ivy", 20, "ensure", "y > 0", "quic.send")
+        model.add_requirement(req1)
+        model.add_requirement(req2)
+        model.add_edge(req1.id, EdgeType.CONSTRAINS, "quic.send")
+        model.add_edge(req2.id, EdgeType.CONSTRAINS, "quic.send")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
+        kinds = {e["kind"] for e in entries}
+        assert kinds == {"ensure", "require"}
+        for entry in entries:
+            assert entry["nct_tag"] == "GUARANTEE"
+            assert entry["count"] == 1
+
+    def test_unknown_test_returns_empty(self, scoped_model):
+        """Unregistered test file returns empty list."""
+        entries = scoped_model.get_scoped_nct_counts(
+            "/nonexistent.ivy", "quic.send"
+        )
+        assert entries == []
+
+    def test_unknown_action_returns_empty(self, scoped_model):
+        """Action not in scope (internal) returns empty list."""
+        entries = scoped_model.get_scoped_nct_counts(
+            "/test/test_a.ivy", "nonexistent.action"
+        )
+        assert entries == []
+
+    def test_imported_action_outside_include_closure_excluded(self):
+        """Imported action requirements in files outside include_closure are excluded."""
+        model = ScopedRequirementModel()
+        req = _make_req("/outside.ivy", 10, "require", "x > 0", "tls.handshake")
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "tls.handshake")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset({"tls.handshake"}),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "tls.handshake")
+        assert entries == []
+
+    def test_entries_have_required_keys(self, scoped_model):
+        """Each entry dict has kind, count, nct_tag with correct types."""
+        entries = scoped_model.get_scoped_nct_counts(
+            "/test/test_a.ivy", "quic.send"
+        )
+        for entry in entries:
+            assert "kind" in entry
+            assert "count" in entry
+            assert "nct_tag" in entry
+            assert isinstance(entry["count"], int)
+            assert entry["count"] > 0
+
+    def test_entries_sorted_by_kind(self):
+        """Returned entries are sorted alphabetically by kind."""
+        model = ScopedRequirementModel()
+        req1 = _make_req("/f.ivy", 10, "require", "x > 0", "quic.send")
+        req2 = _make_req("/f.ivy", 20, "ensure", "y > 0", "quic.send")
+        model.add_requirement(req1)
+        model.add_requirement(req2)
+        model.add_edge(req1.id, EdgeType.CONSTRAINS, "quic.send")
+        model.add_edge(req2.id, EdgeType.CONSTRAINS, "quic.send")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
+        assert entries[0]["kind"] == "ensure"
+        assert entries[1]["kind"] == "require"

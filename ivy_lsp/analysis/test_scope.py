@@ -168,6 +168,52 @@ class ScopedRequirementModel(RequirementGraph):
                 counts[req.kind] += 1
         return dict(counts)
 
+    def get_scoped_nct_counts(
+        self, test_file: str, action_name: str
+    ) -> List[Dict[str, Any]]:
+        """Get requirement counts with NCT classification for a scoped action.
+
+        Returns a list of dicts with keys: kind, count, nct_tag.
+        Only returns entries for exported (GUARANTEE) or imported (ASSUMPTION)
+        actions. Internal actions return [].
+        """
+        scope = self._test_scopes.get(test_file)
+        if scope is None:
+            return []
+
+        direction = classify_action_direction(action_name, scope)
+        if direction == ActionClassification.INTERNAL:
+            return []
+
+        nct_tag = (
+            "GUARANTEE"
+            if direction == ActionClassification.GENERATED
+            else "ASSUMPTION"
+        )
+
+        # For exported actions, reuse get_scoped_counts (filters by exported_actions)
+        counts = self.get_scoped_counts(test_file, action_name)
+
+        # For imported actions, get_scoped_counts returns {} since it only
+        # handles exported_actions. Scan requirements directly.
+        if not counts and direction == ActionClassification.RECEIVED:
+            raw_counts: Dict[str, int] = defaultdict(int)
+            for req in self.requirements.values():
+                if (
+                    req.file in scope.include_closure
+                    and req.monitor_action == action_name
+                ):
+                    raw_counts[req.kind] += 1
+            counts = dict(raw_counts)
+
+        if not counts:
+            return []
+
+        return [
+            {"kind": kind, "count": count, "nct_tag": nct_tag}
+            for kind, count in sorted(counts.items())
+        ]
+
     def invalidate_file(self, filepath: str) -> None:
         for test_file in self._file_to_tests.get(filepath, set()):
             self._scope_cache.pop(test_file, None)
