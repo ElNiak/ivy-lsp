@@ -23,11 +23,12 @@ def compute_code_actions(
     actions: List[lsp.CodeAction] = []
 
     for diag in diagnostics:
-        code = (
-            diag.code
-            if isinstance(diag.code, str)
-            else str(diag.code) if diag.code is not None else None
-        )
+        if diag.code is None:
+            code = None
+        elif isinstance(diag.code, str):
+            code = diag.code
+        else:
+            code = str(diag.code)
 
         if code == "missing-lang-header":
             actions.append(
@@ -52,11 +53,14 @@ def compute_code_actions(
             lines = source.split("\n")
             line_no = diag.range.start.line
             if line_no < len(lines):
-                # Remove the entire include line (including trailing newline)
-                end_line = line_no + 1 if line_no + 1 <= len(lines) else line_no
-                end_char = (
-                    0 if end_line > line_no else len(lines[line_no])
-                )
+                if line_no + 1 < len(lines):
+                    # Not the last line: delete from start to start of next
+                    end_line = line_no + 1
+                    end_char = 0
+                else:
+                    # Last line: delete to end of this line
+                    end_line = line_no
+                    end_char = len(lines[line_no])
                 actions.append(
                     lsp.CodeAction(
                         title="Remove unresolved include",

@@ -76,6 +76,26 @@ class TestUnresolvedInclude:
         )
 
 
+    def test_quickfix_last_line_include_no_trailing_newline(self):
+        """Include on last line without trailing newline produces valid range."""
+        from ivy_lsp.features.code_action import compute_code_actions
+
+        diag = Diagnostic(
+            range=Range(start=Position(1, 0), end=Position(1, 20)),
+            message="Unresolved include: missing",
+            severity=DiagnosticSeverity.Warning,
+            source="ivy-lsp",
+            code="unresolved-include",
+        )
+        source = "#lang ivy1.7\ninclude missing"  # No trailing newline
+        actions = compute_code_actions("file:///test.ivy", source, [diag])
+        fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
+        assert len(fix) == 1
+        edit = fix[0].edit.changes["file:///test.ivy"][0]
+        # end_line should not exceed the last line index (1)
+        assert edit.range.end.line <= 1
+
+
 class TestNoMatchingDiagnostic:
     def test_no_actionable_diagnostics(self):
         """Diagnostics without known codes produce no actions."""
@@ -95,6 +115,21 @@ class TestNoMatchingDiagnostic:
         from ivy_lsp.features.code_action import compute_code_actions
 
         assert compute_code_actions("file:///test.ivy", "", []) == []
+
+    def test_out_of_bounds_diagnostic_line(self):
+        """Diagnostic with line beyond source produces no action."""
+        from ivy_lsp.features.code_action import compute_code_actions
+
+        diag = Diagnostic(
+            range=Range(start=Position(99, 0), end=Position(99, 20)),
+            message="Unresolved include",
+            severity=DiagnosticSeverity.Warning,
+            source="ivy-lsp",
+            code="unresolved-include",
+        )
+        source = "#lang ivy1.7\ntype cid\n"
+        actions = compute_code_actions("file:///test.ivy", source, [diag])
+        assert actions == []
 
 
 class TestDiagnosticCodeField:
