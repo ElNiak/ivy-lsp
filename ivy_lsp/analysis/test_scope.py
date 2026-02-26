@@ -191,12 +191,9 @@ class ScopedRequirementModel(RequirementGraph):
             else "ASSUMPTION"
         )
 
-        # For exported actions, reuse get_scoped_counts (filters by exported_actions)
-        counts = self.get_scoped_counts(test_file, action_name)
-
-        # For imported actions, get_scoped_counts returns {} since it only
-        # handles exported_actions. Scan requirements directly.
-        if not counts and direction == ActionClassification.RECEIVED:
+        if direction == ActionClassification.RECEIVED:
+            # Imported actions: scan requirements directly (get_scoped_counts
+            # only handles exported actions).
             raw_counts: Dict[str, int] = defaultdict(int)
             for req in self.requirements.values():
                 if (
@@ -205,6 +202,9 @@ class ScopedRequirementModel(RequirementGraph):
                 ):
                     raw_counts[req.kind] += 1
             counts = dict(raw_counts)
+        else:
+            # Exported actions: reuse get_scoped_counts
+            counts = self.get_scoped_counts(test_file, action_name)
 
         if not counts:
             return []

@@ -4,7 +4,7 @@ from ivy_lsp.analysis.requirement_graph import (
     ActionNode, EdgeType, RequirementGraph, RequirementNode, StateVarNode,
 )
 from ivy_lsp.analysis.test_scope import (
-    ExportImportInfo, ScopedRequirementModel, TestScope, ActionClassification,
+    ExportImportInfo, ScopedRequirementModel, TestScope,
 )
 
 
