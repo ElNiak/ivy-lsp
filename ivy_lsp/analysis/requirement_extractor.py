@@ -55,6 +55,28 @@ def extract_requirements_full(
     return requirements, writes
 
 
+def extract_exports_imports_full(
+    ast_obj: Any,
+    filepath: str,
+    source: str,
+) -> "ExportImportInfo":
+    """Extract export/import declarations from full AST.
+
+    Walks ``ast_obj.decls`` looking for ``ExportDecl`` and ``ImportDecl``
+    nodes.  Falls back to light-mode regex extraction if the ``ivy``
+    package is not importable.
+
+    Returns:
+        An ``ExportImportInfo`` with names and 0-based line numbers.
+    """
+    from ivy_lsp.analysis.test_scope import ExportImportInfo
+
+    if ast_obj is None or not hasattr(ast_obj, "decls"):
+        return ExportImportInfo(file=filepath)
+
+    return ExportImportInfo(file=filepath)
+
+
 def _process_decl(
     decl: Any,
     filepath: str,

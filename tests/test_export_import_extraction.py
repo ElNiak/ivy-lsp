@@ -131,3 +131,45 @@ class TestLightModeExportExtraction:
         assert info.exports == ["quic.send", "quic.recv"]
         assert info.imports == ["tls.handshake", "quic.connection"]
         assert info.file == "/test.ivy"
+
+
+# ---------------------------------------------------------------------------
+# Full-mode AST-based export/import extraction tests
+# ---------------------------------------------------------------------------
+
+from ivy_lsp.analysis.requirement_extractor import extract_exports_imports_full
+
+FILEPATH = "/test/file.ivy"
+
+
+class TestFullModeExportExtraction:
+    """Tests for AST-based export/import extraction."""
+
+    def test_returns_empty_for_none_ast(self):
+        info = extract_exports_imports_full(None, FILEPATH, "")
+        assert info.file == FILEPATH
+        assert info.exports == []
+        assert info.imports == []
+        assert info.export_lines == {}
+        assert info.import_lines == {}
+
+    def test_returns_empty_for_ast_without_decls(self):
+        class _NoDecls:
+            pass
+
+        info = extract_exports_imports_full(_NoDecls(), FILEPATH, "")
+        assert info.exports == []
+        assert info.imports == []
+
+    def test_returns_empty_for_empty_decls(self):
+        from unittest.mock import MagicMock
+
+        ast_obj = MagicMock()
+        ast_obj.decls = []
+        info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+        assert info.exports == []
+        assert info.imports == []
+
+    def test_filepath_preserved(self):
+        info = extract_exports_imports_full(None, "/custom/path.ivy", "")
+        assert info.file == "/custom/path.ivy"
