@@ -109,6 +109,26 @@ class TestIncludeFolding:
         assert import_folds[0].end_line == 4
 
 
+class TestUnmatchedBraces:
+    def test_unmatched_opening_brace(self):
+        """Unclosed brace produces no fold."""
+        from ivy_lsp.features.folding_range import compute_folding_ranges
+
+        source = "#lang ivy1.7\nobject foo = {\n    type this\n"
+        ranges = compute_folding_ranges(source)
+        brace_folds = [r for r in ranges if r.kind == "region"]
+        assert len(brace_folds) == 0
+
+    def test_unmatched_closing_brace(self):
+        """Extra closing brace produces no fold."""
+        from ivy_lsp.features.folding_range import compute_folding_ranges
+
+        source = "#lang ivy1.7\n}\ntype cid\n"
+        ranges = compute_folding_ranges(source)
+        brace_folds = [r for r in ranges if r.kind == "region"]
+        assert len(brace_folds) == 0
+
+
 class TestEmptySource:
     def test_empty_string(self):
         from ivy_lsp.features.folding_range import compute_folding_ranges
