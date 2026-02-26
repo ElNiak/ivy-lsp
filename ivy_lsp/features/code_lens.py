@@ -15,6 +15,8 @@ from typing import Any, List
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+
 logger = logging.getLogger(__name__)
 
 # Patterns for detecting monitor/declaration lines in source
@@ -82,15 +84,29 @@ def _monitor_lenses(
     lenses = []
     source = "\n".join(lines)
 
+    # Determine active scope once (immutable during iteration)
+    active_scope = None
+    if isinstance(graph, ScopedRequirementModel):
+        active_scope = graph.get_active_scope()
+
     for m in _MONITOR_LINE_RE.finditer(source):
         action_name = m.group(2)
         line = source[: m.start()].count("\n")
 
-        reqs = graph.get_requirements_for_action(action_name)
-        if not reqs:
-            continue
-
-        counts = graph.get_requirement_counts_for_action(action_name)
+        if active_scope is not None:
+            counts = graph.get_scoped_counts(active_scope.test_file, action_name)
+            if not counts:
+                continue
+            reqs = [
+                r
+                for r in graph.get_scoped_requirements(active_scope.test_file)
+                if r.monitor_action == action_name
+            ]
+        else:
+            reqs = graph.get_requirements_for_action(action_name)
+            if not reqs:
+                continue
+            counts = graph.get_requirement_counts_for_action(action_name)
 
         # Count state vars read
         var_ids: set = set()

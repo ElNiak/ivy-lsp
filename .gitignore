@@ -8,3 +8,4 @@ build/
 .ruff_cache/
 .venv/
 .DS_Store
+pytest-of-elniak/
