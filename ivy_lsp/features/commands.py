@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+
 logger = logging.getLogger(__name__)
 
 _VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
@@ -257,3 +259,90 @@ def register(server: Any) -> None:
             "ivycAvailable": _find_tool("ivyc") is not None,
             "ivyShowAvailable": _find_tool("ivy_show") is not None,
         }
+
+    @server.feature("ivy/setActiveTest")
+    def ivy_set_active_test(params) -> Dict[str, Any]:
+        """Set the active test scope for diagnostics and code lenses.
+
+        The client is responsible for triggering a diagnostic refresh
+        after a successful response.
+        """
+        test_file = getattr(params, "testFile", None)
+
+        try:
+            graph = server._indexer._requirement_graph
+        except AttributeError:
+            return {"success": False, "error": "Indexer not available"}
+
+        if not isinstance(graph, ScopedRequirementModel):
+            return {"success": False, "error": "Scoped model not available"}
+
+        if test_file is not None and test_file not in graph._test_scopes:
+            active = graph.get_active_scope()
+            return {
+                "success": False,
+                "error": f"Unknown test: {test_file}",
+                "activeTest": active.test_file if active else None,
+            }
+
+        graph.set_active_test(test_file)
+        active = graph.get_active_scope()
+
+        return {
+            "success": True,
+            "activeTest": active.test_file if active else None,
+        }
+
+    @server.feature("ivy/listTests")
+    def ivy_list_tests(params: Any = None) -> Dict[str, Any]:
+        """List all discovered test scopes with metadata."""
+        try:
+            graph = server._indexer._requirement_graph
+        except AttributeError:
+            return {"tests": [], "activeTest": None}
+
+        if not isinstance(graph, ScopedRequirementModel):
+            return {"tests": [], "activeTest": None}
+
+        tests = []
+        for _test_file, scope in sorted(graph._test_scopes.items()):
+            tests.append({
+                "testFile": scope.test_file,
+                "testerRole": scope.tester_role,
+                "exportCount": len(scope.exported_actions),
+                "importCount": len(scope.imported_actions),
+                "includeCount": len(scope.include_closure),
+            })
+
+        active = graph.get_active_scope()
+        return {
+            "tests": tests,
+            "activeTest": active.test_file if active else None,
+        }
+
+    @server.feature("ivy/compileTest")
+    async def ivy_compile_test(params) -> Dict[str, Any]:
+        """Compile a specific test file with ivyc target=test."""
+        test_file = getattr(params, "testFile", None)
+        if not test_file:
+            return {
+                "success": False,
+                "message": "No testFile specified",
+                "output": [],
+                "duration": 0.0,
+            }
+
+        token = getattr(params, "workDoneToken", None)
+        staged = _resolve_via_staging(server, test_file)
+        cmd = ["ivyc", "target=test", staged]
+        result = await _run_tool(cmd, DEFAULT_COMPILE_TIMEOUT, server, token)
+
+        # Store compilation result in scoped model if available
+        try:
+            graph = server._indexer._requirement_graph
+            if isinstance(graph, ScopedRequirementModel):
+                graph._compilation_results[test_file] = result
+        except AttributeError:
+            pass
+
+        return result

@@ -1,0 +1,397 @@
+# tests/test_active_test_commands.py
+"""Tests for ivy/setActiveTest, ivy/listTests, ivy/compileTest commands."""
+
+import sys
+from collections import namedtuple
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+IVY_ROOT = Path(__file__).resolve().parent.parent
+if str(IVY_ROOT) not in sys.path:
+    sys.path.insert(0, str(IVY_ROOT))
+
+from ivy_lsp.analysis.requirement_graph import RequirementGraph
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+from ivy_lsp.features.commands import register
+
+
+# ---------------------------------------------------------------------------
+# Helpers (duplicated from test_commands.py -- small, self-contained)
+# ---------------------------------------------------------------------------
+
+
+def _make_registered_handlers():
+    """Register handlers on a mock server and return (server, handlers dict)."""
+    server = MagicMock()
+    registered = {}
+
+    def fake_feature(method):
+        def decorator(fn):
+            registered[method] = fn
+            return fn
+        return decorator
+
+    server.feature = fake_feature
+    register(server)
+    return server, registered
+
+
+def _make_namedtuple_params(fields: dict):
+    """Build a nested namedtuple mimicking pygls _dict_to_object() output."""
+    def _convert(obj):
+        if isinstance(obj, dict):
+            converted = {k: _convert(v) for k, v in obj.items()}
+            NT = namedtuple("Object", list(converted.keys()), rename=True)
+            return NT(**converted)
+        return obj
+    return _convert(fields)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def scoped_server():
+    """Server with ScopedRequirementModel containing two test scopes."""
+    server, registered = _make_registered_handlers()
+
+    model = ScopedRequirementModel()
+    scope_client = TestScope(
+        test_file="/workspace/quic_client_test.ivy",
+        include_closure=frozenset({
+            "/workspace/quic_client_test.ivy",
+            "/workspace/quic_stack.ivy",
+            "/workspace/quic_types.ivy",
+        }),
+        exported_actions=frozenset({"quic.send_packet", "quic.send_frame"}),
+        imported_actions=frozenset({"tls.handshake"}),
+        tester_role="client",
+    )
+    scope_server = TestScope(
+        test_file="/workspace/quic_server_test.ivy",
+        include_closure=frozenset({
+            "/workspace/quic_server_test.ivy",
+            "/workspace/quic_stack.ivy",
+        }),
+        exported_actions=frozenset({"quic.recv_packet"}),
+        imported_actions=frozenset(),
+        tester_role="server",
+    )
+    model.register_test_scope(scope_client)
+    model.register_test_scope(scope_server)
+
+    server._indexer._requirement_graph = model
+    return server, registered, model
+
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+
+
+class TestNewCommandsRegistered:
+    def test_set_active_test_registered(self):
+        _server, registered = _make_registered_handlers()
+        assert "ivy/setActiveTest" in registered
+
+    def test_list_tests_registered(self):
+        _server, registered = _make_registered_handlers()
+        assert "ivy/listTests" in registered
+
+    def test_compile_test_registered(self):
+        _server, registered = _make_registered_handlers()
+        assert "ivy/compileTest" in registered
+
+    def test_existing_commands_still_registered(self):
+        _server, registered = _make_registered_handlers()
+        assert "ivy/verify" in registered
+        assert "ivy/compile" in registered
+        assert "ivy/showModel" in registered
+        assert "ivy/capabilities" in registered
+
+
+# ---------------------------------------------------------------------------
+# ivy/setActiveTest
+# ---------------------------------------------------------------------------
+
+
+class TestSetActiveTestHandler:
+    def test_set_known_test(self, scoped_server):
+        server, registered, model = scoped_server
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params)
+        assert result["success"] is True
+        assert result["activeTest"] == "/workspace/quic_client_test.ivy"
+        assert model.get_active_scope() is not None
+        assert model.get_active_scope().tester_role == "client"
+
+    def test_clear_active_test(self, scoped_server):
+        server, registered, model = scoped_server
+        # First set one
+        model.set_active_test("/workspace/quic_client_test.ivy")
+        # Then clear
+        params = _make_namedtuple_params({"testFile": None})
+        result = registered["ivy/setActiveTest"](params)
+        assert result["success"] is True
+        assert result["activeTest"] is None
+        assert model.get_active_scope() is None
+
+    def test_set_unknown_test_returns_error(self, scoped_server):
+        server, registered, model = scoped_server
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/nonexistent.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params)
+        assert result["success"] is False
+        assert "error" in result
+
+    def test_no_scoped_model_returns_error(self):
+        server, registered = _make_registered_handlers()
+        # Plain RequirementGraph, not ScopedRequirementModel
+        server._indexer._requirement_graph = RequirementGraph()
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/test.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params)
+        assert result["success"] is False
+        assert "error" in result
+
+    def test_switch_between_tests(self, scoped_server):
+        server, registered, model = scoped_server
+        params_a = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+        })
+        params_b = _make_namedtuple_params({
+            "testFile": "/workspace/quic_server_test.ivy",
+        })
+        registered["ivy/setActiveTest"](params_a)
+        assert model.get_active_scope().tester_role == "client"
+        registered["ivy/setActiveTest"](params_b)
+        assert model.get_active_scope().tester_role == "server"
+
+    def test_set_unknown_after_known_returns_error(self, scoped_server):
+        """Setting unknown test after a known one must fail, not silently keep the old."""
+        server, registered, model = scoped_server
+        params_valid = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params_valid)
+        assert result["success"] is True
+
+        params_unknown = _make_namedtuple_params({
+            "testFile": "/workspace/nonexistent.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params_unknown)
+        assert result["success"] is False
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# ivy/listTests
+# ---------------------------------------------------------------------------
+
+
+class TestListTestsHandler:
+    def test_list_with_scopes(self, scoped_server):
+        server, registered, model = scoped_server
+        result = registered["ivy/listTests"](None)
+        assert "tests" in result
+        tests = result["tests"]
+        assert len(tests) == 2
+        # Sorted by testFile for determinism
+        files = [t["testFile"] for t in tests]
+        assert files == sorted(files)
+
+    def test_list_entry_fields(self, scoped_server):
+        server, registered, model = scoped_server
+        result = registered["ivy/listTests"](None)
+        entry = next(
+            t for t in result["tests"]
+            if t["testFile"] == "/workspace/quic_client_test.ivy"
+        )
+        assert entry["testerRole"] == "client"
+        assert entry["exportCount"] == 2
+        assert entry["importCount"] == 1
+        assert entry["includeCount"] == 3
+
+    def test_list_empty_scopes(self):
+        server, registered = _make_registered_handlers()
+        server._indexer._requirement_graph = ScopedRequirementModel()
+        result = registered["ivy/listTests"](None)
+        assert result["tests"] == []
+
+    def test_list_no_scoped_model(self):
+        server, registered = _make_registered_handlers()
+        server._indexer._requirement_graph = RequirementGraph()
+        result = registered["ivy/listTests"](None)
+        assert result["tests"] == []
+
+    def test_list_includes_active_marker(self, scoped_server):
+        server, registered, model = scoped_server
+        model.set_active_test("/workspace/quic_client_test.ivy")
+        result = registered["ivy/listTests"](None)
+        assert result["activeTest"] == "/workspace/quic_client_test.ivy"
+
+    def test_list_no_active_test(self, scoped_server):
+        server, registered, model = scoped_server
+        result = registered["ivy/listTests"](None)
+        assert result["activeTest"] is None
+
+
+# ---------------------------------------------------------------------------
+# ivy/compileTest
+# ---------------------------------------------------------------------------
+
+
+class TestCompileTestHandler:
+    @pytest.mark.asyncio
+    async def test_compile_success(self, scoped_server):
+        server, registered, model = scoped_server
+        server._indexer._resolver.get_staged_path.return_value = (
+            "/tmp/staging/quic_client_test.ivy"
+        )
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/compileTest"](params)
+
+        assert result["success"] is True
+        assert result["message"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_compile_uses_staging(self, scoped_server):
+        server, registered, model = scoped_server
+        server._indexer._resolver.get_staged_path.return_value = (
+            "/tmp/staging/quic_client_test.ivy"
+        )
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/compileTest"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "/tmp/staging/quic_client_test.ivy" in call_args
+        assert "/workspace/quic_client_test.ivy" not in call_args
+
+    @pytest.mark.asyncio
+    async def test_compile_cmd_has_target_test(self, scoped_server):
+        server, registered, model = scoped_server
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/compileTest"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "ivyc" in call_args
+        assert "target=test" in call_args
+
+    @pytest.mark.asyncio
+    async def test_compile_stores_result(self, scoped_server):
+        server, registered, model = scoped_server
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/compileTest"](params)
+
+        assert "/workspace/quic_client_test.ivy" in model._compilation_results
+        assert model._compilation_results["/workspace/quic_client_test.ivy"]["success"]
+
+    @pytest.mark.asyncio
+    async def test_compile_no_test_file(self, scoped_server):
+        server, registered, model = scoped_server
+        params = _make_namedtuple_params({
+            "testFile": None,
+            "workDoneToken": None,
+        })
+        result = await registered["ivy/compileTest"](params)
+        assert result["success"] is False
+        assert "testFile" in result["message"].lower() or "test" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_compile_failure_exit_code(self, scoped_server):
+        server, registered, model = scoped_server
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (
+                b"", b"error: compilation failed\n"
+            )
+            mock_proc.returncode = 1
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/compileTest"](params)
+
+        assert result["success"] is False
+        assert "Exit code 1" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_compile_without_scoped_model_still_works(self):
+        """Compile should work even with plain RequirementGraph."""
+        server, registered = _make_registered_handlers()
+        server._indexer._requirement_graph = RequirementGraph()
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/test.ivy",
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/compileTest"](params)
+
+        assert result["success"] is True
