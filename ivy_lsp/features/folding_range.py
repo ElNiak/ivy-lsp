@@ -6,13 +6,10 @@ lines, and consecutive include directives.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
 from lsprotocol import types as lsp
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
