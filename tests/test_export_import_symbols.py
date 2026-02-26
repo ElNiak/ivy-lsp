@@ -1,11 +1,9 @@
 # tests/test_export_import_symbols.py
 """Tests for ExportDecl/ImportDecl symbol extraction in ast_to_symbols."""
 
-import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 from lsprotocol.types import SymbolKind
 
 from ivy_lsp.parsing.symbols import IvySymbol
