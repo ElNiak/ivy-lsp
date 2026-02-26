@@ -81,6 +81,7 @@ class WorkspaceIndexer:
         self._wire_requirement_graph()
         self._load_requirement_manifests()
         self._wire_coverage_edges()
+        self._compute_test_scopes()
 
     # ------------------------------------------------------------------
     # Single-file indexing
@@ -262,3 +263,30 @@ class WorkspaceIndexer:
     def _wire_coverage_edges(self) -> None:
         """Wire COVERS edges from requirement bracket tags to RFC requirements."""
         self._requirement_graph.wire_coverage_edges()
+
+    def _compute_test_scopes(self) -> None:
+        """Build a TestScope for each file that has exports and register it."""
+        for filepath, info in self._file_export_imports.items():
+            if not info.has_exports:
+                continue
+
+            closure = {filepath}
+            closure |= self._include_graph.get_transitive_includes(filepath)
+
+            all_exports: list = []
+            all_imports: list = []
+            for f in closure:
+                f_info = self._file_export_imports.get(f)
+                if f_info is not None:
+                    all_exports.extend(f_info.exports)
+                    all_imports.extend(f_info.imports)
+
+            frozen_closure = frozenset(closure)
+            scope = TestScope(
+                test_file=filepath,
+                include_closure=frozen_closure,
+                exported_actions=frozenset(all_exports),
+                imported_actions=frozenset(all_imports),
+                tester_role=detect_test_role(frozen_closure),
+            )
+            self._requirement_graph.register_test_scope(scope)

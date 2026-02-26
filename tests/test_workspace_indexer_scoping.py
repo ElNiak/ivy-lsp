@@ -157,3 +157,207 @@ class TestExportImportExtraction:
         assert filepath in indexer._file_export_imports
         info = indexer._file_export_imports[filepath]
         assert "quic_send_event" in info.exports
+
+
+# ===================================================================
+# TestScopeComputation
+# ===================================================================
+
+
+class TestScopeComputation:
+    """Verify _compute_test_scopes() builds correct TestScope objects."""
+
+    def _setup_indexer_with_graph(self, file_infos, include_edges):
+        """Set up indexer with pre-populated export info and include graph."""
+        indexer, _, _ = _make_indexer()
+        indexer._file_export_imports = dict(file_infos)
+        for from_file, to_file in include_edges:
+            indexer._include_graph.add_edge(from_file, to_file)
+        return indexer
+
+    def test_file_with_exports_gets_scope(self):
+        test_file = "/ws/test.ivy"
+        info = _make_export_import_info(test_file, exports=["quic.send"])
+        indexer = self._setup_indexer_with_graph({test_file: info}, [])
+
+        indexer._compute_test_scopes()
+
+        assert test_file in indexer._requirement_graph._test_scopes
+
+    def test_file_without_exports_gets_no_scope(self):
+        lib_file = "/ws/lib.ivy"
+        info = _make_export_import_info(lib_file)  # no exports
+        indexer = self._setup_indexer_with_graph({lib_file: info}, [])
+
+        indexer._compute_test_scopes()
+
+        assert lib_file not in indexer._requirement_graph._test_scopes
+
+    def test_include_closure_contains_self_and_transitive(self):
+        test_f = "/ws/test.ivy"
+        mid_f = "/ws/mid.ivy"
+        base_f = "/ws/base.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {
+                test_f: _make_export_import_info(test_f, exports=["quic.send"]),
+                mid_f: _make_export_import_info(mid_f),
+                base_f: _make_export_import_info(base_f),
+            },
+            [(test_f, mid_f), (mid_f, base_f)],
+        )
+
+        indexer._compute_test_scopes()
+
+        scope = indexer._requirement_graph._test_scopes[test_f]
+        assert scope.include_closure == frozenset({test_f, mid_f, base_f})
+
+    def test_exports_unioned_across_closure(self):
+        test_f = "/ws/test.ivy"
+        helper_f = "/ws/helper.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {
+                test_f: _make_export_import_info(test_f, exports=["quic.send"]),
+                helper_f: _make_export_import_info(helper_f, exports=["quic.recv"]),
+            },
+            [(test_f, helper_f)],
+        )
+
+        indexer._compute_test_scopes()
+
+        scope = indexer._requirement_graph._test_scopes[test_f]
+        assert scope.exported_actions == frozenset({"quic.send", "quic.recv"})
+
+    def test_imports_unioned_across_closure(self):
+        test_f = "/ws/test.ivy"
+        helper_f = "/ws/helper.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {
+                test_f: _make_export_import_info(
+                    test_f, exports=["quic.send"], imports=["tls.handshake"]
+                ),
+                helper_f: _make_export_import_info(
+                    helper_f, imports=["quic.connection"]
+                ),
+            },
+            [(test_f, helper_f)],
+        )
+
+        indexer._compute_test_scopes()
+
+        scope = indexer._requirement_graph._test_scopes[test_f]
+        assert scope.imported_actions == frozenset(
+            {"tls.handshake", "quic.connection"}
+        )
+
+    def test_role_from_server_behavior_file(self):
+        test_f = "/ws/test.ivy"
+        behavior_f = "/ws/quic_server_behavior.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {
+                test_f: _make_export_import_info(test_f, exports=["quic.send"]),
+                behavior_f: _make_export_import_info(behavior_f),
+            },
+            [(test_f, behavior_f)],
+        )
+
+        indexer._compute_test_scopes()
+
+        assert indexer._requirement_graph._test_scopes[test_f].tester_role == "client"
+
+    def test_unknown_role_without_behavior_file(self):
+        test_f = "/ws/test.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {test_f: _make_export_import_info(test_f, exports=["quic.send"])},
+            [],
+        )
+
+        indexer._compute_test_scopes()
+
+        assert indexer._requirement_graph._test_scopes[test_f].tester_role == "unknown"
+
+    def test_diamond_include_shape(self):
+        """test -> A, test -> B, A -> shared, B -> shared."""
+        test_f = "/ws/test.ivy"
+        a_f = "/ws/a.ivy"
+        b_f = "/ws/b.ivy"
+        shared_f = "/ws/shared.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {
+                test_f: _make_export_import_info(test_f, exports=["quic.send"]),
+                a_f: _make_export_import_info(a_f, exports=["quic.recv"]),
+                b_f: _make_export_import_info(b_f, imports=["tls.hs"]),
+                shared_f: _make_export_import_info(
+                    shared_f, exports=["quic.close"], imports=["quic.open"]
+                ),
+            },
+            [(test_f, a_f), (test_f, b_f), (a_f, shared_f), (b_f, shared_f)],
+        )
+
+        indexer._compute_test_scopes()
+
+        scope = indexer._requirement_graph._test_scopes[test_f]
+        assert scope.include_closure == frozenset({test_f, a_f, b_f, shared_f})
+        assert scope.exported_actions == frozenset(
+            {"quic.send", "quic.recv", "quic.close"}
+        )
+        assert scope.imported_actions == frozenset({"tls.hs", "quic.open"})
+
+    def test_empty_workspace_no_scopes(self):
+        indexer = self._setup_indexer_with_graph({}, [])
+        indexer._compute_test_scopes()
+        assert indexer._requirement_graph._test_scopes == {}
+
+    def test_file_in_closure_but_not_in_export_map(self):
+        """File in include graph but missing from _file_export_imports (e.g. deleted)."""
+        test_f = "/ws/test.ivy"
+        missing_f = "/ws/deleted.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {test_f: _make_export_import_info(test_f, exports=["quic.send"])},
+            [(test_f, missing_f)],
+        )
+
+        indexer._compute_test_scopes()
+
+        scope = indexer._requirement_graph._test_scopes[test_f]
+        assert missing_f in scope.include_closure
+        assert scope.exported_actions == frozenset({"quic.send"})
+
+    def test_multiple_test_files_each_get_scope(self):
+        test_a = "/ws/test_a.ivy"
+        test_b = "/ws/test_b.ivy"
+        shared = "/ws/shared.ivy"
+        indexer = self._setup_indexer_with_graph(
+            {
+                test_a: _make_export_import_info(test_a, exports=["quic.send"]),
+                test_b: _make_export_import_info(test_b, exports=["quic.recv"]),
+                shared: _make_export_import_info(shared),
+            },
+            [(test_a, shared), (test_b, shared)],
+        )
+
+        indexer._compute_test_scopes()
+
+        scopes = indexer._requirement_graph._test_scopes
+        assert test_a in scopes
+        assert test_b in scopes
+        assert shared not in scopes
+
+    def test_called_after_wire_coverage_in_index_workspace(self):
+        indexer, _, resolver = _make_indexer()
+        resolver.find_all_ivy_files.return_value = []
+        call_order = []
+
+        orig_wire = indexer._wire_coverage_edges
+
+        def track_wire():
+            call_order.append("wire_coverage")
+            orig_wire()
+
+        def track_compute():
+            call_order.append("compute_scopes")
+
+        with patch.object(indexer, "_wire_coverage_edges", track_wire):
+            with patch.object(indexer, "_compute_test_scopes", track_compute):
+                indexer.index_workspace()
+
+        assert call_order.index("wire_coverage") < call_order.index("compute_scopes")
