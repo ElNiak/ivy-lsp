@@ -332,3 +332,64 @@ class TestFullModeExportExtraction:
 
         assert info.exports == []
         assert info.imports == []
+
+    def test_decl_exception_logged_and_skipped(self):
+        good_decl = _make_export_decl([("quic.send", 5)])
+
+        class _BadExportDecl(_FakeExportDecl):
+            @property
+            def args(self):
+                raise RuntimeError("boom")
+
+        bad = _BadExportDecl()
+        bad.lineno = _make_lineno(1)
+
+        ast_obj = SimpleNamespace(decls=[good_decl, bad])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == ["quic.send"]
+
+    def test_export_def_with_no_args_skipped(self):
+        decl = _FakeExportDecl()
+        defn = _FakeExportDef()
+        defn.args = []
+        decl.args = [defn]
+        decl.lineno = _make_lineno(1)
+
+        ast_obj = SimpleNamespace(decls=[decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == []
+
+    def test_atom_with_rep_fallback(self):
+        decl = _FakeExportDecl()
+        defn = _FakeExportDef()
+        defn.args = [SimpleNamespace(rep="quic.alt_send")]  # no .relname
+        decl.args = [defn]
+        decl.lineno = _make_lineno(3)
+
+        ast_obj = SimpleNamespace(decls=[decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == ["quic.alt_send"]
+
+    def test_decl_without_lineno_defaults_to_zero(self):
+        decl = _FakeExportDecl()
+        defn = _FakeExportDef()
+        defn.args = [SimpleNamespace(relname="quic.send")]
+        decl.args = [defn]
+        # No lineno attribute
+
+        ast_obj = SimpleNamespace(decls=[decl])
+
+        with _patch_ivy_ast_for_exports():
+            info = extract_exports_imports_full(ast_obj, FILEPATH, "")
+
+        assert info.exports == ["quic.send"]
+        assert info.export_lines["quic.send"] == 0
