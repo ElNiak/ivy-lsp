@@ -377,3 +377,36 @@ def register(server: Any) -> None:
             pass
 
         return result
+
+    @server.feature("ivy/activeDocumentChanged")
+    def ivy_active_document_changed(params) -> None:
+        """Auto-detect active test when user switches documents.
+
+        If the newly focused document is a registered test file,
+        set it as the active test and refresh diagnostics.
+        Non-test files are ignored (sticky behavior).
+        """
+        uri = getattr(params, "uri", None)
+        if not uri or not uri.startswith("file://"):
+            return
+
+        filepath = uri.replace("file://", "")
+
+        try:
+            graph = server._indexer._requirement_graph
+        except AttributeError:
+            return
+
+        if not isinstance(graph, ScopedRequirementModel):
+            return
+
+        if filepath not in graph._test_scopes:
+            return  # Non-test file: keep current scope (sticky)
+
+        # Check if already the active test (avoid redundant refresh)
+        current = graph.get_active_scope()
+        if current and current.test_file == filepath:
+            return
+
+        graph.set_active_test(filepath)
+        _refresh_open_diagnostics(server)

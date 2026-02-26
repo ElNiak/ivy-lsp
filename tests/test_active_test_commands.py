@@ -522,3 +522,118 @@ class TestSetActiveTestDiagnosticRefresh:
             registered["ivy/setActiveTest"](params)
 
         assert server.text_document_publish_diagnostics.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# ivy/activeDocumentChanged (Task 16)
+# ---------------------------------------------------------------------------
+
+
+class TestActiveDocumentChangedRegistered:
+    def test_handler_registered(self):
+        _server, registered = _make_registered_handlers()
+        assert "ivy/activeDocumentChanged" in registered
+
+
+class TestActiveDocumentChanged:
+    """Tests for ivy/activeDocumentChanged notification handler."""
+
+    def test_opening_test_file_sets_active_test(self, scoped_server):
+        """Opening a test file should auto-set it as active test."""
+        server, registered, model = scoped_server
+        assert model.get_active_scope() is None
+
+        params = _make_namedtuple_params({
+            "uri": "file:///workspace/quic_client_test.ivy",
+        })
+        registered["ivy/activeDocumentChanged"](params)
+        assert model.get_active_scope() is not None
+        assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
+
+    def test_opening_non_test_file_keeps_active_test(self, scoped_server):
+        """Opening a non-test file should NOT clear the active test (sticky)."""
+        server, registered, model = scoped_server
+        model.set_active_test("/workspace/quic_client_test.ivy")
+
+        params = _make_namedtuple_params({
+            "uri": "file:///workspace/quic_stack.ivy",
+        })
+        registered["ivy/activeDocumentChanged"](params)
+        # Active test should still be quic_client_test.ivy
+        assert model.get_active_scope() is not None
+        assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
+
+    def test_switching_between_test_files(self, scoped_server):
+        """Opening a different test file should switch the active test."""
+        server, registered, model = scoped_server
+        model.set_active_test("/workspace/quic_client_test.ivy")
+
+        params = _make_namedtuple_params({
+            "uri": "file:///workspace/quic_server_test.ivy",
+        })
+        registered["ivy/activeDocumentChanged"](params)
+        assert model.get_active_scope().test_file == "/workspace/quic_server_test.ivy"
+        assert model.get_active_scope().tester_role == "server"
+
+    def test_no_scoped_model_no_crash(self):
+        """Handler should not crash when graph is plain RequirementGraph."""
+        server, registered = _make_registered_handlers()
+        server._indexer._requirement_graph = RequirementGraph()
+
+        params = _make_namedtuple_params({
+            "uri": "file:///workspace/test.ivy",
+        })
+        # Should not raise
+        registered["ivy/activeDocumentChanged"](params)
+
+    def test_no_indexer_no_crash(self):
+        """Handler should not crash when indexer is missing."""
+        server, registered = _make_registered_handlers()
+        del server._indexer
+
+        params = _make_namedtuple_params({
+            "uri": "file:///workspace/test.ivy",
+        })
+        # Should not raise
+        registered["ivy/activeDocumentChanged"](params)
+
+    def test_changed_test_triggers_diagnostic_refresh(self, scoped_server):
+        """When active test changes, diagnostics should be refreshed."""
+        server, registered, model = scoped_server
+        mock_doc = MagicMock()
+        mock_doc.uri = "file:///workspace/quic_stack.ivy"
+        mock_doc.source = "action quic.send(x:t)\n"
+        server.workspace.text_documents = {mock_doc.uri: mock_doc}
+
+        with patch(
+            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            return_value=[],
+        ):
+            params = _make_namedtuple_params({
+                "uri": "file:///workspace/quic_client_test.ivy",
+            })
+            registered["ivy/activeDocumentChanged"](params)
+
+        server.text_document_publish_diagnostics.assert_called()
+
+    def test_same_test_no_redundant_refresh(self, scoped_server):
+        """Re-opening the same test file should NOT refresh diagnostics."""
+        server, registered, model = scoped_server
+        model.set_active_test("/workspace/quic_client_test.ivy")
+
+        params = _make_namedtuple_params({
+            "uri": "file:///workspace/quic_client_test.ivy",
+        })
+        registered["ivy/activeDocumentChanged"](params)
+        server.text_document_publish_diagnostics.assert_not_called()
+
+    def test_non_file_uri_ignored(self, scoped_server):
+        """Non-file URIs (untitled, git) should be ignored."""
+        server, registered, model = scoped_server
+        model.set_active_test("/workspace/quic_client_test.ivy")
+
+        params = _make_namedtuple_params({
+            "uri": "untitled:Untitled-1",
+        })
+        registered["ivy/activeDocumentChanged"](params)
+        assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
