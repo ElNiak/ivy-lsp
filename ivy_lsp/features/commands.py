@@ -285,7 +285,9 @@ def register(server: Any) -> None:
                     lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to refresh diagnostics for %s", uri, exc_info=True
+                )
 
     @server.feature("ivy/setActiveTest")
     def ivy_set_active_test(params) -> Dict[str, Any]:
