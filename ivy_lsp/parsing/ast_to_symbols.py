@@ -203,12 +203,12 @@ def _convert_decl(decl: Any, filename: str, source: str) -> List[IvySymbol]:
         return _convert_constant_or_relation(decl, filename, source)
     if isinstance(decl, ia.InstantiateDecl):
         return _convert_instantiate(decl, filename, source)
-    # Skip: MixinDecl, VariantDecl, ExportDecl, ImportDecl
-    if isinstance(
-        decl,
-        (ia.MixinDecl, ia.VariantDecl, ia.ExportDecl, ia.ImportDecl),
-    ):
+    if isinstance(decl, (ia.MixinDecl, ia.VariantDecl)):
         return []
+    if isinstance(decl, ia.ExportDecl):
+        return _convert_export(decl, filename, source)
+    if isinstance(decl, ia.ImportDecl):
+        return _convert_import(decl, filename, source)
 
     return []
 
@@ -620,6 +620,59 @@ def _convert_instantiate(decl: Any, filename: str, source: str) -> List[IvySymbo
 
 
 # ---------------------------------------------------------------------------
+# Export/Import declarations
+# ---------------------------------------------------------------------------
+
+
+def _convert_export(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert an ExportDecl to IvySymbol(s) with kind=Event.
+
+    ExportDecl does not implement ``defines()``; instead we iterate
+    ``decl.args`` (list of ExportDef) and extract the action name
+    from each ``defn.args[0]`` atom.
+    """
+    symbols: List[IvySymbol] = []
+    rng = _loc_to_tuple(getattr(decl, "lineno", None), source)
+    for defn in getattr(decl, "args", []):
+        atom = defn.args[0] if getattr(defn, "args", None) else None
+        name = _atom_name(atom) if atom else None
+        if name:
+            symbols.append(
+                IvySymbol(
+                    name=f"export {name}",
+                    kind=SymbolKind.Event,
+                    range=rng,
+                    detail=f"export {name}",
+                    file_path=filename,
+                )
+            )
+    return symbols
+
+
+def _convert_import(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert an ImportDecl to IvySymbol(s) with kind=Event.
+
+    Same structure as ``_convert_export`` but for import declarations.
+    """
+    symbols: List[IvySymbol] = []
+    rng = _loc_to_tuple(getattr(decl, "lineno", None), source)
+    for defn in getattr(decl, "args", []):
+        atom = defn.args[0] if getattr(defn, "args", None) else None
+        name = _atom_name(atom) if atom else None
+        if name:
+            symbols.append(
+                IvySymbol(
+                    name=f"import {name}",
+                    kind=SymbolKind.Event,
+                    range=rng,
+                    detail=f"import {name}",
+                    file_path=filename,
+                )
+            )
+    return symbols
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -694,3 +747,20 @@ def _name_from_args(decl: Any) -> Optional[str]:
     except (IndexError, AttributeError):
         logger.debug("Could not extract name from args for %s", type(decl).__name__)
         return None
+
+
+def _atom_name(atom: Any) -> Optional[str]:
+    """Extract a name from an Ivy AST atom node.
+
+    Checks ``relname`` first (preferred), then ``rep`` as fallback.
+    Used by export/import converters where the atom is the action reference.
+    """
+    if atom is None:
+        return None
+    relname = getattr(atom, "relname", None)
+    if relname:
+        return relname
+    rep = getattr(atom, "rep", None)
+    if rep:
+        return rep
+    return None
