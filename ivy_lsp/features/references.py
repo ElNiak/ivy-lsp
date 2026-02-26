@@ -51,8 +51,7 @@ def find_references(
     locations: List[lsp.Location] = []
     for fpath in all_files:
         try:
-            with open(fpath) as f:
-                file_source = f.read()
+            file_source = Path(fpath).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         file_lines = file_source.split("\n")
