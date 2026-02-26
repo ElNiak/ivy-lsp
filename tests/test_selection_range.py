@@ -81,3 +81,28 @@ class TestSelectionChain:
             [Position(line=1, character=5), Position(line=2, character=5)],
         )
         assert len(results) == 2
+
+
+class TestEdgeCases:
+    def test_empty_source_lines(self):
+        """Empty source_lines should not crash."""
+        from ivy_lsp.features.selection_range import compute_selection_ranges
+
+        results = compute_selection_ranges([], [Position(line=0, character=0)])
+        assert len(results) == 1
+        sr = results[0]
+        assert sr.range.start.line == 0
+
+    def test_dotted_identifier(self):
+        """Cursor on a dotted identifier highlights the last component."""
+        from ivy_lsp.features.selection_range import compute_selection_ranges
+
+        lines = ["#lang ivy1.7", "relation frame.ack"]
+        results = compute_selection_ranges(lines, [Position(line=1, character=15)])
+        assert len(results) == 1
+        sr = results[0]
+        # Innermost should be a word range on the last component
+        assert sr.range.start.line == 1
+        # After fix, should select just "ack" (15-18), not "frame.ack" (9-18)
+        assert sr.range.start.character == 15
+        assert sr.range.end.character == 18

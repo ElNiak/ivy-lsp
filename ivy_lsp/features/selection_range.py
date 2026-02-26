@@ -48,7 +48,7 @@ def compute_selection_ranges(
     Chain: word -> line -> brace block (if any) -> whole file.
     """
     total_lines = len(source_lines)
-    last_line_len = len(source_lines[-1]) if source_lines else 0
+    last_line_len = len(source_lines[-1]) if total_lines > 0 else 0
     file_range = make_range(0, 0, max(0, total_lines - 1), last_line_len)
 
     results: List[lsp.SelectionRange] = []
@@ -58,8 +58,9 @@ def compute_selection_ranges(
         # 1. Word under cursor
         word = word_at_position(source_lines, pos)
         if word:
+            name = word.rsplit(".", 1)[-1] if "." in word else word
             line = source_lines[pos.line]
-            for m in re.finditer(r"\b" + re.escape(word) + r"\b", line):
+            for m in re.finditer(r"\b" + re.escape(name) + r"\b", line):
                 if m.start() <= pos.character <= m.end():
                     chain.append(make_range(pos.line, m.start(), pos.line, m.end()))
                     break
@@ -83,9 +84,7 @@ def compute_selection_ranges(
         # Deduplicate consecutive identical ranges.
         deduped: List[lsp.Range] = []
         for r in chain:
-            if not deduped or (
-                r.start != deduped[-1].start or r.end != deduped[-1].end
-            ):
+            if not deduped or r != deduped[-1]:
                 deduped.append(r)
 
         # Build linked list from innermost to outermost.
