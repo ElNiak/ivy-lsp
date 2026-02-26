@@ -395,3 +395,130 @@ class TestCompileTestHandler:
             result = await registered["ivy/compileTest"](params)
 
         assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# ivy/setActiveTest -- diagnostic refresh (Task 15)
+# ---------------------------------------------------------------------------
+
+
+class TestSetActiveTestDiagnosticRefresh:
+    """Tests that ivy/setActiveTest refreshes diagnostics for open documents."""
+
+    def test_successful_set_publishes_diagnostics(self, scoped_server):
+        """Setting active test should trigger diagnostic publish for open docs."""
+        server, registered, model = scoped_server
+
+        mock_doc = MagicMock()
+        mock_doc.uri = "file:///workspace/quic_stack.ivy"
+        mock_doc.source = "action quic.send(x:t)\n"
+        server.workspace.text_documents = {mock_doc.uri: mock_doc}
+
+        with patch(
+            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            return_value=[],
+        ):
+            params = _make_namedtuple_params({
+                "testFile": "/workspace/quic_client_test.ivy",
+            })
+            result = registered["ivy/setActiveTest"](params)
+
+        assert result["success"] is True
+        server.text_document_publish_diagnostics.assert_called_once()
+
+    def test_clear_active_test_publishes_diagnostics(self, scoped_server):
+        """Clearing active test should also refresh diagnostics."""
+        server, registered, model = scoped_server
+        model.set_active_test("/workspace/quic_client_test.ivy")
+
+        mock_doc = MagicMock()
+        mock_doc.uri = "file:///workspace/quic_stack.ivy"
+        mock_doc.source = "#lang ivy1.7\naction quic.send(x:t)\n"
+        server.workspace.text_documents = {mock_doc.uri: mock_doc}
+
+        with patch(
+            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            return_value=[],
+        ):
+            params = _make_namedtuple_params({"testFile": None})
+            result = registered["ivy/setActiveTest"](params)
+
+        assert result["success"] is True
+        server.text_document_publish_diagnostics.assert_called_once()
+
+    def test_failed_set_does_not_publish(self, scoped_server):
+        """Setting unknown test should NOT trigger diagnostic publish."""
+        server, registered, model = scoped_server
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/nonexistent.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params)
+        assert result["success"] is False
+        server.text_document_publish_diagnostics.assert_not_called()
+
+    def test_refresh_skips_non_file_uris(self, scoped_server):
+        """Diagnostic refresh should only process file:// URIs."""
+        server, registered, model = scoped_server
+
+        mock_ivy = MagicMock()
+        mock_ivy.uri = "file:///workspace/quic_stack.ivy"
+        mock_ivy.source = "action quic.send(x:t)\n"
+
+        mock_untitled = MagicMock()
+        mock_untitled.uri = "untitled:Untitled-1"
+        mock_untitled.source = "some text"
+
+        server.workspace.text_documents = {
+            mock_ivy.uri: mock_ivy,
+            mock_untitled.uri: mock_untitled,
+        }
+
+        with patch(
+            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            return_value=[],
+        ) as mock_compute:
+            params = _make_namedtuple_params({
+                "testFile": "/workspace/quic_client_test.ivy",
+            })
+            registered["ivy/setActiveTest"](params)
+
+        # compute_diagnostics called only for file:// URI, not untitled
+        assert mock_compute.call_count == 1
+        call_filepath = mock_compute.call_args[0][2]  # 3rd positional arg
+        assert call_filepath == "/workspace/quic_stack.ivy"
+
+    def test_no_workspace_text_documents_no_crash(self, scoped_server):
+        """If workspace has no iterable text_documents, handler still succeeds."""
+        server, registered, model = scoped_server
+        # Don't set text_documents -- MagicMock auto-attr is not iterable,
+        # so _refresh_open_diagnostics catches TypeError and returns.
+
+        params = _make_namedtuple_params({
+            "testFile": "/workspace/quic_client_test.ivy",
+        })
+        result = registered["ivy/setActiveTest"](params)
+        assert result["success"] is True
+
+    def test_multiple_open_docs_all_refreshed(self, scoped_server):
+        """All open file:// documents get refreshed, not just the first."""
+        server, registered, model = scoped_server
+
+        docs = {}
+        for name in ("quic_stack.ivy", "quic_types.ivy", "quic_utils.ivy"):
+            doc = MagicMock()
+            doc.uri = f"file:///workspace/{name}"
+            doc.source = f"# {name}\n"
+            docs[doc.uri] = doc
+        server.workspace.text_documents = docs
+
+        with patch(
+            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            return_value=[],
+        ):
+            params = _make_namedtuple_params({
+                "testFile": "/workspace/quic_client_test.ivy",
+            })
+            registered["ivy/setActiveTest"](params)
+
+        assert server.text_document_publish_diagnostics.call_count == 3

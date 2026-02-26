@@ -260,12 +260,39 @@ def register(server: Any) -> None:
             "ivyShowAvailable": _find_tool("ivy_show") is not None,
         }
 
+    def _refresh_open_diagnostics(srv) -> None:
+        """Re-publish diagnostics for all open documents.
+
+        Called after active test scope changes so that scoped
+        diagnostic filtering takes effect immediately.
+        """
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        try:
+            items = list(srv.workspace.text_documents.items())
+        except (AttributeError, TypeError):
+            return
+
+        for uri, doc in items:
+            if not uri.startswith("file://"):
+                continue
+            filepath = uri.replace("file://", "")
+            try:
+                diags = compute_diagnostics(
+                    srv._parser, doc.source or "", filepath, srv._indexer
+                )
+                srv.text_document_publish_diagnostics(
+                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+                )
+            except Exception:
+                pass
+
     @server.feature("ivy/setActiveTest")
     def ivy_set_active_test(params) -> Dict[str, Any]:
         """Set the active test scope for diagnostics and code lenses.
 
-        The client is responsible for triggering a diagnostic refresh
-        after a successful response.
+        On success, re-publishes diagnostics for all open documents
+        so scoped filtering takes effect immediately.
         """
         test_file = getattr(params, "testFile", None)
 
@@ -287,6 +314,8 @@ def register(server: Any) -> None:
 
         graph.set_active_test(test_file)
         active = graph.get_active_scope()
+
+        _refresh_open_diagnostics(server)
 
         return {
             "success": True,
