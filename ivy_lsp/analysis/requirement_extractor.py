@@ -74,6 +74,14 @@ def extract_exports_imports_full(
     if ast_obj is None or not hasattr(ast_obj, "decls"):
         return ExportImportInfo(file=filepath)
 
+    try:
+        import ivy.ivy_ast as ia
+    except ImportError:
+        from ivy_lsp.analysis.light_mode_extractor import (
+            extract_exports_imports_light,
+        )
+        return extract_exports_imports_light(source, filepath)
+
     return ExportImportInfo(file=filepath)
 
 

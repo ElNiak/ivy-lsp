@@ -173,3 +173,17 @@ class TestFullModeExportExtraction:
     def test_filepath_preserved(self):
         info = extract_exports_imports_full(None, "/custom/path.ivy", "")
         assert info.file == "/custom/path.ivy"
+
+    def test_falls_back_to_light_mode_when_ivy_unavailable(self):
+        from unittest.mock import MagicMock, patch
+
+        source = "export quic.send\nimport tls.handshake\n"
+        ast_obj = MagicMock()
+        ast_obj.decls = [MagicMock()]
+
+        with patch.dict("sys.modules", {"ivy": None, "ivy.ivy_ast": None}):
+            info = extract_exports_imports_full(ast_obj, FILEPATH, source)
+
+        assert info.exports == ["quic.send"]
+        assert info.imports == ["tls.handshake"]
+        assert info.file == FILEPATH
