@@ -5,9 +5,13 @@ computation, and scoped requirement queries.
 """
 from __future__ import annotations
 
+import logging
 import os
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List
+from typing import Any, Dict, FrozenSet, List, Optional, Set
+
+from ivy_lsp.analysis.requirement_graph import RequirementGraph, RequirementNode
 
 
 @dataclass
@@ -56,3 +60,68 @@ def detect_test_role(include_closure: FrozenSet[str]) -> str:
         if "mim" in basename:
             return "mim"
     return "unknown"
+
+
+logger = logging.getLogger(__name__)
+
+
+class ScopedRequirementModel(RequirementGraph):
+    """RequirementGraph with per-test scoping layer.
+
+    Inherits all RequirementGraph methods (unscoped) and adds
+    scoped query methods that filter by test scope.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._test_scopes: Dict[str, TestScope] = {}
+        self._file_to_tests: Dict[str, Set[str]] = defaultdict(set)
+        self._active_test: Optional[str] = None
+        self._scope_cache: Dict[str, list] = {}
+        self._compilation_results: Dict[str, Any] = {}
+
+    def register_test_scope(self, scope: TestScope) -> None:
+        self._test_scopes[scope.test_file] = scope
+        for f in scope.include_closure:
+            self._file_to_tests[f].add(scope.test_file)
+        self._scope_cache.pop(scope.test_file, None)
+
+    def set_active_test(self, test_file: Optional[str]) -> None:
+        if test_file is None or test_file in self._test_scopes:
+            self._active_test = test_file
+
+    def get_active_scope(self) -> Optional[TestScope]:
+        if self._active_test is None:
+            return None
+        return self._test_scopes.get(self._active_test)
+
+    def get_tests_for_file(self, filepath: str) -> Set[str]:
+        return set(self._file_to_tests.get(filepath, set()))
+
+    def get_scoped_requirements(self, test_file: str) -> List[RequirementNode]:
+        if test_file in self._scope_cache:
+            return self._scope_cache[test_file]
+        scope = self._test_scopes.get(test_file)
+        if scope is None:
+            return []
+        result = [
+            r for r in self.requirements.values()
+            if r.file in scope.include_closure
+            and r.monitor_action in scope.exported_actions
+        ]
+        self._scope_cache[test_file] = result
+        return result
+
+    def get_scoped_counts(self, test_file: str, action_name: str) -> Dict[str, int]:
+        scope = self._test_scopes.get(test_file)
+        if scope is None or action_name not in scope.exported_actions:
+            return {}
+        counts: Dict[str, int] = defaultdict(int)
+        for req in self.get_scoped_requirements(test_file):
+            if req.monitor_action == action_name:
+                counts[req.kind] += 1
+        return dict(counts)
+
+    def invalidate_file(self, filepath: str) -> None:
+        for test_file in self._file_to_tests.get(filepath, set()):
+            self._scope_cache.pop(test_file, None)
