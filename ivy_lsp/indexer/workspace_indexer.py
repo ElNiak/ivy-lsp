@@ -6,11 +6,22 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
-from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
-from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-from ivy_lsp.analysis.requirement_graph import RequirementGraph
+from ivy_lsp.analysis.light_mode_extractor import (
+    extract_exports_imports_light,
+    extract_requirements_light,
+)
+from ivy_lsp.analysis.requirement_extractor import (
+    extract_exports_imports_full,
+    extract_requirements_full,
+)
+from ivy_lsp.analysis.test_scope import (
+    ExportImportInfo,
+    ScopedRequirementModel,
+    TestScope,
+    detect_test_role,
+)
 from ivy_lsp.indexer.file_cache import FileCache
 from ivy_lsp.indexer.include_resolver import IncludeResolver
 from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
@@ -48,7 +59,8 @@ class WorkspaceIndexer:
         self._cache = FileCache()
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
-        self._requirement_graph = RequirementGraph()
+        self._requirement_graph = ScopedRequirementModel()
+        self._file_export_imports: Dict[str, ExportImportInfo] = {}
 
     # ------------------------------------------------------------------
     # Full workspace indexing
@@ -58,7 +70,8 @@ class WorkspaceIndexer:
         """Reset indices and parse every ``.ivy`` file in the workspace."""
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
-        self._requirement_graph = RequirementGraph()
+        self._requirement_graph = ScopedRequirementModel()
+        self._file_export_imports: Dict[str, ExportImportInfo] = {}
 
         files = self._resolver.find_all_ivy_files()
         for filepath in files:
