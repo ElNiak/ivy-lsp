@@ -9,6 +9,8 @@ from typing import Any, Dict, List
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+
 logger = logging.getLogger(__name__)
 
 DEBOUNCE_DELAY = 0.5  # seconds
@@ -206,6 +208,10 @@ def compute_requirement_diagnostics(
                 )
 
     # 2. Unmonitored actions (Hint)
+    active_scope = None
+    if isinstance(graph, ScopedRequirementModel):
+        active_scope = graph.get_active_scope()
+
     for match in re.finditer(
         r"^\s*action\s+([\w.]+)", source, re.MULTILINE
     ):
@@ -213,19 +219,44 @@ def compute_requirement_diagnostics(
         line_no = source[: match.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
 
-        reqs = graph.get_requirements_for_action(action_name)
-        if not reqs:
-            diags.append(
-                lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(line_no, 0),
-                        end=lsp.Position(line_no, len(line_text)),
-                    ),
-                    message=f"Action '{action_name}' has no before/after monitors in scope",
-                    severity=lsp.DiagnosticSeverity.Hint,
-                    source="ivy-lsp-reqs",
-                )
+        if active_scope is not None:
+            if not active_scope.is_action_exported(action_name):
+                continue
+            scoped_counts = graph.get_scoped_counts(
+                active_scope.test_file, action_name
             )
+            if not scoped_counts:
+                diags.append(
+                    lsp.Diagnostic(
+                        range=lsp.Range(
+                            start=lsp.Position(line_no, 0),
+                            end=lsp.Position(line_no, len(line_text)),
+                        ),
+                        message=(
+                            f"Action '{action_name}' has no before/after "
+                            f"monitors in active test scope"
+                        ),
+                        severity=lsp.DiagnosticSeverity.Hint,
+                        source="ivy-lsp-reqs",
+                    )
+                )
+        else:
+            reqs = graph.get_requirements_for_action(action_name)
+            if not reqs:
+                diags.append(
+                    lsp.Diagnostic(
+                        range=lsp.Range(
+                            start=lsp.Position(line_no, 0),
+                            end=lsp.Position(line_no, len(line_text)),
+                        ),
+                        message=(
+                            f"Action '{action_name}' has no before/after "
+                            f"monitors in scope"
+                        ),
+                        severity=lsp.DiagnosticSeverity.Hint,
+                        source="ivy-lsp-reqs",
+                    )
+                )
 
     # 3. High-impact state variables (Info, threshold: 5+ readers)
     impact_threshold = 5
