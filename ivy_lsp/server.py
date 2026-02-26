@@ -31,21 +31,27 @@ class IvyLanguageServer(LanguageServer):
             completion,
             definition,
             diagnostics,
+            document_highlight,
             document_symbols,
+            folding_range,
             hover,
             references,
+            selection_range,
             workspace_symbols,
         )
 
         document_symbols.register(self)
         workspace_symbols.register(self)
         definition.register(self)
+        document_highlight.register(self)
         references.register(self)
+        selection_range.register(self)
         hover.register(self)
         completion.register(self)
         diagnostics.register(self)
         code_lens.register(self)
         commands.register(self)
+        folding_range.register(self)
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
