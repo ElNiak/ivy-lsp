@@ -5,6 +5,34 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-02-26
+
+### Added
+
+- **`ivy/activeDocumentChanged` handler**: Auto-detects active test context when the user switches documents, keeping scoped diagnostics and code lenses in sync.
+- **NCT classification tags in code lenses**: Scoped lens labels now show NCT classification counts via `get_scoped_nct_counts()`.
+- **Diagnostic refresh on `ivy/setActiveTest`**: Diagnostics are automatically refreshed when the active test changes.
+
+### Changed
+
+- Added debug logging to the diagnostic refresh error handler.
+- Cleaned up `get_scoped_nct_counts` code per code review findings.
+
+## [0.7.0] - 2026-02-26
+
+### Added
+
+- **ScopedRequirementModel**: Replaces the flat `RequirementGraph` with per-test scoped queries, enabling test-specific code lenses and diagnostics.
+- **TestScope and role detection**: `TestScope` dataclass with automatic role inference from export/import info.
+- **Export/Import extraction**: Full-mode AST walking and light-mode regex fallback for `ExportDecl`/`ImportDecl` extraction.
+- **ExportImportInfo data structure**: Typed representation of export/import relationships.
+- **NCT classification**: Enums and functions for Network-Centric Compositional Testing classification of requirements.
+- **New LSP commands**: `ivy/setActiveTest`, `ivy/listTests`, `ivy/compileTest` for test-scoped workflows.
+- **Scope-aware diagnostics**: Unmonitored action detection now respects active test scope.
+- **Scope-aware code lenses**: Code lenses use scoped queries when an active test is set.
+- **ExportDecl/ImportDecl symbols**: Extracted as `Event` symbols in the document symbol provider.
+- **Scope recomputation on reindex**: Test scopes are invalidated and recomputed when files are re-indexed.
+
 ## [0.5.4] - 2026-02-25
 
 ### Fixed
@@ -99,6 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace indexer with include resolution.
 - Dual parser: full `IvyParserWrapper` (z3) and `FallbackScanner` (lexer-only error recovery).
 
+[0.7.1]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.7.1
+[0.7.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.7.0
 [0.5.4]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.4
 [0.5.2]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.2
 [0.5.1]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.1
