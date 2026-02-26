@@ -63,6 +63,7 @@ def check_structural_issues(
                 message="Missing '#lang ivy1.7' header",
                 severity=lsp.DiagnosticSeverity.Warning,
                 source="ivy-lsp",
+                code="missing-lang-header",
             )
         )
 
@@ -124,6 +125,7 @@ def check_structural_issues(
                         message=f"Unresolved include: {inc_name}",
                         severity=lsp.DiagnosticSeverity.Warning,
                         source="ivy-lsp",
+                        code="unresolved-include",
                     )
                 )
 

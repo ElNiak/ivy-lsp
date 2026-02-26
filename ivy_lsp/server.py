@@ -26,6 +26,7 @@ class IvyLanguageServer(LanguageServer):
         self._analysis_pipeline = None
 
         from ivy_lsp.features import (
+            code_action,
             code_lens,
             commands,
             completion,
@@ -36,7 +37,9 @@ class IvyLanguageServer(LanguageServer):
             folding_range,
             hover,
             references,
+            rename,
             selection_range,
+            signature_help,
             workspace_symbols,
         )
 
@@ -45,10 +48,13 @@ class IvyLanguageServer(LanguageServer):
         definition.register(self)
         document_highlight.register(self)
         references.register(self)
+        rename.register(self)
         selection_range.register(self)
+        signature_help.register(self)
         hover.register(self)
         completion.register(self)
         diagnostics.register(self)
+        code_action.register(self)
         code_lens.register(self)
         commands.register(self)
         folding_range.register(self)
