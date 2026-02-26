@@ -2,9 +2,7 @@
 """Integration tests verifying the triple-counting bug is fixed."""
 import pytest
 from ivy_lsp.analysis.requirement_graph import EdgeType, RequirementNode
-from ivy_lsp.analysis.test_scope import (
-    ExportImportInfo, ScopedRequirementModel, TestScope, detect_test_role,
-)
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 
 
 def _make_req(file, line, kind="require", formula="true", action="", mixin_kind="before"):
