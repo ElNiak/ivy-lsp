@@ -9,6 +9,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, FrozenSet, List, Optional, Set
 
 from ivy_lsp.analysis.requirement_graph import RequirementGraph, RequirementNode
@@ -60,6 +61,51 @@ def detect_test_role(include_closure: FrozenSet[str]) -> str:
         if "mim" in basename:
             return "mim"
     return "unknown"
+
+
+class NctClassification(Enum):
+    """NCT role classification for a requirement node."""
+
+    ASSUMPTION = "assumption"
+    GUARANTEE = "guarantee"
+    TESTER_ONLY = "tester_only"
+
+
+class ActionClassification(Enum):
+    """Direction classification for an action within a test scope."""
+
+    GENERATED = "generated"
+    RECEIVED = "received"
+    INTERNAL = "internal"
+
+
+def classify_requirement(req: RequirementNode) -> NctClassification:
+    """Classify a requirement as assumption, guarantee, or tester-only.
+
+    Priority:
+    1. _generating in formula -> TESTER_ONLY
+    2. mixin_kind == "after"  -> GUARANTEE
+    3. kind in (ensure, assert) -> GUARANTEE
+    4. otherwise              -> ASSUMPTION
+    """
+    if "_generating" in req.formula_text:
+        return NctClassification.TESTER_ONLY
+    if req.mixin_kind == "after":
+        return NctClassification.GUARANTEE
+    if req.kind in ("ensure", "assert"):
+        return NctClassification.GUARANTEE
+    return NctClassification.ASSUMPTION
+
+
+def classify_action_direction(
+    action_name: str, scope: TestScope
+) -> ActionClassification:
+    """Classify an action as generated, received, or internal."""
+    if action_name in scope.exported_actions:
+        return ActionClassification.GENERATED
+    if action_name in scope.imported_actions:
+        return ActionClassification.RECEIVED
+    return ActionClassification.INTERNAL
 
 
 logger = logging.getLogger(__name__)
