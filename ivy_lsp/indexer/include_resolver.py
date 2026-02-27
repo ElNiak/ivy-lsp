@@ -63,6 +63,28 @@ class IncludeResolver:
         self._staging_dir: Optional[str] = None
         self._staged_files: Dict[str, str] = {}
 
+    def to_config_dict(self) -> dict:
+        """Serialize resolver configuration for cross-process transfer."""
+        return {
+            "workspace_root": self._workspace_root,
+            "ivy_include_path": self._ivy_include_path,
+            "exclude_paths": list(self._exclude_paths),
+            "include_paths": list(self._include_paths),
+            "staging_dir": self._staging_dir,
+        }
+
+    @classmethod
+    def from_config(cls, d: dict) -> "IncludeResolver":
+        """Restore an IncludeResolver from a config dict."""
+        instance = cls(
+            d["workspace_root"],
+            ivy_include_path=d.get("ivy_include_path"),
+            exclude_paths=d.get("exclude_paths", []),
+            include_paths=d.get("include_paths", []),
+        )
+        instance._staging_dir = d.get("staging_dir")
+        return instance
+
     def resolve(self, include_name: str, from_file: str) -> Optional[str]:
         """Resolve an include name to an absolute file path.
 
