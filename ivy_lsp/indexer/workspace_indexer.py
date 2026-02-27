@@ -105,6 +105,8 @@ class WorkspaceIndexer:
         self._last_index_duration: Optional[float] = None
         self._last_index_time: Optional[float] = None
         self._deep_index_running = False
+        self._deep_index_progress = DeepIndexProgress()
+        self._progress_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Full workspace indexing (two-mode: fast scan + background deep parse)
@@ -187,6 +189,13 @@ class WorkspaceIndexer:
             includes = self._extract_includes(source)
             self._cache.put(filepath, None, symbols, includes)
 
+            with self._progress_lock:
+                self._deep_index_progress.file_statuses[filepath] = FileIndexStatus(
+                    filepath=filepath,
+                    shallow_indexed=True,
+                    last_indexed_at=time.time(),
+                )
+
             for sym in symbols:
                 self._symbol_table.add_symbol(sym)
 
@@ -229,13 +238,30 @@ class WorkspaceIndexer:
             len(self._file_export_imports),
         )
 
+        with self._progress_lock:
+            self._deep_index_progress.total_test_files = len(test_files)
+            self._deep_index_progress.started_at = time.time()
+
         for test_file in test_files:
+            with self._progress_lock:
+                self._deep_index_progress.current_file = test_file
+
             try:
                 with open(test_file) as f:
                     source = f.read()
             except OSError:
+                with self._progress_lock:
+                    status = self._deep_index_progress.file_statuses.get(
+                        test_file, FileIndexStatus(filepath=test_file)
+                    )
+                    status.deep_parse_attempted = True
+                    status.deep_parse_succeeded = False
+                    status.parse_error = "Cannot read file"
+                    self._deep_index_progress.file_statuses[test_file] = status
+                    self._deep_index_progress.completed_test_files += 1
                 continue
 
+            result = None
             try:
                 result = self._parser.parse(source, test_file)
             except Exception:
@@ -244,9 +270,8 @@ class WorkspaceIndexer:
                     test_file,
                     exc_info=True,
                 )
-                continue
 
-            if result.success and result.ast is not None:
+            if result is not None and result.success and result.ast is not None:
                 # Upgrade symbols for this file
                 ast_symbols = ast_to_symbols(result.ast, test_file, source)
                 self._upgrade_file_symbols(test_file, ast_symbols, result)
@@ -255,9 +280,27 @@ class WorkspaceIndexer:
                 self._extract_file_requirements(test_file, result, source)
                 self._extract_file_exports_imports(test_file, result, source)
 
+            with self._progress_lock:
+                status = self._deep_index_progress.file_statuses.get(
+                    test_file, FileIndexStatus(filepath=test_file)
+                )
+                status.deep_parse_attempted = True
+                status.deep_parse_succeeded = (
+                    result is not None and result.success and result.ast is not None
+                )
+                status.last_indexed_at = time.time()
+                if not status.deep_parse_succeeded and result is not None:
+                    if hasattr(result, "errors") and result.errors:
+                        status.parse_error = str(result.errors[0])
+                self._deep_index_progress.file_statuses[test_file] = status
+                self._deep_index_progress.completed_test_files += 1
+
         # Re-wire graphs after all upgrades
         self._wire_requirement_graph()
         self._compute_test_scopes()
+
+        with self._progress_lock:
+            self._deep_index_progress.current_file = None
         self._deep_index_running = False
         logger.info("Deep index complete for %d test files", len(test_files))
 

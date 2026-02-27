@@ -1,7 +1,13 @@
 """Tests for deep index progress tracking data structures."""
+import threading
 import time
+from unittest.mock import MagicMock, patch
 
-from ivy_lsp.indexer.workspace_indexer import FileIndexStatus, DeepIndexProgress
+from ivy_lsp.indexer.workspace_indexer import (
+    FileIndexStatus,
+    DeepIndexProgress,
+    WorkspaceIndexer,
+)
 
 
 class TestFileIndexStatus:
@@ -54,3 +60,66 @@ class TestDeepIndexProgress:
         )
         assert p.total_test_files == 3
         assert len(p.file_statuses) == 1
+
+
+class TestWorkspaceIndexerProgressTracking:
+    def _make_indexer(self, tmp_path):
+        parser = MagicMock()
+        parser.parse.return_value = MagicMock(success=False, ast=None, errors=[])
+        resolver = MagicMock()
+        resolver.find_all_ivy_files.return_value = []
+        return WorkspaceIndexer(str(tmp_path), parser, resolver)
+
+    def test_has_progress_and_lock(self, tmp_path):
+        idx = self._make_indexer(tmp_path)
+        assert hasattr(idx, "_deep_index_progress")
+        assert isinstance(idx._deep_index_progress, DeepIndexProgress)
+        assert hasattr(idx, "_progress_lock")
+
+    def test_shallow_index_updates_file_status(self, tmp_path):
+        f = tmp_path / "a.ivy"
+        f.write_text("#lang ivy1.7\ntype t\n")
+        parser = MagicMock()
+        resolver = MagicMock()
+        resolver.find_all_ivy_files.return_value = [str(f)]
+        resolver.resolve.return_value = None
+
+        idx = WorkspaceIndexer(str(tmp_path), parser, resolver)
+        idx._fast_index_all_files()
+
+        status = idx._deep_index_progress.file_statuses.get(str(f))
+        assert status is not None
+        assert status.shallow_indexed is True
+        assert status.last_indexed_at is not None
+
+    def test_deep_index_updates_progress(self, tmp_path):
+        f = tmp_path / "test.ivy"
+        f.write_text("#lang ivy1.7\nexport action foo\n")
+
+        mock_result = MagicMock(success=True, ast=MagicMock(), errors=[])
+        parser = MagicMock()
+        parser.parse.return_value = mock_result
+        resolver = MagicMock()
+        resolver.find_all_ivy_files.return_value = [str(f)]
+        resolver.resolve.return_value = None
+
+        idx = WorkspaceIndexer(str(tmp_path), parser, resolver)
+        from ivy_lsp.analysis.test_scope import ExportImportInfo
+
+        idx._file_export_imports[str(f)] = ExportImportInfo(
+            file=str(f), exports=["foo"],
+        )
+
+        with patch(
+            "ivy_lsp.parsing.ast_to_symbols.ast_to_symbols", return_value=[]
+        ):
+            idx._deep_index_from_tests()
+
+        progress = idx._deep_index_progress
+        assert progress.total_test_files == 1
+        assert progress.completed_test_files == 1
+        assert progress.current_file is None  # Reset after loop
+        status = progress.file_statuses.get(str(f))
+        assert status is not None
+        assert status.deep_parse_attempted is True
+        assert status.deep_parse_succeeded is True
