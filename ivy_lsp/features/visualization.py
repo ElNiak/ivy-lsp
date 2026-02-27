@@ -530,6 +530,121 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Handler: ivy/stateMachineView
+# ---------------------------------------------------------------------------
+
+
+def handle_state_machine_view(server: Any, params: dict) -> dict:
+    """Handle ivy/stateMachineView request.
+
+    Models the Ivy specification as a state machine where:
+    - State variables are state nodes
+    - Actions are transitions between state nodes (via READS/WRITES edges)
+    - Guards are require/assume clauses on the action's monitors
+    - Invariants are properties that constrain active state variables
+    """
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return {
+            "nodes": [],
+            "transitions": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+        }
+
+    scope_info = _resolve_scope(graph, params)
+    state_var_filter = params.get("stateVarFilter")
+
+    nodes: List[Dict[str, Any]] = []
+    transitions: List[Dict[str, Any]] = []
+
+    # Identify state vars that participate in action monitors
+    active_vars: Set[str] = set()
+    for action_id in graph.actions:
+        reqs = graph.get_requirements_for_action(action_id)
+        for req in reqs:
+            for etype, target_id in graph._outgoing.get(req.id, []):
+                if etype in (EdgeType.READS, EdgeType.WRITES):
+                    active_vars.add(target_id)
+
+    # Build state nodes
+    for var_id, var_node in graph.state_vars.items():
+        if var_id not in active_vars:
+            continue
+        if state_var_filter and var_node.name != state_var_filter:
+            continue
+        nodes.append(
+            {
+                "id": var_id,
+                "label": var_node.name,
+                "type": "state",
+                "file": var_node.file,
+                "line": var_node.line,
+            }
+        )
+
+    # Add invariant nodes (properties that constrain active state vars)
+    for prop_id, prop_node in graph.properties.items():
+        prop_vars = {
+            target
+            for etype, target in graph._outgoing.get(prop_id, [])
+            if etype == EdgeType.READS
+        }
+        if prop_vars & active_vars:
+            nodes.append(
+                {
+                    "id": prop_id,
+                    "label": prop_node.name or prop_node.formula_text[:40],
+                    "type": "invariant",
+                    "file": prop_node.file,
+                    "line": prop_node.line,
+                }
+            )
+
+    active_var_ids = {n["id"] for n in nodes if n["type"] == "state"}
+
+    # Build transitions: action connects source state vars to target state vars
+    for action_id, action_node in graph.actions.items():
+        reqs = graph.get_requirements_for_action(action_id)
+
+        read_vars: Set[str] = set()
+        write_vars: Set[str] = set()
+        guards: List[str] = []
+
+        for req in reqs:
+            for etype, target_id in graph._outgoing.get(req.id, []):
+                if etype == EdgeType.READS and target_id in active_var_ids:
+                    read_vars.add(target_id)
+                elif etype == EdgeType.WRITES and target_id in active_var_ids:
+                    write_vars.add(target_id)
+            if req.kind in ("require", "assume"):
+                guards.append(req.formula_text)
+
+        # Create transitions: from each read var to each written var
+        sources = read_vars if read_vars else write_vars
+        targets = write_vars if write_vars else read_vars
+
+        for src in sources:
+            for tgt in targets:
+                transitions.append(
+                    {
+                        "source": src,
+                        "target": tgt,
+                        "action": action_node.name,
+                        "guards": guards,
+                    }
+                )
+
+    return {
+        "nodes": nodes,
+        "transitions": transitions,
+        "scopeInfo": {
+            "testFile": scope_info.get("testFile"),
+            "scoped": scope_info.get("scoped", False),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # LSP wiring
 # ---------------------------------------------------------------------------
 
@@ -552,3 +667,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/actionDependencyGraph")
     def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
         return handle_action_dependency_graph(server, params or {})
+
+    @server.feature("ivy/stateMachineView")
+    def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
+        return handle_state_machine_view(server, params or {})

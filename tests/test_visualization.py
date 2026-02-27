@@ -12,6 +12,7 @@ if str(IVY_ROOT) not in sys.path:
 from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
     ActionNode,
     EdgeType,
+    PropertyNode,
     RequirementNode,
     StateVarNode,
 )
@@ -24,6 +25,7 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     handle_action_requirements,
     handle_coverage_gaps,
     handle_model_summary_table,
+    handle_state_machine_view,
     register,
 )
 from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
@@ -830,6 +832,263 @@ class TestHandleActionDependencyGraph:
 
 
 # ---------------------------------------------------------------------------
+# Helpers for state machine view tests
+# ---------------------------------------------------------------------------
+
+
+def _build_graph_for_state_machine() -> ScopedRequirementModel:
+    """Build a graph suitable for state machine view testing.
+
+    Contains:
+    - Two actions: send_pkt (writes conn_state), recv_pkt (reads conn_state)
+    - One state var: conn_state
+    - A require guard on recv_pkt (conn_state = open)
+    - An assume guard on recv_pkt (conn_state ~= closed)
+    - A property (invariant) that reads conn_state
+    """
+    graph = ScopedRequirementModel()
+
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+    graph.add_action(
+        ActionNode(
+            id="recv_pkt",
+            name="recv_pkt",
+            qualified_name="quic.recv_pkt",
+            file="/test/quic.ivy",
+            line=20,
+        )
+    )
+    graph.add_state_var(
+        StateVarNode(
+            id="conn_state",
+            name="conn_state",
+            qualified_name="quic.conn_state",
+            file="/test/quic.ivy",
+            line=3,
+            is_relation=False,
+        )
+    )
+
+    # send_pkt writes conn_state (after-ensure)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:15",
+        kind="ensure",
+        formula_text="conn_state(C) := sending",
+        line=15,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
+    )
+    # recv_pkt reads conn_state (before-require guard)
+    r2 = RequirementNode(
+        id="/test/quic.ivy:25",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=25,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="recv_pkt",
+        mixin_kind="before",
+    )
+    # recv_pkt has an assume guard (also reads conn_state)
+    r3 = RequirementNode(
+        id="/test/quic.ivy:26",
+        kind="assume",
+        formula_text="conn_state(C) ~= closed",
+        line=26,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="recv_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1, r2, r3])
+    graph.add_edge(r1.id, EdgeType.WRITES, "conn_state")
+    graph.add_edge(r2.id, EdgeType.READS, "conn_state")
+    graph.add_edge(r3.id, EdgeType.READS, "conn_state")
+
+    # Property (invariant) that reads conn_state
+    prop = PropertyNode(
+        id="/test/quic.ivy:50",
+        kind="invariant",
+        name="conn_valid",
+        formula_text="forall C. conn_state(C) ~= invalid",
+        file="/test/quic.ivy",
+        line=50,
+    )
+    graph.add_property(prop)
+    graph.add_edge(prop.id, EdgeType.READS, "conn_state")
+
+    return graph
+
+
+# ---------------------------------------------------------------------------
+# handle_state_machine_view
+# ---------------------------------------------------------------------------
+
+
+class TestHandleStateMachineView:
+    def test_returns_empty_when_no_graph(self):
+        server = _FakeServer(None)
+        result = handle_state_machine_view(server, {})
+        assert result["nodes"] == []
+        assert result["transitions"] == []
+        assert "scopeInfo" in result
+
+    def test_state_vars_become_nodes(self):
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        state_nodes = [n for n in result["nodes"] if n["type"] == "state"]
+        node_ids = {n["id"] for n in state_nodes}
+        assert "conn_state" in node_ids
+
+    def test_state_node_has_expected_fields(self):
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        state_nodes = [n for n in result["nodes"] if n["type"] == "state"]
+        assert len(state_nodes) >= 1
+        node = state_nodes[0]
+        assert "id" in node
+        assert "label" in node
+        assert node["type"] == "state"
+        assert "file" in node
+        assert "line" in node
+
+    def test_invariant_nodes_from_properties(self):
+        """Properties that read active state vars appear as invariant nodes."""
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        inv_nodes = [n for n in result["nodes"] if n["type"] == "invariant"]
+        assert len(inv_nodes) >= 1
+        inv = inv_nodes[0]
+        assert inv["label"] == "conn_valid"
+        assert inv["file"] == "/test/quic.ivy"
+        assert inv["line"] == 50
+
+    def test_actions_become_transitions(self):
+        """Actions that read/write state vars become transitions."""
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        transitions = result["transitions"]
+        action_names = {t["action"] for t in transitions}
+        # send_pkt writes conn_state, recv_pkt reads conn_state
+        assert "send_pkt" in action_names or "recv_pkt" in action_names
+
+    def test_transition_has_expected_fields(self):
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        assert len(result["transitions"]) >= 1
+        t = result["transitions"][0]
+        assert "source" in t
+        assert "target" in t
+        assert "action" in t
+        assert "guards" in t
+
+    def test_guards_from_require_assume(self):
+        """recv_pkt has require and assume guards on conn_state."""
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        recv_transitions = [
+            t for t in result["transitions"] if t["action"] == "recv_pkt"
+        ]
+        # recv_pkt reads conn_state -> should have transitions
+        assert len(recv_transitions) >= 1
+        guards = recv_transitions[0]["guards"]
+        # require and assume formulas should appear as guards
+        guard_texts = set(guards)
+        assert "conn_state(C) = open" in guard_texts
+        assert "conn_state(C) ~= closed" in guard_texts
+
+    def test_send_pkt_has_no_guards(self):
+        """send_pkt has only an ensure (not require/assume), so no guards."""
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        send_transitions = [
+            t for t in result["transitions"] if t["action"] == "send_pkt"
+        ]
+        if send_transitions:
+            assert send_transitions[0]["guards"] == []
+
+    def test_state_var_filter(self):
+        """When stateVarFilter is set, only matching state vars appear."""
+        graph = _build_graph_for_state_machine()
+        # Add a second state var that is also active
+        graph.add_state_var(
+            StateVarNode(
+                id="pkt_num",
+                name="pkt_num",
+                qualified_name="quic.pkt_num",
+                file="/test/quic.ivy",
+                line=4,
+                is_relation=False,
+            )
+        )
+        r_extra = RequirementNode(
+            id="/test/quic.ivy:30",
+            kind="ensure",
+            formula_text="pkt_num(C) := pkt_num(C) + 1",
+            line=30,
+            col=0,
+            file="/test/quic.ivy",
+            monitor_action="send_pkt",
+            mixin_kind="after",
+        )
+        graph.add_file_requirements("/test/quic.ivy", [r_extra])
+        graph.add_edge(r_extra.id, EdgeType.WRITES, "pkt_num")
+
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(
+            server, {"stateVarFilter": "conn_state"}
+        )
+        state_nodes = [n for n in result["nodes"] if n["type"] == "state"]
+        state_names = {n["label"] for n in state_nodes}
+        assert "conn_state" in state_names
+        assert "pkt_num" not in state_names
+
+    def test_inactive_state_vars_excluded(self):
+        """State vars not involved in any action monitor are excluded."""
+        graph = _build_graph_for_state_machine()
+        # Add a state var with no edges
+        graph.add_state_var(
+            StateVarNode(
+                id="orphan_var",
+                name="orphan_var",
+                qualified_name="quic.orphan_var",
+                file="/test/quic.ivy",
+                line=99,
+                is_relation=False,
+            )
+        )
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        node_ids = {n["id"] for n in result["nodes"]}
+        assert "orphan_var" not in node_ids
+
+    def test_scope_info_present(self):
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {})
+        assert "scopeInfo" in result
+        assert "testFile" in result["scopeInfo"]
+        assert "scoped" in result["scopeInfo"]
+
+
+# ---------------------------------------------------------------------------
 # register() — LSP wiring
 # ---------------------------------------------------------------------------
 
@@ -857,11 +1116,12 @@ class TestVisualizationRegister:
         assert "ivy/modelSummaryTable" in server._handlers
         assert "ivy/coverageGaps" in server._handlers
         assert "ivy/actionDependencyGraph" in server._handlers
+        assert "ivy/stateMachineView" in server._handlers
 
-    def test_register_adds_exactly_four_endpoints(self):
+    def test_register_adds_exactly_five_endpoints(self):
         server = _FakeFeatureServer()
         register(server)
-        assert len(server._handlers) == 4
+        assert len(server._handlers) == 5
 
     def test_action_requirements_endpoint_callable(self):
         server = _FakeFeatureServer()
@@ -886,6 +1146,14 @@ class TestVisualizationRegister:
         result = handler({})
         assert "unguardedStateVars" in result
         assert "summary" in result
+
+    def test_state_machine_view_endpoint_callable(self):
+        server = _FakeFeatureServer()
+        register(server)
+        handler = server._handlers["ivy/stateMachineView"]
+        result = handler({})
+        assert "nodes" in result
+        assert "transitions" in result
 
     def test_endpoints_return_valid_json_types(self):
         server = _FakeFeatureServer()
