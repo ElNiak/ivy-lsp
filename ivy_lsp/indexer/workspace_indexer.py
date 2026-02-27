@@ -353,7 +353,10 @@ class WorkspaceIndexer:
         from ivy_lsp.indexer.parallel_indexer import ParallelDeepIndexer
         from ivy_lsp.parsing.symbols import IvySymbol
 
-        indexer = ParallelDeepIndexer(num_workers=num_workers)
+        indexer = ParallelDeepIndexer(
+            num_workers=num_workers,
+            resolver_config=self._resolver.to_config_dict(),
+        )
         results = indexer.parse_files(test_files)
 
         for filepath, worker_result in results.items():
@@ -362,6 +365,25 @@ class WorkspaceIndexer:
             if worker_result.success:
                 symbols = [IvySymbol.from_dict(d) for d in worker_result.symbols]
                 self._upgrade_file_symbols(filepath, symbols, None)
+                # Re-extract requirements and exports with light-mode
+                # extractors.  ASTs can't cross process boundaries so
+                # full extraction isn't possible, but re-running light
+                # mode ensures consistency with the serial path.
+                try:
+                    with open(filepath) as f:
+                        source = f.read()
+                    reqs, writes = extract_requirements_light(source, filepath)
+                    self._requirement_graph.add_file_requirements(
+                        filepath, reqs, writes
+                    )
+                    info = extract_exports_imports_light(source, filepath)
+                    self._file_export_imports[filepath] = info
+                except Exception:
+                    logger.debug(
+                        "Parallel: light extraction failed for %s",
+                        filepath,
+                        exc_info=True,
+                    )
             with self._progress_lock:
                 status = self._deep_index_progress.file_statuses.get(
                     filepath, FileIndexStatus(filepath=filepath)
