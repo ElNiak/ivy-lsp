@@ -24,7 +24,9 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     handle_action_dependency_graph,
     handle_action_requirements,
     handle_coverage_gaps,
+    handle_layered_overview,
     handle_model_summary_table,
+    handle_smart_suggestions,
     handle_state_machine_view,
     register,
 )
@@ -1089,6 +1091,63 @@ class TestHandleStateMachineView:
 
 
 # ---------------------------------------------------------------------------
+# handle_layered_overview
+# ---------------------------------------------------------------------------
+
+
+class TestHandleLayeredOverview:
+    def test_returns_empty_when_no_graph(self):
+        server = _FakeServer(None)
+        result = handle_layered_overview(server, {})
+        assert result["layers"] == []
+
+    def test_groups_by_file(self):
+        graph = _build_graph()
+        server = _FakeServer(graph)
+        result = handle_layered_overview(server, {})
+        assert len(result["layers"]) >= 1
+        layer = result["layers"][0]
+        assert "file" in layer
+        assert isinstance(layer["actions"], list)
+        assert isinstance(layer["stateVars"], list)
+        assert isinstance(layer["requirements"], int)
+
+    def test_groups_by_module(self):
+        graph = _build_graph()
+        server = _FakeServer(graph)
+        result = handle_layered_overview(server, {"groupBy": "module"})
+        assert len(result["layers"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# handle_smart_suggestions
+# ---------------------------------------------------------------------------
+
+
+class TestHandleSmartSuggestions:
+    def test_returns_empty_when_no_graph(self):
+        server = _FakeServer(None)
+        result = handle_smart_suggestions(
+            server, {"filePath": "/test/q.ivy", "line": 5}
+        )
+        assert result["suggestions"] == []
+
+    def test_returns_suggestions_for_monitor_context(self):
+        graph = _build_graph()
+        server = _FakeServer(graph)
+        result = handle_smart_suggestions(
+            server,
+            {
+                "filePath": "/test/quic.ivy",
+                "line": 12,
+                "actionName": "send_pkt",
+            },
+        )
+        # Should return a list of suggestions (may be empty if no gaps)
+        assert isinstance(result["suggestions"], list)
+
+
+# ---------------------------------------------------------------------------
 # register() — LSP wiring
 # ---------------------------------------------------------------------------
 
@@ -1117,11 +1176,13 @@ class TestVisualizationRegister:
         assert "ivy/coverageGaps" in server._handlers
         assert "ivy/actionDependencyGraph" in server._handlers
         assert "ivy/stateMachineView" in server._handlers
+        assert "ivy/layeredOverview" in server._handlers
+        assert "ivy/smartSuggestions" in server._handlers
 
-    def test_register_adds_exactly_five_endpoints(self):
+    def test_register_adds_exactly_seven_endpoints(self):
         server = _FakeFeatureServer()
         register(server)
-        assert len(server._handlers) == 5
+        assert len(server._handlers) == 7
 
     def test_action_requirements_endpoint_callable(self):
         server = _FakeFeatureServer()

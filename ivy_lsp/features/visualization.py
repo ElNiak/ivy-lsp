@@ -645,6 +645,167 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Handler: ivy/layeredOverview
+# ---------------------------------------------------------------------------
+
+
+def handle_layered_overview(server: Any, params: dict) -> dict:
+    """Handle ivy/layeredOverview request.
+
+    Groups symbols, actions, state vars, and requirements by file or module.
+    """
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return {"layers": [], "scopeInfo": {"testFile": None, "scoped": False}}
+
+    scope_info = _resolve_scope(graph, params)
+    group_by = params.get("groupBy", "file")
+
+    by_group: Dict[str, Dict[str, Any]] = {}
+
+    for action_id, action_node in graph.actions.items():
+        key = (
+            action_node.file
+            if group_by == "file"
+            else _extract_module(action_node.qualified_name)
+        )
+        if key not in by_group:
+            by_group[key] = {
+                "file": action_node.file if group_by == "file" else None,
+                "module": key if group_by == "module" else None,
+                "actions": [],
+                "stateVars": [],
+                "requirements": 0,
+            }
+        reqs = graph.get_requirements_for_action(action_id)
+        by_group[key]["actions"].append(action_node.name)
+        by_group[key]["requirements"] += len(reqs)
+
+    for var_id, var_node in graph.state_vars.items():
+        key = (
+            var_node.file
+            if group_by == "file"
+            else _extract_module(var_node.qualified_name)
+        )
+        if key not in by_group:
+            by_group[key] = {
+                "file": var_node.file if group_by == "file" else None,
+                "module": key if group_by == "module" else None,
+                "actions": [],
+                "stateVars": [],
+                "requirements": 0,
+            }
+        by_group[key]["stateVars"].append(var_node.name)
+
+    layers = list(by_group.values())
+
+    return {
+        "layers": layers,
+        "scopeInfo": {
+            "testFile": scope_info.get("testFile"),
+            "scoped": scope_info.get("scoped", False),
+        },
+    }
+
+
+def _extract_module(qualified_name: str) -> str:
+    """Extract module prefix from a qualified name like 'quic.send_pkt' -> 'quic'."""
+    parts = qualified_name.rsplit(".", 1)
+    return parts[0] if len(parts) > 1 else qualified_name
+
+
+# ---------------------------------------------------------------------------
+# Handler: ivy/smartSuggestions
+# ---------------------------------------------------------------------------
+
+
+def handle_smart_suggestions(server: Any, params: dict) -> dict:
+    """Handle ivy/smartSuggestions request.
+
+    Returns context-aware suggestions based on cursor position and
+    the semantic model's requirement graph.
+    """
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return {"suggestions": [], "context": None}
+
+    file_path = params.get("filePath", "")
+    line = params.get("line", 0)
+    action_name = params.get("actionName")
+
+    suggestions: List[Dict[str, Any]] = []
+
+    if action_name:
+        # Find state vars currently read by this action's requirements
+        reqs = graph.get_requirements_for_action(action_name)
+        seen_vars: Set[str] = set()
+        for req in reqs:
+            for etype, target_id in graph._outgoing.get(req.id, []):
+                if etype == EdgeType.READS:
+                    seen_vars.add(target_id)
+
+        # Find state vars read by OTHER requirements that share the same
+        # state vars (i.e., related requirements).  Suggest vars that the
+        # related requirements read but this action does not.
+        all_vars_for_related: Set[str] = set()
+        for var_id in seen_vars:
+            sharing = graph.get_requirements_sharing_state_var(var_id)
+            for s in sharing:
+                for etype, target_id in graph._outgoing.get(s.id, []):
+                    if etype == EdgeType.READS:
+                        all_vars_for_related.add(target_id)
+
+        missing_vars = all_vars_for_related - seen_vars
+        for var_id in missing_vars:
+            var_node = graph.state_vars.get(var_id)
+            if var_node:
+                suggestions.append(
+                    {
+                        "type": "state_var",
+                        "name": var_node.name,
+                        "qualifiedName": var_node.qualified_name,
+                        "reason": (
+                            f"Used by related requirements but not yet "
+                            f"referenced in {action_name}"
+                        ),
+                        "priority": "medium",
+                    }
+                )
+
+        # Suggest missing coverage patterns: state vars written by the
+        # action but not guarded (read) by any of its requirements.
+        written_vars = graph.get_state_vars_written_in_monitor(action_name)
+        for sv in written_vars:
+            guarded = any(
+                etype == EdgeType.READS and target == sv.id
+                for req in reqs
+                for etype, target in graph._outgoing.get(req.id, [])
+            )
+            if not guarded:
+                suggestions.append(
+                    {
+                        "type": "missing_guard",
+                        "name": sv.name,
+                        "reason": (
+                            f"State var '{sv.name}' is written by "
+                            f"{action_name} but not guarded"
+                        ),
+                        "priority": "high",
+                        "template": f"require {sv.name}(...) ",
+                    }
+                )
+
+    return {
+        "suggestions": suggestions,
+        "context": {
+            "file": file_path,
+            "line": line,
+            "action": action_name,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # LSP wiring
 # ---------------------------------------------------------------------------
 
@@ -671,3 +832,11 @@ def register(server: Any) -> None:
     @server.feature("ivy/stateMachineView")
     def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
         return handle_state_machine_view(server, params or {})
+
+    @server.feature("ivy/layeredOverview")
+    def on_layered_overview(params: Any = None) -> Dict[str, Any]:
+        return handle_layered_overview(server, params or {})
+
+    @server.feature("ivy/smartSuggestions")
+    def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
+        return handle_smart_suggestions(server, params or {})
