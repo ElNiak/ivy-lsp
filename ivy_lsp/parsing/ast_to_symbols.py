@@ -43,7 +43,7 @@ def ast_to_symbols(ivy_obj: Any, filename: str, source: str) -> List[IvySymbol]:
     abs_filename = os.path.abspath(filename) if filename else filename
     for decl in ivy_obj.decls:
         try:
-            if _is_from_included_file(decl, abs_filename):
+            if is_from_included_file(decl, abs_filename):
                 continue
             syms = _convert_decl(decl, filename, source)
             flat_symbols.extend(syms)
@@ -677,7 +677,7 @@ def _convert_import(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 # ---------------------------------------------------------------------------
 
 
-def _is_from_included_file(decl: Any, abs_filename: Optional[str]) -> bool:
+def is_from_included_file(decl: Any, abs_filename: Optional[str]) -> bool:
     """Return True if *decl* originated from a different file via ``include``.
 
     When the Ivy parser processes ``include foo``, declarations from

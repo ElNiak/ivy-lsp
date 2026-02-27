@@ -8,9 +8,11 @@ Requires ``ivy`` to be installed; degrades gracefully if unavailable.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, List
 
 from ivy_lsp.adapters.protocols import TypeAnnotation
+from ivy_lsp.parsing.ast_to_symbols import is_from_included_file
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,11 @@ class AstEnrichmentAdapter:
             return []
 
         annotations: List[TypeAnnotation] = []
+        abs_filename = os.path.abspath(filename) if filename else filename
         for decl in ast.decls:
             try:
+                if is_from_included_file(decl, abs_filename):
+                    continue
                 self._process_decl(decl, filename, annotations)
             except Exception:
                 logger.warning(
