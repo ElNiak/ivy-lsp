@@ -292,3 +292,124 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
             "scoped": scope_info.get("scoped", False),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Handler: ivy/coverageGaps
+# ---------------------------------------------------------------------------
+
+
+def handle_coverage_gaps(server: Any, params: dict) -> dict:
+    """Handle ivy/coverageGaps request.
+
+    Identifies coverage gaps in the formal model:
+    - Unguarded state variables: written but not read by any requirement
+    - Orphan requirements: monitor_action references a non-existent action
+    - Uncovered RFC requirements: RFC requirements with no matching bracket tag
+    """
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return {
+            "unguardedStateVars": [],
+            "uncoveredRfcRequirements": [],
+            "orphanRequirements": [],
+            "summary": {
+                "totalActions": 0,
+                "totalRequirements": 0,
+                "totalStateVars": 0,
+                "unguardedCount": 0,
+                "totalRfcReqs": 0,
+                "uncoveredRfcCount": 0,
+                "orphanReqCount": 0,
+            },
+            "scopeInfo": {"testFile": None, "scoped": False},
+        }
+
+    scope_info = _resolve_scope(graph, params)
+
+    # -- Unguarded state variables ------------------------------------------
+    # A state var is "guarded" if any requirement or property READS it.
+    guarded_vars: Set[str] = set()
+    for req_id in graph.requirements:
+        for etype, target_id in graph._outgoing.get(req_id, []):
+            if etype == EdgeType.READS:
+                guarded_vars.add(target_id)
+    for prop_id in graph.properties:
+        for etype, target_id in graph._outgoing.get(prop_id, []):
+            if etype == EdgeType.READS:
+                guarded_vars.add(target_id)
+
+    # Collect state vars that are written (via WRITES edges)
+    written_vars: Set[str] = set()
+    for _source, etype, target_id in graph.edges:
+        if etype == EdgeType.WRITES:
+            written_vars.add(target_id)
+
+    unguarded: List[dict] = []
+    for var_id, var_node in graph.state_vars.items():
+        is_guarded = var_id in guarded_vars
+        if not is_guarded:
+            is_written = var_id in written_vars
+            severity = "high" if is_written else "low"
+            unguarded.append(
+                {
+                    "name": var_node.name,
+                    "qualifiedName": var_node.qualified_name,
+                    "file": var_node.file,
+                    "line": var_node.line,
+                    "isWritten": is_written,
+                    "guardedByRequirements": 0,
+                    "severity": severity,
+                }
+            )
+
+    # -- Uncovered RFC requirements -----------------------------------------
+    uncovered_rfc = graph.get_uncovered_requirements()
+    uncovered_rfc_list: List[dict] = []
+    for rfc_req in uncovered_rfc:
+        uncovered_rfc_list.append(
+            {
+                "id": rfc_req.id,
+                "rfc": getattr(rfc_req, "rfc", ""),
+                "section": getattr(rfc_req, "section", ""),
+                "level": getattr(rfc_req, "level", ""),
+                "text": getattr(rfc_req, "text", ""),
+            }
+        )
+
+    # -- Orphan requirements ------------------------------------------------
+    # Requirements whose monitor_action does not match any known action.
+    orphans: List[dict] = []
+    for req in graph.requirements.values():
+        if req.monitor_action and req.monitor_action not in graph.actions:
+            orphans.append(
+                {
+                    "id": req.id,
+                    "kind": req.kind,
+                    "formulaText": req.formula_text,
+                    "file": req.file,
+                    "line": req.line,
+                    "reason": (
+                        f"Action '{req.monitor_action}' not found in graph"
+                    ),
+                }
+            )
+
+    return {
+        "unguardedStateVars": unguarded,
+        "uncoveredRfcRequirements": uncovered_rfc_list,
+        "orphanRequirements": orphans,
+        "summary": {
+            "totalActions": len(graph.actions),
+            "totalRequirements": len(graph.requirements),
+            "totalStateVars": len(graph.state_vars),
+            "unguardedCount": len(unguarded),
+            "totalRfcReqs": len(graph.rfc_requirements),
+            "uncoveredRfcCount": len(uncovered_rfc_list),
+            "orphanReqCount": len(orphans),
+        },
+        "scopeInfo": {
+            "testFile": scope_info.get("testFile"),
+            "scoped": scope_info.get("scoped", False),
+        },
+    }

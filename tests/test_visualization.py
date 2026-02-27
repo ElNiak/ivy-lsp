@@ -21,8 +21,10 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     _resolve_scope,
     _serialize_requirement,
     handle_action_requirements,
+    handle_coverage_gaps,
     handle_model_summary_table,
 )
+from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -277,3 +279,318 @@ class TestHandleModelSummaryTable:
             "rfcCoverageCount",
         }
         assert expected_fields.issubset(set(row.keys()))
+
+
+# ---------------------------------------------------------------------------
+# Helpers for coverage gaps tests
+# ---------------------------------------------------------------------------
+
+
+def _build_graph_with_gaps() -> ScopedRequirementModel:
+    """Build a graph with unguarded state vars, orphan reqs, and RFC coverage gaps."""
+    graph = ScopedRequirementModel()
+
+    # Action with requirements
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+
+    # State var that IS guarded (read by a require-kind requirement)
+    graph.add_state_var(
+        StateVarNode(
+            id="conn_state",
+            name="conn_state",
+            qualified_name="quic.conn_state",
+            file="/test/quic.ivy",
+            line=3,
+            is_relation=False,
+        )
+    )
+
+    # State var that is UNGUARDED (written but not read by any requirement)
+    graph.add_state_var(
+        StateVarNode(
+            id="pkt_count",
+            name="pkt_count",
+            qualified_name="quic.pkt_count",
+            file="/test/quic.ivy",
+            line=4,
+            is_relation=False,
+        )
+    )
+
+    # Requirement that reads conn_state (guards it)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+        bracket_tags=["rfc9000:4.1"],
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1])
+    graph.add_edge(r1.id, EdgeType.READS, "conn_state")
+
+    # pkt_count is written but never read by any requirement
+    graph.add_edge(
+        "/test/quic.ivy:20:write:pkt_count", EdgeType.WRITES, "pkt_count"
+    )
+
+    return graph
+
+
+def _build_graph_with_orphan() -> ScopedRequirementModel:
+    """Build a graph with an orphan requirement (action not in graph)."""
+    graph = ScopedRequirementModel()
+
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+
+    # Normal requirement pointing at a known action
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+    )
+
+    # Orphan: monitor_action refers to a non-existent action
+    r_orphan = RequirementNode(
+        id="/test/quic.ivy:30",
+        kind="ensure",
+        formula_text="ack_sent(C)",
+        line=30,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="nonexistent_action",
+        mixin_kind="after",
+    )
+
+    graph.add_file_requirements("/test/quic.ivy", [r1, r_orphan])
+    return graph
+
+
+def _build_graph_with_rfc_coverage() -> ScopedRequirementModel:
+    """Build a graph with RFC requirements, some covered and some not."""
+    graph = ScopedRequirementModel()
+
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+
+    # Add RFC requirements to the graph
+    graph.add_rfc_requirement(
+        RfcRequirement(
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="Connection must be open before sending",
+            level="MUST",
+        )
+    )
+    graph.add_rfc_requirement(
+        RfcRequirement(
+            id="rfc9000:8.1",
+            rfc="RFC9000",
+            section="8.1",
+            text="Must validate address before use",
+            level="MUST",
+        )
+    )
+    graph.add_rfc_requirement(
+        RfcRequirement(
+            id="rfc9000:17.2",
+            rfc="RFC9000",
+            section="17.2",
+            text="Short header packets must use connection ID",
+            level="MUST",
+        )
+    )
+
+    # Requirement that covers rfc9000:4.1 (via bracket_tags)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+        bracket_tags=["rfc9000:4.1"],
+    )
+
+    graph.add_file_requirements("/test/quic.ivy", [r1])
+    # rfc9000:8.1 and rfc9000:17.2 are NOT covered by any requirement
+
+    return graph
+
+
+# ---------------------------------------------------------------------------
+# handle_coverage_gaps
+# ---------------------------------------------------------------------------
+
+
+class TestHandleCoverageGaps:
+    def test_returns_empty_when_no_graph(self):
+        server = _FakeServer(None)
+        result = handle_coverage_gaps(server, {})
+        assert result["unguardedStateVars"] == []
+        assert result["orphanRequirements"] == []
+        assert result["uncoveredRfcRequirements"] == []
+        assert result["summary"]["totalStateVars"] == 0
+        assert result["summary"]["unguardedCount"] == 0
+        assert result["summary"]["totalRfcReqs"] == 0
+        assert result["summary"]["uncoveredRfcCount"] == 0
+        assert result["summary"]["orphanReqCount"] == 0
+
+    def test_detects_unguarded_state_var(self):
+        """A state var that is written but not read by any requirement is unguarded."""
+        graph = _build_graph_with_gaps()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        unguarded_names = [v["name"] for v in result["unguardedStateVars"]]
+        assert "pkt_count" in unguarded_names
+        assert "conn_state" not in unguarded_names
+
+    def test_unguarded_var_has_expected_fields(self):
+        """Each unguarded state var entry has all expected fields."""
+        graph = _build_graph_with_gaps()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        pkt_count_entry = next(
+            v for v in result["unguardedStateVars"] if v["name"] == "pkt_count"
+        )
+        assert pkt_count_entry["qualifiedName"] == "quic.pkt_count"
+        assert pkt_count_entry["file"] == "/test/quic.ivy"
+        assert pkt_count_entry["line"] == 4
+        assert pkt_count_entry["isWritten"] is True
+        assert pkt_count_entry["severity"] == "high"
+
+    def test_unguarded_but_not_written_is_low_severity(self):
+        """A state var that is neither read nor written has low severity."""
+        graph = _build_graph_with_gaps()
+        # Add a third state var that is not written and not read
+        graph.add_state_var(
+            StateVarNode(
+                id="idle_flag",
+                name="idle_flag",
+                qualified_name="quic.idle_flag",
+                file="/test/quic.ivy",
+                line=6,
+                is_relation=False,
+            )
+        )
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        idle_entry = next(
+            v for v in result["unguardedStateVars"] if v["name"] == "idle_flag"
+        )
+        assert idle_entry["isWritten"] is False
+        assert idle_entry["severity"] == "low"
+
+    def test_detects_orphan_requirements(self):
+        """Requirements whose monitor_action matches no known action are orphans."""
+        graph = _build_graph_with_orphan()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        orphan_ids = [o["id"] for o in result["orphanRequirements"]]
+        assert "/test/quic.ivy:30" in orphan_ids
+        # The requirement pointing at send_pkt is NOT orphaned
+        assert "/test/quic.ivy:12" not in orphan_ids
+
+    def test_orphan_has_expected_fields(self):
+        """Each orphan entry has id, kind, formulaText, file, line, reason."""
+        graph = _build_graph_with_orphan()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        orphan = result["orphanRequirements"][0]
+        assert orphan["kind"] == "ensure"
+        assert orphan["formulaText"] == "ack_sent(C)"
+        assert orphan["file"] == "/test/quic.ivy"
+        assert orphan["line"] == 30
+        assert "nonexistent_action" in orphan["reason"]
+
+    def test_rfc_coverage_tracking(self):
+        """Uncovered RFC requirements are detected correctly."""
+        graph = _build_graph_with_rfc_coverage()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        uncovered_ids = [r["id"] for r in result["uncoveredRfcRequirements"]]
+        # rfc9000:4.1 is covered by r1
+        assert "rfc9000:4.1" not in uncovered_ids
+        # rfc9000:8.1 and rfc9000:17.2 are uncovered
+        assert "rfc9000:8.1" in uncovered_ids
+        assert "rfc9000:17.2" in uncovered_ids
+
+    def test_rfc_uncovered_entry_has_expected_fields(self):
+        """Each uncovered RFC entry has id, rfc, section, level, text."""
+        graph = _build_graph_with_rfc_coverage()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        entry = next(
+            r
+            for r in result["uncoveredRfcRequirements"]
+            if r["id"] == "rfc9000:8.1"
+        )
+        assert entry["rfc"] == "RFC9000"
+        assert entry["section"] == "8.1"
+        assert entry["level"] == "MUST"
+        assert entry["text"] == "Must validate address before use"
+
+    def test_summary_counts_are_correct(self):
+        """Summary aggregates totalActions, totalRequirements, totalStateVars, etc."""
+        graph = _build_graph_with_gaps()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        s = result["summary"]
+        assert s["totalActions"] == 1
+        assert s["totalRequirements"] == 1
+        assert s["totalStateVars"] == 2
+        # pkt_count is unguarded
+        assert s["unguardedCount"] >= 1
+
+    def test_summary_rfc_counts(self):
+        """Summary reflects correct RFC coverage counts."""
+        graph = _build_graph_with_rfc_coverage()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        s = result["summary"]
+        assert s["totalRfcReqs"] == 3
+        # 1 covered (rfc9000:4.1), 2 uncovered
+        assert s["uncoveredRfcCount"] == 2
+
+    def test_scope_info_present(self):
+        """Result includes scopeInfo."""
+        graph = _build_graph_with_gaps()
+        server = _FakeServer(graph)
+        result = handle_coverage_gaps(server, {})
+        assert "scopeInfo" in result
+        assert "testFile" in result["scopeInfo"]
+        assert "scoped" in result["scopeInfo"]
