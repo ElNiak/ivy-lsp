@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 import time
 
 from lsprotocol import types as lsp
@@ -11,6 +12,37 @@ from ivy_lsp import __version__
 from ivy_lsp.features.status import ServerStateTracker
 
 logger = logging.getLogger(__name__)
+
+
+class _LspLogHandler(logging.Handler):
+    """Bridge Python logging -> LSP window/logMessage notifications."""
+
+    _LEVEL_MAP = {
+        logging.DEBUG: lsp.MessageType.Log,
+        logging.INFO: lsp.MessageType.Info,
+        logging.WARNING: lsp.MessageType.Warning,
+        logging.ERROR: lsp.MessageType.Error,
+        logging.CRITICAL: lsp.MessageType.Error,
+    }
+
+    def __init__(self, server: "IvyLanguageServer"):
+        super().__init__()
+        self._server = server
+        self._sending = False  # recursion guard
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self._sending:
+            return
+        self._sending = True
+        try:
+            msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
+            self._server.window_log_message(
+                lsp.LogMessageParams(type=msg_type, message=self.format(record))
+            )
+        except Exception:
+            pass  # server may not be connected yet
+        finally:
+            self._sending = False
 
 
 class IvyLanguageServer(LanguageServer):
@@ -75,6 +107,7 @@ class IvyLanguageServer(LanguageServer):
                     message=f"Ivy LSP running in {mode} mode",
                 )
             )
+            self._install_lsp_log_handler()
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
@@ -88,6 +121,17 @@ class IvyLanguageServer(LanguageServer):
                 logger.info("Staging directory cleaned up")
             except Exception:
                 logger.exception("Failed to clean up staging directory")
+
+    def _install_lsp_log_handler(self) -> None:
+        """Replace stderr handler with LSP notification handler."""
+        root = logging.getLogger()
+        handler = _LspLogHandler(self)
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        root.addHandler(handler)
+        # Remove stderr handlers to avoid double-logging.
+        for h in root.handlers[:]:
+            if isinstance(h, logging.StreamHandler) and h.stream is sys.stderr:
+                root.removeHandler(h)
 
     def _setup_indexer(self):
         """Create and populate the workspace indexer."""
