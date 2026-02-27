@@ -341,7 +341,7 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
 
     # Collect state vars that are written (via WRITES edges)
     written_vars: Set[str] = set()
-    for _source, etype, target_id in graph.edges:
+    for _, etype, target_id in graph.edges:
         if etype == EdgeType.WRITES:
             written_vars.add(target_id)
 
@@ -413,3 +413,24 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
             "scoped": scope_info.get("scoped", False),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# LSP wiring
+# ---------------------------------------------------------------------------
+
+
+def register(server: Any) -> None:
+    """Register visualization request handlers on the server."""
+
+    @server.feature("ivy/actionRequirements")
+    def on_action_requirements(params: Any = None) -> Dict[str, Any]:
+        return handle_action_requirements(server, params or {})
+
+    @server.feature("ivy/modelSummaryTable")
+    def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
+        return handle_model_summary_table(server, params or {})
+
+    @server.feature("ivy/coverageGaps")
+    def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
+        return handle_coverage_gaps(server, params or {})

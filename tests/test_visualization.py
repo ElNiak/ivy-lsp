@@ -23,6 +23,7 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     handle_action_requirements,
     handle_coverage_gaps,
     handle_model_summary_table,
+    register,
 )
 from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 
@@ -594,3 +595,76 @@ class TestHandleCoverageGaps:
         assert "scopeInfo" in result
         assert "testFile" in result["scopeInfo"]
         assert "scoped" in result["scopeInfo"]
+
+
+# ---------------------------------------------------------------------------
+# register() — LSP wiring
+# ---------------------------------------------------------------------------
+
+
+class _FakeFeatureServer:
+    """Minimal mock that captures @server.feature() registrations."""
+
+    def __init__(self):
+        self._handlers = {}
+        self._indexer = type("I", (), {"_requirement_graph": _build_graph()})()
+
+    def feature(self, method_name):
+        def decorator(fn):
+            self._handlers[method_name] = fn
+            return fn
+
+        return decorator
+
+
+class TestVisualizationRegister:
+    def test_register_adds_all_endpoints(self):
+        server = _FakeFeatureServer()
+        register(server)
+        assert "ivy/actionRequirements" in server._handlers
+        assert "ivy/modelSummaryTable" in server._handlers
+        assert "ivy/coverageGaps" in server._handlers
+
+    def test_register_adds_exactly_three_endpoints(self):
+        server = _FakeFeatureServer()
+        register(server)
+        assert len(server._handlers) == 3
+
+    def test_action_requirements_endpoint_callable(self):
+        server = _FakeFeatureServer()
+        register(server)
+        handler = server._handlers["ivy/actionRequirements"]
+        result = handler({})
+        assert "actions" in result
+        assert result["modelReady"] is True
+
+    def test_model_summary_table_endpoint_callable(self):
+        server = _FakeFeatureServer()
+        register(server)
+        handler = server._handlers["ivy/modelSummaryTable"]
+        result = handler({})
+        assert "rows" in result
+        assert "totals" in result
+
+    def test_coverage_gaps_endpoint_callable(self):
+        server = _FakeFeatureServer()
+        register(server)
+        handler = server._handlers["ivy/coverageGaps"]
+        result = handler({})
+        assert "unguardedStateVars" in result
+        assert "summary" in result
+
+    def test_endpoints_return_valid_json_types(self):
+        server = _FakeFeatureServer()
+        register(server)
+        for name, handler in server._handlers.items():
+            result = handler({})
+            assert isinstance(result, dict), f"{name} should return dict"
+
+    def test_endpoints_handle_none_params(self):
+        """Handlers should tolerate None params (defaulting to {})."""
+        server = _FakeFeatureServer()
+        register(server)
+        for name, handler in server._handlers.items():
+            result = handler(None)
+            assert isinstance(result, dict), f"{name} should handle None params"

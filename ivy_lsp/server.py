@@ -96,6 +96,7 @@ class IvyLanguageServer(LanguageServer):
             rename,
             selection_range,
             signature_help,
+            visualization,
             workspace_symbols,
         )
 
@@ -115,6 +116,7 @@ class IvyLanguageServer(LanguageServer):
         commands.register(self)
         folding_range.register(self)
         monitoring.register(self)
+        visualization.register(self)
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
