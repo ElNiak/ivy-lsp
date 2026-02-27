@@ -135,12 +135,19 @@ def _check_structural_issues(source: str, filepath: str) -> list[dict[str, Any]]
 def start_mcp(
     workspace_root: str | None = None,
     semantic_model: Any = None,
-) -> None:
+    requirement_graph: Any = None,
+    _return_app: bool = False,
+) -> Any:
     """Start the MCP server exposing Ivy tools.
 
     Args:
         workspace_root: Root directory for the workspace.
         semantic_model: Optional SemanticModel for shared-process mode.
+        requirement_graph: Optional RequirementGraph (or ScopedRequirementModel)
+            for visualization tools. When provided, enables ivy_action_requirements,
+            ivy_model_summary, and ivy_coverage_gaps MCP tools.
+        _return_app: Internal flag for testing. When True, returns the FastMCP
+            instance without starting the server.
     """
     try:
         from mcp.server.fastmcp import FastMCP
@@ -158,7 +165,8 @@ def start_mcp(
             "Ivy Language Server MCP tools for formal verification. "
             "Provides verification (ivy_check), compilation (ivyc), "
             "model inspection (ivy_show), fast linting, include graph analysis, "
-            "and semantic traceability (RFC coverage, impact analysis, cross-references)."
+            "semantic traceability (RFC coverage, impact analysis, cross-references), "
+            "and model visualization (action requirements, summary table, coverage gaps)."
         ),
     )
 
@@ -753,6 +761,100 @@ def start_mcp(
             }
 
         return json.dumps(result)
+
+    # --- Visualization Tools ---
+
+    def _make_viz_server_proxy():
+        """Create a minimal server-like object for visualization handlers.
+
+        The visualization handlers in features/visualization.py expect a
+        server object with ``server._indexer._requirement_graph``.  This
+        builds a lightweight proxy that satisfies that contract.
+        """
+        indexer = type("_IndexerProxy", (), {
+            "_requirement_graph": requirement_graph,
+        })()
+        return type("_ServerProxy", (), {"_indexer": indexer})()
+
+    @mcp.tool()
+    def ivy_action_requirements(
+        action_name: str | None = None,
+        file_path: str | None = None,
+        test_file: str | None = None,
+    ) -> str:
+        """Get requirements organized by action boundaries (before/after monitors).
+
+        Returns requirements grouped by the action they monitor, their temporal
+        position (before/after), kind (require/ensure/assume/assert), and the
+        state variables they read or write.
+
+        Args:
+            action_name: Specific action to query. If omitted, returns all actions.
+            file_path: Scope to actions defined in this file (relative path).
+            test_file: Optional test file to scope the analysis to (relative path).
+        """
+        from ivy_lsp.features.visualization import handle_action_requirements
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if action_name:
+            params["actionName"] = action_name
+        if file_path:
+            try:
+                params["filePath"] = _validate_path(root, file_path)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        if test_file:
+            try:
+                params["testFile"] = _validate_path(root, test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        return json.dumps(handle_action_requirements(server_proxy, params))
+
+    @mcp.tool()
+    def ivy_model_summary(test_file: str | None = None) -> str:
+        """Get per-action requirement counts, state variable usage, and RFC coverage.
+
+        Returns one row per action with counts of before/after requirements by kind,
+        state variables read/written, and RFC bracket tags covered.
+
+        Args:
+            test_file: Optional test file to scope the summary to (relative path).
+        """
+        from ivy_lsp.features.visualization import handle_model_summary_table
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if test_file:
+            try:
+                params["testFile"] = _validate_path(root, test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        return json.dumps(handle_model_summary_table(server_proxy, params))
+
+    @mcp.tool()
+    def ivy_coverage_gaps(test_file: str | None = None) -> str:
+        """Identify coverage gaps: unguarded state vars, uncovered RFC requirements.
+
+        Finds state variables written but never guarded, RFC sections with no
+        covering assertions, and requirements whose monitored action does not exist.
+
+        Args:
+            test_file: Optional test file to scope the analysis to (relative path).
+        """
+        from ivy_lsp.features.visualization import handle_coverage_gaps
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if test_file:
+            try:
+                params["testFile"] = _validate_path(root, test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        return json.dumps(handle_coverage_gaps(server_proxy, params))
+
+    if _return_app:
+        return mcp
 
     logger.info("Starting ivy-lsp MCP server (workspace: %s)", root)
     mcp.run(transport="stdio")
