@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import time
@@ -41,10 +42,12 @@ def _find_tool(name: str) -> Optional[str]:
 def _resolve_via_staging(server: Any, filepath: str) -> str:
     """Return the staging-directory path for *filepath* if available.
 
-    Ivy CLI tools resolve ``include`` directives relative to the input
-    file's directory.  By redirecting the tool to the staging directory
-    -- where every workspace .ivy file has a flat symlink -- the tool
-    can find all includes regardless of the original directory structure.
+    Ivy's ``import_module()`` resolves ``include`` directives relative
+    to the **process CWD** (via bare ``open(fname, 'r')``), *not* the
+    input file's directory.  Callers must therefore also pass
+    ``cwd=os.path.dirname(staged_path)`` to ``_run_tool()`` so the
+    subprocess CWD points into the staging directory where every
+    workspace ``.ivy`` file has a flat symlink.
 
     Falls back to the original path when the server has no active
     staging directory or the file's basename is not in the staging map.
@@ -100,6 +103,7 @@ async def _run_tool(
     timeout: float,
     server: Any,
     token: Optional[Union[str, int]] = None,
+    cwd: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run an Ivy CLI tool as async subprocess with progress reporting."""
     start = time.monotonic()
@@ -124,6 +128,7 @@ async def _run_tool(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
 
         try:
@@ -179,11 +184,42 @@ async def _run_tool(
 def register(server: Any) -> None:
     """Register custom Ivy command handlers."""
 
+    def _track_start(srv: Any, op_type: str, filepath: str) -> Optional[str]:
+        tracker = getattr(srv, "state_tracker", None)
+        if tracker is None:
+            return None
+        return tracker.operation_tracker.record_start(op_type, filepath)
+
+    def _track_end(srv: Any, op_id: Optional[str], result: Dict[str, Any]) -> None:
+        if op_id is None:
+            return
+        tracker = getattr(srv, "state_tracker", None)
+        if tracker is None:
+            return
+        tracker.operation_tracker.record_end(
+            op_id,
+            success=result.get("success", False),
+            message=result.get("message", ""),
+            duration=result.get("duration", 0.0),
+        )
+
+    def _track_error(srv: Any, op_id: Optional[str], exc: Exception) -> None:
+        if op_id is None:
+            return
+        tracker = getattr(srv, "state_tracker", None)
+        if tracker is None:
+            return
+        tracker.operation_tracker.record_end(
+            op_id, success=False, message=str(exc), duration=0.0
+        )
+
     @server.feature("ivy/verify")
     async def ivy_verify(params) -> Dict[str, Any]:
         uri = params.textDocument.uri
         filepath = uri.replace("file://", "")
         token = getattr(params, "workDoneToken", None)
+
+        op_id = _track_start(server, "verify", filepath)
 
         # Smart isolate detection
         position = None
@@ -201,30 +237,41 @@ def register(server: Any) -> None:
             cmd.append(f"isolate={_validate_ivy_param(isolate)}")
         cmd.append(staged_filepath)
 
-        result = await _run_tool(cmd, DEFAULT_VERIFY_TIMEOUT, server, token)
-        result["isolate"] = isolate
-
-        # Parse output into diagnostics
-        from ivy_lsp.features.diagnostics import parse_ivy_check_output
-
-        combined = "\n".join(result["output"])
-        deep_diags = parse_ivy_check_output(combined)
-        result["diagnosticCount"] = len(deep_diags)
-
-        # Publish merged diagnostics
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-
-        doc = server.workspace.get_text_document(uri)
-        base_diags = compute_diagnostics(
-            server._parser, doc.source or "", filepath, server._indexer
-        )
-        server.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(
-                uri=uri, diagnostics=base_diags + deep_diags
+        try:
+            result = await _run_tool(
+                cmd,
+                DEFAULT_VERIFY_TIMEOUT,
+                server,
+                token,
+                cwd=os.path.dirname(staged_filepath),
             )
-        )
+            result["isolate"] = isolate
 
-        return result
+            # Parse output into diagnostics
+            from ivy_lsp.features.diagnostics import parse_ivy_check_output
+
+            combined = "\n".join(result["output"])
+            deep_diags = parse_ivy_check_output(combined)
+            result["diagnosticCount"] = len(deep_diags)
+
+            # Publish merged diagnostics
+            from ivy_lsp.features.diagnostics import compute_diagnostics
+
+            doc = server.workspace.get_text_document(uri)
+            base_diags = compute_diagnostics(
+                server._parser, doc.source or "", filepath, server._indexer
+            )
+            server.text_document_publish_diagnostics(
+                lsp.PublishDiagnosticsParams(
+                    uri=uri, diagnostics=base_diags + deep_diags
+                )
+            )
+
+            _track_end(server, op_id, result)
+            return result
+        except Exception as e:
+            _track_error(server, op_id, e)
+            raise
 
     @server.feature("ivy/compile")
     async def ivy_compile(params) -> Dict[str, Any]:
@@ -233,10 +280,22 @@ def register(server: Any) -> None:
         token = getattr(params, "workDoneToken", None)
         target = getattr(params, "target", "test")
 
+        op_id = _track_start(server, "compile", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivyc", f"target={_validate_ivy_param(target)}", staged_filepath]
-        result = await _run_tool(cmd, DEFAULT_COMPILE_TIMEOUT, server, token)
-        return result
+        try:
+            result = await _run_tool(
+                cmd,
+                DEFAULT_COMPILE_TIMEOUT,
+                server,
+                token,
+                cwd=os.path.dirname(staged_filepath),
+            )
+            _track_end(server, op_id, result)
+            return result
+        except Exception as e:
+            _track_error(server, op_id, e)
+            raise
 
     @server.feature("ivy/showModel")
     async def ivy_show_model(params) -> Dict[str, Any]:
@@ -244,12 +303,22 @@ def register(server: Any) -> None:
         filepath = uri.replace("file://", "")
         token = getattr(params, "workDoneToken", None)
 
+        op_id = _track_start(server, "showModel", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivy_show", staged_filepath]
-        result = await _run_tool(
-            cmd, DEFAULT_SHOW_MODEL_TIMEOUT, server, token
-        )
-        return result
+        try:
+            result = await _run_tool(
+                cmd,
+                DEFAULT_SHOW_MODEL_TIMEOUT,
+                server,
+                token,
+                cwd=os.path.dirname(staged_filepath),
+            )
+            _track_end(server, op_id, result)
+            return result
+        except Exception as e:
+            _track_error(server, op_id, e)
+            raise
 
     @server.feature("ivy/capabilities")
     def ivy_capabilities(params: Any = None) -> Dict[str, Any]:
@@ -290,12 +359,15 @@ def register(server: Any) -> None:
                 )
 
     @server.feature("ivy/setActiveTest")
-    def ivy_set_active_test(params) -> Dict[str, Any]:
+    def ivy_set_active_test(params: Any = None) -> Dict[str, Any]:
         """Set the active test scope for diagnostics and code lenses.
 
         On success, re-publishes diagnostics for all open documents
         so scoped filtering takes effect immediately.
         """
+        if params is None:
+            return {"success": False, "error": "No params provided"}
+
         test_file = getattr(params, "testFile", None)
 
         try:
@@ -352,8 +424,16 @@ def register(server: Any) -> None:
         }
 
     @server.feature("ivy/compileTest")
-    async def ivy_compile_test(params) -> Dict[str, Any]:
+    async def ivy_compile_test(params: Any = None) -> Dict[str, Any]:
         """Compile a specific test file with ivyc target=test."""
+        if params is None:
+            return {
+                "success": False,
+                "message": "No params provided",
+                "output": [],
+                "duration": 0.0,
+            }
+
         test_file = getattr(params, "testFile", None)
         if not test_file:
             return {
@@ -363,23 +443,35 @@ def register(server: Any) -> None:
                 "duration": 0.0,
             }
 
+        op_id = _track_start(server, "compileTest", test_file)
         token = getattr(params, "workDoneToken", None)
         staged = _resolve_via_staging(server, test_file)
         cmd = ["ivyc", "target=test", staged]
-        result = await _run_tool(cmd, DEFAULT_COMPILE_TIMEOUT, server, token)
-
-        # Store compilation result in scoped model if available
         try:
-            graph = server._indexer._requirement_graph
-            if isinstance(graph, ScopedRequirementModel):
-                graph._compilation_results[test_file] = result
-        except AttributeError:
-            pass
+            result = await _run_tool(
+                cmd,
+                DEFAULT_COMPILE_TIMEOUT,
+                server,
+                token,
+                cwd=os.path.dirname(staged),
+            )
 
-        return result
+            # Store compilation result in scoped model if available
+            try:
+                graph = server._indexer._requirement_graph
+                if isinstance(graph, ScopedRequirementModel):
+                    graph._compilation_results[test_file] = result
+            except AttributeError:
+                pass
+
+            _track_end(server, op_id, result)
+            return result
+        except Exception as e:
+            _track_error(server, op_id, e)
+            raise
 
     @server.feature("ivy/activeDocumentChanged")
-    def ivy_active_document_changed(params) -> None:
+    def ivy_active_document_changed(params: Any = None) -> None:
         """Auto-detect active test when user switches documents.
 
         If the newly focused document is a registered test file,
