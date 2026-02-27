@@ -47,3 +47,39 @@ class TestIvySymbolSerialization:
         restored = IvySymbol.from_dict(sym.to_dict())
         assert restored.detail is None
         assert restored.file_path is None
+
+
+from ivy_lsp.analysis.test_scope import ExportImportInfo
+
+
+class TestExportImportInfoSerialization:
+    def test_to_dict(self):
+        info = ExportImportInfo(
+            file="/tmp/test.ivy", exports=["foo", "bar"],
+            imports=["baz"], export_lines={"foo": 10, "bar": 20},
+            import_lines={"baz": 30},
+        )
+        d = info.to_dict()
+        assert d["file"] == "/tmp/test.ivy"
+        assert d["exports"] == ["foo", "bar"]
+        assert d["export_lines"] == {"foo": 10, "bar": 20}
+
+    def test_from_dict(self):
+        d = {
+            "file": "/tmp/test.ivy", "exports": ["foo"], "imports": [],
+            "export_lines": {"foo": 10}, "import_lines": {},
+        }
+        info = ExportImportInfo.from_dict(d)
+        assert info.file == "/tmp/test.ivy"
+        assert info.exports == ["foo"]
+        assert info.has_exports is True
+
+    def test_roundtrip(self):
+        info = ExportImportInfo(
+            file="/tmp/a.ivy", exports=["x"], imports=["y"],
+            export_lines={"x": 1}, import_lines={"y": 2},
+        )
+        restored = ExportImportInfo.from_dict(info.to_dict())
+        assert restored.file == info.file
+        assert restored.exports == info.exports
+        assert restored.imports == info.imports

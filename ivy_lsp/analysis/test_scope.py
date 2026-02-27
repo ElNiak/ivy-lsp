@@ -29,6 +29,25 @@ class ExportImportInfo:
     def has_exports(self) -> bool:
         return len(self.exports) > 0
 
+    def to_dict(self) -> dict:
+        return {
+            "file": self.file,
+            "exports": list(self.exports),
+            "imports": list(self.imports),
+            "export_lines": dict(self.export_lines),
+            "import_lines": dict(self.import_lines),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ExportImportInfo":
+        return cls(
+            file=d["file"],
+            exports=d.get("exports", []),
+            imports=d.get("imports", []),
+            export_lines=d.get("export_lines", {}),
+            import_lines=d.get("import_lines", {}),
+        )
+
 
 @dataclass(frozen=True)
 class TestScope:
