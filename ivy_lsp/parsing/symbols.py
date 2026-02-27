@@ -34,6 +34,27 @@ class IvySymbol:
     detail: Optional[str] = None
     file_path: Optional[str] = None
 
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "kind": int(self.kind),
+            "range": list(self.range),
+            "children": [c.to_dict() for c in self.children],
+            "detail": self.detail,
+            "file_path": self.file_path,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "IvySymbol":
+        return cls(
+            name=d["name"],
+            kind=SymbolKind(d["kind"]),
+            range=tuple(d["range"]),
+            children=[cls.from_dict(c) for c in d.get("children", [])],
+            detail=d.get("detail"),
+            file_path=d.get("file_path"),
+        )
+
 
 @dataclass
 class IvyScope:
