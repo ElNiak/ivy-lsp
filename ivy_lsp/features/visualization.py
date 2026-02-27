@@ -681,7 +681,7 @@ def handle_layered_overview(server: Any, params: dict) -> dict:
         by_group[key]["actions"].append(action_node.name)
         by_group[key]["requirements"] += len(reqs)
 
-    for var_id, var_node in graph.state_vars.items():
+    for _, var_node in graph.state_vars.items():
         key = (
             var_node.file
             if group_by == "file"
