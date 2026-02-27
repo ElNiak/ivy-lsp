@@ -6,7 +6,7 @@ import enum
 import logging
 import os
 import re
-from typing import List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from lsprotocol import types as lsp
 from lsprotocol.types import SymbolKind
@@ -313,6 +313,84 @@ def _add_symbol_completions(
             )
     for child in sym.children:
         _add_symbol_completions(child, lower_prefix, seen, items)
+
+
+def compute_semantic_completions(
+    graph: Any,
+    filepath: str,
+    line: int,
+    block_type: str,
+) -> List[Dict[str, str]]:
+    """Compute context-aware completion items from the requirement graph.
+
+    Args:
+        graph: RequirementGraph instance (or None)
+        filepath: Current file path
+        line: Current line number
+        block_type: "before", "after", or "body"
+
+    Returns:
+        List of dicts with label, detail, kind, insertText, sortText keys.
+    """
+    if graph is None:
+        return []
+
+    from ivy_lsp.analysis.requirement_graph import EdgeType
+
+    completions: List[Dict[str, str]] = []
+
+    # Find which action's monitor block we're in
+    action_name = _find_enclosing_action(graph, filepath, line)
+
+    if action_name and block_type in ("before", "body"):
+        # In before/body blocks: suggest state vars commonly used in require
+        reqs = graph.get_requirements_for_action(action_name)
+        seen_vars: Set[str] = set()
+        for req in reqs:
+            for etype, target_id in graph._outgoing.get(req.id, []):
+                if etype == EdgeType.READS:
+                    seen_vars.add(target_id)
+
+        # Suggest all state vars, prioritizing those already used
+        for var_id, var_node in graph.state_vars.items():
+            priority = "high" if var_id in seen_vars else "low"
+            completions.append({
+                "label": var_node.name,
+                "detail": f"state var ({priority} relevance)",
+                "kind": "variable",
+                "insertText": var_node.name,
+                "sortText": "0" + var_node.name
+                if priority == "high"
+                else "1" + var_node.name,
+            })
+
+    elif action_name and block_type == "after":
+        # In after blocks: suggest state vars commonly written
+        written = graph.get_state_vars_written_in_monitor(action_name)
+        for sv in written:
+            completions.append({
+                "label": sv.name,
+                "detail": "state var (written by action)",
+                "kind": "variable",
+                "insertText": sv.name,
+                "sortText": "0" + sv.name,
+            })
+
+    return completions
+
+
+def _find_enclosing_action(
+    graph: Any, filepath: str, line: int
+) -> Optional[str]:
+    """Find the action name for the monitor block at the given line.
+
+    Searches requirements in the graph for one whose file matches and
+    whose line is within a proximity window (10 lines) of the cursor.
+    """
+    for req in graph.requirements.values():
+        if req.file == filepath and abs(req.line - line) <= 10:
+            return req.monitor_action
+    return None
 
 
 def register(server) -> None:
