@@ -161,7 +161,8 @@ def _monitor_lenses(
                 ),
                 command=lsp.Command(
                     title=title,
-                    command="",
+                    command="ivy.showActionRequirements",
+                    arguments=[action_name],
                 ),
             )
         )
@@ -201,7 +202,8 @@ def _state_var_lenses(
                     ),
                     command=lsp.Command(
                         title=title,
-                        command="",
+                        command="ivy.showActionRequirements",
+                        arguments=[var_name],
                     ),
                 )
             )

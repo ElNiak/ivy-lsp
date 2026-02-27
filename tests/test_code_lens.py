@@ -515,3 +515,88 @@ class TestLensRange:
 
         assert len(lenses) >= 1
         assert lenses[0].range.start.line == 2
+
+
+class TestClickableCodeLenses:
+    """Verify that code lens commands include ivy.showActionRequirements."""
+
+    def test_monitor_lens_has_command(self):
+        """Monitor code lenses should use ivy.showActionRequirements command."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:1",
+            kind="require",
+            formula_text="x > 0",
+            line=1,
+            col=0,
+            file=filepath,
+            monitor_action="send",
+            mixin_kind="before",
+        )
+        graph.add_file_requirements(filepath, [req])
+
+        indexer = _make_indexer(graph=graph)
+        source = "before send {\n    require x > 0\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        monitor_lens = lenses[0]
+        assert monitor_lens.command is not None
+        assert monitor_lens.command.command == "ivy.showActionRequirements"
+
+    def test_monitor_lens_has_action_name_in_arguments(self):
+        """Monitor code lens arguments should contain the action name."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:1",
+            kind="require",
+            formula_text="x > 0",
+            line=1,
+            col=0,
+            file=filepath,
+            monitor_action="send",
+            mixin_kind="before",
+        )
+        graph.add_file_requirements(filepath, [req])
+
+        indexer = _make_indexer(graph=graph)
+        source = "before send {\n    require x > 0\n}\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        monitor_lens = lenses[0]
+        assert monitor_lens.command.arguments is not None
+        assert "send" in monitor_lens.command.arguments
+
+    def test_state_var_lens_has_command(self):
+        """State var code lenses should use ivy.showActionRequirements command."""
+        filepath = _abs("test.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{filepath}:5",
+            kind="require",
+            formula_text="connected(X,Y)",
+            line=5,
+            col=0,
+            file=filepath,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+        graph.add_edge(req.id, EdgeType.READS, "connected")
+
+        indexer = _make_indexer(graph=graph)
+        source = "relation connected(X:cid, Y:cid)\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        assert len(lenses) >= 1
+        sv_lens = lenses[0]
+        assert sv_lens.command is not None
+        assert sv_lens.command.command == "ivy.showActionRequirements"
+        assert sv_lens.command.arguments is not None
+        assert "connected" in sv_lens.command.arguments
