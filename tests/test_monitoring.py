@@ -11,6 +11,7 @@ from ivy_lsp.features.monitoring import (
     handle_include_graph,
     handle_reindex,
     handle_clear_cache,
+    handle_feature_status,
 )
 
 
@@ -129,3 +130,99 @@ class TestClearCache:
         mock_server._indexer = None
         result = handle_clear_cache(mock_server)
         assert result["success"] is False
+
+
+class TestFeatureStatus:
+    """Tests for the ivy/featureStatus endpoint handler."""
+
+    def _make_server(self, full_mode=True, has_indexer=True, has_pipeline=True,
+                     indexing_state="idle", has_parser=True):
+        """Build a mock server with configurable feature availability."""
+        server = MagicMock()
+        server.state_tracker = ServerStateTracker()
+        server._full_mode = full_mode
+        if indexing_state == "indexing":
+            server.state_tracker.set_indexing()
+        elif indexing_state == "error":
+            server.state_tracker.set_index_error("index failed")
+        server._parser = MagicMock() if has_parser else None
+        if has_indexer:
+            server._indexer = MagicMock()
+            server._indexer._requirement_graph = MagicMock()
+        else:
+            server._indexer = None
+        if has_pipeline:
+            server._semantic_model = MagicMock()
+            server._semantic_model.node_count.return_value = 10
+            server._semantic_model.edge_count.return_value = 5
+            pipeline = MagicMock()
+            pipeline.get_pipeline_state.return_value = {
+                "tier1FileCount": 3, "tier2FileCount": 2, "tier3FileCount": 0,
+                "tier3Running": False, "semanticNodeCount": 10,
+                "semanticEdgeCount": 5, "semanticModelReady": True,
+            }
+            server._analysis_pipeline = pipeline
+        else:
+            server._semantic_model = None
+            server._analysis_pipeline = None
+        return server
+
+    def test_returns_features_and_pipeline(self):
+        server = self._make_server()
+        result = handle_feature_status(server)
+        assert "features" in result
+        assert "analysisPipeline" in result
+        assert isinstance(result["features"], list)
+        assert len(result["features"]) >= 4
+
+    def test_all_ready_in_full_mode_with_indexer(self):
+        server = self._make_server(full_mode=True, has_indexer=True)
+        result = handle_feature_status(server)
+        statuses = {f["id"]: f["status"] for f in result["features"]}
+        assert statuses["codeLens"] == "ready"
+        assert statuses["diagnostics"] == "ready"
+        assert statuses["navigation"] == "ready"
+
+    def test_light_mode_degrades_diagnostics(self):
+        server = self._make_server(full_mode=False)
+        result = handle_feature_status(server)
+        statuses = {f["id"]: f["status"] for f in result["features"]}
+        assert statuses["diagnostics"] == "degraded"
+
+    def test_no_indexer_disables_codelens_and_navigation(self):
+        server = self._make_server(has_indexer=False)
+        result = handle_feature_status(server)
+        statuses = {f["id"]: f["status"] for f in result["features"]}
+        assert statuses["codeLens"] == "unavailable"
+        assert statuses["navigation"] == "unavailable"
+
+    def test_indexing_in_progress_shows_loading(self):
+        server = self._make_server(indexing_state="indexing")
+        result = handle_feature_status(server)
+        statuses = {f["id"]: f["status"] for f in result["features"]}
+        assert statuses["codeLens"] == "loading"
+        assert statuses["navigation"] == "loading"
+
+    def test_no_pipeline_disables_semantic_and_rfc(self):
+        server = self._make_server(has_pipeline=False)
+        result = handle_feature_status(server)
+        statuses = {f["id"]: f["status"] for f in result["features"]}
+        assert statuses["semanticAnalysis"] == "unavailable"
+        assert statuses["rfcCoverage"] == "unavailable"
+
+    def test_pipeline_state_forwarded(self):
+        server = self._make_server()
+        result = handle_feature_status(server)
+        ps = result["analysisPipeline"]
+        assert ps["tier1FileCount"] == 3
+        assert ps["semanticModelReady"] is True
+
+    def test_each_feature_has_required_fields(self):
+        server = self._make_server()
+        result = handle_feature_status(server)
+        for f in result["features"]:
+            assert "id" in f
+            assert "name" in f
+            assert "status" in f
+            assert f["status"] in ("ready", "degraded", "unavailable", "loading")
+            assert "reason" in f

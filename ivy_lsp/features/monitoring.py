@@ -13,19 +13,28 @@ from ivy_lsp import __version__
 
 logger = logging.getLogger(__name__)
 
+# Cache tool availability at import time to avoid repeated PATH scans.
+_tool_cache: Dict[str, bool] | None = None
+
+
+def _get_tool_cache() -> Dict[str, bool]:
+    global _tool_cache
+    if _tool_cache is None:
+        _tool_cache = {
+            "ivyCheck": shutil.which("ivy_check") is not None,
+            "ivyc": shutil.which("ivyc") is not None,
+            "ivyShow": shutil.which("ivy_show") is not None,
+        }
+    return _tool_cache
+
 
 # --- Pure handler functions (testable without LSP wiring) ---
 
 
 def handle_server_status(server: Any) -> Dict[str, Any]:
     mode = "full" if server._full_mode else "light"
-    tools = {
-        "ivyCheck": shutil.which("ivy_check") is not None,
-        "ivyc": shutil.which("ivyc") is not None,
-        "ivyShow": shutil.which("ivy_show") is not None,
-    }
     return server.state_tracker.to_status_dict(
-        mode=mode, version=__version__, tools=tools
+        mode=mode, version=__version__, tools=_get_tool_cache()
     )
 
 
@@ -129,6 +138,137 @@ def handle_clear_cache(server: Any) -> Dict[str, Any]:
         return {"success": False, "message": str(e)}
 
 
+def handle_feature_status(server: Any) -> Dict[str, Any]:
+    """Compute per-feature availability status."""
+    from ivy_lsp.features.status import IndexingState
+
+    features = []
+    is_full = server._full_mode
+    has_indexer = server._indexer is not None
+    indexing = server.state_tracker.indexing_state
+    indexer_ok = has_indexer and indexing == IndexingState.IDLE
+    indexer_loading = has_indexer and indexing == IndexingState.INDEXING
+    has_graph = has_indexer and getattr(
+        server._indexer, "_requirement_graph", None
+    ) is not None
+    has_pipeline = getattr(server, "_analysis_pipeline", None) is not None
+    has_model = getattr(server, "_semantic_model", None) is not None
+    has_parser = server._parser is not None
+
+    # --- Code Lens ---
+    if indexer_loading:
+        features.append({
+            "id": "codeLens", "name": "Code Lens", "status": "loading",
+            "reason": "Indexing in progress", "dependsOn": ["indexing"],
+        })
+    elif not indexer_ok:
+        features.append({
+            "id": "codeLens", "name": "Code Lens", "status": "unavailable",
+            "reason": "Requires successful indexing", "dependsOn": ["indexing"],
+        })
+    else:
+        features.append({
+            "id": "codeLens", "name": "Code Lens", "status": "ready",
+            "reason": "Requirement graph available" if has_graph
+            else "Index available", "dependsOn": ["indexing"],
+        })
+
+    # --- Document Symbols ---
+    if has_parser and is_full:
+        features.append({
+            "id": "documentSymbols", "name": "Document Symbols",
+            "status": "ready", "reason": "Full parser available",
+        })
+    elif has_parser:
+        features.append({
+            "id": "documentSymbols", "name": "Document Symbols",
+            "status": "degraded", "reason": "Fallback parser (light mode)",
+        })
+    else:
+        features.append({
+            "id": "documentSymbols", "name": "Document Symbols",
+            "status": "unavailable", "reason": "No parser available",
+        })
+
+    # --- Diagnostics ---
+    features.append({
+        "id": "diagnostics", "name": "Diagnostics",
+        "status": "ready" if is_full else "degraded",
+        "reason": "Full diagnostics active" if is_full
+        else "Structural checks only (light mode)",
+    })
+
+    # --- Semantic Analysis ---
+    if not has_pipeline:
+        features.append({
+            "id": "semanticAnalysis", "name": "Semantic Analysis",
+            "status": "unavailable", "reason": "Pipeline not initialized",
+        })
+    elif not is_full:
+        features.append({
+            "id": "semanticAnalysis", "name": "Semantic Analysis",
+            "status": "degraded",
+            "reason": "Tier 1 only (light mode, no z3)",
+        })
+    else:
+        features.append({
+            "id": "semanticAnalysis", "name": "Semantic Analysis",
+            "status": "ready", "reason": "All tiers available",
+        })
+
+    # --- RFC Coverage ---
+    if not has_model:
+        features.append({
+            "id": "rfcCoverage", "name": "RFC Coverage",
+            "status": "unavailable",
+            "reason": "Semantic model not initialized",
+            "dependsOn": ["semanticAnalysis"],
+        })
+    else:
+        model_ready = server._semantic_model.node_count() > 0
+        features.append({
+            "id": "rfcCoverage", "name": "RFC Coverage",
+            "status": "ready" if model_ready else "degraded",
+            "reason": f"Semantic model active ({server._semantic_model.node_count()} nodes)"
+            if model_ready else "No data in semantic model yet",
+            "dependsOn": ["semanticAnalysis"],
+        })
+
+    # --- Navigation (completion, definition, hover, references) ---
+    if indexer_loading:
+        features.append({
+            "id": "navigation", "name": "Navigation",
+            "status": "loading",
+            "reason": "Indexing in progress",
+            "dependsOn": ["indexing"],
+        })
+    elif indexer_ok:
+        features.append({
+            "id": "navigation", "name": "Navigation",
+            "status": "ready",
+            "reason": "Index available",
+            "dependsOn": ["indexing"],
+        })
+    else:
+        features.append({
+            "id": "navigation", "name": "Navigation",
+            "status": "unavailable",
+            "reason": "Requires indexing",
+            "dependsOn": ["indexing"],
+        })
+
+    # --- Pipeline state ---
+    pipeline_state = {
+        "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
+        "tier3Running": False, "semanticNodeCount": 0,
+        "semanticEdgeCount": 0, "semanticModelReady": False,
+    }
+    if has_pipeline:
+        pipeline_state = server._analysis_pipeline.get_pipeline_state()
+
+    return {"features": features, "analysisPipeline": pipeline_state}
+
+
 # --- LSP wiring ---
 
 
@@ -158,3 +298,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/clearCache")
     def on_clear_cache(params: Any = None) -> Dict[str, Any]:
         return handle_clear_cache(server)
+
+    @server.feature("ivy/featureStatus")
+    def on_feature_status(params: Any = None) -> Dict[str, Any]:
+        return handle_feature_status(server)
