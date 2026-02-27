@@ -75,7 +75,12 @@ class CompilerAdapter:
     """Wraps the Ivy compiler with state isolation.
 
     Implements :class:`~ivy_lsp.adapters.protocols.ICompilerAdapter`.
+    When a :class:`CompilerManager` is provided, delegates compilation
+    to a subprocess for full isolation.
     """
+
+    def __init__(self, compiler_manager: Any = None) -> None:
+        self._manager = compiler_manager
 
     def compile(self, source: str, filename: str) -> CompileResult:
         """Compile *source* through the full Ivy compiler pipeline.
@@ -83,6 +88,9 @@ class CompilerAdapter:
         Returns a :class:`CompileResult` with module/signature snapshots.
         Never raises -- captures all errors.
         """
+        if self._manager is not None:
+            return self._compile_via_manager(source, filename)
+        # Legacy in-process path
         try:
             import ivy.ivy_compiler as ic
         except ImportError:
@@ -124,6 +132,28 @@ class CompilerAdapter:
                 signature_snapshot=sig_snap,
             )
 
+    def _compile_via_manager(self, source: str, filename: str) -> CompileResult:
+        """Compile via CompilerManager subprocess."""
+        ir = self._manager.compile_sync(source, filename)
+        if not ir.success:
+            return CompileResult(
+                success=False,
+                errors=[CompileError(message=e, file=filename) for e in ir.errors],
+            )
+        try:
+            module_snap = ModuleSnapshot.from_ir(ir)
+            sig_snap = module_snap.signature
+        except Exception:
+            logger.warning("Snapshot conversion failed", exc_info=True)
+            module_snap = None
+            sig_snap = None
+
+        return CompileResult(
+            success=True,
+            module_snapshot=module_snap,
+            signature_snapshot=sig_snap,
+        )
+
     # Maximum time (seconds) before we warn about a long-running compilation.
     COMPILE_TIMEOUT = 120
 
@@ -135,6 +165,10 @@ class CompilerAdapter:
         A watchdog timer logs a warning if compilation exceeds
         ``COMPILE_TIMEOUT`` seconds, making long lock-hold times visible.
         """
+        if self._manager is not None:
+            self._compile_background_via_manager(source, filename, callback)
+            return
+        # Legacy in-process path
         timed_out = threading.Event()
 
         def _watchdog():
@@ -173,6 +207,36 @@ class CompilerAdapter:
                 )
 
         future.add_done_callback(_on_done)
+
+    def _compile_background_via_manager(
+        self, source: str, filename: str, callback: Optional[Callable]
+    ) -> None:
+        """Background compilation via CompilerManager subprocess."""
+
+        def _on_ir(ir: Any) -> None:
+            if not ir.success:
+                result = CompileResult(
+                    success=False,
+                    errors=[
+                        CompileError(message=e, file=filename) for e in ir.errors
+                    ],
+                )
+            else:
+                try:
+                    module_snap = ModuleSnapshot.from_ir(ir)
+                    sig_snap = module_snap.signature
+                except Exception:
+                    module_snap = None
+                    sig_snap = None
+                result = CompileResult(
+                    success=True,
+                    module_snapshot=module_snap,
+                    signature_snapshot=sig_snap,
+                )
+            if callback:
+                callback(result)
+
+        self._manager.compile_async(source, filename, _on_ir)
 
 
 def _extract_module_snapshot() -> Optional[ModuleSnapshot]:

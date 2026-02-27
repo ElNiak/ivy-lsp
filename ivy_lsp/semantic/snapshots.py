@@ -50,3 +50,35 @@ class ModuleSnapshot:
     conjectures: List[str] = field(default_factory=list)
     isolates: List[str] = field(default_factory=list)
     raw_module: Optional[Any] = None
+
+    @classmethod
+    def from_ir(cls, ir: Any) -> ModuleSnapshot:
+        """Create a ModuleSnapshot from a CompiledModuleIR."""
+        sig_sorts = {
+            name: SortInfo(
+                name=name,
+                arity=s.arity,
+                is_uninterpreted=s.is_uninterpreted,
+            )
+            for name, s in ir.sorts.items()
+        }
+        sig_symbols = {
+            name: SymbolInfo(
+                name=name,
+                sort=s.sort_str,
+                is_relation=s.is_relation,
+            )
+            for name, s in ir.symbols.items()
+        }
+        sig = SignatureSnapshot(
+            sorts=sig_sorts,
+            symbols=sig_symbols,
+            actions=list(ir.actions.keys()),
+            relations=[n for n, s in ir.symbols.items() if s.is_relation],
+        )
+        return cls(
+            signature=sig,
+            axioms=[lf.formula_str for lf in ir.labeled_axioms],
+            conjectures=[lf.formula_str for lf in ir.labeled_conjectures],
+            isolates=list(ir.isolates.keys()),
+        )
