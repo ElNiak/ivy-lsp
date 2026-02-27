@@ -98,6 +98,61 @@ def _detect_isolate_at_position(
     return _find_containing(symbols, position.line)
 
 
+def _collect_all_isolates(
+    server: Any,
+    filepath: str,
+    source: str,
+) -> List[str]:
+    """Collect all isolate names from the current file and transitive includes.
+
+    Checks the current file's document symbols first, then walks the include
+    graph to find isolates defined in transitively included modules.
+    """
+    from ivy_lsp.features.document_symbols import compute_document_symbols
+
+    def _extract_isolate_names(
+        syms: Sequence[lsp.DocumentSymbol],
+    ) -> List[str]:
+        names: List[str] = []
+        for sym in syms:
+            if sym.kind == lsp.SymbolKind.Namespace:
+                names.append(sym.name)
+            if sym.children:
+                names.extend(_extract_isolate_names(sym.children))
+        return names
+
+    # Check current file
+    symbols = compute_document_symbols(
+        server._parser, server._indexer, source, filepath
+    )
+    isolates = _extract_isolate_names(symbols)
+
+    # If none found locally, walk transitive includes
+    if not isolates:
+        try:
+            include_graph = server._indexer._include_graph
+            cache = server._indexer._cache
+        except AttributeError:
+            return isolates
+
+        for included_file in include_graph.get_transitive_includes(filepath):
+            cached = cache.get(included_file)
+            if cached is None:
+                continue
+            for sym in cached.symbols:
+                if getattr(sym, "kind", None) == lsp.SymbolKind.Namespace:
+                    isolates.append(sym.name)
+
+    # Deduplicate while preserving order
+    seen: set = set()
+    unique: List[str] = []
+    for name in isolates:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
+    return unique
+
+
 async def _run_tool(
     cmd: List[str],
     timeout: float,
@@ -303,9 +358,43 @@ def register(server: Any) -> None:
         filepath = uri.replace("file://", "")
         token = getattr(params, "workDoneToken", None)
 
+        # Smart isolate detection (same pattern as ivy/verify)
+        position = None
+        raw_pos = getattr(params, "position", None)
+        if raw_pos is not None:
+            position = lsp.Position(line=raw_pos.line, character=raw_pos.character)
+
+        # Accept explicit isolate from extension (e.g., quick pick retry)
+        isolate = getattr(params, "isolate", None)
+
+        # Try cursor-based detection
+        if isolate is None and position is not None:
+            isolate = _detect_isolate_at_position(server, uri, position)
+
+        # If still no isolate, collect from file + transitive includes
+        if isolate is None:
+            doc = server.workspace.get_text_document(uri)
+            source = doc.source or ""
+            all_isolates = _collect_all_isolates(
+                server, filepath, source
+            )
+            if len(all_isolates) == 1:
+                isolate = all_isolates[0]
+            elif len(all_isolates) > 1:
+                return {
+                    "success": False,
+                    "message": "Multiple isolates found — please select one",
+                    "output": [],
+                    "duration": 0.0,
+                    "availableIsolates": all_isolates,
+                }
+
         op_id = _track_start(server, "showModel", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
-        cmd = ["ivy_show", staged_filepath]
+        cmd = ["ivy_show"]
+        if isolate:
+            cmd.append(f"isolate={_validate_ivy_param(isolate)}")
+        cmd.append(staged_filepath)
         try:
             result = await _run_tool(
                 cmd,
@@ -314,6 +403,7 @@ def register(server: Any) -> None:
                 token,
                 cwd=os.path.dirname(staged_filepath),
             )
+            result["isolate"] = isolate
             _track_end(server, op_id, result)
             return result
         except Exception as e:
