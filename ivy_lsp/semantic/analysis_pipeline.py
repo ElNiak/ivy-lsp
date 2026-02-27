@@ -37,6 +37,10 @@ class AnalysisPipeline:
         self._parser = parser_adapter
         self._enrichment = enrichment_adapter
         self._compiler = compiler_adapter
+        self._tier1_files: set[str] = set()
+        self._tier2_files: set[str] = set()
+        self._tier3_files: set[str] = set()
+        self._tier3_running: bool = False
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -55,11 +59,12 @@ class AnalysisPipeline:
             nodes.append(ann)
 
         self._model.update_file(filepath, nodes, edges, "tier1")
+        self._tier1_files.add(filepath)
         logger.debug("Tier 1 complete for %s: %d nodes", filepath, len(nodes))
 
     # -- Tier 2 ----------------------------------------------------------------
 
-    def run_tier2(self, source: str, filepath: str) -> None:
+    def run_tier2(self, source: str, filepath: str) -> Any:
         """AST-enriched analysis (<200ms, ivy parser).
 
         - Parse with parser_adapter
@@ -67,6 +72,8 @@ class AnalysisPipeline:
         - Build cross-reference edges (HAS_PARAM)
         - Re-parse RFC annotations to link with AST nodes
         - Feed into model.update_file at tier2
+
+        Returns the ParseResult so callers can reuse it (avoiding double parse).
         """
         nodes: List[Any] = []
         edges: List[Tuple[str, SemanticEdgeType, str]] = []
@@ -126,12 +133,14 @@ class AnalysisPipeline:
             nodes.append(ann)
 
         self._model.update_file(filepath, nodes, edges, "tier2")
+        self._tier2_files.add(filepath)
         logger.debug(
             "Tier 2 complete for %s: %d nodes, %d edges",
             filepath,
             len(nodes),
             len(edges),
         )
+        return result
 
     # -- Tier 3 ----------------------------------------------------------------
 
@@ -146,28 +155,55 @@ class AnalysisPipeline:
                     filepath,
                     [e.message for e in result.errors],
                 )
+                self._tier3_running = False
                 return
             nodes: List[Any] = []
             edges: List[Tuple[str, SemanticEdgeType, str]] = []
             self._model.update_file(filepath, nodes, edges, "tier3")
+            self._tier3_files.add(filepath)
+            self._tier3_running = False
             logger.debug("Tier 3 complete for %s", filepath)
 
-        if hasattr(self._compiler, "compile_background"):
-            self._compiler.compile_background(source, filepath, _on_result)
-        else:
-            # Synchronous fallback
-            result = self._compiler.compile(source, filepath)
-            _on_result(result)
+        self._tier3_running = True
+        try:
+            if hasattr(self._compiler, "compile_background"):
+                self._compiler.compile_background(source, filepath, _on_result)
+            else:
+                # Synchronous fallback
+                result = self._compiler.compile(source, filepath)
+                _on_result(result)
+        except Exception:
+            self._tier3_running = False
+            raise
+
+    # -- State query -----------------------------------------------------------
+
+    def get_pipeline_state(self) -> dict:
+        """Return current pipeline state for monitoring."""
+        return {
+            "tier1FileCount": len(self._tier1_files),
+            "tier2FileCount": len(self._tier2_files),
+            "tier3FileCount": len(self._tier3_files),
+            "tier3Running": self._tier3_running,
+            "semanticNodeCount": self._model.node_count(),
+            "semanticEdgeCount": self._model.edge_count(),
+            "semanticModelReady": self._model.node_count() > 0,
+        }
 
     # -- Orchestration ---------------------------------------------------------
 
-    def analyze(self, source: str, filepath: str, trigger: str = "change") -> None:
+    def analyze(self, source: str, filepath: str, trigger: str = "change") -> Any:
         """Run appropriate tiers based on trigger.
 
         trigger: "change" -> T1+T2, "save" -> T1+T2+T3, "command" -> T3 only
+
+        Returns the ParseResult from Tier 2 (or None if Tier 2 was not run)
+        so that callers can reuse it and avoid a redundant parse.
         """
+        parse_result = None
         if trigger in ("change", "save"):
             self.run_tier1(source, filepath)
-            self.run_tier2(source, filepath)
+            parse_result = self.run_tier2(source, filepath)
         if trigger in ("save", "command"):
             self.run_tier3_background(source, filepath)
+        return parse_result

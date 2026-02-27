@@ -482,3 +482,78 @@ class TestAnalyzeOrchestration:
         assert len(nodes_b) == 1
         assert nodes_a[0].tags == ["a"]
         assert nodes_b[0].tags == ["b"]
+
+
+# ---------------------------------------------------------------------------
+# Pipeline state tracking tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineState:
+    """Tests for get_pipeline_state() tier tracking."""
+
+    def _make_pipeline(self, model=None, compiler=None):
+        from ivy_lsp.adapters.null_adapter import (
+            NullAstEnrichmentAdapter,
+            NullCompilerAdapter,
+            NullParserAdapter,
+        )
+        m = model or SemanticModel()
+        return AnalysisPipeline(
+            model=m,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler or NullCompilerAdapter(),
+        ), m
+
+    def test_initial_state_all_zeros(self):
+        pipeline, _ = self._make_pipeline()
+        state = pipeline.get_pipeline_state()
+        assert state["tier1FileCount"] == 0
+        assert state["tier2FileCount"] == 0
+        assert state["tier3FileCount"] == 0
+        assert state["tier3Running"] is False
+        assert state["semanticNodeCount"] == 0
+        assert state["semanticEdgeCount"] == 0
+        assert state["semanticModelReady"] is False
+
+    def test_tier1_increments_file_count(self):
+        pipeline, model = self._make_pipeline()
+        pipeline.run_tier1("require x; # [rfc9000:4.1]\n", "a.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier1FileCount"] == 1
+        assert state["semanticModelReady"] is True
+
+    def test_tier2_increments_file_count(self):
+        pipeline, _ = self._make_pipeline()
+        pipeline.run_tier2("type cid\n", "b.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier2FileCount"] == 1
+
+    def test_tier3_tracks_file_on_success(self):
+        pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=True))
+        pipeline.run_tier3_background("type cid\n", "c.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier3FileCount"] == 1
+        assert state["tier3Running"] is False
+
+    def test_tier3_not_tracked_on_failure(self):
+        pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=False))
+        pipeline.run_tier3_background("bad\n", "d.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier3FileCount"] == 0
+        assert state["tier3Running"] is False
+
+    def test_multiple_files_counted_separately(self):
+        pipeline, _ = self._make_pipeline()
+        pipeline.run_tier1("require x; # [a]\n", "a.ivy")
+        pipeline.run_tier1("require y; # [b]\n", "b.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier1FileCount"] == 2
+
+    def test_same_file_counted_once(self):
+        pipeline, _ = self._make_pipeline()
+        pipeline.run_tier1("require x; # [a]\n", "a.ivy")
+        pipeline.run_tier1("require y; # [b]\n", "a.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier1FileCount"] == 1
