@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import time
+import uuid
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
@@ -15,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class _LspLogHandler(logging.Handler):
-    """Bridge Python logging -> LSP window/logMessage notifications."""
+    """Bridge Python logging -> LSP window/logMessage notifications.
+
+    Rate-limited to prevent flooding the stdio pipe, which can cause
+    write-side blocking and contribute to thread pool starvation.
+    """
 
     _LEVEL_MAP = {
         logging.DEBUG: lsp.MessageType.Log,
@@ -25,20 +30,35 @@ class _LspLogHandler(logging.Handler):
         logging.CRITICAL: lsp.MessageType.Error,
     }
 
+    _MIN_INTERVAL = 0.05  # 50ms between messages
+
     def __init__(self, server: "IvyLanguageServer"):
         super().__init__()
         self._server = server
         self._sending = False  # recursion guard
+        self._last_emit = 0.0
+        self._drop_count = 0
 
     def emit(self, record: logging.LogRecord) -> None:
         if self._sending:
             return
+        # Always let WARNING+ through; throttle DEBUG/INFO.
+        now = time.time()
+        if record.levelno < logging.WARNING:
+            if (now - self._last_emit) < self._MIN_INTERVAL:
+                self._drop_count += 1
+                return
         self._sending = True
         try:
             msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
+            msg = self.format(record)
+            if self._drop_count > 0:
+                msg = f"[{self._drop_count} log messages suppressed] {msg}"
+                self._drop_count = 0
             self._server.window_log_message(
-                lsp.LogMessageParams(type=msg_type, message=self.format(record))
+                lsp.LogMessageParams(type=msg_type, message=msg)
             )
+            self._last_emit = now
         except Exception:
             pass  # server may not be connected yet
         finally:
@@ -122,6 +142,70 @@ class IvyLanguageServer(LanguageServer):
             except Exception:
                 logger.exception("Failed to clean up staging directory")
 
+    def _make_deep_index_progress_callback(self):
+        """Create a callback that sends ``$/progress`` work-done notifications.
+
+        The callback is invoked from the deep-index background thread.
+        pygls message sending is thread-safe (queued internally), so
+        ``work_done_progress.begin/report/end`` can be called directly.
+
+        Returns:
+            A callable ``(completed, total, current_file) -> None``.
+        """
+        token = str(uuid.uuid4())
+        state = {"created": False}
+        server = self
+
+        def _callback(completed: int, total: int, current_file):
+            if not state["created"]:
+                try:
+                    server.work_done_progress.create(token)
+                    server.work_done_progress.begin(
+                        token,
+                        lsp.WorkDoneProgressBegin(
+                            title="Ivy Deep Index",
+                            message=f"Parsing {total} test files...",
+                            cancellable=False,
+                            percentage=0,
+                        ),
+                    )
+                    state["created"] = True
+                except Exception:
+                    logger.debug(
+                        "Client does not support work-done progress",
+                        exc_info=True,
+                    )
+                    return
+
+            if completed >= total:
+                try:
+                    server.work_done_progress.end(
+                        token,
+                        lsp.WorkDoneProgressEnd(
+                            message=f"Indexed {total} test files",
+                        ),
+                    )
+                except Exception:
+                    logger.debug("Failed to end progress", exc_info=True)
+                return
+
+            pct = int(100 * completed / total) if total > 0 else 0
+            basename = (
+                os.path.basename(current_file) if current_file else ""
+            )
+            try:
+                server.work_done_progress.report(
+                    token,
+                    lsp.WorkDoneProgressReport(
+                        message=f"({completed}/{total}) {basename}",
+                        percentage=pct,
+                    ),
+                )
+            except Exception:
+                logger.debug("Failed to report progress", exc_info=True)
+
+        return _callback
+
     def _install_lsp_log_handler(self) -> None:
         """Replace stderr handler with LSP notification handler."""
         root = logging.getLogger()
@@ -195,7 +279,10 @@ class IvyLanguageServer(LanguageServer):
             self._full_mode = False
             logger.info("z3 not available (%s); running in light mode", e)
 
-        self._indexer = WorkspaceIndexer(root, self._parser, resolver)
+        progress_cb = self._make_deep_index_progress_callback()
+        self._indexer = WorkspaceIndexer(
+            root, self._parser, resolver, progress_callback=progress_cb,
+        )
         self.state_tracker.set_indexing()
         try:
             index_start = time.time()

@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ivy_lsp.analysis.light_mode_extractor import (
     extract_exports_imports_light,
@@ -65,6 +65,7 @@ class FileIndexStatus:
     deep_parse_succeeded: bool = False
     last_indexed_at: Optional[float] = None
     parse_error: Optional[str] = None
+    parse_duration: Optional[float] = None
 
 
 @dataclass
@@ -93,10 +94,14 @@ class WorkspaceIndexer:
         parser: Any,
         resolver: IncludeResolver,
         persistent_cache: bool = False,
+        progress_callback: Optional[
+            Callable[[int, int, Optional[str]], None]
+        ] = None,
     ) -> None:
         self._workspace_root = os.path.abspath(workspace_root)
         self._parser = parser
         self._resolver = resolver
+        self._progress_callback = progress_callback
         if persistent_cache:
             from ivy_lsp.indexer.file_cache import PersistentFileCache
 
@@ -253,6 +258,22 @@ class WorkspaceIndexer:
     # Phase 2: Background full-parse from test entry points
     # ------------------------------------------------------------------
 
+    def _notify_progress(self) -> None:
+        """Invoke the progress callback with current deep-index state.
+
+        Thread-safe: reads progress under lock, calls back outside lock.
+        """
+        if self._progress_callback is None:
+            return
+        with self._progress_lock:
+            completed = self._deep_index_progress.completed_test_files
+            total = self._deep_index_progress.total_test_files
+            current = self._deep_index_progress.current_file
+        try:
+            self._progress_callback(completed, total, current)
+        except Exception:
+            logger.debug("Progress callback failed", exc_info=True)
+
     def _deep_index_from_tests(self) -> None:
         """Full-parse from test entry points in a background thread.
 
@@ -275,6 +296,9 @@ class WorkspaceIndexer:
             self._deep_index_progress.total_test_files = len(test_files)
             self._deep_index_progress.started_at = time.time()
 
+        # Signal progress start (0/total)
+        self._notify_progress()
+
         num_workers = int(os.environ.get("IVY_LSP_PARSE_WORKERS", "0"))
         use_parallel = num_workers != 1 and len(test_files) > 3
 
@@ -290,6 +314,8 @@ class WorkspaceIndexer:
         with self._progress_lock:
             self._deep_index_progress.current_file = None
         self._deep_index_running = False
+        # Signal progress end (total/total)
+        self._notify_progress()
         logger.info("Deep index complete for %d test files", len(test_files))
 
     def _deep_index_serial(self, test_files: List[str]) -> None:
@@ -297,6 +323,7 @@ class WorkspaceIndexer:
         from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
 
         for test_file in test_files:
+            file_start = time.time()
             with self._progress_lock:
                 self._deep_index_progress.current_file = test_file
 
@@ -311,8 +338,10 @@ class WorkspaceIndexer:
                     status.deep_parse_attempted = True
                     status.deep_parse_succeeded = False
                     status.parse_error = "Cannot read file"
+                    status.parse_duration = time.time() - file_start
                     self._deep_index_progress.file_statuses[test_file] = status
                     self._deep_index_progress.completed_test_files += 1
+                self._notify_progress()
                 continue
 
             result = None
@@ -340,11 +369,13 @@ class WorkspaceIndexer:
                     result is not None and result.success and result.ast is not None
                 )
                 status.last_indexed_at = time.time()
+                status.parse_duration = time.time() - file_start
                 if not status.deep_parse_succeeded and result is not None:
                     if hasattr(result, "errors") and result.errors:
                         status.parse_error = str(result.errors[0])
                 self._deep_index_progress.file_statuses[test_file] = status
                 self._deep_index_progress.completed_test_files += 1
+            self._notify_progress()
 
     def _deep_index_parallel(
         self, test_files: List[str], num_workers: int,
@@ -395,6 +426,7 @@ class WorkspaceIndexer:
                     status.parse_error = worker_result.errors[0]
                 self._deep_index_progress.file_statuses[filepath] = status
                 self._deep_index_progress.completed_test_files += 1
+            self._notify_progress()
 
     def _upgrade_file_symbols(
         self,

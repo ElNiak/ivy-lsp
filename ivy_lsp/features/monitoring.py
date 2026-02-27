@@ -278,15 +278,21 @@ def handle_deep_index_progress(server: Any) -> Dict[str, Any]:
             "completedTests": 0,
             "currentFile": None,
             "startedAt": None,
+            "elapsedSeconds": None,
             "fileStatuses": [],
         }
     progress = server._indexer._deep_index_progress
+    running = server._indexer._deep_index_running
+    elapsed = None
+    if progress.started_at is not None:
+        elapsed = round(time.time() - progress.started_at, 1)
     return {
-        "running": server._indexer._deep_index_running,
+        "running": running,
         "totalTests": progress.total_test_files,
         "completedTests": progress.completed_test_files,
         "currentFile": progress.current_file,
         "startedAt": progress.started_at,
+        "elapsedSeconds": elapsed,
         "fileStatuses": [
             {
                 "file": s.filepath,
@@ -294,6 +300,11 @@ def handle_deep_index_progress(server: Any) -> Dict[str, Any]:
                 "deepParseAttempted": s.deep_parse_attempted,
                 "deepParseSucceeded": s.deep_parse_succeeded,
                 "parseError": s.parse_error,
+                "parseDuration": (
+                    round(s.parse_duration, 2)
+                    if s.parse_duration is not None
+                    else None
+                ),
             }
             for s in progress.file_statuses.values()
         ],
