@@ -432,6 +432,28 @@ class WorkspaceIndexer:
         self._wire_requirement_graph()
         self._compute_test_scopes()
 
+    def reindex_file_with_dependents(self, filepath: str) -> None:
+        """Re-index a file and all files that transitively depend on it."""
+        abs_path = os.path.abspath(filepath)
+        # BFS to collect all transitive dependents
+        dirty = {abs_path}
+        queue = [abs_path]
+        while queue:
+            current = queue.pop(0)
+            for dep in self._include_graph.get_included_by(current):
+                if dep not in dirty:
+                    dirty.add(dep)
+                    queue.append(dep)
+
+        # Re-index each dirty file
+        for f in dirty:
+            self._remove_file_symbols(f)
+            self._cache.invalidate(f)
+            self._index_single_file(f)
+
+        self._wire_requirement_graph()
+        self._compute_test_scopes()
+
     def _remove_file_symbols(self, filepath: str) -> None:
         """Rebuild the symbol table excluding all symbols from *filepath*."""
         old_symbols = list(self._symbol_table.all_symbols())
