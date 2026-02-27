@@ -2,11 +2,13 @@
 
 import logging
 import os
+import time
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 
 from ivy_lsp import __version__
+from ivy_lsp.features.status import ServerStateTracker
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ class IvyLanguageServer(LanguageServer):
         self._full_mode = False
         self._semantic_model = None
         self._analysis_pipeline = None
+        self.state_tracker = ServerStateTracker()
 
         from ivy_lsp.features import (
             code_action,
@@ -36,6 +39,7 @@ class IvyLanguageServer(LanguageServer):
             document_symbols,
             folding_range,
             hover,
+            monitoring,
             references,
             rename,
             selection_range,
@@ -58,6 +62,7 @@ class IvyLanguageServer(LanguageServer):
         code_lens.register(self)
         commands.register(self)
         folding_range.register(self)
+        monitoring.register(self)
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
@@ -95,20 +100,6 @@ class IvyLanguageServer(LanguageServer):
         else:
             root = os.getcwd()
 
-        # Try full parser (requires z3). Fall back to lexer-only mode.
-        try:
-            from ivy_lsp.parsing.parser_session import IvyParserWrapper
-
-            self._parser = IvyParserWrapper()
-            self._full_mode = True
-            logger.info("Full parser available (z3 found)")
-        except (ImportError, ModuleNotFoundError) as e:
-            from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
-
-            self._parser = FallbackOnlyParser()
-            self._full_mode = False
-            logger.info("z3 not available (%s); running in light mode", e)
-
         # Read include/exclude paths from environment
         raw_includes = os.environ.get("IVY_LSP_INCLUDE_PATHS", "")
         include_paths = [p.strip() for p in raw_includes.split(",") if p.strip()]
@@ -139,13 +130,39 @@ class IvyLanguageServer(LanguageServer):
                 )
             )
 
-        self._indexer = WorkspaceIndexer(root, self._parser, resolver)
+        # Try full parser (requires z3). Fall back to lexer-only mode.
+        # Parser is created after resolver so it can use resolver.resolve
+        # as a callback for cross-directory include resolution.
         try:
+            from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+            # Eagerly verify z3 is actually available — IvyParserWrapper
+            # defers ivy imports to method bodies, so the import above
+            # succeeds even without z3.
+            import ivy.ivy_utils  # noqa: F401 — triggers z3_shim
+
+            self._parser = IvyParserWrapper(resolve_callback=resolver.resolve)
+            self._full_mode = True
+            logger.info("Full parser available (z3 found)")
+        except (ImportError, ModuleNotFoundError) as e:
+            from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
+
+            self._parser = FallbackOnlyParser()
+            self._full_mode = False
+            logger.info("z3 not available (%s); running in light mode", e)
+
+        self._indexer = WorkspaceIndexer(root, self._parser, resolver)
+        self.state_tracker.set_indexing()
+        try:
+            index_start = time.time()
             self._indexer.index_workspace()
+            index_duration = time.time() - index_start
+            self.state_tracker.set_indexed(index_duration)
             n_files = len(self._indexer._cache._cache)
             n_symbols = sum(1 for _ in self._indexer._symbol_table.all_symbols())
             logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
-        except Exception:
+        except Exception as exc:
+            self.state_tracker.set_index_error(str(exc))
             logger.exception("Workspace indexing failed")
             self.window_show_message(
                 lsp.ShowMessageParams(
