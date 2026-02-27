@@ -416,6 +416,120 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Handler: ivy/actionDependencyGraph
+# ---------------------------------------------------------------------------
+
+
+def handle_action_dependency_graph(server: Any, params: dict) -> dict:
+    """Handle ivy/actionDependencyGraph request.
+
+    Builds a graph where actions are nodes and edges represent shared
+    state variables (action A writes a var that action B reads).
+    """
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return {
+            "nodes": [],
+            "edges": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+        }
+
+    scope_info = _resolve_scope(graph, params)
+    include_state_vars = params.get("includeStateVars", False)
+
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
+
+    # Build action nodes
+    for action_id, action_node in graph.actions.items():
+        reqs = graph.get_requirements_for_action(action_id)
+        nodes.append(
+            {
+                "id": action_id,
+                "label": action_node.name,
+                "type": "action",
+                "file": action_node.file,
+                "line": action_node.line,
+                "requirementCount": len(reqs),
+            }
+        )
+
+    # Build writer/reader maps: state_var_id -> set of action_ids
+    writers: Dict[str, Set[str]] = defaultdict(set)
+    readers: Dict[str, Set[str]] = defaultdict(set)
+
+    for action_id in graph.actions:
+        reqs = graph.get_requirements_for_action(action_id)
+        for req in reqs:
+            for etype, target_id in graph._outgoing.get(req.id, []):
+                if etype == EdgeType.WRITES:
+                    writers[target_id].add(action_id)
+                elif etype == EdgeType.READS:
+                    readers[target_id].add(action_id)
+
+    # Create edges between actions that share state vars (writer -> reader)
+    seen_edges: Set[tuple] = set()
+    for var_id in set(writers.keys()) | set(readers.keys()):
+        writer_actions = writers.get(var_id, set())
+        reader_actions = readers.get(var_id, set())
+        for w in writer_actions:
+            for r in reader_actions:
+                if w != r:
+                    edge_key = (w, r)
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        var_node = graph.state_vars.get(var_id)
+                        label = var_node.name if var_node else var_id
+                        edges.append(
+                            {
+                                "source": w,
+                                "target": r,
+                                "label": label,
+                                "type": "shared_state",
+                            }
+                        )
+
+    # Optionally include state var nodes with writes/reads edges
+    if include_state_vars:
+        for var_id, var_node in graph.state_vars.items():
+            if var_id in writers or var_id in readers:
+                nodes.append(
+                    {
+                        "id": var_id,
+                        "label": var_node.name,
+                        "type": "stateVar",
+                        "file": var_node.file,
+                        "line": var_node.line,
+                    }
+                )
+                for w in writers.get(var_id, set()):
+                    edges.append(
+                        {
+                            "source": w,
+                            "target": var_id,
+                            "type": "writes",
+                        }
+                    )
+                for r in readers.get(var_id, set()):
+                    edges.append(
+                        {
+                            "source": var_id,
+                            "target": r,
+                            "type": "reads",
+                        }
+                    )
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "scopeInfo": {
+            "testFile": scope_info.get("testFile"),
+            "scoped": scope_info.get("scoped", False),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # LSP wiring
 # ---------------------------------------------------------------------------
 
@@ -434,3 +548,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/coverageGaps")
     def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
         return handle_coverage_gaps(server, params or {})
+
+    @server.feature("ivy/actionDependencyGraph")
+    def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
+        return handle_action_dependency_graph(server, params or {})

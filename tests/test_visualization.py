@@ -20,6 +20,7 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     _get_requirement_graph,
     _resolve_scope,
     _serialize_requirement,
+    handle_action_dependency_graph,
     handle_action_requirements,
     handle_coverage_gaps,
     handle_model_summary_table,
@@ -598,6 +599,237 @@ class TestHandleCoverageGaps:
 
 
 # ---------------------------------------------------------------------------
+# Helpers for action dependency graph tests
+# ---------------------------------------------------------------------------
+
+
+def _build_graph_with_shared_state() -> ScopedRequirementModel:
+    """Build a graph where two actions share a state variable."""
+    graph = ScopedRequirementModel()
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+    graph.add_action(
+        ActionNode(
+            id="recv_pkt",
+            name="recv_pkt",
+            qualified_name="quic.recv_pkt",
+            file="/test/quic.ivy",
+            line=20,
+        )
+    )
+    graph.add_state_var(
+        StateVarNode(
+            id="conn_state",
+            name="conn_state",
+            qualified_name="quic.conn_state",
+            file="/test/quic.ivy",
+            line=3,
+            is_relation=False,
+        )
+    )
+    # send_pkt writes conn_state
+    r1 = RequirementNode(
+        id="/test/quic.ivy:15",
+        kind="ensure",
+        formula_text="conn_state(C) = sending",
+        line=15,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
+    )
+    # recv_pkt reads conn_state
+    r2 = RequirementNode(
+        id="/test/quic.ivy:25",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=25,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="recv_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1, r2])
+    graph.add_edge(r1.id, EdgeType.WRITES, "conn_state")
+    graph.add_edge(r2.id, EdgeType.READS, "conn_state")
+    return graph
+
+
+# ---------------------------------------------------------------------------
+# handle_action_dependency_graph
+# ---------------------------------------------------------------------------
+
+
+class TestHandleActionDependencyGraph:
+    def test_returns_empty_when_no_graph(self):
+        server = _FakeServer(None)
+        result = handle_action_dependency_graph(server, {})
+        assert result["nodes"] == []
+        assert result["edges"] == []
+
+    def test_returns_action_nodes(self):
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        node_ids = {n["id"] for n in result["nodes"]}
+        assert "send_pkt" in node_ids
+        assert "recv_pkt" in node_ids
+
+    def test_action_node_has_expected_fields(self):
+        """Each action node should have id, label, type, file, line, requirementCount."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        action_nodes = [n for n in result["nodes"] if n["type"] == "action"]
+        assert len(action_nodes) >= 2
+        for node in action_nodes:
+            assert "id" in node
+            assert "label" in node
+            assert "type" in node
+            assert node["type"] == "action"
+            assert "file" in node
+            assert "line" in node
+            assert "requirementCount" in node
+
+    def test_shared_state_creates_edge(self):
+        """send_pkt WRITES conn_state, recv_pkt READS conn_state -> edge from send_pkt to recv_pkt."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        edges = result["edges"]
+        assert len(edges) >= 1
+        edge_pairs = {(e["source"], e["target"]) for e in edges}
+        # Writer -> Reader direction
+        assert ("send_pkt", "recv_pkt") in edge_pairs
+
+    def test_edge_has_label_and_type(self):
+        """Edges via shared state should carry label (var name) and type."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        edges = result["edges"]
+        assert len(edges) >= 1
+        edge = edges[0]
+        assert "label" in edge
+        assert "type" in edge
+        assert edge["type"] == "shared_state"
+
+    def test_no_self_edges(self):
+        """Actions should not have edges to themselves via shared state vars."""
+        graph = ScopedRequirementModel()
+        graph.add_action(
+            ActionNode(
+                id="act_a",
+                name="act_a",
+                qualified_name="quic.act_a",
+                file="/test/quic.ivy",
+                line=10,
+            )
+        )
+        graph.add_state_var(
+            StateVarNode(
+                id="var_x",
+                name="var_x",
+                qualified_name="quic.var_x",
+                file="/test/quic.ivy",
+                line=3,
+                is_relation=False,
+            )
+        )
+        # act_a both writes and reads var_x
+        r1 = RequirementNode(
+            id="/test/quic.ivy:12",
+            kind="ensure",
+            formula_text="var_x := 1",
+            line=12,
+            col=0,
+            file="/test/quic.ivy",
+            monitor_action="act_a",
+            mixin_kind="after",
+        )
+        r2 = RequirementNode(
+            id="/test/quic.ivy:13",
+            kind="require",
+            formula_text="var_x > 0",
+            line=13,
+            col=0,
+            file="/test/quic.ivy",
+            monitor_action="act_a",
+            mixin_kind="before",
+        )
+        graph.add_file_requirements("/test/quic.ivy", [r1, r2])
+        graph.add_edge(r1.id, EdgeType.WRITES, "var_x")
+        graph.add_edge(r2.id, EdgeType.READS, "var_x")
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        for edge in result["edges"]:
+            assert edge["source"] != edge["target"], "Self-edges should not exist"
+
+    def test_includes_state_var_nodes_when_requested(self):
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {"includeStateVars": True})
+        types = {n["type"] for n in result["nodes"]}
+        assert "stateVar" in types
+
+    def test_state_var_nodes_have_expected_fields(self):
+        """State var nodes include id, label, type, file, line."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {"includeStateVars": True})
+        sv_nodes = [n for n in result["nodes"] if n["type"] == "stateVar"]
+        assert len(sv_nodes) >= 1
+        for node in sv_nodes:
+            assert "id" in node
+            assert "label" in node
+            assert node["type"] == "stateVar"
+            assert "file" in node
+            assert "line" in node
+
+    def test_state_var_edges_when_included(self):
+        """When includeStateVars is True, edges include writes and reads types."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {"includeStateVars": True})
+        edge_types = {e["type"] for e in result["edges"]}
+        assert "writes" in edge_types
+        assert "reads" in edge_types
+
+    def test_does_not_include_state_var_nodes_by_default(self):
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        types = {n["type"] for n in result["nodes"]}
+        assert "stateVar" not in types
+
+    def test_scope_info_present(self):
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        assert "scopeInfo" in result
+        assert "testFile" in result["scopeInfo"]
+        assert "scoped" in result["scopeInfo"]
+
+    def test_requirement_count_on_action_nodes(self):
+        """requirementCount reflects the number of requirements for each action."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {})
+        send_node = next(n for n in result["nodes"] if n["id"] == "send_pkt")
+        recv_node = next(n for n in result["nodes"] if n["id"] == "recv_pkt")
+        # send_pkt has r1 (ensure, after), recv_pkt has r2 (require, before)
+        assert send_node["requirementCount"] == 1
+        assert recv_node["requirementCount"] == 1
+
+
+# ---------------------------------------------------------------------------
 # register() — LSP wiring
 # ---------------------------------------------------------------------------
 
@@ -624,11 +856,12 @@ class TestVisualizationRegister:
         assert "ivy/actionRequirements" in server._handlers
         assert "ivy/modelSummaryTable" in server._handlers
         assert "ivy/coverageGaps" in server._handlers
+        assert "ivy/actionDependencyGraph" in server._handlers
 
-    def test_register_adds_exactly_three_endpoints(self):
+    def test_register_adds_exactly_four_endpoints(self):
         server = _FakeFeatureServer()
         register(server)
-        assert len(server._handlers) == 3
+        assert len(server._handlers) == 4
 
     def test_action_requirements_endpoint_callable(self):
         server = _FakeFeatureServer()
