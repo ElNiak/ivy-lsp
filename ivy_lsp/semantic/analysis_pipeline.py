@@ -45,11 +45,13 @@ class AnalysisPipeline:
         parser_adapter: IParserAdapter,
         enrichment_adapter: IAstEnrichmentAdapter,
         compiler_adapter: ICompilerAdapter,
+        compiler_manager: Any = None,
     ) -> None:
         self._model = model
         self._parser = parser_adapter
         self._enrichment = enrichment_adapter
         self._compiler = compiler_adapter
+        self._compiler_manager = compiler_manager
         self._tier1_files: set[str] = set()
         self._tier2_files: set[str] = set()
         self._tier3_files: set[str] = set()
@@ -175,6 +177,19 @@ class AnalysisPipeline:
                 return
             nodes: List[Any] = []
             edges: List[Tuple[str, SemanticEdgeType, str]] = []
+
+            # Enrich semantic model from compiled data if available
+            if self._compiler_manager is not None:
+                try:
+                    ir = self._compiler_manager.get_cached(filepath)
+                    if ir is not None:
+                        from ivy_lsp.compilation.graph_enrichment import (
+                            enrich_semantic_model,
+                        )
+                        enrich_semantic_model(self._model, ir, filepath)
+                except Exception:
+                    logger.debug("Tier 3 enrichment failed", exc_info=True)
+
             self._model.update_file(filepath, nodes, edges, "tier3")
             self._tier3_files.add(filepath)
             self._tier3_running = False

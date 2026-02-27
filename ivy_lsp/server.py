@@ -81,6 +81,7 @@ class IvyLanguageServer(LanguageServer):
         self._analysis_pipeline = None
         self._bulk_analysis_cancel = threading.Event()
         self.state_tracker = ServerStateTracker()
+        self._compiler_manager = None
 
         from ivy_lsp.features import (
             code_action,
@@ -123,6 +124,10 @@ class IvyLanguageServer(LanguageServer):
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
             logger.info("Ivy Language Server initialized")
+            # Install the LSP log bridge early so that indexing
+            # milestones (file count, symbol count, deep-index stats)
+            # are forwarded as window/logMessage to the client.
+            self._install_lsp_log_handler()
             self._setup_indexer()
             mode = "full" if self._full_mode else "light"
             self.window_log_message(
@@ -131,11 +136,12 @@ class IvyLanguageServer(LanguageServer):
                     message=f"Ivy LSP running in {mode} mode",
                 )
             )
-            self._install_lsp_log_handler()
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
             self._bulk_analysis_cancel.set()
+            if self._compiler_manager is not None:
+                self._compiler_manager.shutdown()
             self._cleanup_staging()
 
     def _cleanup_staging(self) -> None:
@@ -422,6 +428,14 @@ class IvyLanguageServer(LanguageServer):
             n_files = len(self._indexer._cache._cache)
             n_symbols = sum(1 for _ in self._indexer._symbol_table.all_symbols())
             logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
+            # Explicit notification bypasses the log-handler rate limiter
+            # so clients always see this milestone in the Output channel.
+            self.window_log_message(
+                lsp.LogMessageParams(
+                    type=lsp.MessageType.Info,
+                    message=f"Indexed {n_files} files, {n_symbols} symbols",
+                )
+            )
             self._send_model_ready_notification()
         except Exception as exc:
             self.state_tracker.set_index_error(str(exc))
@@ -453,7 +467,32 @@ class IvyLanguageServer(LanguageServer):
                     from ivy_lsp.adapters.compiler_adapter import CompilerAdapter
 
                     enrichment = AstEnrichmentAdapter()
-                    compiler = CompilerAdapter()
+
+                    # Create CompilerManager for subprocess-based compilation
+                    try:
+                        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+                        staging_dir = None
+                        if self._indexer and hasattr(self._indexer, "_resolver"):
+                            staging_dir = getattr(
+                                self._indexer._resolver, "_staging_dir", None
+                            )
+                        self._compiler_manager = CompilerManager(
+                            staging_dir=staging_dir,
+                            timeout=float(
+                                os.environ.get("IVY_LSP_COMPILE_TIMEOUT", "300")
+                            ),
+                            cache_ttl=float(
+                                os.environ.get("IVY_LSP_COMPILE_CACHE_TTL", "600")
+                            ),
+                        )
+                        compiler = CompilerAdapter(self._compiler_manager)
+                    except Exception:
+                        logger.debug(
+                            "CompilerManager unavailable, using legacy adapter",
+                            exc_info=True,
+                        )
+                        compiler = CompilerAdapter()
                 except ImportError:
                     enrichment = NullAstEnrichmentAdapter()
                     compiler = NullCompilerAdapter()
@@ -466,7 +505,11 @@ class IvyLanguageServer(LanguageServer):
                 compiler = NullCompilerAdapter()
 
             self._analysis_pipeline = AnalysisPipeline(
-                self._semantic_model, self._parser, enrichment, compiler
+                self._semantic_model,
+                self._parser,
+                enrichment,
+                compiler,
+                compiler_manager=self._compiler_manager,
             )
             logger.info("Semantic model and analysis pipeline initialized")
         except Exception:
