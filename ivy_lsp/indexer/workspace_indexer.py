@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from ivy_lsp.analysis.light_mode_extractor import (
     extract_exports_imports_light,
@@ -38,6 +40,20 @@ class SymbolLocation:
     range: Tuple[int, int, int, int]
 
 
+@dataclass
+class IndexerStats:
+    """Snapshot of indexer statistics for monitoring."""
+
+    file_count: int = 0
+    symbol_count: int = 0
+    include_edge_count: int = 0
+    test_scope_count: int = 0
+    per_file_errors: List[Dict[str, str]] = field(default_factory=list)
+    stale_files: List[str] = field(default_factory=list)
+    last_index_time: Optional[str] = None
+    last_index_duration: Optional[float] = None
+
+
 class WorkspaceIndexer:
     """Central cross-file index for the Ivy workspace.
 
@@ -61,6 +77,9 @@ class WorkspaceIndexer:
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports: Dict[str, ExportImportInfo] = {}
+        self._index_errors: List[Dict[str, str]] = []
+        self._last_index_duration: Optional[float] = None
+        self._last_index_time: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Full workspace indexing
@@ -68,10 +87,12 @@ class WorkspaceIndexer:
 
     def index_workspace(self) -> None:
         """Reset indices and parse every ``.ivy`` file in the workspace."""
+        start = time.time()
+        self._index_errors = []
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
-        self._file_export_imports: Dict[str, ExportImportInfo] = {}
+        self._file_export_imports = {}
 
         files = self._resolver.find_all_ivy_files()
         for filepath in files:
@@ -82,6 +103,8 @@ class WorkspaceIndexer:
         self._load_requirement_manifests()
         self._wire_coverage_edges()
         self._compute_test_scopes()
+        self._last_index_duration = time.time() - start
+        self._last_index_time = time.time()
 
     # ------------------------------------------------------------------
     # Single-file indexing
@@ -200,6 +223,54 @@ class WorkspaceIndexer:
         for included_file in transitive:
             own_symbols.extend(self._symbol_table.symbols_in_file(included_file))
         return own_symbols
+
+    # ------------------------------------------------------------------
+    # Full re-index and stats
+    # ------------------------------------------------------------------
+
+    def reindex(self) -> None:
+        """Clear caches and fully re-index the workspace."""
+        self._cache = FileCache()
+        self.index_workspace()
+
+    def detect_stale_files(self) -> List[str]:
+        """Return indexed file paths that no longer exist on disk."""
+        stale = []
+        for filepath in self._symbol_table._by_file:
+            if not os.path.exists(filepath):
+                stale.append(filepath)
+        return stale
+
+    def get_stats(self) -> IndexerStats:
+        """Return a snapshot of current indexer statistics."""
+        all_symbols = len(self._symbol_table._all)
+        file_count = len(self._symbol_table._by_file)
+
+        # Count include edges from the _includes adjacency dict
+        edge_count = sum(
+            len(targets) for targets in self._include_graph._includes.values()
+        )
+
+        test_scope_count = len(
+            getattr(self._requirement_graph, "_test_scopes", {})
+        )
+
+        last_time_str = None
+        if self._last_index_time is not None:
+            last_time_str = datetime.fromtimestamp(
+                self._last_index_time, tz=timezone.utc
+            ).isoformat()
+
+        return IndexerStats(
+            file_count=file_count,
+            symbol_count=all_symbols,
+            include_edge_count=edge_count,
+            test_scope_count=test_scope_count,
+            per_file_errors=list(self._index_errors),
+            stale_files=self.detect_stale_files(),
+            last_index_time=last_time_str,
+            last_index_duration=self._last_index_duration,
+        )
 
     # ------------------------------------------------------------------
     # Requirement graph
