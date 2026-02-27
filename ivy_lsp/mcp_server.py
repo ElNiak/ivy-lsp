@@ -166,7 +166,8 @@ def start_mcp(
             "Provides verification (ivy_check), compilation (ivyc), "
             "model inspection (ivy_show), fast linting, include graph analysis, "
             "semantic traceability (RFC coverage, impact analysis, cross-references), "
-            "and model visualization (action requirements, summary table, coverage gaps)."
+            "and model visualization (action requirements, summary table, coverage gaps, "
+            "action dependency graph, state machine view)."
         ),
     )
 
@@ -852,6 +853,63 @@ def start_mcp(
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
         return json.dumps(handle_coverage_gaps(server_proxy, params))
+
+    @mcp.tool()
+    def ivy_action_dependency_graph(
+        test_file: str | None = None,
+        include_state_vars: bool = False,
+    ) -> str:
+        """Return the action dependency graph showing shared-state relationships.
+
+        Actions are nodes; edges represent shared state variables (action A writes
+        a variable that action B reads). Optionally includes state variable nodes
+        with explicit reads/writes edges.
+
+        Args:
+            test_file: Optional test file to scope the analysis to (relative path).
+            include_state_vars: When True, include state variable nodes and their
+                reads/writes edges in the graph.
+        """
+        from ivy_lsp.features.visualization import handle_action_dependency_graph
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if test_file:
+            try:
+                params["testFile"] = _validate_path(root, test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        if include_state_vars:
+            params["includeStateVars"] = True
+        return json.dumps(handle_action_dependency_graph(server_proxy, params))
+
+    @mcp.tool()
+    def ivy_state_machine_view(
+        test_file: str | None = None,
+        state_var_filter: str | None = None,
+    ) -> str:
+        """Return a state-machine view of the Ivy specification.
+
+        Models the specification as a state machine where state variables are
+        state nodes, actions are transitions between them (via READS/WRITES),
+        and guards are require/assume clauses on the action's monitors.
+
+        Args:
+            test_file: Optional test file to scope the analysis to (relative path).
+            state_var_filter: Optional state variable name to restrict the view to.
+        """
+        from ivy_lsp.features.visualization import handle_state_machine_view
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if test_file:
+            try:
+                params["testFile"] = _validate_path(root, test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        if state_var_filter:
+            params["stateVarFilter"] = state_var_filter
+        return json.dumps(handle_state_machine_view(server_proxy, params))
 
     if _return_app:
         return mcp

@@ -1,8 +1,9 @@
-"""Tests for MCP visualization tool wrappers (Task 5).
+"""Tests for MCP visualization tool wrappers (Tasks 5 and 15).
 
-Tests the three MCP tools added to mcp_server.py that wrap the
+Tests the five MCP tools added to mcp_server.py that wrap the
 visualization handlers: ivy_action_requirements, ivy_model_summary,
-and ivy_coverage_gaps.
+ivy_coverage_gaps (P1, Task 5), ivy_action_dependency_graph, and
+ivy_state_machine_view (P2, Task 15).
 
 Uses FastMCP.call_tool() for integration-level testing of tool
 registration, parameter passing, and JSON output.
@@ -312,6 +313,220 @@ class TestIvyCoverageGapsTool:
         parsed = json.loads(_extract_text(result))
         assert parsed["unguardedStateVars"] == []
         assert parsed["summary"]["totalActions"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers: richer graph for P2 tools (dependency graph / state machine)
+# ---------------------------------------------------------------------------
+
+
+def _build_dependency_graph() -> ScopedRequirementModel:
+    """Build a graph with READS and WRITES edges for dependency graph tests.
+
+    Graph shape:
+    - action "send" has r1 (require, before) that READS "conn_open"
+    - action "send" has r2 (ensure, after) that WRITES "pkt_sent"
+    - action "recv" has r3 (require, before) that READS "pkt_sent"
+    This creates a dependency edge: send -> recv via "pkt_sent".
+    """
+    graph = ScopedRequirementModel()
+    graph.add_action(
+        ActionNode(
+            id="send", name="send", qualified_name="quic.send",
+            file="/test/q.ivy", line=10,
+        )
+    )
+    graph.add_action(
+        ActionNode(
+            id="recv", name="recv", qualified_name="quic.recv",
+            file="/test/q.ivy", line=20,
+        )
+    )
+    graph.add_state_var(
+        StateVarNode(
+            id="conn_open", name="conn_open",
+            qualified_name="quic.conn_open",
+            file="/test/q.ivy", line=5, is_relation=False,
+        )
+    )
+    graph.add_state_var(
+        StateVarNode(
+            id="pkt_sent", name="pkt_sent",
+            qualified_name="quic.pkt_sent",
+            file="/test/q.ivy", line=6, is_relation=False,
+        )
+    )
+    r1 = RequirementNode(
+        id="/test/q.ivy:12", kind="require", formula_text="conn_open",
+        line=12, col=0, file="/test/q.ivy",
+        monitor_action="send", mixin_kind="before",
+    )
+    r2 = RequirementNode(
+        id="/test/q.ivy:15", kind="ensure", formula_text="pkt_sent",
+        line=15, col=0, file="/test/q.ivy",
+        monitor_action="send", mixin_kind="after",
+    )
+    r3 = RequirementNode(
+        id="/test/q.ivy:22", kind="require", formula_text="pkt_sent",
+        line=22, col=0, file="/test/q.ivy",
+        monitor_action="recv", mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/q.ivy", [r1, r2, r3])
+    # send reads conn_open, writes pkt_sent
+    graph.add_edge(r1.id, EdgeType.READS, "conn_open")
+    graph.add_edge(r2.id, EdgeType.WRITES, "pkt_sent")
+    # recv reads pkt_sent
+    graph.add_edge(r3.id, EdgeType.READS, "pkt_sent")
+    return graph
+
+
+# ---------------------------------------------------------------------------
+# Test: P2 tools are registered alongside P1 tools
+# ---------------------------------------------------------------------------
+
+
+class TestP2ToolRegistration:
+    @pytest.mark.asyncio
+    async def test_p2_visualization_tools_registered(self):
+        """The two P2 visualization tools should appear in list_tools()."""
+        mcp = _get_mcp_app(requirement_graph=_build_test_graph())
+        tools = await mcp.list_tools()
+        tool_names = {t.name for t in tools}
+        assert "ivy_action_dependency_graph" in tool_names
+        assert "ivy_state_machine_view" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_p1_tools_still_present_after_p2(self):
+        """P1 visualization tools must still be registered after P2 additions."""
+        mcp = _get_mcp_app(requirement_graph=_build_test_graph())
+        tools = await mcp.list_tools()
+        tool_names = {t.name for t in tools}
+        assert "ivy_action_requirements" in tool_names
+        assert "ivy_model_summary" in tool_names
+        assert "ivy_coverage_gaps" in tool_names
+
+
+# ---------------------------------------------------------------------------
+# Test: ivy_action_dependency_graph tool
+# ---------------------------------------------------------------------------
+
+
+class TestIvyActionDependencyGraphTool:
+    @pytest.mark.asyncio
+    async def test_returns_valid_json(self):
+        """Tool should return parseable JSON with nodes and edges."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        parsed = json.loads(_extract_text(result))
+        assert isinstance(parsed["nodes"], list)
+        assert isinstance(parsed["edges"], list)
+
+    @pytest.mark.asyncio
+    async def test_action_nodes_present(self):
+        """Both actions should appear as nodes in the dependency graph."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        parsed = json.loads(_extract_text(result))
+        node_ids = {n["id"] for n in parsed["nodes"] if n["type"] == "action"}
+        assert "send" in node_ids
+        assert "recv" in node_ids
+
+    @pytest.mark.asyncio
+    async def test_shared_state_edge(self):
+        """An edge from send to recv via pkt_sent should exist."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        parsed = json.loads(_extract_text(result))
+        shared_edges = [
+            e for e in parsed["edges"]
+            if e["type"] == "shared_state"
+        ]
+        assert len(shared_edges) >= 1
+        edge = shared_edges[0]
+        assert edge["source"] == "send"
+        assert edge["target"] == "recv"
+
+    @pytest.mark.asyncio
+    async def test_include_state_vars(self):
+        """With include_state_vars=True, state var nodes should appear."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool(
+            "ivy_action_dependency_graph", {"include_state_vars": True}
+        )
+        parsed = json.loads(_extract_text(result))
+        state_var_nodes = [
+            n for n in parsed["nodes"] if n["type"] == "stateVar"
+        ]
+        assert len(state_var_nodes) >= 1
+        state_var_names = {n["label"] for n in state_var_nodes}
+        assert "pkt_sent" in state_var_names
+
+    @pytest.mark.asyncio
+    async def test_missing_graph_returns_empty(self):
+        """When no requirement_graph is provided, nodes/edges should be empty."""
+        mcp = _get_mcp_app(requirement_graph=None)
+        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        parsed = json.loads(_extract_text(result))
+        assert parsed["nodes"] == []
+        assert parsed["edges"] == []
+
+
+# ---------------------------------------------------------------------------
+# Test: ivy_state_machine_view tool
+# ---------------------------------------------------------------------------
+
+
+class TestIvyStateMachineViewTool:
+    @pytest.mark.asyncio
+    async def test_returns_valid_json(self):
+        """Tool should return parseable JSON with nodes and transitions."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool("ivy_state_machine_view", {})
+        parsed = json.loads(_extract_text(result))
+        assert isinstance(parsed["nodes"], list)
+        assert isinstance(parsed["transitions"], list)
+
+    @pytest.mark.asyncio
+    async def test_state_nodes_present(self):
+        """Active state variables should appear as state nodes."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool("ivy_state_machine_view", {})
+        parsed = json.loads(_extract_text(result))
+        state_nodes = [n for n in parsed["nodes"] if n["type"] == "state"]
+        state_labels = {n["label"] for n in state_nodes}
+        # conn_open is read, pkt_sent is read and written
+        assert "pkt_sent" in state_labels
+        assert "conn_open" in state_labels
+
+    @pytest.mark.asyncio
+    async def test_transitions_include_action(self):
+        """Transitions should reference the action name."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool("ivy_state_machine_view", {})
+        parsed = json.loads(_extract_text(result))
+        action_names = {t["action"] for t in parsed["transitions"]}
+        assert "send" in action_names
+
+    @pytest.mark.asyncio
+    async def test_state_var_filter(self):
+        """Filtering by state_var_filter should limit state nodes."""
+        mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
+        result = await mcp.call_tool(
+            "ivy_state_machine_view", {"state_var_filter": "pkt_sent"}
+        )
+        parsed = json.loads(_extract_text(result))
+        state_nodes = [n for n in parsed["nodes"] if n["type"] == "state"]
+        assert len(state_nodes) == 1
+        assert state_nodes[0]["label"] == "pkt_sent"
+
+    @pytest.mark.asyncio
+    async def test_missing_graph_returns_empty(self):
+        """When no requirement_graph is provided, nodes/transitions should be empty."""
+        mcp = _get_mcp_app(requirement_graph=None)
+        result = await mcp.call_tool("ivy_state_machine_view", {})
+        parsed = json.loads(_extract_text(result))
+        assert parsed["nodes"] == []
+        assert parsed["transitions"] == []
 
 
 # ---------------------------------------------------------------------------
