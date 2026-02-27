@@ -153,6 +153,41 @@ def _collect_all_isolates(
     return unique
 
 
+def _find_enclosing_test(
+    server: Any,
+    filepath: str,
+) -> Optional[str]:
+    """Find a test file whose include closure contains *filepath*.
+
+    Returns the active test if it includes the file, otherwise
+    picks the first available test scope.  Returns ``None`` if no
+    test scope covers the file or if *filepath* is itself a test.
+    """
+    try:
+        graph = server._indexer._requirement_graph
+    except AttributeError:
+        return None
+
+    if not isinstance(graph, ScopedRequirementModel):
+        return None
+
+    # If the file IS a test file, no redirection needed
+    if filepath in graph._test_scopes:
+        return None
+
+    # Prefer the active test scope if it covers this file
+    active = graph.get_active_scope()
+    if active and active.is_file_in_scope(filepath):
+        return active.test_file
+
+    # Find any test that includes this file
+    tests = graph.get_tests_for_file(filepath)
+    if tests:
+        return sorted(tests)[0]  # deterministic pick
+
+    return None
+
+
 async def _run_tool(
     cmd: List[str],
     timeout: float,
@@ -274,8 +309,6 @@ def register(server: Any) -> None:
         filepath = uri.replace("file://", "")
         token = getattr(params, "workDoneToken", None)
 
-        op_id = _track_start(server, "verify", filepath)
-
         # Smart isolate detection
         position = None
         raw_pos = getattr(params, "position", None)
@@ -286,10 +319,34 @@ def register(server: Any) -> None:
         if isolate is None and position is not None:
             isolate = _detect_isolate_at_position(server, uri, position)
 
+        # Redirect module files to their enclosing test
+        redirected = False
+        enclosing_test = _find_enclosing_test(server, filepath)
+        if enclosing_test is not None:
+            logger.info(
+                "Redirecting ivy_check from module %s to test %s",
+                filepath,
+                enclosing_test,
+            )
+            redirected = True
+            if isolate is None:
+                module_basename = os.path.basename(
+                    uri.replace("file://", "")
+                ).replace(".ivy", "")
+                all_isolates = _collect_all_isolates(
+                    server, enclosing_test, ""
+                )
+                if module_basename in all_isolates:
+                    isolate = module_basename
+            filepath = enclosing_test
+
+        op_id = _track_start(server, "verify", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivy_check"]
         if isolate:
             cmd.append(f"isolate={_validate_ivy_param(isolate)}")
+        elif redirected:
+            cmd.append("coi=false")
         cmd.append(staged_filepath)
 
         try:
@@ -334,6 +391,16 @@ def register(server: Any) -> None:
         filepath = uri.replace("file://", "")
         token = getattr(params, "workDoneToken", None)
         target = getattr(params, "target", "test")
+
+        # Redirect module files to their enclosing test
+        enclosing_test = _find_enclosing_test(server, filepath)
+        if enclosing_test is not None:
+            logger.info(
+                "Redirecting ivyc from module %s to test %s",
+                filepath,
+                enclosing_test,
+            )
+            filepath = enclosing_test
 
         op_id = _track_start(server, "compile", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
@@ -389,11 +456,39 @@ def register(server: Any) -> None:
                     "availableIsolates": all_isolates,
                 }
 
+        # Redirect module files to their enclosing test to avoid
+        # circular-include "redefining" errors (mirrors ivy_to_cpp.py).
+        redirected = False
+        enclosing_test = _find_enclosing_test(server, filepath)
+        if enclosing_test is not None:
+            logger.info(
+                "Redirecting ivy_show from module %s to test %s",
+                filepath,
+                enclosing_test,
+            )
+            redirected = True
+            # Derive isolate from original module basename when unset
+            if isolate is None:
+                module_basename = os.path.basename(
+                    uri.replace("file://", "")
+                ).replace(".ivy", "")
+                # Validate the derived isolate exists in the test's
+                # transitive closure (pass empty source to force the
+                # include-graph walker).
+                all_isolates = _collect_all_isolates(
+                    server, enclosing_test, ""
+                )
+                if module_basename in all_isolates:
+                    isolate = module_basename
+            filepath = enclosing_test
+
         op_id = _track_start(server, "showModel", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivy_show"]
         if isolate:
             cmd.append(f"isolate={_validate_ivy_param(isolate)}")
+        elif redirected:
+            cmd.append("coi=false")
         cmd.append(staged_filepath)
         try:
             result = await _run_tool(

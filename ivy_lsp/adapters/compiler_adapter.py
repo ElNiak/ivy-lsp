@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
@@ -123,21 +124,55 @@ class CompilerAdapter:
                 signature_snapshot=sig_snap,
             )
 
+    # Maximum time (seconds) before we warn about a long-running compilation.
+    COMPILE_TIMEOUT = 120
+
     def compile_background(
         self, source: str, filename: str, callback: Optional[Callable] = None
     ) -> None:
-        """Submit compilation to the background thread pool."""
+        """Submit compilation to the background thread pool.
+
+        A watchdog timer logs a warning if compilation exceeds
+        ``COMPILE_TIMEOUT`` seconds, making long lock-hold times visible.
+        """
+        timed_out = threading.Event()
+
+        def _watchdog():
+            if not timed_out.is_set():
+                logger.warning(
+                    "Background compilation for %s exceeded %ds timeout "
+                    "(may be blocking other parsing operations)",
+                    filename,
+                    self.COMPILE_TIMEOUT,
+                )
+
+        timer = threading.Timer(self.COMPILE_TIMEOUT, _watchdog)
+        timer.daemon = True
+        timer.start()
 
         def _run() -> CompileResult:
-            result = self.compile(source, filename)
-            if callback:
-                callback(result)
-            return result
+            try:
+                result = self.compile(source, filename)
+                if callback:
+                    callback(result)
+                return result
+            finally:
+                timed_out.set()
+                timer.cancel()
 
         future = _executor.submit(_run)
-        future.add_done_callback(
-            lambda f: f.result() if not f.cancelled() else None
-        )
+
+        def _on_done(f):
+            try:
+                f.result()
+            except Exception:
+                logger.debug(
+                    "Background compilation failed for %s",
+                    filename,
+                    exc_info=True,
+                )
+
+        future.add_done_callback(_on_done)
 
 
 def _extract_module_snapshot() -> Optional[ModuleSnapshot]:

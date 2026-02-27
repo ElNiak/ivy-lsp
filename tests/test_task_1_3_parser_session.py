@@ -231,3 +231,91 @@ relation connected(X:cid, Y:cid)
         result = wrapper.parse("#lang ivy1.7\n\ntype cid\n", "myfile.ivy")
         assert result.success is True
         assert result.filename == "myfile.ivy"
+
+
+class TestIvyParserWrapperResolveCallback:
+    """Verify IvyParserWrapper uses resolve_callback for includes."""
+
+    def test_no_callback_default(self):
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        wrapper = IvyParserWrapper()
+        assert wrapper._resolve_callback is None
+
+    def test_callback_is_stored(self):
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        cb = lambda name, from_file: None
+        wrapper = IvyParserWrapper(resolve_callback=cb)
+        assert wrapper._resolve_callback is cb
+
+    def test_include_resolved_via_callback(self, tmp_path):
+        """Parser finds included file through resolve callback."""
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        # Create two files in separate directories
+        dir_a = tmp_path / "dir_a"
+        dir_a.mkdir()
+        dir_b = tmp_path / "dir_b"
+        dir_b.mkdir()
+
+        (dir_a / "types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
+        main_file = dir_b / "main.ivy"
+        main_file.write_text("#lang ivy1.7\n\ninclude types\n\ntype pkt\n")
+
+        # Without callback: types.ivy is NOT in dir_b, so include fails
+        wrapper_no_cb = IvyParserWrapper()
+        result_no_cb = wrapper_no_cb.parse(main_file.read_text(), str(main_file))
+        assert result_no_cb.success is False
+
+        # With callback: resolve types -> dir_a/types.ivy
+        def resolver(name, from_file):
+            if name == "types":
+                return str(dir_a / "types.ivy")
+            return None
+
+        wrapper_cb = IvyParserWrapper(resolve_callback=resolver)
+        result_cb = wrapper_cb.parse(main_file.read_text(), str(main_file))
+        assert result_cb.success is True
+
+    def test_callback_returns_none_falls_back(self, tmp_path):
+        """When callback returns None, falls back to same-dir search."""
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        (tmp_path / "types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
+        main_file = tmp_path / "main.ivy"
+        main_file.write_text("#lang ivy1.7\n\ninclude types\n\ntype pkt\n")
+
+        def null_resolver(name, from_file):
+            return None
+
+        wrapper = IvyParserWrapper(resolve_callback=null_resolver)
+        result = wrapper.parse(main_file.read_text(), str(main_file))
+        # types.ivy IS in same dir, so fallback should find it
+        assert result.success is True
+
+    def test_cross_directory_include_with_resolver(self, tmp_path):
+        """Integration: cross-directory include via IncludeResolver + staging."""
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        # Mimic quic workspace: two subdirectories
+        stack = tmp_path / "quic_stack"
+        stack.mkdir()
+        tests = tmp_path / "quic_tests"
+        tests.mkdir()
+
+        (stack / "quic_types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
+        test_file = tests / "test.ivy"
+        test_file.write_text(
+            "#lang ivy1.7\n\ninclude quic_types\n\ntype pkt\n"
+        )
+
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+
+        wrapper = IvyParserWrapper(resolve_callback=resolver.resolve)
+        result = wrapper.parse(test_file.read_text(), str(test_file))
+        assert result.success is True
+
+        resolver.cleanup_staging()

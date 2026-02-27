@@ -14,10 +14,12 @@ if str(IVY_ROOT) not in sys.path:
 
 from ivy_lsp.features.commands import (
     _detect_isolate_at_position,
+    _find_enclosing_test,
     _find_tool,
     _run_tool,
     _validate_ivy_param,
 )
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.diagnostics import parse_ivy_check_output
 
 
@@ -548,4 +550,484 @@ class TestValidateIvyParam:
 
     def test_accepts_alphanumeric(self):
         assert _validate_ivy_param("frame_ack_v2") == "frame_ack_v2"
+
+
+# ---------------------------------------------------------------------------
+# _find_enclosing_test
+# ---------------------------------------------------------------------------
+
+
+def _make_scoped_server(
+    test_scopes: dict,
+    active_test: str | None = None,
+) -> MagicMock:
+    """Build a mock server with a ScopedRequirementModel containing the
+    given test scopes.
+
+    *test_scopes* maps test_file -> frozenset of included files.
+    """
+    graph = ScopedRequirementModel()
+    for test_file, include_closure in test_scopes.items():
+        scope = TestScope(
+            test_file=test_file,
+            include_closure=frozenset(include_closure) | {test_file},
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="unknown",
+        )
+        graph.register_test_scope(scope)
+    if active_test is not None:
+        graph.set_active_test(active_test)
+
+    server = MagicMock()
+    server._indexer._requirement_graph = graph
+    return server
+
+
+class TestFindEnclosingTest:
+    def test_returns_none_for_test_file(self):
+        server = _make_scoped_server({
+            "/tests/test_quic.ivy": {"/modules/quic_packet.ivy"},
+        })
+        result = _find_enclosing_test(server, "/tests/test_quic.ivy")
+        assert result is None
+
+    def test_returns_active_test_when_covering(self):
+        server = _make_scoped_server(
+            {
+                "/tests/test_a.ivy": {"/modules/mod.ivy"},
+                "/tests/test_b.ivy": {"/modules/mod.ivy"},
+            },
+            active_test="/tests/test_a.ivy",
+        )
+        result = _find_enclosing_test(server, "/modules/mod.ivy")
+        assert result == "/tests/test_a.ivy"
+
+    def test_returns_any_test_when_no_active(self):
+        server = _make_scoped_server({
+            "/tests/test_b.ivy": {"/modules/mod.ivy"},
+            "/tests/test_a.ivy": {"/modules/mod.ivy"},
+        })
+        result = _find_enclosing_test(server, "/modules/mod.ivy")
+        # Deterministic: sorted picks test_a first
+        assert result == "/tests/test_a.ivy"
+
+    def test_returns_none_when_no_test_covers(self):
+        server = _make_scoped_server({
+            "/tests/test_quic.ivy": {"/modules/quic_packet.ivy"},
+        })
+        result = _find_enclosing_test(server, "/modules/other.ivy")
+        assert result is None
+
+    def test_returns_none_when_no_indexer(self):
+        server = MagicMock(spec=[])
+        result = _find_enclosing_test(server, "/modules/mod.ivy")
+        assert result is None
+
+    def test_returns_none_when_no_scoped_model(self):
+        server = MagicMock()
+        server._indexer._requirement_graph = "not a ScopedRequirementModel"
+        result = _find_enclosing_test(server, "/modules/mod.ivy")
+        assert result is None
+
+    def test_prefers_active_over_other_tests(self):
+        """When active test covers the file, prefer it over alphabetically earlier tests."""
+        server = _make_scoped_server(
+            {
+                "/tests/test_a.ivy": {"/modules/mod.ivy"},
+                "/tests/test_z.ivy": {"/modules/mod.ivy"},
+            },
+            active_test="/tests/test_z.ivy",
+        )
+        result = _find_enclosing_test(server, "/modules/mod.ivy")
+        assert result == "/tests/test_z.ivy"
+
+    def test_falls_back_when_active_does_not_cover(self):
+        """Active test exists but doesn't include the module."""
+        server = _make_scoped_server(
+            {
+                "/tests/test_a.ivy": {"/modules/mod.ivy"},
+                "/tests/test_z.ivy": {"/modules/other.ivy"},
+            },
+            active_test="/tests/test_z.ivy",
+        )
+        result = _find_enclosing_test(server, "/modules/mod.ivy")
+        assert result == "/tests/test_a.ivy"
+
+
+# ---------------------------------------------------------------------------
+# Handler redirection integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestShowModelRedirection:
+    """Verify ivy/showModel redirects module files to their enclosing test."""
+
+    @pytest.mark.asyncio
+    async def test_show_model_redirects_module_to_test(self):
+        server, registered = _make_registered_handlers()
+
+        # Set up scoped model with a test that includes the module
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({
+                "/tests/test_quic.ivy",
+                "/modules/quic_packet.ivy",
+            }),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+        server._indexer._include_graph.get_transitive_includes.return_value = []
+        server._indexer._cache = {}
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/showModel"](params)
+
+        assert result["success"] is True
+        # The command should have been called with the test file, not the module
+        call_args = mock_exec.call_args[0]
+        assert "/tests/test_quic.ivy" in call_args
+        assert "/modules/quic_packet.ivy" not in call_args
+
+    @pytest.mark.asyncio
+    async def test_show_model_no_redirect_for_test_file(self):
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({"/tests/test_quic.ivy"}),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///tests/test_quic.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/showModel"](params)
+
+        assert result["success"] is True
+        call_args = mock_exec.call_args[0]
+        assert "/tests/test_quic.ivy" in call_args
+
+    @pytest.mark.asyncio
+    async def test_show_model_adds_coi_false_when_redirected_no_isolate(self):
+        """When redirected and no isolate resolved, coi=false must appear."""
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({
+                "/tests/test_quic.ivy",
+                "/modules/quic_packet.ivy",
+            }),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+        server._indexer._include_graph.get_transitive_includes.return_value = []
+        server._indexer._cache = {}
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/showModel"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "coi=false" in call_args
+
+    @pytest.mark.asyncio
+    async def test_show_model_no_coi_false_when_isolate_matched(self):
+        """When redirected but an isolate was resolved, coi=false must NOT appear."""
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({
+                "/tests/test_quic.ivy",
+                "/modules/quic_packet.ivy",
+            }),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+        server._indexer._include_graph.get_transitive_includes.return_value = []
+        server._indexer._cache = {}
+
+        # Return a single isolate "quic_packet" from document symbols.
+        # The pre-redirect block finds exactly 1 isolate and auto-selects it.
+        ns_symbol = lsp.DocumentSymbol(
+            name="quic_packet",
+            kind=lsp.SymbolKind.Namespace,
+            range=lsp.Range(
+                start=lsp.Position(1, 0), end=lsp.Position(10, 0)
+            ),
+            selection_range=lsp.Range(
+                start=lsp.Position(1, 0), end=lsp.Position(1, 12)
+            ),
+            children=None,
+        )
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec, \
+             patch(
+                 "ivy_lsp.features.document_symbols.compute_document_symbols",
+                 return_value=[ns_symbol],
+             ):
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/showModel"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "isolate=quic_packet" in call_args
+        assert "coi=false" not in call_args
+
+    @pytest.mark.asyncio
+    async def test_show_model_no_coi_false_when_not_redirected(self):
+        """When file is a test (no redirection), coi=false must NOT appear."""
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({"/tests/test_quic.ivy"}),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///tests/test_quic.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/showModel"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "coi=false" not in call_args
+
+
+class TestVerifyRedirection:
+    @pytest.mark.asyncio
+    async def test_verify_redirects_module_to_test(self):
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({
+                "/tests/test_quic.ivy",
+                "/modules/quic_packet.ivy",
+            }),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+        server._indexer._include_graph.get_transitive_includes.return_value = []
+        server._indexer._cache = {}
+
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        server.workspace.get_text_document.return_value = doc
+        server._parser = MagicMock()
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/verify"](params)
+
+        assert result["success"] is True
+        call_args = mock_exec.call_args[0]
+        assert "/tests/test_quic.ivy" in call_args
+
+    @pytest.mark.asyncio
+    async def test_verify_adds_coi_false_when_redirected_no_isolate(self):
+        """When redirected and no isolate resolved, coi=false must appear."""
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({
+                "/tests/test_quic.ivy",
+                "/modules/quic_packet.ivy",
+            }),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+        server._indexer._include_graph.get_transitive_includes.return_value = []
+        server._indexer._cache = {}
+
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        server.workspace.get_text_document.return_value = doc
+        server._parser = MagicMock()
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/verify"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "coi=false" in call_args
+
+    @pytest.mark.asyncio
+    async def test_verify_no_coi_false_when_not_redirected(self):
+        """When file is a test (no redirection), coi=false must NOT appear."""
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({"/tests/test_quic.ivy"}),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        server.workspace.get_text_document.return_value = doc
+        server._parser = MagicMock()
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///tests/test_quic.ivy"},
+            "workDoneToken": None,
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await registered["ivy/verify"](params)
+
+        call_args = mock_exec.call_args[0]
+        assert "coi=false" not in call_args
+
+
+class TestCompileRedirection:
+    @pytest.mark.asyncio
+    async def test_compile_redirects_module_to_test(self):
+        server, registered = _make_registered_handlers()
+
+        graph = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/tests/test_quic.ivy",
+            include_closure=frozenset({
+                "/tests/test_quic.ivy",
+                "/modules/quic_packet.ivy",
+            }),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        graph.register_test_scope(scope)
+        server._indexer._requirement_graph = graph
+        server._indexer._resolver.get_staged_path.return_value = None
+
+        params = _make_namedtuple_params({
+            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+            "workDoneToken": None,
+            "target": "test",
+        })
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"ok\n", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await registered["ivy/compile"](params)
+
+        assert result["success"] is True
+        call_args = mock_exec.call_args[0]
+        assert "/tests/test_quic.ivy" in call_args
+        assert "/modules/quic_packet.ivy" not in call_args
 

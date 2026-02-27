@@ -2,10 +2,15 @@
 
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Serializes access to Ivy's module-level globals across threads.
+# Without this, a background CompilerSession can clobber state mid-parse.
+_ivy_state_lock = threading.Lock()
 
 
 @dataclass
@@ -24,9 +29,16 @@ class ParserSession:
     Saves and restores all mutable globals across ivy_parser, ivy_utils,
     and ivy_ast modules to allow safe sequential parsing without
     state leakage between files.
+
+    Acquires ``_ivy_state_lock`` on entry so that only one thread can
+    touch the shared Ivy globals at a time.
     """
 
     def __enter__(self):
+        self._lock_acquired = _ivy_state_lock.acquire(timeout=60)
+        if not self._lock_acquired:
+            logger.error("Failed to acquire Ivy state lock within 60s")
+
         import ivy.ivy_ast as ia
         import ivy.ivy_parser as ip
         import ivy.ivy_utils as iu
@@ -89,11 +101,28 @@ class ParserSession:
                 "Subsequent parses may be corrupted.",
                 exc_info=True,
             )
+        finally:
+            if self._lock_acquired:
+                _ivy_state_lock.release()
         return False  # don't suppress exceptions
 
 
 class IvyParserWrapper:
-    """Safe wrapper around ivy_parser.parse() with state isolation."""
+    """Safe wrapper around ivy_parser.parse() with state isolation.
+
+    Args:
+        resolve_callback: Optional callback matching the signature
+            ``(include_name: str, from_file: str) -> Optional[str]``.
+            When set, the parser delegates ``include`` resolution to this
+            callback before falling back to the built-in same-dir / stdlib
+            search.  Typically wired to :meth:`IncludeResolver.resolve`.
+    """
+
+    def __init__(
+        self,
+        resolve_callback: Optional[Callable[[str, str], Optional[str]]] = None,
+    ) -> None:
+        self._resolve_callback = resolve_callback
 
     def parse(self, source: str, filename: str = "<string>") -> ParseResult:
         """Parse Ivy source with full global state isolation.
@@ -110,14 +139,24 @@ class IvyParserWrapper:
                 """Resolve and parse an included module."""
                 fname = name + ".ivy"
                 current_file = iu.filename or filename
-                from_dir = os.path.dirname(os.path.abspath(current_file))
-                candidate = os.path.join(from_dir, fname)
-                if not os.path.isfile(candidate):
-                    try:
-                        std_dir = iu.get_std_include_dir()
-                        candidate = os.path.join(std_dir, fname)
-                    except Exception:
-                        candidate = None
+                candidate = None
+
+                # Try resolve callback first (covers all 4 levels:
+                # same-dir, staging, workspace root, stdlib)
+                if self._resolve_callback is not None:
+                    candidate = self._resolve_callback(name, current_file)
+
+                # Fallback: original 2-level search (same dir + stdlib)
+                if candidate is None:
+                    from_dir = os.path.dirname(os.path.abspath(current_file))
+                    candidate = os.path.join(from_dir, fname)
+                    if not os.path.isfile(candidate):
+                        try:
+                            std_dir = iu.get_std_include_dir()
+                            candidate = os.path.join(std_dir, fname)
+                        except Exception:
+                            candidate = None
+
                 if candidate is None or not os.path.isfile(candidate):
                     raise iu.IvyError(
                         None,

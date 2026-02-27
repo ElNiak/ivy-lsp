@@ -8,6 +8,34 @@ Supports two modes:
 import logging
 import os
 import sys
+from typing import Any
+
+
+def _fixed_params_hook(obj: dict, cls: type) -> Any:
+    """Structure hook that handles optional ``params`` per JSON-RPC 2.0.
+
+    pygls 2.0.1 ships a ``_params_field_structure_hook`` that crashes when
+    the incoming JSON-RPC message omits the ``params`` field (which the
+    JSON-RPC 2.0 spec explicitly allows).  This replacement sets
+    ``params=None`` when the field is absent so that
+    ``JsonRPCRequestMessage`` / ``JsonRPCNotification`` can be constructed.
+    """
+    from pygls.protocol import _dict_to_object
+
+    if "params" in obj:
+        obj["params"] = _dict_to_object(obj["params"])
+    else:
+        obj["params"] = None
+    return cls(**obj)
+
+
+def _patch_pygls_converter(server: Any) -> None:
+    """Re-register structure hooks on *server*'s protocol converter."""
+    from pygls.protocol.json_rpc import JsonRPCNotification, JsonRPCRequestMessage
+
+    converter = server.protocol._converter
+    converter.register_structure_hook(JsonRPCRequestMessage, _fixed_params_hook)
+    converter.register_structure_hook(JsonRPCNotification, _fixed_params_hook)
 
 
 def main():
@@ -46,6 +74,7 @@ def main():
             from ivy_lsp.server import IvyLanguageServer
 
             server = IvyLanguageServer()
+            _patch_pygls_converter(server)
             server.start_io()
         except ImportError as e:
             log.critical(

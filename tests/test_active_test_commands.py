@@ -637,3 +637,104 @@ class TestActiveDocumentChanged:
         })
         registered["ivy/activeDocumentChanged"](params)
         assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
+
+    def test_none_params_no_crash(self):
+        """Handler must not crash when pygls passes params=None."""
+        server, registered = _make_registered_handlers()
+        # Should not raise — getattr(None, "uri", None) returns None,
+        # triggering the early return on the `not uri` guard.
+        registered["ivy/activeDocumentChanged"](None)
+
+
+class TestNoneParamsGuards:
+    """Verify all custom handlers survive params=None (pygls deserialization edge case)."""
+
+    def test_set_active_test_none_params(self):
+        server, registered = _make_registered_handlers()
+        result = registered["ivy/setActiveTest"](None)
+        assert result["success"] is False
+        assert "No params" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_compile_test_none_params(self):
+        server, registered = _make_registered_handlers()
+        result = await registered["ivy/compileTest"](None)
+        assert result["success"] is False
+        assert "No params" in result["message"]
+
+    def test_active_document_changed_none_params(self):
+        server, registered = _make_registered_handlers()
+        # Should return without error (handler returns None)
+        registered["ivy/activeDocumentChanged"](None)
+
+
+# ---------------------------------------------------------------------------
+# pygls converter monkey-patch (_fixed_params_hook)
+# ---------------------------------------------------------------------------
+
+
+class TestFixedParamsHook:
+    """Verify the pygls monkey-patch handles optional JSON-RPC params."""
+
+    def test_missing_params_injects_none(self):
+        """When 'params' key is absent, hook should set params=None."""
+        from ivy_lsp.__main__ import _fixed_params_hook
+
+        calls = []
+
+        def fake_cls(**kwargs):
+            calls.append(kwargs)
+            return kwargs
+
+        obj = {"jsonrpc": "2.0", "id": 1, "method": "ivy/listTests"}
+        result = _fixed_params_hook(obj, fake_cls)
+        assert result["params"] is None
+
+    def test_present_params_dict_converted(self):
+        """When 'params' key is present with a dict, hook should convert it."""
+        from ivy_lsp.__main__ import _fixed_params_hook
+
+        calls = []
+
+        def fake_cls(**kwargs):
+            calls.append(kwargs)
+            return kwargs
+
+        obj = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "ivy/setActiveTest",
+            "params": {"testFile": "/workspace/test.ivy"},
+        }
+        result = _fixed_params_hook(obj, fake_cls)
+        # _dict_to_object converts dicts to namedtuples
+        assert hasattr(result["params"], "testFile")
+        assert result["params"].testFile == "/workspace/test.ivy"
+
+    def test_null_params_stays_none(self):
+        """When 'params' key is present but None, hook should keep it None."""
+        from ivy_lsp.__main__ import _fixed_params_hook
+
+        def fake_cls(**kwargs):
+            return kwargs
+
+        obj = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "ivy/listTests",
+            "params": None,
+        }
+        result = _fixed_params_hook(obj, fake_cls)
+        assert result["params"] is None
+
+    def test_patch_function_registers_hooks(self):
+        """_patch_pygls_converter should register hooks on the converter."""
+        from ivy_lsp.__main__ import _patch_pygls_converter
+
+        mock_server = MagicMock()
+        mock_converter = MagicMock()
+        mock_server.protocol._converter = mock_converter
+
+        _patch_pygls_converter(mock_server)
+
+        assert mock_converter.register_structure_hook.call_count == 2
