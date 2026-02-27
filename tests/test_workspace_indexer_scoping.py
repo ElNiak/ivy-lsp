@@ -386,12 +386,12 @@ class TestReindexInvalidation:
         )
         indexer._requirement_graph.register_test_scope(scope)
         indexer._requirement_graph.get_scoped_requirements(test_f)
-        assert test_f in indexer._requirement_graph._scope_cache
+        assert (test_f, False) in indexer._requirement_graph._scope_cache
 
         with patch.object(indexer, "_index_single_file", return_value=[]):
             indexer.reindex_file(target)
 
-        assert test_f not in indexer._requirement_graph._scope_cache
+        assert (test_f, False) not in indexer._requirement_graph._scope_cache
 
     def test_reindex_removes_old_export_import_info(self):
         indexer, _, _ = _make_indexer()

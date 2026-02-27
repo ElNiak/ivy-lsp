@@ -184,9 +184,9 @@ class SemanticModel:
         """Return outgoing edges from *node_id*, optionally filtered."""
         with self._lock:
             edges = list(self._outgoing.get(node_id, []))
-        if edge_type is not None:
-            edges = [(et, tid) for et, tid in edges if et == edge_type]
-        return edges
+            if edge_type is not None:
+                edges = [(et, tid) for et, tid in edges if et == edge_type]
+            return edges
 
     def get_incoming(
         self, node_id: str, edge_type: Optional[SemanticEdgeType] = None
@@ -194,9 +194,9 @@ class SemanticModel:
         """Return incoming edges to *node_id*, optionally filtered."""
         with self._lock:
             edges = list(self._incoming.get(node_id, []))
-        if edge_type is not None:
-            edges = [(et, sid) for et, sid in edges if et == edge_type]
-        return edges
+            if edge_type is not None:
+                edges = [(et, sid) for et, sid in edges if et == edge_type]
+            return edges
 
     def node_count(self) -> int:
         """Return total number of nodes."""

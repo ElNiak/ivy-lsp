@@ -131,14 +131,14 @@ class TestActiveTestSelector:
 class TestCacheInvalidation:
     def test_invalidate_file_clears_scope_cache(self, scoped_model):
         scoped_model.get_scoped_requirements("/test/test_a.ivy")
-        assert "/test/test_a.ivy" in scoped_model._scope_cache
+        assert ("/test/test_a.ivy", False) in scoped_model._scope_cache
         scoped_model.invalidate_file("/test/shared.ivy")
-        assert "/test/test_a.ivy" not in scoped_model._scope_cache
+        assert ("/test/test_a.ivy", False) not in scoped_model._scope_cache
 
     def test_invalidate_unrelated_file_preserves_cache(self, scoped_model):
         scoped_model.get_scoped_requirements("/test/test_a.ivy")
         scoped_model.invalidate_file("/test/file_b.ivy")
-        assert "/test/test_a.ivy" in scoped_model._scope_cache
+        assert ("/test/test_a.ivy", False) in scoped_model._scope_cache
 
 
 class TestScopedNctCounts:

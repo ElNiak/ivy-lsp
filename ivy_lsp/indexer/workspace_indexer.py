@@ -365,6 +365,8 @@ class WorkspaceIndexer:
             if result is not None and result.success and result.ast is not None:
                 ast_symbols = ast_to_symbols(result.ast, test_file, source)
                 self._upgrade_file_symbols(test_file, ast_symbols, result)
+                # Remove Phase 1 light requirements before adding Phase 2 full
+                self._requirement_graph.remove_file(test_file)
                 self._extract_file_requirements(test_file, result, source)
                 self._extract_file_exports_imports(test_file, result, source)
 
@@ -411,6 +413,8 @@ class WorkspaceIndexer:
                 try:
                     with open(filepath) as f:
                         source = f.read()
+                    # Remove Phase 1 light requirements before re-adding
+                    self._requirement_graph.remove_file(filepath)
                     reqs, writes = extract_requirements_light(source, filepath)
                     self._requirement_graph.add_file_requirements(
                         filepath, reqs, writes
@@ -692,16 +696,32 @@ class WorkspaceIndexer:
             )
 
     def _wire_requirement_graph(self) -> None:
-        """Wire state-variable READS edges and property DEPENDS_ON edges."""
-        known_vars = self._requirement_graph.get_all_state_var_names()
-        # Also gather variable names from the symbol table
+        """Wire requirement graph: populate nodes, wire edges."""
         from lsprotocol.types import SymbolKind
 
-        for sym in self._symbol_table.all_symbols():
+        all_symbols = self._symbol_table.all_symbols()
+
+        # Populate ActionNodes from symbol table + requirement references
+        self._requirement_graph.populate_actions_from_symbols(all_symbols)
+
+        # Build known_vars set from existing state vars + symbol table
+        known_vars = self._requirement_graph.get_all_state_var_names()
+        for sym in all_symbols:
             if sym.kind in (SymbolKind.Variable, SymbolKind.Function):
                 known_vars.add(sym.name)
+
+        # Populate StateVarNodes
+        self._requirement_graph.populate_state_vars(known_vars, all_symbols)
+
+        # Clear stale wiring edges before re-wiring
+        self._requirement_graph.clear_wiring_edges()
+
+        # Wire edges
         self._requirement_graph.wire_state_var_edges(known_vars)
         self._requirement_graph.wire_dependency_edges()
+
+        # Wire cross-file propagation edges
+        self._requirement_graph.wire_propagation_edges(self._include_graph)
 
     def _load_requirement_manifests(self) -> None:
         """Load RFC requirement manifests from the workspace and add to the graph."""

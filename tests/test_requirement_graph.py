@@ -820,3 +820,204 @@ def test_remove_file_edges_involving_removed_targets(graph):
     graph.remove_file("/test/removed.ivy")
     # The edge referencing removed state var "my_var" should be gone
     assert len(graph.edges) == 0
+
+
+# ---------------------------------------------------------------------------
+# New tests: populate_actions_from_symbols (C1)
+# ---------------------------------------------------------------------------
+
+
+def _make_ivy_symbol(name, kind, file_path=None, start_line=0):
+    """Create a mock IvySymbol-like object."""
+    return SimpleNamespace(
+        name=name,
+        kind=kind,
+        range=(start_line, 0, start_line + 1, 0),
+        file_path=file_path,
+        detail=None,
+    )
+
+
+def test_populate_actions_from_symbols(graph):
+    """ActionNodes are created from Function-kind symbols."""
+    from lsprotocol.types import SymbolKind
+
+    symbols = [
+        _make_ivy_symbol("quic.send", SymbolKind.Function, "/test/actions.ivy", 10),
+        _make_ivy_symbol("quic.recv", SymbolKind.Function, "/test/actions.ivy", 20),
+        _make_ivy_symbol("my_var", SymbolKind.Variable, "/test/vars.ivy", 5),
+    ]
+    graph.populate_actions_from_symbols(symbols)
+
+    assert "quic.send" in graph.actions
+    assert "quic.recv" in graph.actions
+    assert "my_var" not in graph.actions  # Variable, not Function
+    assert graph.actions["quic.send"].file == "/test/actions.ivy"
+    assert graph.actions["quic.send"].line == 10
+    assert graph.actions["quic.send"].name == "send"
+
+
+def test_populate_actions_includes_monitor_action_refs(graph):
+    """ActionNodes are created for monitor_action references in requirements."""
+    from lsprotocol.types import SymbolKind
+
+    req = _make_req("/test/file.ivy", 1, "require", "x > 0", "unresolved.action")
+    graph.add_requirement(req)
+
+    # No symbols with that name
+    symbols = [
+        _make_ivy_symbol("other.action", SymbolKind.Function, "/test/other.ivy", 5),
+    ]
+    graph.populate_actions_from_symbols(symbols)
+
+    # Both the symbol-based and reference-based actions should exist
+    assert "other.action" in graph.actions
+    assert "unresolved.action" in graph.actions
+    assert graph.actions["unresolved.action"].file == ""  # unknown origin
+
+
+def test_populate_actions_does_not_overwrite_existing(graph):
+    """Existing ActionNodes should not be overwritten by populate."""
+    from lsprotocol.types import SymbolKind
+
+    act = _make_action("quic.send", "/test/original.ivy", 42)
+    graph.add_action(act)
+
+    symbols = [
+        _make_ivy_symbol("quic.send", SymbolKind.Function, "/test/new.ivy", 99),
+    ]
+    graph.populate_actions_from_symbols(symbols)
+
+    assert graph.actions["quic.send"].file == "/test/original.ivy"
+    assert graph.actions["quic.send"].line == 42
+
+
+# ---------------------------------------------------------------------------
+# New tests: populate_state_vars (C2)
+# ---------------------------------------------------------------------------
+
+
+def test_populate_state_vars(graph):
+    """StateVarNodes are created from known_vars set + symbol enrichment."""
+    from lsprotocol.types import SymbolKind
+
+    symbols = [
+        _make_ivy_symbol("sent_pkt", SymbolKind.Variable, "/test/vars.ivy", 5),
+        _make_ivy_symbol("other_fn", SymbolKind.Function, "/test/fns.ivy", 10),
+    ]
+    known_vars = {"sent_pkt", "unknown_var"}
+    graph.populate_state_vars(known_vars, symbols)
+
+    assert "sent_pkt" in graph.state_vars
+    assert graph.state_vars["sent_pkt"].file == "/test/vars.ivy"
+    assert graph.state_vars["sent_pkt"].line == 5
+
+    assert "unknown_var" in graph.state_vars
+    assert graph.state_vars["unknown_var"].file == ""  # no matching symbol
+
+
+def test_populate_state_vars_does_not_overwrite_existing(graph):
+    """Existing StateVarNodes should not be overwritten."""
+    sv = _make_state_var("sent_pkt", "/test/original.ivy", 42, True)
+    graph.add_state_var(sv)
+
+    from lsprotocol.types import SymbolKind
+
+    symbols = [
+        _make_ivy_symbol("sent_pkt", SymbolKind.Variable, "/test/new.ivy", 99),
+    ]
+    graph.populate_state_vars({"sent_pkt"}, symbols)
+
+    assert graph.state_vars["sent_pkt"].file == "/test/original.ivy"
+    assert graph.state_vars["sent_pkt"].is_relation is True
+
+
+# ---------------------------------------------------------------------------
+# New tests: clear_wiring_edges (M1)
+# ---------------------------------------------------------------------------
+
+
+def test_clear_wiring_edges(graph):
+    """clear_wiring_edges keeps CONSTRAINS + WRITES + COVERS, removes READS + DEPENDS_ON."""
+    graph.add_edge("req1", EdgeType.CONSTRAINS, "act1")
+    graph.add_edge("write1", EdgeType.WRITES, "var1")
+    graph.add_edge("req1", EdgeType.READS, "var1")
+    graph.add_edge("prop1", EdgeType.DEPENDS_ON, "prop2")
+    graph.add_edge("req1", EdgeType.COVERS, "rfc1")
+
+    assert len(graph.edges) == 5
+    graph.clear_wiring_edges()
+
+    remaining_types = {t for _, t, _ in graph.edges}
+    assert EdgeType.CONSTRAINS in remaining_types
+    assert EdgeType.WRITES in remaining_types
+    assert EdgeType.COVERS in remaining_types
+    assert EdgeType.READS not in remaining_types
+    assert EdgeType.DEPENDS_ON not in remaining_types
+    assert len(graph.edges) == 3
+
+
+def test_wire_then_rewire_no_duplicates(graph):
+    """Calling wire_state_var_edges twice should not create duplicate READS edges."""
+    req = _make_req("/test/file.ivy", 1, "require", "sent_pkt > 0", "act")
+    sv = _make_state_var("sent_pkt")
+    graph.add_requirement(req)
+    graph.add_state_var(sv)
+
+    known_vars = {"sent_pkt"}
+    graph.wire_state_var_edges(known_vars)
+
+    reads_count_1 = sum(1 for _, t, _ in graph.edges if t == EdgeType.READS)
+    assert reads_count_1 == 1
+
+    # Wire again - should clear and re-add, not accumulate
+    graph.wire_state_var_edges(known_vars)
+
+    reads_count_2 = sum(1 for _, t, _ in graph.edges if t == EdgeType.READS)
+    assert reads_count_2 == 1
+
+
+# ---------------------------------------------------------------------------
+# New test: thread safety (C3)
+# ---------------------------------------------------------------------------
+
+
+def test_thread_safety_concurrent_read_write():
+    """Concurrent add_requirement + get_requirements_for_action should not corrupt."""
+    import threading
+
+    graph = RequirementGraph()
+    act = _make_action("act", "/test/act.ivy", 0)
+    graph.add_action(act)
+
+    errors = []
+
+    def writer():
+        for i in range(100):
+            req = _make_req("/test/file.ivy", i, "require", "true", "act")
+            graph.add_requirement(req)
+            graph.add_edge(req.id, EdgeType.CONSTRAINS, "act")
+
+    def reader():
+        for _ in range(100):
+            try:
+                reqs = graph.get_requirements_for_action("act")
+                # Just verify no exception and return type is correct
+                assert isinstance(reqs, list)
+            except Exception as e:
+                errors.append(e)
+
+    threads = [
+        threading.Thread(target=writer),
+        threading.Thread(target=reader),
+        threading.Thread(target=reader),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"Thread safety errors: {errors}"
+    # Verify final state is consistent
+    reqs = graph.get_requirements_for_action("act")
+    assert len(reqs) == 100

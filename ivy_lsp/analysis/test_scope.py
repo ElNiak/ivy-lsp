@@ -10,7 +10,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, FrozenSet, List, Optional, Set
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from ivy_lsp.analysis.requirement_graph import RequirementGraph, RequirementNode
 
@@ -142,14 +142,15 @@ class ScopedRequirementModel(RequirementGraph):
         self._test_scopes: Dict[str, TestScope] = {}
         self._file_to_tests: Dict[str, Set[str]] = defaultdict(set)
         self._active_test: Optional[str] = None
-        self._scope_cache: Dict[str, list] = {}
+        self._scope_cache: Dict[Tuple[str, bool], list] = {}
         self._compilation_results: Dict[str, Any] = {}
 
     def register_test_scope(self, scope: TestScope) -> None:
         self._test_scopes[scope.test_file] = scope
         for f in scope.include_closure:
             self._file_to_tests[f].add(scope.test_file)
-        self._scope_cache.pop(scope.test_file, None)
+        self._scope_cache.pop((scope.test_file, False), None)
+        self._scope_cache.pop((scope.test_file, True), None)
 
     def set_active_test(self, test_file: Optional[str]) -> None:
         if test_file is None or test_file in self._test_scopes:
@@ -163,18 +164,27 @@ class ScopedRequirementModel(RequirementGraph):
     def get_tests_for_file(self, filepath: str) -> Set[str]:
         return set(self._file_to_tests.get(filepath, set()))
 
-    def get_scoped_requirements(self, test_file: str) -> List[RequirementNode]:
-        if test_file in self._scope_cache:
-            return self._scope_cache[test_file]
+    def get_scoped_requirements(
+        self, test_file: str, include_imported: bool = False,
+    ) -> List[RequirementNode]:
+        cache_key = (test_file, include_imported)
+        if cache_key in self._scope_cache:
+            return self._scope_cache[cache_key]
         scope = self._test_scopes.get(test_file)
         if scope is None:
             return []
-        result = [
-            r for r in self.requirements.values()
-            if r.file in scope.include_closure
-            and r.monitor_action in scope.exported_actions
-        ]
-        self._scope_cache[test_file] = result
+        if include_imported:
+            result = [
+                r for r in self.requirements.values()
+                if r.file in scope.include_closure
+            ]
+        else:
+            result = [
+                r for r in self.requirements.values()
+                if r.file in scope.include_closure
+                and r.monitor_action in scope.exported_actions
+            ]
+        self._scope_cache[cache_key] = result
         return result
 
     def get_scoped_counts(self, test_file: str, action_name: str) -> Dict[str, int]:
@@ -235,4 +245,5 @@ class ScopedRequirementModel(RequirementGraph):
 
     def invalidate_file(self, filepath: str) -> None:
         for test_file in self._file_to_tests.get(filepath, set()):
-            self._scope_cache.pop(test_file, None)
+            self._scope_cache.pop((test_file, False), None)
+            self._scope_cache.pop((test_file, True), None)
