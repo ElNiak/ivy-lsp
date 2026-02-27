@@ -92,11 +92,17 @@ class WorkspaceIndexer:
         workspace_root: str,
         parser: Any,
         resolver: IncludeResolver,
+        persistent_cache: bool = False,
     ) -> None:
         self._workspace_root = os.path.abspath(workspace_root)
         self._parser = parser
         self._resolver = resolver
-        self._cache = FileCache()
+        if persistent_cache:
+            from ivy_lsp.indexer.file_cache import PersistentFileCache
+
+            self._cache = PersistentFileCache(workspace_root)
+        else:
+            self._cache = FileCache()
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
@@ -176,6 +182,35 @@ class WorkspaceIndexer:
 
         files = self._resolver.find_all_ivy_files()
         for filepath in files:
+            # Warm-load from persistent cache if available
+            cached = self._cache.get(filepath)
+            if cached is not None:
+                for sym in cached.symbols:
+                    self._symbol_table.add_symbol(sym)
+                for inc_name in cached.includes:
+                    resolved = self._resolver.resolve(inc_name, filepath)
+                    if resolved:
+                        self._include_graph.add_edge(filepath, resolved)
+                with self._progress_lock:
+                    self._deep_index_progress.file_statuses[filepath] = FileIndexStatus(
+                        filepath=filepath,
+                        shallow_indexed=True,
+                        last_indexed_at=time.time(),
+                    )
+                # Light-mode extraction still needed for requirement graph
+                try:
+                    with open(filepath) as f:
+                        source = f.read()
+                except OSError:
+                    continue
+                reqs, writes = extract_requirements_light(source, filepath)
+                self._requirement_graph.add_file_requirements(
+                    filepath, reqs, writes
+                )
+                info = extract_exports_imports_light(source, filepath)
+                self._file_export_imports[filepath] = info
+                continue
+
             try:
                 with open(filepath) as f:
                     source = f.read()
