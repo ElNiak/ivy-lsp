@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from ivy_lsp.analysis.requirement_graph import (
     EdgeType,
+    GraphSnapshot,
     RequirementGraph,
     RequirementNode,
     StateVarNode,
@@ -30,10 +31,18 @@ def _get_requirement_graph(server: Any) -> Optional[RequirementGraph]:
     try:
         indexer = server._indexer
         if indexer is None:
+            logger.warning(
+                "_get_requirement_graph: indexer is None (server not initialized?)"
+            )
             return None
         graph = getattr(indexer, "_requirement_graph", None)
+        if graph is None:
+            logger.warning("_get_requirement_graph: _requirement_graph is None")
         return graph
     except AttributeError:
+        logger.warning(
+            "_get_requirement_graph: AttributeError accessing server._indexer"
+        )
         return None
 
 
@@ -54,9 +63,9 @@ def _resolve_scope(graph: Any, params: dict) -> dict:
     return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
 
 
-def _serialize_requirement(req: RequirementNode, graph: RequirementGraph) -> dict:
+def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
     """Convert a RequirementNode to a JSON-serializable dict."""
-    state_vars_read = [sv.name for sv in graph.get_state_vars_read_by(req.id)]
+    state_vars_read = [sv.name for sv in snap.get_state_vars_read_by(req.id)]
 
     nct = None
     try:
@@ -100,97 +109,109 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
     Returns per-action requirement breakdown with before/after monitors,
     counts, RFC tags, and state variable information.
     """
+    _not_ready = {
+        "actions": [],
+        "scopeInfo": {"testFile": None, "scoped": False},
+        "modelReady": False,
+    }
     graph = _get_requirement_graph(server)
     if graph is None:
-        return {
-            "actions": [],
-            "scopeInfo": {"testFile": None, "scoped": False},
-            "modelReady": False,
-        }
+        logger.warning("handle_action_requirements: graph is None, returning modelReady=False")
+        return _not_ready
 
-    scope_info = _resolve_scope(graph, params)
-    action_filter = params.get("actionName")
-    file_filter = params.get("filePath")
-
-    actions_to_process = dict(graph.actions)
-    if action_filter:
-        actions_to_process = {
-            k: v
-            for k, v in actions_to_process.items()
-            if v.name == action_filter
-            or v.qualified_name == action_filter
-            or k == action_filter
-        }
-    if file_filter:
-        actions_to_process = {
-            k: v for k, v in actions_to_process.items() if v.file == file_filter
-        }
-
-    result_actions = []
-    for action_id, action_node in actions_to_process.items():
-        reqs = graph.get_requirements_for_action(action_id)
-        before = [r for r in reqs if r.mixin_kind in ("before", "direct")]
-        after = [r for r in reqs if r.mixin_kind == "after"]
-        implement = [r for r in reqs if r.mixin_kind == "implement"]
-
-        all_tags: Set[str] = set()
-        counts: Dict[str, int] = defaultdict(int)
-        for r in reqs:
-            counts[r.kind] += 1
-            all_tags.update(r.bracket_tags)
-
-        direction = None
-        scope = scope_info.get("_scope")
-        if scope:
-            try:
-                from ivy_lsp.analysis.test_scope import classify_action_direction
-
-                direction = classify_action_direction(action_id, scope).value
-            except Exception:
-                pass
-
-        state_vars_read: List[StateVarNode] = []
-        state_vars_written = graph.get_state_vars_written_in_monitor(action_id)
-
-        result_actions.append(
-            {
-                "actionName": action_node.name,
-                "qualifiedName": action_node.qualified_name,
-                "file": action_node.file,
-                "line": action_node.line,
-                "direction": direction,
-                "monitors": {
-                    "before": [_serialize_requirement(r, graph) for r in before],
-                    "after": [_serialize_requirement(r, graph) for r in after],
-                    "direct": [
-                        _serialize_requirement(r, graph) for r in implement
-                    ],
-                },
-                "stateVarsRead": [
-                    _serialize_state_var(sv) for sv in state_vars_read
-                ],
-                "stateVarsWritten": [
-                    _serialize_state_var(sv) for sv in state_vars_written
-                ],
-                "rfcTags": sorted(all_tags),
-                "counts": {
-                    "require": counts.get("require", 0),
-                    "ensure": counts.get("ensure", 0),
-                    "assume": counts.get("assume", 0),
-                    "assert": counts.get("assert", 0),
-                    "total": len(reqs),
-                },
-            }
+    try:
+        snap = graph.snapshot()
+        logger.info(
+            "handle_action_requirements: snapshot has %d actions, %d requirements",
+            len(snap.actions),
+            len(snap.requirements),
         )
+        scope_info = _resolve_scope(graph, params)
+        action_filter = params.get("actionName")
+        file_filter = params.get("filePath")
 
-    return {
-        "actions": result_actions,
-        "scopeInfo": {
-            "testFile": scope_info.get("testFile"),
-            "scoped": scope_info.get("scoped", False),
-        },
-        "modelReady": True,
-    }
+        actions_to_process = dict(snap.actions)
+        if action_filter:
+            actions_to_process = {
+                k: v
+                for k, v in actions_to_process.items()
+                if v.name == action_filter
+                or v.qualified_name == action_filter
+                or k == action_filter
+            }
+        if file_filter:
+            actions_to_process = {
+                k: v for k, v in actions_to_process.items() if v.file == file_filter
+            }
+
+        result_actions = []
+        for action_id, action_node in actions_to_process.items():
+            reqs = snap.get_requirements_for_action(action_id)
+            before = [r for r in reqs if r.mixin_kind in ("before", "direct")]
+            after = [r for r in reqs if r.mixin_kind == "after"]
+            implement = [r for r in reqs if r.mixin_kind == "implement"]
+
+            all_tags: Set[str] = set()
+            counts: Dict[str, int] = defaultdict(int)
+            for r in reqs:
+                counts[r.kind] += 1
+                all_tags.update(r.bracket_tags)
+
+            direction = None
+            scope = scope_info.get("_scope")
+            if scope:
+                try:
+                    from ivy_lsp.analysis.test_scope import classify_action_direction
+
+                    direction = classify_action_direction(action_id, scope).value
+                except Exception:
+                    pass
+
+            state_vars_read: List[StateVarNode] = []
+            state_vars_written = snap.get_state_vars_written_in_monitor(action_id)
+
+            result_actions.append(
+                {
+                    "actionName": action_node.name,
+                    "qualifiedName": action_node.qualified_name,
+                    "file": action_node.file,
+                    "line": action_node.line,
+                    "direction": direction,
+                    "monitors": {
+                        "before": [_serialize_requirement(r, snap) for r in before],
+                        "after": [_serialize_requirement(r, snap) for r in after],
+                        "direct": [
+                            _serialize_requirement(r, snap) for r in implement
+                        ],
+                    },
+                    "stateVarsRead": [
+                        _serialize_state_var(sv) for sv in state_vars_read
+                    ],
+                    "stateVarsWritten": [
+                        _serialize_state_var(sv) for sv in state_vars_written
+                    ],
+                    "rfcTags": sorted(all_tags),
+                    "counts": {
+                        "require": counts.get("require", 0),
+                        "ensure": counts.get("ensure", 0),
+                        "assume": counts.get("assume", 0),
+                        "assert": counts.get("assert", 0),
+                        "total": len(reqs),
+                    },
+                }
+            )
+
+        return {
+            "actions": result_actions,
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
+            "modelReady": True,
+        }
+    except Exception:
+        logger.exception("handle_action_requirements failed")
+        return _not_ready
 
 
 # ---------------------------------------------------------------------------
@@ -204,94 +225,99 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
     Returns a flat summary table with one row per action and aggregated
     totals for requirements, state variables, and RFC coverage.
     """
+    _not_ready = {
+        "rows": [],
+        "totals": {
+            "actions": 0,
+            "requirements": 0,
+            "stateVars": 0,
+            "rfcTagsCovered": 0,
+            "rfcTagsTotal": 0,
+        },
+        "scopeInfo": {"testFile": None, "scoped": False},
+    }
     graph = _get_requirement_graph(server)
     if graph is None:
+        return _not_ready
+
+    try:
+        snap = graph.snapshot()
+        scope_info = _resolve_scope(graph, params)
+        rows: List[dict] = []
+        total_reqs = 0
+
+        for action_id, action_node in snap.actions.items():
+            reqs = snap.get_requirements_for_action(action_id)
+            before_reqs = [r for r in reqs if r.mixin_kind in ("before", "direct")]
+            after_reqs = [r for r in reqs if r.mixin_kind == "after"]
+
+            before_require = sum(1 for r in before_reqs if r.kind == "require")
+            before_ensure = sum(1 for r in before_reqs if r.kind == "ensure")
+            after_require = sum(1 for r in after_reqs if r.kind == "require")
+            after_ensure = sum(1 for r in after_reqs if r.kind == "ensure")
+            assume_count = sum(1 for r in reqs if r.kind == "assume")
+            assert_count = sum(1 for r in reqs if r.kind == "assert")
+
+            rfc_tags: Set[str] = set()
+            for r in reqs:
+                rfc_tags.update(r.bracket_tags)
+
+            vars_read_ids: Set[str] = set()
+            for r in reqs:
+                for sv in snap.get_state_vars_read_by(r.id):
+                    vars_read_ids.add(sv.id)
+            vars_written = snap.get_state_vars_written_in_monitor(action_id)
+
+            direction = None
+            scope = scope_info.get("_scope")
+            if scope:
+                try:
+                    from ivy_lsp.analysis.test_scope import classify_action_direction
+
+                    direction = classify_action_direction(action_id, scope).value
+                except Exception:
+                    pass
+
+            total_reqs += len(reqs)
+            rows.append(
+                {
+                    "actionName": action_node.name,
+                    "qualifiedName": action_node.qualified_name,
+                    "file": action_node.file,
+                    "line": action_node.line,
+                    "direction": direction,
+                    "beforeRequireCount": before_require,
+                    "beforeEnsureCount": before_ensure,
+                    "afterRequireCount": after_require,
+                    "afterEnsureCount": after_ensure,
+                    "assumeCount": assume_count,
+                    "assertCount": assert_count,
+                    "totalRequirements": len(reqs),
+                    "stateVarsRead": len(vars_read_ids),
+                    "stateVarsWritten": len(vars_written),
+                    "rfcTagsCovered": sorted(rfc_tags),
+                    "rfcCoverageCount": len(rfc_tags),
+                }
+            )
+
+        coverage = snap.get_coverage_stats()
         return {
-            "rows": [],
+            "rows": rows,
             "totals": {
-                "actions": 0,
-                "requirements": 0,
-                "stateVars": 0,
-                "rfcTagsCovered": 0,
-                "rfcTagsTotal": 0,
+                "actions": len(snap.actions),
+                "requirements": total_reqs,
+                "stateVars": len(snap.state_vars),
+                "rfcTagsCovered": coverage.get("covered", 0),
+                "rfcTagsTotal": coverage.get("total", 0),
             },
-            "scopeInfo": {"testFile": None, "scoped": False},
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
         }
-
-    scope_info = _resolve_scope(graph, params)
-    rows: List[dict] = []
-    total_reqs = 0
-
-    for action_id, action_node in graph.actions.items():
-        reqs = graph.get_requirements_for_action(action_id)
-        before_reqs = [r for r in reqs if r.mixin_kind in ("before", "direct")]
-        after_reqs = [r for r in reqs if r.mixin_kind == "after"]
-
-        before_require = sum(1 for r in before_reqs if r.kind == "require")
-        before_ensure = sum(1 for r in before_reqs if r.kind == "ensure")
-        after_require = sum(1 for r in after_reqs if r.kind == "require")
-        after_ensure = sum(1 for r in after_reqs if r.kind == "ensure")
-        assume_count = sum(1 for r in reqs if r.kind == "assume")
-        assert_count = sum(1 for r in reqs if r.kind == "assert")
-
-        rfc_tags: Set[str] = set()
-        for r in reqs:
-            rfc_tags.update(r.bracket_tags)
-
-        # Aggregate state vars read across all requirements for this action
-        vars_read_ids: Set[str] = set()
-        for r in reqs:
-            for sv in graph.get_state_vars_read_by(r.id):
-                vars_read_ids.add(sv.id)
-        vars_written = graph.get_state_vars_written_in_monitor(action_id)
-
-        direction = None
-        scope = scope_info.get("_scope")
-        if scope:
-            try:
-                from ivy_lsp.analysis.test_scope import classify_action_direction
-
-                direction = classify_action_direction(action_id, scope).value
-            except Exception:
-                pass
-
-        total_reqs += len(reqs)
-        rows.append(
-            {
-                "actionName": action_node.name,
-                "qualifiedName": action_node.qualified_name,
-                "file": action_node.file,
-                "line": action_node.line,
-                "direction": direction,
-                "beforeRequireCount": before_require,
-                "beforeEnsureCount": before_ensure,
-                "afterRequireCount": after_require,
-                "afterEnsureCount": after_ensure,
-                "assumeCount": assume_count,
-                "assertCount": assert_count,
-                "totalRequirements": len(reqs),
-                "stateVarsRead": len(vars_read_ids),
-                "stateVarsWritten": len(vars_written),
-                "rfcTagsCovered": sorted(rfc_tags),
-                "rfcCoverageCount": len(rfc_tags),
-            }
-        )
-
-    coverage = graph.get_coverage_stats()
-    return {
-        "rows": rows,
-        "totals": {
-            "actions": len(graph.actions),
-            "requirements": total_reqs,
-            "stateVars": len(graph.state_vars),
-            "rfcTagsCovered": coverage.get("covered", 0),
-            "rfcTagsTotal": coverage.get("total", 0),
-        },
-        "scopeInfo": {
-            "testFile": scope_info.get("testFile"),
-            "scoped": scope_info.get("scoped", False),
-        },
-    }
+    except Exception:
+        logger.exception("handle_model_summary_table failed")
+        return _not_ready
 
 
 # ---------------------------------------------------------------------------
@@ -307,112 +333,115 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
     - Orphan requirements: monitor_action references a non-existent action
     - Uncovered RFC requirements: RFC requirements with no matching bracket tag
     """
+    _not_ready = {
+        "unguardedStateVars": [],
+        "uncoveredRfcRequirements": [],
+        "orphanRequirements": [],
+        "summary": {
+            "totalActions": 0,
+            "totalRequirements": 0,
+            "totalStateVars": 0,
+            "unguardedCount": 0,
+            "totalRfcReqs": 0,
+            "uncoveredRfcCount": 0,
+            "orphanReqCount": 0,
+        },
+        "scopeInfo": {"testFile": None, "scoped": False},
+    }
     graph = _get_requirement_graph(server)
     if graph is None:
+        return _not_ready
+
+    try:
+        snap = graph.snapshot()
+        scope_info = _resolve_scope(graph, params)
+
+        # -- Unguarded state variables --------------------------------------
+        guarded_vars: Set[str] = set()
+        for req_id in snap.requirements:
+            for etype, target_id in snap.outgoing.get(req_id, []):
+                if etype == EdgeType.READS:
+                    guarded_vars.add(target_id)
+        for prop_id in snap.properties:
+            for etype, target_id in snap.outgoing.get(prop_id, []):
+                if etype == EdgeType.READS:
+                    guarded_vars.add(target_id)
+
+        written_vars: Set[str] = set()
+        for _, etype, target_id in snap.edges:
+            if etype == EdgeType.WRITES:
+                written_vars.add(target_id)
+
+        unguarded: List[dict] = []
+        for var_id, var_node in snap.state_vars.items():
+            is_guarded = var_id in guarded_vars
+            if not is_guarded:
+                is_written = var_id in written_vars
+                severity = "high" if is_written else "low"
+                unguarded.append(
+                    {
+                        "name": var_node.name,
+                        "qualifiedName": var_node.qualified_name,
+                        "file": var_node.file,
+                        "line": var_node.line,
+                        "isWritten": is_written,
+                        "guardedByRequirements": 0,
+                        "severity": severity,
+                    }
+                )
+
+        # -- Uncovered RFC requirements -------------------------------------
+        uncovered_rfc = snap.get_uncovered_requirements()
+        uncovered_rfc_list: List[dict] = []
+        for rfc_req in uncovered_rfc:
+            uncovered_rfc_list.append(
+                {
+                    "id": rfc_req.id,
+                    "rfc": getattr(rfc_req, "rfc", ""),
+                    "section": getattr(rfc_req, "section", ""),
+                    "level": getattr(rfc_req, "level", ""),
+                    "text": getattr(rfc_req, "text", ""),
+                }
+            )
+
+        # -- Orphan requirements --------------------------------------------
+        orphans: List[dict] = []
+        for req in snap.requirements.values():
+            if req.monitor_action and req.monitor_action not in snap.actions:
+                orphans.append(
+                    {
+                        "id": req.id,
+                        "kind": req.kind,
+                        "formulaText": req.formula_text,
+                        "file": req.file,
+                        "line": req.line,
+                        "reason": (
+                            f"Action '{req.monitor_action}' not found in graph"
+                        ),
+                    }
+                )
+
         return {
-            "unguardedStateVars": [],
-            "uncoveredRfcRequirements": [],
-            "orphanRequirements": [],
+            "unguardedStateVars": unguarded,
+            "uncoveredRfcRequirements": uncovered_rfc_list,
+            "orphanRequirements": orphans,
             "summary": {
-                "totalActions": 0,
-                "totalRequirements": 0,
-                "totalStateVars": 0,
-                "unguardedCount": 0,
-                "totalRfcReqs": 0,
-                "uncoveredRfcCount": 0,
-                "orphanReqCount": 0,
+                "totalActions": len(snap.actions),
+                "totalRequirements": len(snap.requirements),
+                "totalStateVars": len(snap.state_vars),
+                "unguardedCount": len(unguarded),
+                "totalRfcReqs": len(snap.rfc_requirements),
+                "uncoveredRfcCount": len(uncovered_rfc_list),
+                "orphanReqCount": len(orphans),
             },
-            "scopeInfo": {"testFile": None, "scoped": False},
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
         }
-
-    scope_info = _resolve_scope(graph, params)
-
-    # -- Unguarded state variables ------------------------------------------
-    # A state var is "guarded" if any requirement or property READS it.
-    guarded_vars: Set[str] = set()
-    for req_id in graph.requirements:
-        for etype, target_id in graph._outgoing.get(req_id, []):
-            if etype == EdgeType.READS:
-                guarded_vars.add(target_id)
-    for prop_id in graph.properties:
-        for etype, target_id in graph._outgoing.get(prop_id, []):
-            if etype == EdgeType.READS:
-                guarded_vars.add(target_id)
-
-    # Collect state vars that are written (via WRITES edges)
-    written_vars: Set[str] = set()
-    for _, etype, target_id in graph.edges:
-        if etype == EdgeType.WRITES:
-            written_vars.add(target_id)
-
-    unguarded: List[dict] = []
-    for var_id, var_node in graph.state_vars.items():
-        is_guarded = var_id in guarded_vars
-        if not is_guarded:
-            is_written = var_id in written_vars
-            severity = "high" if is_written else "low"
-            unguarded.append(
-                {
-                    "name": var_node.name,
-                    "qualifiedName": var_node.qualified_name,
-                    "file": var_node.file,
-                    "line": var_node.line,
-                    "isWritten": is_written,
-                    "guardedByRequirements": 0,
-                    "severity": severity,
-                }
-            )
-
-    # -- Uncovered RFC requirements -----------------------------------------
-    uncovered_rfc = graph.get_uncovered_requirements()
-    uncovered_rfc_list: List[dict] = []
-    for rfc_req in uncovered_rfc:
-        uncovered_rfc_list.append(
-            {
-                "id": rfc_req.id,
-                "rfc": getattr(rfc_req, "rfc", ""),
-                "section": getattr(rfc_req, "section", ""),
-                "level": getattr(rfc_req, "level", ""),
-                "text": getattr(rfc_req, "text", ""),
-            }
-        )
-
-    # -- Orphan requirements ------------------------------------------------
-    # Requirements whose monitor_action does not match any known action.
-    orphans: List[dict] = []
-    for req in graph.requirements.values():
-        if req.monitor_action and req.monitor_action not in graph.actions:
-            orphans.append(
-                {
-                    "id": req.id,
-                    "kind": req.kind,
-                    "formulaText": req.formula_text,
-                    "file": req.file,
-                    "line": req.line,
-                    "reason": (
-                        f"Action '{req.monitor_action}' not found in graph"
-                    ),
-                }
-            )
-
-    return {
-        "unguardedStateVars": unguarded,
-        "uncoveredRfcRequirements": uncovered_rfc_list,
-        "orphanRequirements": orphans,
-        "summary": {
-            "totalActions": len(graph.actions),
-            "totalRequirements": len(graph.requirements),
-            "totalStateVars": len(graph.state_vars),
-            "unguardedCount": len(unguarded),
-            "totalRfcReqs": len(graph.rfc_requirements),
-            "uncoveredRfcCount": len(uncovered_rfc_list),
-            "orphanReqCount": len(orphans),
-        },
-        "scopeInfo": {
-            "testFile": scope_info.get("testFile"),
-            "scoped": scope_info.get("scoped", False),
-        },
-    }
+    except Exception:
+        logger.exception("handle_coverage_gaps failed")
+        return _not_ready
 
 
 # ---------------------------------------------------------------------------
@@ -426,107 +455,109 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
     Builds a graph where actions are nodes and edges represent shared
     state variables (action A writes a var that action B reads).
     """
+    _not_ready = {
+        "nodes": [],
+        "edges": [],
+        "scopeInfo": {"testFile": None, "scoped": False},
+    }
     graph = _get_requirement_graph(server)
     if graph is None:
-        return {
-            "nodes": [],
-            "edges": [],
-            "scopeInfo": {"testFile": None, "scoped": False},
-        }
+        return _not_ready
 
-    scope_info = _resolve_scope(graph, params)
-    include_state_vars = params.get("includeStateVars", False)
+    try:
+        snap = graph.snapshot()
+        scope_info = _resolve_scope(graph, params)
+        include_state_vars = params.get("includeStateVars", False)
 
-    nodes: List[Dict[str, Any]] = []
-    edges: List[Dict[str, Any]] = []
+        nodes: List[Dict[str, Any]] = []
+        edges: List[Dict[str, Any]] = []
 
-    # Build action nodes
-    for action_id, action_node in graph.actions.items():
-        reqs = graph.get_requirements_for_action(action_id)
-        nodes.append(
-            {
-                "id": action_id,
-                "label": action_node.name,
-                "type": "action",
-                "file": action_node.file,
-                "line": action_node.line,
-                "requirementCount": len(reqs),
-            }
-        )
+        for action_id, action_node in snap.actions.items():
+            reqs = snap.get_requirements_for_action(action_id)
+            nodes.append(
+                {
+                    "id": action_id,
+                    "label": action_node.name,
+                    "type": "action",
+                    "file": action_node.file,
+                    "line": action_node.line,
+                    "requirementCount": len(reqs),
+                }
+            )
 
-    # Build writer/reader maps: state_var_id -> set of action_ids
-    writers: Dict[str, Set[str]] = defaultdict(set)
-    readers: Dict[str, Set[str]] = defaultdict(set)
+        writers: Dict[str, Set[str]] = defaultdict(set)
+        readers: Dict[str, Set[str]] = defaultdict(set)
 
-    for action_id in graph.actions:
-        reqs = graph.get_requirements_for_action(action_id)
-        for req in reqs:
-            for etype, target_id in graph._outgoing.get(req.id, []):
-                if etype == EdgeType.WRITES:
-                    writers[target_id].add(action_id)
-                elif etype == EdgeType.READS:
-                    readers[target_id].add(action_id)
+        for action_id in snap.actions:
+            reqs = snap.get_requirements_for_action(action_id)
+            for req in reqs:
+                for etype, target_id in snap.outgoing.get(req.id, []):
+                    if etype == EdgeType.WRITES:
+                        writers[target_id].add(action_id)
+                    elif etype == EdgeType.READS:
+                        readers[target_id].add(action_id)
 
-    # Create edges between actions that share state vars (writer -> reader)
-    seen_edges: Set[tuple] = set()
-    for var_id in set(writers.keys()) | set(readers.keys()):
-        writer_actions = writers.get(var_id, set())
-        reader_actions = readers.get(var_id, set())
-        for w in writer_actions:
-            for r in reader_actions:
-                if w != r:
-                    edge_key = (w, r)
-                    if edge_key not in seen_edges:
-                        seen_edges.add(edge_key)
-                        var_node = graph.state_vars.get(var_id)
-                        label = var_node.name if var_node else var_id
+        seen_edges: Set[tuple] = set()
+        for var_id in set(writers.keys()) | set(readers.keys()):
+            writer_actions = writers.get(var_id, set())
+            reader_actions = readers.get(var_id, set())
+            for w in writer_actions:
+                for r in reader_actions:
+                    if w != r:
+                        edge_key = (w, r)
+                        if edge_key not in seen_edges:
+                            seen_edges.add(edge_key)
+                            var_node = snap.state_vars.get(var_id)
+                            label = var_node.name if var_node else var_id
+                            edges.append(
+                                {
+                                    "source": w,
+                                    "target": r,
+                                    "label": label,
+                                    "type": "shared_state",
+                                }
+                            )
+
+        if include_state_vars:
+            for var_id, var_node in snap.state_vars.items():
+                if var_id in writers or var_id in readers:
+                    nodes.append(
+                        {
+                            "id": var_id,
+                            "label": var_node.name,
+                            "type": "stateVar",
+                            "file": var_node.file,
+                            "line": var_node.line,
+                        }
+                    )
+                    for w in writers.get(var_id, set()):
                         edges.append(
                             {
                                 "source": w,
+                                "target": var_id,
+                                "type": "writes",
+                            }
+                        )
+                    for r in readers.get(var_id, set()):
+                        edges.append(
+                            {
+                                "source": var_id,
                                 "target": r,
-                                "label": label,
-                                "type": "shared_state",
+                                "type": "reads",
                             }
                         )
 
-    # Optionally include state var nodes with writes/reads edges
-    if include_state_vars:
-        for var_id, var_node in graph.state_vars.items():
-            if var_id in writers or var_id in readers:
-                nodes.append(
-                    {
-                        "id": var_id,
-                        "label": var_node.name,
-                        "type": "stateVar",
-                        "file": var_node.file,
-                        "line": var_node.line,
-                    }
-                )
-                for w in writers.get(var_id, set()):
-                    edges.append(
-                        {
-                            "source": w,
-                            "target": var_id,
-                            "type": "writes",
-                        }
-                    )
-                for r in readers.get(var_id, set()):
-                    edges.append(
-                        {
-                            "source": var_id,
-                            "target": r,
-                            "type": "reads",
-                        }
-                    )
-
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "scopeInfo": {
-            "testFile": scope_info.get("testFile"),
-            "scoped": scope_info.get("scoped", False),
-        },
-    }
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
+        }
+    except Exception:
+        logger.exception("handle_action_dependency_graph failed")
+        return _not_ready
 
 
 # ---------------------------------------------------------------------------
@@ -543,105 +574,106 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
     - Guards are require/assume clauses on the action's monitors
     - Invariants are properties that constrain active state variables
     """
+    _not_ready = {
+        "nodes": [],
+        "transitions": [],
+        "scopeInfo": {"testFile": None, "scoped": False},
+    }
     graph = _get_requirement_graph(server)
     if graph is None:
-        return {
-            "nodes": [],
-            "transitions": [],
-            "scopeInfo": {"testFile": None, "scoped": False},
-        }
+        return _not_ready
 
-    scope_info = _resolve_scope(graph, params)
-    state_var_filter = params.get("stateVarFilter")
+    try:
+        snap = graph.snapshot()
+        scope_info = _resolve_scope(graph, params)
+        state_var_filter = params.get("stateVarFilter")
 
-    nodes: List[Dict[str, Any]] = []
-    transitions: List[Dict[str, Any]] = []
+        nodes: List[Dict[str, Any]] = []
+        transitions: List[Dict[str, Any]] = []
 
-    # Identify state vars that participate in action monitors
-    active_vars: Set[str] = set()
-    for action_id in graph.actions:
-        reqs = graph.get_requirements_for_action(action_id)
-        for req in reqs:
-            for etype, target_id in graph._outgoing.get(req.id, []):
-                if etype in (EdgeType.READS, EdgeType.WRITES):
-                    active_vars.add(target_id)
+        active_vars: Set[str] = set()
+        for action_id in snap.actions:
+            reqs = snap.get_requirements_for_action(action_id)
+            for req in reqs:
+                for etype, target_id in snap.outgoing.get(req.id, []):
+                    if etype in (EdgeType.READS, EdgeType.WRITES):
+                        active_vars.add(target_id)
 
-    # Build state nodes
-    for var_id, var_node in graph.state_vars.items():
-        if var_id not in active_vars:
-            continue
-        if state_var_filter and var_node.name != state_var_filter:
-            continue
-        nodes.append(
-            {
-                "id": var_id,
-                "label": var_node.name,
-                "type": "state",
-                "file": var_node.file,
-                "line": var_node.line,
-            }
-        )
-
-    # Add invariant nodes (properties that constrain active state vars)
-    for prop_id, prop_node in graph.properties.items():
-        prop_vars = {
-            target
-            for etype, target in graph._outgoing.get(prop_id, [])
-            if etype == EdgeType.READS
-        }
-        if prop_vars & active_vars:
+        for var_id, var_node in snap.state_vars.items():
+            if var_id not in active_vars:
+                continue
+            if state_var_filter and var_node.name != state_var_filter:
+                continue
             nodes.append(
                 {
-                    "id": prop_id,
-                    "label": prop_node.name or prop_node.formula_text[:40],
-                    "type": "invariant",
-                    "file": prop_node.file,
-                    "line": prop_node.line,
+                    "id": var_id,
+                    "label": var_node.name,
+                    "type": "state",
+                    "file": var_node.file,
+                    "line": var_node.line,
                 }
             )
 
-    active_var_ids = {n["id"] for n in nodes if n["type"] == "state"}
-
-    # Build transitions: action connects source state vars to target state vars
-    for action_id, action_node in graph.actions.items():
-        reqs = graph.get_requirements_for_action(action_id)
-
-        read_vars: Set[str] = set()
-        write_vars: Set[str] = set()
-        guards: List[str] = []
-
-        for req in reqs:
-            for etype, target_id in graph._outgoing.get(req.id, []):
-                if etype == EdgeType.READS and target_id in active_var_ids:
-                    read_vars.add(target_id)
-                elif etype == EdgeType.WRITES and target_id in active_var_ids:
-                    write_vars.add(target_id)
-            if req.kind in ("require", "assume"):
-                guards.append(req.formula_text)
-
-        # Create transitions: from each read var to each written var
-        sources = read_vars if read_vars else write_vars
-        targets = write_vars if write_vars else read_vars
-
-        for src in sources:
-            for tgt in targets:
-                transitions.append(
+        for prop_id, prop_node in snap.properties.items():
+            prop_vars = {
+                target
+                for etype, target in snap.outgoing.get(prop_id, [])
+                if etype == EdgeType.READS
+            }
+            if prop_vars & active_vars:
+                nodes.append(
                     {
-                        "source": src,
-                        "target": tgt,
-                        "action": action_node.name,
-                        "guards": guards,
+                        "id": prop_id,
+                        "label": prop_node.name or prop_node.formula_text[:40],
+                        "type": "invariant",
+                        "file": prop_node.file,
+                        "line": prop_node.line,
                     }
                 )
 
-    return {
-        "nodes": nodes,
-        "transitions": transitions,
-        "scopeInfo": {
-            "testFile": scope_info.get("testFile"),
-            "scoped": scope_info.get("scoped", False),
-        },
-    }
+        active_var_ids = {n["id"] for n in nodes if n["type"] == "state"}
+
+        for action_id, action_node in snap.actions.items():
+            reqs = snap.get_requirements_for_action(action_id)
+
+            read_vars: Set[str] = set()
+            write_vars: Set[str] = set()
+            guards: List[str] = []
+
+            for req in reqs:
+                for etype, target_id in snap.outgoing.get(req.id, []):
+                    if etype == EdgeType.READS and target_id in active_var_ids:
+                        read_vars.add(target_id)
+                    elif etype == EdgeType.WRITES and target_id in active_var_ids:
+                        write_vars.add(target_id)
+                if req.kind in ("require", "assume"):
+                    guards.append(req.formula_text)
+
+            sources = read_vars if read_vars else write_vars
+            targets = write_vars if write_vars else read_vars
+
+            for src in sources:
+                for tgt in targets:
+                    transitions.append(
+                        {
+                            "source": src,
+                            "target": tgt,
+                            "action": action_node.name,
+                            "guards": guards,
+                        }
+                    )
+
+        return {
+            "nodes": nodes,
+            "transitions": transitions,
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
+        }
+    except Exception:
+        logger.exception("handle_state_machine_view failed")
+        return _not_ready
 
 
 # ---------------------------------------------------------------------------
@@ -654,58 +686,64 @@ def handle_layered_overview(server: Any, params: dict) -> dict:
 
     Groups symbols, actions, state vars, and requirements by file or module.
     """
+    _not_ready = {"layers": [], "scopeInfo": {"testFile": None, "scoped": False}}
     graph = _get_requirement_graph(server)
     if graph is None:
-        return {"layers": [], "scopeInfo": {"testFile": None, "scoped": False}}
+        return _not_ready
 
-    scope_info = _resolve_scope(graph, params)
-    group_by = params.get("groupBy", "file")
+    try:
+        snap = graph.snapshot()
+        scope_info = _resolve_scope(graph, params)
+        group_by = params.get("groupBy", "file")
 
-    by_group: Dict[str, Dict[str, Any]] = {}
+        by_group: Dict[str, Dict[str, Any]] = {}
 
-    for action_id, action_node in graph.actions.items():
-        key = (
-            action_node.file
-            if group_by == "file"
-            else _extract_module(action_node.qualified_name)
-        )
-        if key not in by_group:
-            by_group[key] = {
-                "file": action_node.file if group_by == "file" else None,
-                "module": key if group_by == "module" else None,
-                "actions": [],
-                "stateVars": [],
-                "requirements": 0,
-            }
-        reqs = graph.get_requirements_for_action(action_id)
-        by_group[key]["actions"].append(action_node.name)
-        by_group[key]["requirements"] += len(reqs)
+        for action_id, action_node in snap.actions.items():
+            key = (
+                action_node.file
+                if group_by == "file"
+                else _extract_module(action_node.qualified_name)
+            )
+            if key not in by_group:
+                by_group[key] = {
+                    "file": action_node.file if group_by == "file" else None,
+                    "module": key if group_by == "module" else None,
+                    "actions": [],
+                    "stateVars": [],
+                    "requirements": 0,
+                }
+            reqs = snap.get_requirements_for_action(action_id)
+            by_group[key]["actions"].append(action_node.name)
+            by_group[key]["requirements"] += len(reqs)
 
-    for _, var_node in graph.state_vars.items():
-        key = (
-            var_node.file
-            if group_by == "file"
-            else _extract_module(var_node.qualified_name)
-        )
-        if key not in by_group:
-            by_group[key] = {
-                "file": var_node.file if group_by == "file" else None,
-                "module": key if group_by == "module" else None,
-                "actions": [],
-                "stateVars": [],
-                "requirements": 0,
-            }
-        by_group[key]["stateVars"].append(var_node.name)
+        for _, var_node in snap.state_vars.items():
+            key = (
+                var_node.file
+                if group_by == "file"
+                else _extract_module(var_node.qualified_name)
+            )
+            if key not in by_group:
+                by_group[key] = {
+                    "file": var_node.file if group_by == "file" else None,
+                    "module": key if group_by == "module" else None,
+                    "actions": [],
+                    "stateVars": [],
+                    "requirements": 0,
+                }
+            by_group[key]["stateVars"].append(var_node.name)
 
-    layers = list(by_group.values())
+        layers = list(by_group.values())
 
-    return {
-        "layers": layers,
-        "scopeInfo": {
-            "testFile": scope_info.get("testFile"),
-            "scoped": scope_info.get("scoped", False),
-        },
-    }
+        return {
+            "layers": layers,
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
+        }
+    except Exception:
+        logger.exception("handle_layered_overview failed")
+        return _not_ready
 
 
 def _extract_module(qualified_name: str) -> str:
@@ -725,84 +763,84 @@ def handle_smart_suggestions(server: Any, params: dict) -> dict:
     Returns context-aware suggestions based on cursor position and
     the semantic model's requirement graph.
     """
+    _not_ready = {"suggestions": [], "context": None}
     graph = _get_requirement_graph(server)
     if graph is None:
-        return {"suggestions": [], "context": None}
+        return _not_ready
 
-    file_path = params.get("filePath", "")
-    line = params.get("line", 0)
-    action_name = params.get("actionName")
+    try:
+        snap = graph.snapshot()
+        file_path = params.get("filePath", "")
+        line = params.get("line", 0)
+        action_name = params.get("actionName")
 
-    suggestions: List[Dict[str, Any]] = []
+        suggestions: List[Dict[str, Any]] = []
 
-    if action_name:
-        # Find state vars currently read by this action's requirements
-        reqs = graph.get_requirements_for_action(action_name)
-        seen_vars: Set[str] = set()
-        for req in reqs:
-            for etype, target_id in graph._outgoing.get(req.id, []):
-                if etype == EdgeType.READS:
-                    seen_vars.add(target_id)
-
-        # Find state vars read by OTHER requirements that share the same
-        # state vars (i.e., related requirements).  Suggest vars that the
-        # related requirements read but this action does not.
-        all_vars_for_related: Set[str] = set()
-        for var_id in seen_vars:
-            sharing = graph.get_requirements_sharing_state_var(var_id)
-            for s in sharing:
-                for etype, target_id in graph._outgoing.get(s.id, []):
+        if action_name:
+            reqs = snap.get_requirements_for_action(action_name)
+            seen_vars: Set[str] = set()
+            for req in reqs:
+                for etype, target_id in snap.outgoing.get(req.id, []):
                     if etype == EdgeType.READS:
-                        all_vars_for_related.add(target_id)
+                        seen_vars.add(target_id)
 
-        missing_vars = all_vars_for_related - seen_vars
-        for var_id in missing_vars:
-            var_node = graph.state_vars.get(var_id)
-            if var_node:
-                suggestions.append(
-                    {
-                        "type": "state_var",
-                        "name": var_node.name,
-                        "qualifiedName": var_node.qualified_name,
-                        "reason": (
-                            f"Used by related requirements but not yet "
-                            f"referenced in {action_name}"
-                        ),
-                        "priority": "medium",
-                    }
+            all_vars_for_related: Set[str] = set()
+            for var_id in seen_vars:
+                sharing = snap.get_requirements_sharing_state_var(var_id)
+                for s in sharing:
+                    for etype, target_id in snap.outgoing.get(s.id, []):
+                        if etype == EdgeType.READS:
+                            all_vars_for_related.add(target_id)
+
+            missing_vars = all_vars_for_related - seen_vars
+            for var_id in missing_vars:
+                var_node = snap.state_vars.get(var_id)
+                if var_node:
+                    suggestions.append(
+                        {
+                            "type": "state_var",
+                            "name": var_node.name,
+                            "qualifiedName": var_node.qualified_name,
+                            "reason": (
+                                f"Used by related requirements but not yet "
+                                f"referenced in {action_name}"
+                            ),
+                            "priority": "medium",
+                        }
+                    )
+
+            written_vars = snap.get_state_vars_written_in_monitor(action_name)
+            for sv in written_vars:
+                guarded = any(
+                    etype == EdgeType.READS and target == sv.id
+                    for req in reqs
+                    for etype, target in snap.outgoing.get(req.id, [])
                 )
+                if not guarded:
+                    suggestions.append(
+                        {
+                            "type": "missing_guard",
+                            "name": sv.name,
+                            "reason": (
+                                f"State var '{sv.name}' is written by "
+                                f"{action_name} but not guarded"
+                            ),
+                            "priority": "high",
+                            "template": f"require {sv.name}(...) ",
+                        }
+                    )
 
-        # Suggest missing coverage patterns: state vars written by the
-        # action but not guarded (read) by any of its requirements.
-        written_vars = graph.get_state_vars_written_in_monitor(action_name)
-        for sv in written_vars:
-            guarded = any(
-                etype == EdgeType.READS and target == sv.id
-                for req in reqs
-                for etype, target in graph._outgoing.get(req.id, [])
-            )
-            if not guarded:
-                suggestions.append(
-                    {
-                        "type": "missing_guard",
-                        "name": sv.name,
-                        "reason": (
-                            f"State var '{sv.name}' is written by "
-                            f"{action_name} but not guarded"
-                        ),
-                        "priority": "high",
-                        "template": f"require {sv.name}(...) ",
-                    }
-                )
-
-    return {
-        "suggestions": suggestions,
-        "context": {
-            "file": file_path,
-            "line": line,
-            "action": action_name,
-        },
-    }
+        return {
+            "suggestions": suggestions,
+            "context": {
+                "file": file_path,
+                "line": line,
+                "action": action_name,
+            },
+        }
+    except Exception:
+        logger.exception("handle_smart_suggestions failed")
+        return _not_ready
 
 
 # ---------------------------------------------------------------------------

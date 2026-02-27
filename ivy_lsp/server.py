@@ -147,6 +147,26 @@ class IvyLanguageServer(LanguageServer):
             except Exception:
                 logger.exception("Failed to clean up staging directory")
 
+    def _send_model_ready_notification(self) -> None:
+        """Send ``ivy/modelReady`` notification so the client can refresh immediately."""
+        try:
+            graph = getattr(self._indexer, "_requirement_graph", None)
+            action_count = len(graph.actions) if graph else 0
+            req_count = len(graph.requirements) if graph else 0
+            self.protocol.notify(
+                "ivy/modelReady",
+                {"actionCount": action_count, "requirementCount": req_count},
+            )
+            logger.info(
+                "Sent ivy/modelReady notification: %d actions, %d requirements",
+                action_count,
+                req_count,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to send ivy/modelReady notification", exc_info=True
+            )
+
     def _make_deep_index_progress_callback(self):
         """Create a callback that sends ``$/progress`` work-done notifications.
 
@@ -305,6 +325,7 @@ class IvyLanguageServer(LanguageServer):
                     len(result.errors),
                     result.cancelled,
                 )
+                self._send_model_ready_notification()
             except Exception:
                 logger.exception("Bulk analysis failed")
 
@@ -401,6 +422,7 @@ class IvyLanguageServer(LanguageServer):
             n_files = len(self._indexer._cache._cache)
             n_symbols = sum(1 for _ in self._indexer._symbol_table.all_symbols())
             logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
+            self._send_model_ready_notification()
         except Exception as exc:
             self.state_tracker.set_index_error(str(exc))
             logger.exception("Workspace indexing failed")

@@ -21,6 +21,77 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Snapshot (thread-safe frozen copy for read-only use)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GraphSnapshot:
+    """Immutable snapshot of a RequirementGraph for thread-safe reads.
+
+    Created via ``RequirementGraph.snapshot()`` under the graph lock.
+    All query methods operate on the frozen data without needing locks.
+    """
+
+    actions: Dict[str, "ActionNode"]
+    requirements: Dict[str, "RequirementNode"]
+    state_vars: Dict[str, "StateVarNode"]
+    properties: Dict[str, "PropertyNode"]
+    rfc_requirements: Dict[str, "RfcRequirement"]
+    edges: List[Tuple[str, "EdgeType", str]]
+    outgoing: Dict[str, List[Tuple["EdgeType", str]]]
+    incoming: Dict[str, List[Tuple["EdgeType", str]]]
+
+    def get_requirements_for_action(self, action_name: str) -> List["RequirementNode"]:
+        result = []
+        for etype, source_id in self.incoming.get(action_name, []):
+            if etype == EdgeType.CONSTRAINS and source_id in self.requirements:
+                result.append(self.requirements[source_id])
+        return result
+
+    def get_state_vars_read_by(self, requirement_id: str) -> List["StateVarNode"]:
+        result = []
+        for etype, target_id in self.outgoing.get(requirement_id, []):
+            if etype == EdgeType.READS and target_id in self.state_vars:
+                result.append(self.state_vars[target_id])
+        return result
+
+    def get_state_vars_written_in_monitor(self, action_name: str) -> List["StateVarNode"]:
+        written: Set[str] = set()
+        for _src, etype, dst in self.edges:
+            if etype == EdgeType.WRITES:
+                written.add(dst)
+        return [self.state_vars[v] for v in written if v in self.state_vars]
+
+    def get_uncovered_requirements(self) -> List["RfcRequirement"]:
+        covered_ids: Set[str] = set()
+        for req in self.requirements.values():
+            for tag in req.bracket_tags:
+                if tag in self.rfc_requirements:
+                    covered_ids.add(tag)
+        return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
+
+    def get_coverage_stats(self) -> Dict[str, int]:
+        covered_ids: Set[str] = set()
+        for req in self.requirements.values():
+            for tag in req.bracket_tags:
+                if tag in self.rfc_requirements:
+                    covered_ids.add(tag)
+        return {
+            "total": len(self.rfc_requirements),
+            "covered": len(covered_ids),
+            "uncovered": len(self.rfc_requirements) - len(covered_ids),
+        }
+
+    def get_requirements_sharing_state_var(self, var_name: str) -> List["RequirementNode"]:
+        result = []
+        for etype, source_id in self.incoming.get(var_name, []):
+            if etype == EdgeType.READS and source_id in self.requirements:
+                result.append(self.requirements[source_id])
+        return result
+
+
+# ---------------------------------------------------------------------------
 # Node types
 # ---------------------------------------------------------------------------
 
@@ -359,6 +430,22 @@ class RequirementGraph:
         for s, t, d in self.edges:
             self._outgoing[s].append((t, d))
             self._incoming[d].append((t, s))
+
+    # -- Snapshot -----------------------------------------------------------
+
+    def snapshot(self) -> GraphSnapshot:
+        """Return a thread-safe frozen copy of all graph data for read-only use."""
+        with self._lock:
+            return GraphSnapshot(
+                actions=dict(self.actions),
+                requirements=dict(self.requirements),
+                state_vars=dict(self.state_vars),
+                properties=dict(self.properties),
+                rfc_requirements=dict(self.rfc_requirements),
+                edges=list(self.edges),
+                outgoing={k: list(v) for k, v in self._outgoing.items()},
+                incoming={k: list(v) for k, v in self._incoming.items()},
+            )
 
     # -- Queries ------------------------------------------------------------
 
