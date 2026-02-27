@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import sqlite3
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
@@ -92,3 +96,139 @@ class FileCache:
         dependents = include_graph.get_included_by(filepath)
         for dep in dependents:
             self._cache.pop(dep, None)
+
+
+class PersistentFileCache:
+    """SQLite-backed file cache with in-memory LRU hot layer.
+
+    Data path: ``~/.cache/ivy-lsp/<hash>/index.db``
+    """
+
+    SCHEMA_VERSION = "1"
+
+    def __init__(self, workspace_root: str, max_memory: int = 200) -> None:
+        self._workspace_root = workspace_root
+        self._memory = FileCache(max_size=max_memory)
+        self._db_path = self._get_db_path(workspace_root)
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        self._db = sqlite3.connect(self._db_path)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._init_schema()
+
+    def _get_db_path(self, workspace_root: str) -> str:
+        h = hashlib.sha256(
+            os.path.abspath(workspace_root).encode()
+        ).hexdigest()[:16]
+        cache_base = os.path.join(
+            os.path.expanduser("~"), ".cache", "ivy-lsp", h,
+        )
+        return os.path.join(cache_base, "index.db")
+
+    def _init_schema(self) -> None:
+        cur = self._db.cursor()
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS cache_meta (
+                key TEXT PRIMARY KEY, value TEXT)"""
+        )
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS file_cache (
+                filepath TEXT PRIMARY KEY,
+                mtime REAL NOT NULL,
+                symbols_json TEXT NOT NULL,
+                includes_json TEXT NOT NULL,
+                cached_at REAL NOT NULL)"""
+        )
+        row = cur.execute(
+            "SELECT value FROM cache_meta WHERE key='schema_version'"
+        ).fetchone()
+        stored_version = row[0] if row else None
+        if stored_version != self.SCHEMA_VERSION:
+            cur.execute("DELETE FROM file_cache")
+            cur.execute(
+                "INSERT OR REPLACE INTO cache_meta (key, value) "
+                "VALUES ('schema_version', ?)",
+                (self.SCHEMA_VERSION,),
+            )
+        self._db.commit()
+
+    def get(self, filepath: str) -> Optional[CachedFile]:
+        cached = self._memory.get(filepath)
+        if cached is not None:
+            return cached
+        row = self._db.execute(
+            "SELECT * FROM file_cache WHERE filepath=?", (filepath,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            current_mtime = os.path.getmtime(filepath)
+        except OSError:
+            return None
+        if current_mtime != row["mtime"]:
+            self._db.execute(
+                "DELETE FROM file_cache WHERE filepath=?", (filepath,),
+            )
+            self._db.commit()
+            return None
+        from ivy_lsp.parsing.symbols import IvySymbol
+
+        symbols = [IvySymbol.from_dict(d) for d in json.loads(row["symbols_json"])]
+        includes = json.loads(row["includes_json"])
+        entry = CachedFile(
+            filepath=filepath,
+            mtime=row["mtime"],
+            parse_result=None,
+            symbols=symbols,
+            includes=includes,
+        )
+        self._memory.put(filepath, None, symbols, includes)
+        return entry
+
+    def put(
+        self,
+        filepath: str,
+        result: Any,
+        symbols: List[Any],
+        includes: Optional[List[str]] = None,
+    ) -> None:
+        self._memory.put(filepath, result, symbols, includes)
+        try:
+            mtime = os.path.getmtime(filepath)
+        except OSError:
+            return
+        syms_json = json.dumps([s.to_dict() for s in symbols])
+        incs_json = json.dumps(includes or [])
+        self._db.execute(
+            """INSERT OR REPLACE INTO file_cache
+               (filepath, mtime, symbols_json, includes_json, cached_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (filepath, mtime, syms_json, incs_json, time.time()),
+        )
+        self._db.commit()
+
+    def invalidate(self, filepath: str) -> None:
+        self._memory.invalidate(filepath)
+        self._db.execute(
+            "DELETE FROM file_cache WHERE filepath=?", (filepath,),
+        )
+        self._db.commit()
+
+    def invalidate_dependents(
+        self, filepath: str, include_graph: Any,
+    ) -> None:
+        self._memory.invalidate_dependents(filepath, include_graph)
+        dependents = include_graph.get_included_by(filepath)
+        for dep in dependents:
+            self._db.execute(
+                "DELETE FROM file_cache WHERE filepath=?", (dep,),
+            )
+        self._db.commit()
+
+    def clear_all(self) -> None:
+        self._memory = FileCache(max_size=self._memory._max_size)
+        self._db.execute("DELETE FROM file_cache")
+        self._db.commit()
+
+    def close(self) -> None:
+        self._db.close()
