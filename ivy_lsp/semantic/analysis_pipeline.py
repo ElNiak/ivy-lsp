@@ -8,7 +8,9 @@ Tier 3 (compiler, background): full compiler analysis (background thread)
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Tuple
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Callable, List, Optional, Tuple
 
 from ivy_lsp.adapters.protocols import (
     IAstEnrichmentAdapter,
@@ -21,6 +23,17 @@ from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
 from ivy_lsp.semantic.rfc_annotations import parse_file_rfc_annotations
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BulkAnalysisResult:
+    """Result of a bulk T1+T2 analysis run."""
+
+    total: int = 0
+    t1_completed: int = 0
+    t2_completed: int = 0
+    errors: List[Tuple[str, str]] = field(default_factory=list)
+    cancelled: bool = False
 
 
 class AnalysisPipeline:
@@ -41,6 +54,9 @@ class AnalysisPipeline:
         self._tier2_files: set[str] = set()
         self._tier3_files: set[str] = set()
         self._tier3_running: bool = False
+        self._bulk_running: bool = False
+        self._bulk_total: int = 0
+        self._bulk_completed: int = 0
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -176,6 +192,100 @@ class AnalysisPipeline:
             self._tier3_running = False
             raise
 
+    # -- Bulk T1+T2 analysis ---------------------------------------------------
+
+    def run_bulk_t1_t2(
+        self,
+        filepaths: List[str],
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
+        include_t2: bool = True,
+    ) -> BulkAnalysisResult:
+        """Run T1 (and optionally T2) analysis on a batch of files.
+
+        Designed for background pre-population of the semantic model after
+        deep indexing completes.  Each file is processed independently;
+        errors are recorded but never crash the batch.
+
+        Args:
+            filepaths: Absolute paths to ``.ivy`` files.
+            progress_callback: Called after each file with (completed, total, current_file).
+            cancel_event: If set, the batch aborts early.
+            include_t2: When *False*, only T1 runs (~5x faster).
+
+        Returns:
+            A :class:`BulkAnalysisResult` summarising outcomes.
+        """
+        # Filter out files already analysed at the requested tier
+        if include_t2:
+            remaining = [f for f in filepaths if f not in self._tier2_files]
+        else:
+            remaining = [f for f in filepaths if f not in self._tier1_files]
+
+        result = BulkAnalysisResult(total=len(remaining))
+        self._bulk_running = True
+        self._bulk_total = len(remaining)
+        self._bulk_completed = 0
+
+        try:
+            for i, filepath in enumerate(remaining):
+                if cancel_event is not None and cancel_event.is_set():
+                    result.cancelled = True
+                    break
+
+                try:
+                    with open(filepath) as f:
+                        source = f.read()
+                except OSError as exc:
+                    result.errors.append((filepath, str(exc)))
+                    self._bulk_completed = i + 1
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(i + 1, len(remaining), filepath)
+                        except Exception:
+                            pass
+                    continue
+
+                try:
+                    self.run_tier1(source, filepath)
+                    result.t1_completed += 1
+                except Exception as exc:
+                    result.errors.append((filepath, f"T1: {exc}"))
+                    self._bulk_completed = i + 1
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(i + 1, len(remaining), filepath)
+                        except Exception:
+                            pass
+                    continue
+
+                if include_t2:
+                    try:
+                        self.run_tier2(source, filepath)
+                        result.t2_completed += 1
+                    except Exception as exc:
+                        result.errors.append((filepath, f"T2: {exc}"))
+
+                self._bulk_completed = i + 1
+                if progress_callback is not None:
+                    try:
+                        progress_callback(i + 1, len(remaining), filepath)
+                    except Exception:
+                        pass
+        finally:
+            self._bulk_running = False
+
+        logger.info(
+            "Bulk analysis: %d/%d T1, %d/%d T2, %d errors, cancelled=%s",
+            result.t1_completed,
+            result.total,
+            result.t2_completed,
+            result.total,
+            len(result.errors),
+            result.cancelled,
+        )
+        return result
+
     # -- State query -----------------------------------------------------------
 
     def get_pipeline_state(self) -> dict:
@@ -188,6 +298,9 @@ class AnalysisPipeline:
             "semanticNodeCount": self._model.node_count(),
             "semanticEdgeCount": self._model.edge_count(),
             "semanticModelReady": self._model.node_count() > 0,
+            "bulkAnalysisRunning": self._bulk_running,
+            "bulkAnalysisTotal": self._bulk_total,
+            "bulkAnalysisCompleted": self._bulk_completed,
         }
 
     # -- Orchestration ---------------------------------------------------------

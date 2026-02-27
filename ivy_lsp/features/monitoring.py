@@ -262,6 +262,8 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
         "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
         "tier3Running": False, "semanticNodeCount": 0,
         "semanticEdgeCount": 0, "semanticModelReady": False,
+        "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
+        "bulkAnalysisCompleted": 0,
     }
     if has_pipeline:
         pipeline_state = server._analysis_pipeline.get_pipeline_state()

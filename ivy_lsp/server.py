@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+import threading
 import time
 import uuid
 
@@ -78,6 +79,7 @@ class IvyLanguageServer(LanguageServer):
         self._full_mode = False
         self._semantic_model = None
         self._analysis_pipeline = None
+        self._bulk_analysis_cancel = threading.Event()
         self.state_tracker = ServerStateTracker()
 
         from ivy_lsp.features import (
@@ -133,6 +135,7 @@ class IvyLanguageServer(LanguageServer):
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
+            self._bulk_analysis_cancel.set()
             self._cleanup_staging()
 
     def _cleanup_staging(self) -> None:
@@ -207,6 +210,108 @@ class IvyLanguageServer(LanguageServer):
                 logger.debug("Failed to report progress", exc_info=True)
 
         return _callback
+
+    def _make_bulk_analysis_progress_callback(self):
+        """Create a ``$/progress`` callback for bulk background analysis.
+
+        Same pattern as :meth:`_make_deep_index_progress_callback` but
+        with an "Ivy Background Analysis" title.
+        """
+        token = str(uuid.uuid4())
+        state = {"created": False}
+        server = self
+
+        def _callback(completed: int, total: int, current_file):
+            if not state["created"]:
+                try:
+                    server.work_done_progress.create(token)
+                    server.work_done_progress.begin(
+                        token,
+                        lsp.WorkDoneProgressBegin(
+                            title="Ivy Background Analysis",
+                            message=f"Analysing {total} files...",
+                            cancellable=False,
+                            percentage=0,
+                        ),
+                    )
+                    state["created"] = True
+                except Exception:
+                    logger.debug(
+                        "Client does not support work-done progress",
+                        exc_info=True,
+                    )
+                    return
+
+            if completed >= total:
+                try:
+                    server.work_done_progress.end(
+                        token,
+                        lsp.WorkDoneProgressEnd(
+                            message=f"Analysed {total} files",
+                        ),
+                    )
+                except Exception:
+                    logger.debug("Failed to end progress", exc_info=True)
+                return
+
+            pct = int(100 * completed / total) if total > 0 else 0
+            basename = (
+                os.path.basename(current_file) if current_file else ""
+            )
+            try:
+                server.work_done_progress.report(
+                    token,
+                    lsp.WorkDoneProgressReport(
+                        message=f"({completed}/{total}) {basename}",
+                        percentage=pct,
+                    ),
+                )
+            except Exception:
+                logger.debug("Failed to report progress", exc_info=True)
+
+        return _callback
+
+    def _start_bulk_analysis(self) -> None:
+        """Kick off background T1+T2 analysis of all workspace files.
+
+        Called as the ``done_callback`` from :class:`WorkspaceIndexer`
+        after Phase 2 (deep indexing) completes.
+        """
+        if os.environ.get("IVY_LSP_BULK_ANALYSIS", "1") == "0":
+            logger.info("Bulk analysis disabled via IVY_LSP_BULK_ANALYSIS=0")
+            return
+        if self._analysis_pipeline is None or self._indexer is None:
+            return
+
+        include_t2 = os.environ.get("IVY_LSP_BULK_ANALYSIS_T2", "1") != "0"
+        all_files = self._indexer.get_all_ivy_file_paths()
+        if not all_files:
+            return
+
+        progress_cb = self._make_bulk_analysis_progress_callback()
+
+        def _run():
+            try:
+                result = self._analysis_pipeline.run_bulk_t1_t2(
+                    filepaths=all_files,
+                    progress_callback=progress_cb,
+                    cancel_event=self._bulk_analysis_cancel,
+                    include_t2=include_t2,
+                )
+                logger.info(
+                    "Bulk analysis complete: %d T1, %d T2, %d errors, cancelled=%s",
+                    result.t1_completed,
+                    result.t2_completed,
+                    len(result.errors),
+                    result.cancelled,
+                )
+            except Exception:
+                logger.exception("Bulk analysis failed")
+
+        thread = threading.Thread(
+            target=_run, daemon=True, name="ivy-bulk-analysis",
+        )
+        thread.start()
 
     def _install_lsp_log_handler(self) -> None:
         """Replace stderr handler with LSP notification handler."""
@@ -283,7 +388,9 @@ class IvyLanguageServer(LanguageServer):
 
         progress_cb = self._make_deep_index_progress_callback()
         self._indexer = WorkspaceIndexer(
-            root, self._parser, resolver, progress_callback=progress_cb,
+            root, self._parser, resolver,
+            progress_callback=progress_cb,
+            done_callback=self._start_bulk_analysis,
         )
         self.state_tracker.set_indexing()
         try:

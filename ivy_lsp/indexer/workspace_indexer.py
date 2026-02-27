@@ -97,11 +97,13 @@ class WorkspaceIndexer:
         progress_callback: Optional[
             Callable[[int, int, Optional[str]], None]
         ] = None,
+        done_callback: Optional[Callable[[], None]] = None,
     ) -> None:
         self._workspace_root = os.path.abspath(workspace_root)
         self._parser = parser
         self._resolver = resolver
         self._progress_callback = progress_callback
+        self._done_callback = done_callback
         if persistent_cache:
             from ivy_lsp.indexer.file_cache import PersistentFileCache
 
@@ -317,6 +319,12 @@ class WorkspaceIndexer:
         # Signal progress end (total/total)
         self._notify_progress()
         logger.info("Deep index complete for %d test files", len(test_files))
+
+        if self._done_callback is not None:
+            try:
+                self._done_callback()
+            except Exception:
+                logger.warning("Deep index done callback failed", exc_info=True)
 
     def _deep_index_serial(self, test_files: List[str]) -> None:
         """Serial deep indexing of test files."""
@@ -594,6 +602,10 @@ class WorkspaceIndexer:
     # ------------------------------------------------------------------
     # Full re-index and stats
     # ------------------------------------------------------------------
+
+    def get_all_ivy_file_paths(self) -> List[str]:
+        """Return all ``.ivy`` file paths known to the resolver."""
+        return self._resolver.find_all_ivy_files()
 
     def reindex(self) -> None:
         """Clear caches and fully re-index the workspace."""
