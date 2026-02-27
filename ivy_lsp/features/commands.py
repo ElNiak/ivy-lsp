@@ -512,6 +512,8 @@ def register(server: Any) -> None:
             "ivyCheckAvailable": _find_tool("ivy_check") is not None,
             "ivycAvailable": _find_tool("ivyc") is not None,
             "ivyShowAvailable": _find_tool("ivy_show") is not None,
+            "compiledModelAvailable": getattr(server, "_compiler_manager", None)
+            is not None,
         }
 
     def _refresh_open_diagnostics(srv) -> None:
@@ -687,3 +689,92 @@ def register(server: Any) -> None:
 
         graph.set_active_test(filepath)
         _refresh_open_diagnostics(server)
+
+    @server.feature("ivy/compiledModel")
+    def ivy_compiled_model(params: Any = None) -> Dict[str, Any]:
+        """Return the cached CompiledModuleIR for a file as JSON."""
+        if params is None:
+            return {"success": False, "error": "No params provided"}
+
+        uri = getattr(params, "textDocument", None)
+        if uri is not None:
+            uri = getattr(uri, "uri", uri)
+        if not uri:
+            uri = getattr(params, "uri", None)
+        if not uri:
+            return {"success": False, "error": "No file URI provided"}
+
+        filepath = uri.replace("file://", "")
+
+        manager = getattr(server, "_compiler_manager", None)
+        if manager is None:
+            return {"success": False, "error": "CompilerManager not available"}
+
+        ir = manager.get_cached(filepath)
+        if ir is None:
+            return {
+                "success": False,
+                "error": (
+                    f"No cached compilation for {os.path.basename(filepath)}"
+                ),
+                "hint": "Run ivy/compile or wait for background compilation",
+            }
+
+        # Flatten mixins from Dict[str, List[MixinIR]] to a single list
+        flat_mixins = []
+        for mixin_list in ir.mixins.values():
+            for m in mixin_list:
+                flat_mixins.append(
+                    {"mixer": m.mixer, "mixee": m.mixee, "kind": m.kind}
+                )
+
+        return {
+            "success": True,
+            "filepath": filepath,
+            "compileDuration": ir.compile_duration,
+            "sorts": {
+                name: {
+                    "name": s.name,
+                    "arity": s.arity,
+                    "isUninterpreted": s.is_uninterpreted,
+                    "isEnumerated": s.is_enumerated,
+                    "constructors": list(s.constructors),
+                }
+                for name, s in ir.sorts.items()
+            },
+            "symbols": {
+                name: {
+                    "name": s.name,
+                    "sortStr": s.sort_str,
+                    "domainSorts": list(s.domain_sorts),
+                    "rangeSort": s.range_sort,
+                    "isRelation": s.is_relation,
+                    "isDestructor": s.is_destructor,
+                    "isConstructor": s.is_constructor,
+                }
+                for name, s in ir.symbols.items()
+            },
+            "actions": {
+                name: {
+                    "name": a.name,
+                    "formalParams": list(a.formal_params),
+                    "formalReturns": list(a.formal_returns),
+                    "isExported": a.is_exported,
+                    "isImported": a.is_imported,
+                }
+                for name, a in ir.actions.items()
+            },
+            "mixins": flat_mixins,
+            "isolates": {
+                name: {
+                    "name": iso.name,
+                    "verifiedComponents": list(iso.verified_components),
+                    "presentComponents": list(iso.present_components),
+                }
+                for name, iso in ir.isolates.items()
+            },
+            "axiomCount": len(ir.labeled_axioms),
+            "conjectureCount": len(ir.labeled_conjectures),
+            "requirementCount": len(ir.requirements),
+            "errors": list(ir.errors),
+        }
