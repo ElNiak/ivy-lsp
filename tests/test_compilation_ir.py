@@ -12,6 +12,7 @@ import pytest
 
 from ivy_lsp.compilation.ir import (
     ActionIR,
+    CompiledModuleIR,
     IsolateIR,
     LabeledFormulaIR,
     MixinIR,
@@ -344,3 +345,205 @@ class TestRequirementIR:
         )
         with pytest.raises(AttributeError):
             req.kind = "ensure"  # type: ignore[misc]
+
+
+class TestCompiledModuleIR:
+    """Pickle round-trip and factory tests for the top-level container."""
+
+    def _make_full_ir(self) -> CompiledModuleIR:
+        """Build a realistic CompiledModuleIR with QUIC protocol data."""
+        return CompiledModuleIR(
+            sorts={
+                "quic_packet_type": SortIR(
+                    name="quic_packet_type",
+                    is_enumerated=True,
+                    constructors=["initial", "handshake", "one_rtt"],
+                ),
+                "cid": SortIR(
+                    name="cid",
+                    is_uninterpreted=True,
+                    interpretation="bv[64]",
+                ),
+            },
+            symbols={
+                "conn_seen": SymbolIR(
+                    name="conn_seen",
+                    sort_str="cid * quic_packet_type -> bool",
+                    domain_sorts=["cid", "quic_packet_type"],
+                    range_sort="bool",
+                    is_relation=True,
+                ),
+            },
+            actions={
+                "quic_server.send_packet": ActionIR(
+                    name="quic_server.send_packet",
+                    formal_params=["dst:cid", "pkt:quic_packet"],
+                    formal_returns=["ok:bool"],
+                    is_exported=True,
+                ),
+            },
+            public_actions={"quic_server.send_packet"},
+            mixins={
+                "quic_server.handle_send": [
+                    MixinIR(
+                        mixer="quic_shim.send_event",
+                        mixee="quic_server.handle_send",
+                        kind="before",
+                    ),
+                ],
+            },
+            isolates={
+                "quic_server_test": IsolateIR(
+                    name="quic_server_test",
+                    verified_components=["quic_server"],
+                    present_components=["quic_client", "quic_shim"],
+                ),
+            },
+            labeled_axioms=[
+                LabeledFormulaIR(
+                    label="ax1",
+                    formula_str="forall C:cid. conn_seen(C) -> true",
+                    lineno=10,
+                ),
+            ],
+            labeled_properties=[
+                LabeledFormulaIR(
+                    label="prop1",
+                    formula_str="forall C:cid. established(C) -> ready(C)",
+                    lineno=50,
+                ),
+            ],
+            labeled_conjectures=[
+                LabeledFormulaIR(
+                    label="conj1",
+                    formula_str="eventually(done)",
+                    temporal=True,
+                ),
+            ],
+            definitions=[
+                LabeledFormulaIR(
+                    label="def1",
+                    formula_str="is_valid(X) = X > 0",
+                ),
+            ],
+            requirements=[
+                RequirementIR(
+                    action_name="quic_server.send_packet",
+                    kind="require",
+                    formula_str="conn_established(dst)",
+                    mixin_kind="before",
+                ),
+            ],
+            hierarchy={"quic_server": {"send_packet", "recv_packet"}},
+            exports=["quic_server.send_packet"],
+            imports=["quic_shim.recv_event"],
+            aliases={"pkt_type": "quic_packet_type"},
+            delegates=["quic_shim"],
+            mixord=["quic_shim.send_event", "quic_server.handle_send"],
+            sort_order=["cid", "quic_packet_type"],
+            symbol_order=["conn_seen"],
+            errors=[],
+            success=True,
+            source_file="quic_server_test.ivy",
+            compile_duration=1.234,
+        )
+
+    def test_pickle_round_trip_success(self):
+        ir = self._make_full_ir()
+        restored = pickle.loads(pickle.dumps(ir))
+        assert restored == ir
+        assert restored.success is True
+        assert restored.source_file == "quic_server_test.ivy"
+        assert restored.compile_duration == 1.234
+        # Verify sub-IR contents survived
+        assert "quic_packet_type" in restored.sorts
+        assert restored.sorts["quic_packet_type"].is_enumerated is True
+        assert restored.sorts["quic_packet_type"].constructors == [
+            "initial",
+            "handshake",
+            "one_rtt",
+        ]
+        assert "conn_seen" in restored.symbols
+        assert restored.symbols["conn_seen"].is_relation is True
+        assert "quic_server.send_packet" in restored.actions
+        assert restored.public_actions == {"quic_server.send_packet"}
+        assert len(restored.mixins["quic_server.handle_send"]) == 1
+        assert restored.isolates["quic_server_test"].name == "quic_server_test"
+        assert len(restored.labeled_axioms) == 1
+        assert len(restored.labeled_properties) == 1
+        assert len(restored.labeled_conjectures) == 1
+        assert len(restored.definitions) == 1
+        assert len(restored.requirements) == 1
+        assert restored.hierarchy == {
+            "quic_server": {"send_packet", "recv_packet"},
+        }
+        assert restored.exports == ["quic_server.send_packet"]
+        assert restored.imports == ["quic_shim.recv_event"]
+        assert restored.aliases == {"pkt_type": "quic_packet_type"}
+        assert restored.errors == []
+
+    def test_pickle_round_trip_failure(self):
+        ir = CompiledModuleIR(
+            source_file="broken.ivy",
+            errors=[
+                "line 10: type error in sort declaration",
+                "line 25: undefined symbol 'foo'",
+            ],
+            success=False,
+            compile_duration=0.5,
+        )
+        restored = pickle.loads(pickle.dumps(ir))
+        assert restored == ir
+        assert restored.success is False
+        assert restored.source_file == "broken.ivy"
+        assert restored.compile_duration == 0.5
+        assert len(restored.errors) == 2
+        assert "type error" in restored.errors[0]
+        assert "undefined symbol" in restored.errors[1]
+        # All container fields should be empty defaults
+        assert restored.sorts == {}
+        assert restored.symbols == {}
+        assert restored.actions == {}
+        assert restored.public_actions == set()
+        assert restored.mixins == {}
+        assert restored.isolates == {}
+        assert restored.labeled_axioms == []
+        assert restored.labeled_properties == []
+        assert restored.labeled_conjectures == []
+        assert restored.definitions == []
+        assert restored.requirements == []
+        assert restored.hierarchy == {}
+        assert restored.exports == []
+        assert restored.imports == []
+        assert restored.aliases == {}
+        assert restored.delegates == []
+        assert restored.mixord == []
+        assert restored.sort_order == []
+        assert restored.symbol_order == []
+
+    def test_empty_ir_factory(self):
+        ir = CompiledModuleIR.empty(
+            source_file="test.ivy",
+            errors=["compilation failed"],
+            duration=0.1,
+        )
+        assert ir.success is False
+        assert ir.source_file == "test.ivy"
+        assert ir.errors == ["compilation failed"]
+        assert ir.compile_duration == 0.1
+        assert ir.sorts == {}
+        assert ir.symbols == {}
+        assert ir.actions == {}
+        assert ir.public_actions == set()
+
+    def test_empty_ir_factory_defaults(self):
+        ir = CompiledModuleIR.empty(source_file="minimal.ivy")
+        assert ir.success is False
+        assert ir.source_file == "minimal.ivy"
+        assert ir.errors == []
+        assert ir.compile_duration == 0.0
+
+    def test_frozen(self):
+        ir = CompiledModuleIR.empty(source_file="test.ivy")
+        with pytest.raises(AttributeError):
+            ir.success = True  # type: ignore[misc]
