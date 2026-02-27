@@ -269,6 +269,72 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
     return {"features": features, "analysisPipeline": pipeline_state}
 
 
+def handle_deep_index_progress(server: Any) -> Dict[str, Any]:
+    """Return current deep indexing progress with per-file statuses."""
+    if server._indexer is None:
+        return {
+            "running": False,
+            "totalTests": 0,
+            "completedTests": 0,
+            "currentFile": None,
+            "startedAt": None,
+            "fileStatuses": [],
+        }
+    progress = server._indexer._deep_index_progress
+    return {
+        "running": server._indexer._deep_index_running,
+        "totalTests": progress.total_test_files,
+        "completedTests": progress.completed_test_files,
+        "currentFile": progress.current_file,
+        "startedAt": progress.started_at,
+        "fileStatuses": [
+            {
+                "file": s.filepath,
+                "shallowIndexed": s.shallow_indexed,
+                "deepParseAttempted": s.deep_parse_attempted,
+                "deepParseSucceeded": s.deep_parse_succeeded,
+                "parseError": s.parse_error,
+            }
+            for s in progress.file_statuses.values()
+        ],
+    }
+
+
+def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
+    """Return per-test feature availability matrix."""
+    if server._indexer is None:
+        return {"tests": []}
+    progress = server._indexer._deep_index_progress
+    export_imports = server._indexer._file_export_imports
+
+    tests = []
+    for filepath, info in export_imports.items():
+        if not info.has_exports:
+            continue
+        status = progress.file_statuses.get(filepath)
+        deep_ok = status is not None and status.deep_parse_succeeded
+        if deep_ok:
+            features = {
+                "completion": "ready",
+                "definition": "ready",
+                "hover": "ready",
+                "diagnostics": "ready",
+                "codeLens": "ready",
+                "rfcCoverage": "degraded",
+            }
+        else:
+            features = {
+                "completion": "degraded",
+                "definition": "degraded",
+                "hover": "degraded",
+                "diagnostics": "unavailable",
+                "codeLens": "unavailable",
+                "rfcCoverage": "unavailable",
+            }
+        tests.append({"file": filepath, "features": features})
+    return {"tests": tests}
+
+
 # --- LSP wiring ---
 
 
@@ -302,3 +368,11 @@ def register(server: Any) -> None:
     @server.feature("ivy/featureStatus")
     def on_feature_status(params: Any = None) -> Dict[str, Any]:
         return handle_feature_status(server)
+
+    @server.feature("ivy/deepIndexProgress")
+    def on_deep_index_progress(params: Any = None) -> Dict[str, Any]:
+        return handle_deep_index_progress(server)
+
+    @server.feature("ivy/testFeatureMatrix")
+    def on_test_feature_matrix(params: Any = None) -> Dict[str, Any]:
+        return handle_test_feature_matrix(server)
