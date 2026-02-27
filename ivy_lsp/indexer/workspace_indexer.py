@@ -260,8 +260,6 @@ class WorkspaceIndexer:
         its symbols are upgraded to AST quality.  This progressively enriches
         the symbol table while keeping lock contention to a minimum.
         """
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-
         test_files = [
             f
             for f, info in self._file_export_imports.items()
@@ -276,6 +274,27 @@ class WorkspaceIndexer:
         with self._progress_lock:
             self._deep_index_progress.total_test_files = len(test_files)
             self._deep_index_progress.started_at = time.time()
+
+        num_workers = int(os.environ.get("IVY_LSP_PARSE_WORKERS", "0"))
+        use_parallel = num_workers != 1 and len(test_files) > 3
+
+        if use_parallel:
+            self._deep_index_parallel(test_files, num_workers)
+        else:
+            self._deep_index_serial(test_files)
+
+        # Re-wire graphs after all upgrades
+        self._wire_requirement_graph()
+        self._compute_test_scopes()
+
+        with self._progress_lock:
+            self._deep_index_progress.current_file = None
+        self._deep_index_running = False
+        logger.info("Deep index complete for %d test files", len(test_files))
+
+    def _deep_index_serial(self, test_files: List[str]) -> None:
+        """Serial deep indexing of test files."""
+        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
 
         for test_file in test_files:
             with self._progress_lock:
@@ -307,11 +326,8 @@ class WorkspaceIndexer:
                 )
 
             if result is not None and result.success and result.ast is not None:
-                # Upgrade symbols for this file
                 ast_symbols = ast_to_symbols(result.ast, test_file, source)
                 self._upgrade_file_symbols(test_file, ast_symbols, result)
-
-                # Upgrade requirement/export extraction with full parser data
                 self._extract_file_requirements(test_file, result, source)
                 self._extract_file_exports_imports(test_file, result, source)
 
@@ -330,14 +346,33 @@ class WorkspaceIndexer:
                 self._deep_index_progress.file_statuses[test_file] = status
                 self._deep_index_progress.completed_test_files += 1
 
-        # Re-wire graphs after all upgrades
-        self._wire_requirement_graph()
-        self._compute_test_scopes()
+    def _deep_index_parallel(
+        self, test_files: List[str], num_workers: int,
+    ) -> None:
+        """Parallel deep indexing using ProcessPoolExecutor."""
+        from ivy_lsp.indexer.parallel_indexer import ParallelDeepIndexer
+        from ivy_lsp.parsing.symbols import IvySymbol
 
-        with self._progress_lock:
-            self._deep_index_progress.current_file = None
-        self._deep_index_running = False
-        logger.info("Deep index complete for %d test files", len(test_files))
+        indexer = ParallelDeepIndexer(num_workers=num_workers)
+        results = indexer.parse_files(test_files)
+
+        for filepath, worker_result in results.items():
+            with self._progress_lock:
+                self._deep_index_progress.current_file = filepath
+            if worker_result.success:
+                symbols = [IvySymbol.from_dict(d) for d in worker_result.symbols]
+                self._upgrade_file_symbols(filepath, symbols, None)
+            with self._progress_lock:
+                status = self._deep_index_progress.file_statuses.get(
+                    filepath, FileIndexStatus(filepath=filepath)
+                )
+                status.deep_parse_attempted = True
+                status.deep_parse_succeeded = worker_result.success
+                status.last_indexed_at = time.time()
+                if not worker_result.success and worker_result.errors:
+                    status.parse_error = worker_result.errors[0]
+                self._deep_index_progress.file_statuses[filepath] = status
+                self._deep_index_progress.completed_test_files += 1
 
     def _upgrade_file_symbols(
         self,
