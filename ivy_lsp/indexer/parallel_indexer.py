@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 
 @dataclass
@@ -60,3 +62,35 @@ def worker_parse_file(filepath: str) -> WorkerResult:
         symbols=[s.to_dict() for s in symbols],
         errors=[],
     )
+
+
+class ParallelDeepIndexer:
+    """Multi-process deep indexer using ProcessPoolExecutor."""
+
+    # Below this count, serial is faster than fork overhead
+    SERIAL_THRESHOLD = 3
+
+    def __init__(self, num_workers: int = 0) -> None:
+        if num_workers <= 0:
+            num_workers = max(1, (os.cpu_count() or 1) // 2)
+        self._num_workers = num_workers
+
+    def parse_files(
+        self, filepaths: List[str],
+    ) -> Dict[str, WorkerResult]:
+        if len(filepaths) <= self.SERIAL_THRESHOLD:
+            return {f: worker_parse_file(f) for f in filepaths}
+
+        results: Dict[str, WorkerResult] = {}
+        with ProcessPoolExecutor(max_workers=self._num_workers) as pool:
+            futures = {pool.submit(worker_parse_file, f): f for f in filepaths}
+            for future in futures:
+                filepath = futures[future]
+                try:
+                    results[filepath] = future.result(timeout=60)
+                except Exception as e:
+                    results[filepath] = WorkerResult(
+                        filepath=filepath, success=False,
+                        symbols=[], errors=[str(e)],
+                    )
+        return results
