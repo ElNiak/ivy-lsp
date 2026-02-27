@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -54,6 +55,29 @@ class IndexerStats:
     last_index_duration: Optional[float] = None
 
 
+@dataclass
+class FileIndexStatus:
+    """Per-file index depth tracking."""
+
+    filepath: str
+    shallow_indexed: bool = False
+    deep_parse_attempted: bool = False
+    deep_parse_succeeded: bool = False
+    last_indexed_at: Optional[float] = None
+    parse_error: Optional[str] = None
+
+
+@dataclass
+class DeepIndexProgress:
+    """Progress of background deep indexing."""
+
+    total_test_files: int = 0
+    completed_test_files: int = 0
+    current_file: Optional[str] = None
+    started_at: Optional[float] = None
+    file_statuses: Dict[str, FileIndexStatus] = field(default_factory=dict)
+
+
 class WorkspaceIndexer:
     """Central cross-file index for the Ivy workspace.
 
@@ -80,25 +104,39 @@ class WorkspaceIndexer:
         self._index_errors: List[Dict[str, str]] = []
         self._last_index_duration: Optional[float] = None
         self._last_index_time: Optional[float] = None
+        self._deep_index_running = False
 
     # ------------------------------------------------------------------
-    # Full workspace indexing
+    # Full workspace indexing (two-mode: fast scan + background deep parse)
     # ------------------------------------------------------------------
 
     def index_workspace(self) -> None:
-        """Reset indices and parse every ``.ivy`` file in the workspace."""
+        """Index the workspace in two phases for responsiveness.
+
+        Phase 1 (synchronous, fast): lexer-only scan of every ``.ivy`` file.
+        No ``_ivy_state_lock`` is needed.  Populates the symbol table with
+        degraded but usable symbols, builds the include graph, extracts
+        requirements and export/import info with light-mode extractors.
+        The server is marked "ready" immediately after this phase.
+
+        Phase 2 (background, progressive): full-parse ONLY from test entry
+        points (files with exports).  Runs in a daemon thread.  As each
+        test file completes, its symbols are upgraded with AST-quality data.
+        Lock contention is minimized because only ~10-20 files are parsed
+        instead of all 238+.
+        """
         start = time.time()
         self._index_errors = []
         self._symbol_table = SymbolTable()
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports = {}
+        self._deep_index_running = False
 
-        files = self._resolver.find_all_ivy_files()
-        for filepath in files:
-            self._index_single_file(filepath)
+        # Phase 1: fast lexer-only scan (no lock needed)
+        self._fast_index_all_files()
 
-        # Post-indexing: wire state var edges now that all vars are known
+        # Post-indexing wiring
         self._wire_requirement_graph()
         self._load_requirement_manifests()
         self._wire_coverage_edges()
@@ -106,8 +144,148 @@ class WorkspaceIndexer:
         self._last_index_duration = time.time() - start
         self._last_index_time = time.time()
 
+        # Phase 2: background full-parse from test entry points
+        # Only run deep indexing with the real Ivy parser (IvyParserWrapper),
+        # not the FallbackOnlyParser which always returns success=False.
+        from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
+
+        has_full_parser = not isinstance(self._parser, FallbackOnlyParser)
+        if has_full_parser:
+            self._deep_index_running = True
+            t = threading.Thread(
+                target=self._deep_index_from_tests,
+                daemon=True,
+                name="ivy-deep-index",
+            )
+            t.start()
+
     # ------------------------------------------------------------------
-    # Single-file indexing
+    # Phase 1: Fast lexer-only scan (no _ivy_state_lock)
+    # ------------------------------------------------------------------
+
+    def _fast_index_all_files(self) -> None:
+        """Scan every .ivy file using the fallback lexer scanner.
+
+        This does NOT acquire ``_ivy_state_lock`` and completes in seconds.
+        Provides usable symbols for completion, navigation, and document
+        outline immediately.
+        """
+        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
+        files = self._resolver.find_all_ivy_files()
+        for filepath in files:
+            try:
+                with open(filepath) as f:
+                    source = f.read()
+            except OSError:
+                logger.warning(
+                    "Cannot read %s; file will not be indexed", filepath
+                )
+                continue
+
+            symbols, _error_info = fallback_scan(source, filepath)
+            includes = self._extract_includes(source)
+            self._cache.put(filepath, None, symbols, includes)
+
+            for sym in symbols:
+                self._symbol_table.add_symbol(sym)
+
+            for inc_name in includes:
+                resolved = self._resolver.resolve(inc_name, filepath)
+                if resolved:
+                    self._include_graph.add_edge(filepath, resolved)
+
+            # Light-mode requirement extraction (regex, no lock)
+            reqs, writes = extract_requirements_light(source, filepath)
+            self._requirement_graph.add_file_requirements(
+                filepath, reqs, writes
+            )
+
+            # Light-mode export/import extraction (regex, no lock)
+            info = extract_exports_imports_light(source, filepath)
+            self._file_export_imports[filepath] = info
+
+    # ------------------------------------------------------------------
+    # Phase 2: Background full-parse from test entry points
+    # ------------------------------------------------------------------
+
+    def _deep_index_from_tests(self) -> None:
+        """Full-parse from test entry points in a background thread.
+
+        Only files with exports (test files) are parsed.  As each completes,
+        its symbols are upgraded to AST quality.  This progressively enriches
+        the symbol table while keeping lock contention to a minimum.
+        """
+        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+
+        test_files = [
+            f
+            for f, info in self._file_export_imports.items()
+            if info.has_exports
+        ]
+        logger.info(
+            "Deep index: %d test entry points out of %d files",
+            len(test_files),
+            len(self._file_export_imports),
+        )
+
+        for test_file in test_files:
+            try:
+                with open(test_file) as f:
+                    source = f.read()
+            except OSError:
+                continue
+
+            try:
+                result = self._parser.parse(source, test_file)
+            except Exception:
+                logger.debug(
+                    "Deep index parse failed for %s",
+                    test_file,
+                    exc_info=True,
+                )
+                continue
+
+            if result.success and result.ast is not None:
+                # Upgrade symbols for this file
+                ast_symbols = ast_to_symbols(result.ast, test_file, source)
+                self._upgrade_file_symbols(test_file, ast_symbols, result)
+
+                # Upgrade requirement/export extraction with full parser data
+                self._extract_file_requirements(test_file, result, source)
+                self._extract_file_exports_imports(test_file, result, source)
+
+        # Re-wire graphs after all upgrades
+        self._wire_requirement_graph()
+        self._compute_test_scopes()
+        self._deep_index_running = False
+        logger.info("Deep index complete for %d test files", len(test_files))
+
+    def _upgrade_file_symbols(
+        self,
+        filepath: str,
+        new_symbols: List[IvySymbol],
+        parse_result: Any,
+    ) -> None:
+        """Replace fallback-scanned symbols with AST-quality symbols for a file."""
+        # Remove old symbols for this file
+        old_symbols = list(self._symbol_table.all_symbols())
+        self._symbol_table = SymbolTable()
+        for sym in old_symbols:
+            if sym.file_path != filepath:
+                self._symbol_table.add_symbol(sym)
+
+        # Add new AST-quality symbols
+        for sym in new_symbols:
+            self._symbol_table.add_symbol(sym)
+
+        # Update cache - reuse includes from existing cache entry
+        cached = self._cache.get(filepath)
+        includes = cached.includes if cached else []
+        self._cache.put(filepath, parse_result, new_symbols, includes)
+
+    # ------------------------------------------------------------------
+    # Single-file indexing (used by reindex_file for incremental updates)
     # ------------------------------------------------------------------
 
     def _index_single_file(self, filepath: str) -> List[IvySymbol]:
