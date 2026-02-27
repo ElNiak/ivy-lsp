@@ -149,6 +149,7 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
             except Exception:
                 pass
 
+        state_vars_read: List[StateVarNode] = []
         state_vars_written = graph.get_state_vars_written_in_monitor(action_id)
 
         result_actions.append(
@@ -165,6 +166,9 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                         _serialize_requirement(r, graph) for r in implement
                     ],
                 },
+                "stateVarsRead": [
+                    _serialize_state_var(sv) for sv in state_vars_read
+                ],
                 "stateVarsWritten": [
                     _serialize_state_var(sv) for sv in state_vars_written
                 ],
@@ -186,4 +190,105 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
             "scoped": scope_info.get("scoped", False),
         },
         "modelReady": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handler: ivy/modelSummaryTable
+# ---------------------------------------------------------------------------
+
+
+def handle_model_summary_table(server: Any, params: dict) -> dict:
+    """Handle ivy/modelSummaryTable request.
+
+    Returns a flat summary table with one row per action and aggregated
+    totals for requirements, state variables, and RFC coverage.
+    """
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return {
+            "rows": [],
+            "totals": {
+                "actions": 0,
+                "requirements": 0,
+                "stateVars": 0,
+                "rfcTagsCovered": 0,
+                "rfcTagsTotal": 0,
+            },
+            "scopeInfo": {"testFile": None, "scoped": False},
+        }
+
+    scope_info = _resolve_scope(graph, params)
+    rows: List[dict] = []
+    total_reqs = 0
+
+    for action_id, action_node in graph.actions.items():
+        reqs = graph.get_requirements_for_action(action_id)
+        before_reqs = [r for r in reqs if r.mixin_kind in ("before", "direct")]
+        after_reqs = [r for r in reqs if r.mixin_kind == "after"]
+
+        before_require = sum(1 for r in before_reqs if r.kind == "require")
+        before_ensure = sum(1 for r in before_reqs if r.kind == "ensure")
+        after_require = sum(1 for r in after_reqs if r.kind == "require")
+        after_ensure = sum(1 for r in after_reqs if r.kind == "ensure")
+        assume_count = sum(1 for r in reqs if r.kind == "assume")
+        assert_count = sum(1 for r in reqs if r.kind == "assert")
+
+        rfc_tags: Set[str] = set()
+        for r in reqs:
+            rfc_tags.update(r.bracket_tags)
+
+        # Aggregate state vars read across all requirements for this action
+        vars_read_ids: Set[str] = set()
+        for r in reqs:
+            for sv in graph.get_state_vars_read_by(r.id):
+                vars_read_ids.add(sv.id)
+        vars_written = graph.get_state_vars_written_in_monitor(action_id)
+
+        direction = None
+        scope = scope_info.get("_scope")
+        if scope:
+            try:
+                from ivy_lsp.analysis.test_scope import classify_action_direction
+
+                direction = classify_action_direction(action_id, scope).value
+            except Exception:
+                pass
+
+        total_reqs += len(reqs)
+        rows.append(
+            {
+                "actionName": action_node.name,
+                "qualifiedName": action_node.qualified_name,
+                "file": action_node.file,
+                "line": action_node.line,
+                "direction": direction,
+                "beforeRequireCount": before_require,
+                "beforeEnsureCount": before_ensure,
+                "afterRequireCount": after_require,
+                "afterEnsureCount": after_ensure,
+                "assumeCount": assume_count,
+                "assertCount": assert_count,
+                "totalRequirements": len(reqs),
+                "stateVarsRead": len(vars_read_ids),
+                "stateVarsWritten": len(vars_written),
+                "rfcTagsCovered": sorted(rfc_tags),
+                "rfcCoverageCount": len(rfc_tags),
+            }
+        )
+
+    coverage = graph.get_coverage_stats()
+    return {
+        "rows": rows,
+        "totals": {
+            "actions": len(graph.actions),
+            "requirements": total_reqs,
+            "stateVars": len(graph.state_vars),
+            "rfcTagsCovered": coverage.get("covered", 0),
+            "rfcTagsTotal": coverage.get("total", 0),
+        },
+        "scopeInfo": {
+            "testFile": scope_info.get("testFile"),
+            "scoped": scope_info.get("scoped", False),
+        },
     }
