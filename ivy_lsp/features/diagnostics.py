@@ -370,14 +370,24 @@ def compute_diagnostics(
     filepath: str,
     indexer: Any = None,
     semantic_model: Any = None,
+    parse_result: Any = None,
 ) -> List[lsp.Diagnostic]:
-    """Compute all diagnostics for a source file."""
+    """Compute all diagnostics for a source file.
+
+    If *parse_result* is provided (e.g. from a preceding pipeline.analyze()
+    call), it is reused instead of invoking the parser again, avoiding
+    redundant lock acquisition on ``_ivy_state_lock``.
+    """
     diags = check_structural_issues(source, filepath, indexer)
 
-    if parser is None:
+    if parser is None and parse_result is None:
         return diags
 
-    result = parser.parse(source, filepath)
+    result = parse_result if parse_result is not None else (
+        parser.parse(source, filepath) if parser is not None else None
+    )
+    if result is None:
+        return diags
     if not result.success:
         for error in result.errors:
             diags.append(_convert_error_to_diagnostic(error, source))
@@ -479,23 +489,27 @@ def register(server) -> None:
     def _get_semantic_model():
         return getattr(server, "_semantic_model", None)
 
-    def _run_pipeline(source: str, filepath: str, trigger: str) -> None:
+    def _run_pipeline(source: str, filepath: str, trigger: str) -> Any:
+        """Run the analysis pipeline. Returns the ParseResult (or None)."""
         pipeline = getattr(server, "_analysis_pipeline", None)
         if pipeline:
             try:
-                pipeline.analyze(source, filepath, trigger)
+                return pipeline.analyze(source, filepath, trigger)
             except Exception:
                 logger.debug("Pipeline analysis failed for %s", filepath, exc_info=True)
+        return None
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
     def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
         filepath = uri.replace("file://", "")
-        _run_pipeline(doc.source or "", filepath, "change")
+        source = doc.source or ""
+        pipeline_result = _run_pipeline(source, filepath, "change")
         diags = compute_diagnostics(
-            server._parser, doc.source or "", filepath,
+            server._parser, source, filepath,
             server._indexer, _get_semantic_model(),
+            parse_result=pipeline_result,
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
@@ -539,14 +553,19 @@ def register(server) -> None:
         uri = params.text_document.uri
         filepath = uri.replace("file://", "")
         doc = server.workspace.get_text_document(uri)
-        _run_pipeline(doc.source or "", filepath, "save")
+        source = doc.source or ""
+        pipeline_result = _run_pipeline(source, filepath, "save")
         diags = compute_diagnostics(
-            server._parser, doc.source or "", filepath,
+            server._parser, source, filepath,
             server._indexer, _get_semantic_model(),
+            parse_result=pipeline_result,
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
         )
+
+        if filepath.endswith(".ivy") and server._indexer is not None:
+            server._indexer.reindex_file_with_dependents(filepath)
 
         async def _deep():
             try:
