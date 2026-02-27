@@ -301,7 +301,7 @@ def fallback_scan(
                 kind=kind,
                 range=sym_range,
                 file_path=filename,
-                detail=keyword_str,
+                detail=lines[line_idx].strip() if line_idx < len(lines) else keyword_str,
             )
 
             # Attach to current scope parent or root list.
