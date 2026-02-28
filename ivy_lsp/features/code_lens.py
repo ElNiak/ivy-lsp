@@ -16,6 +16,7 @@ from typing import Any, List
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +427,7 @@ def register(server) -> None:
     @server.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
     def code_lens(params: lsp.CodeLensParams) -> List[lsp.CodeLens]:
         uri = params.text_document.uri
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         doc = server.workspace.get_text_document(uri)
         source = doc.source or ""
 

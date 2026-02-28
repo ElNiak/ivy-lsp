@@ -11,6 +11,8 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.utils import uri_to_path
+
 
 def _parse_parameters(detail: Optional[str]) -> List[lsp.ParameterInformation]:
     """Extract parameter information from an IvySymbol detail string.
@@ -145,6 +147,6 @@ def register(server) -> None:
         if not doc.source:
             return None
         lines = doc.source.split("\n")
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         indexer = getattr(server, "_indexer", None)
         return compute_signature_help(indexer, filepath, lines, params.position)

@@ -13,6 +13,7 @@ from pygls.lsp.server import LanguageServer
 from ivy_lsp import __version__
 from ivy_lsp.features.status import ServerStateTracker
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -41,6 +42,7 @@ class _LspLogHandler(logging.Handler):
     _CAT_PRIORITY = {"MIL": 1, "DIA": 2, "PER": 3, "ACT": 4}
     _CAT_MIN_INTERVAL = {"MIL": 0.01, "DIA": 0.01, "PER": 0.1, "ACT": 0.1}
     _DEFAULT_MIN_INTERVAL = 0.05
+    _MAX_MESSAGE_LEN = 8192  # 8 KB cap per log message
 
     def __init__(self, server: "IvyLanguageServer"):
         super().__init__()
@@ -81,6 +83,10 @@ class _LspLogHandler(logging.Handler):
         else:
             msg = self.format(record)
 
+        # Truncate oversized messages to prevent large LSP notifications
+        if len(msg) > self._MAX_MESSAGE_LEN:
+            msg = msg[: self._MAX_MESSAGE_LEN] + "... [truncated]"
+
         self._sending = True
         try:
             msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
@@ -97,7 +103,11 @@ class _LspLogHandler(logging.Handler):
             )
             self._last_emit = now
         except Exception:
-            pass  # server may not be connected yet
+            try:
+                sys.stderr.write(f"[ivy-lsp-fallback] {msg}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
         finally:
             self._sending = False
 
@@ -163,29 +173,32 @@ class IvyLanguageServer(LanguageServer):
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
-            slog.info(
-                "Server initialized",
-                extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
-            )
-            # Install the LSP log bridge early so that indexing
-            # milestones (file count, symbol count, deep-index stats)
-            # are forwarded as window/logMessage to the client.
-            self._install_lsp_log_handler()
-            self._setup_indexer()
-            mode = "full" if self._full_mode else "light"
-            self.window_log_message(
-                lsp.LogMessageParams(
-                    type=lsp.MessageType.Info,
-                    message=f"Ivy LSP running in {mode} mode",
+            try:
+                slog.info(
+                    "Server initialized",
+                    extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
                 )
-            )
-            slog.info(
-                "Running in %s mode",
-                mode,
-                extra={"event": LogEvent(
-                    LogCategory.MILESTONE, "startup", {"mode": mode},
-                )},
-            )
+                # Install the LSP log bridge early so that indexing
+                # milestones (file count, symbol count, deep-index stats)
+                # are forwarded as window/logMessage to the client.
+                self._install_lsp_log_handler()
+                self._setup_indexer()
+                mode = "full" if self._full_mode else "light"
+                self.window_log_message(
+                    lsp.LogMessageParams(
+                        type=lsp.MessageType.Info,
+                        message=f"Ivy LSP running in {mode} mode",
+                    )
+                )
+                slog.info(
+                    "Running in %s mode",
+                    mode,
+                    extra={"event": LogEvent(
+                        LogCategory.MILESTONE, "startup", {"mode": mode},
+                    )},
+                )
+            except Exception:
+                logger.exception("on_initialized failed")
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
@@ -361,10 +374,11 @@ class IvyLanguageServer(LanguageServer):
         """Create a ``$/progress`` callback for bulk compilation.
 
         Same pattern as :meth:`_make_deep_index_progress_callback` but
-        with an "Ivy Compilation" title.
+        with an "Ivy Compilation" title.  Throttled to at most 1
+        report per second to avoid flooding the stdio pipe.
         """
         token = str(uuid.uuid4())
-        state = {"created": False}
+        state = {"created": False, "last_report": 0.0}
         server = self
 
         def _callback(completed: int, total: int, current_file):
@@ -399,6 +413,12 @@ class IvyLanguageServer(LanguageServer):
                 except Exception:
                     logger.debug("Failed to end progress", exc_info=True)
                 return
+
+            # Throttle intermediate reports to at most 1/sec
+            now = time.time()
+            if (now - state["last_report"]) < 1.0:
+                return
+            state["last_report"] = now
 
             pct = int(100 * completed / total) if total > 0 else 0
             basename = (
@@ -517,6 +537,7 @@ class IvyLanguageServer(LanguageServer):
 
         completed = [0]
         total = len(test_files)
+        compile_lock = threading.Lock()
 
         # Track state for polling endpoint
         self._bulk_compile_running = True
@@ -525,10 +546,16 @@ class IvyLanguageServer(LanguageServer):
 
         progress_cb = self._make_bulk_compile_progress_callback()
 
+        # Throttle compilation progress notifications to at most 1/sec
+        last_notify_time = [0.0]
+
         def _make_callback(filepath: str):
             def _on_compile(ir):
-                completed[0] += 1
-                self._bulk_compile_completed = completed[0]
+                with compile_lock:
+                    completed[0] += 1
+                    current = completed[0]
+                    self._bulk_compile_completed = current
+
                 if ir.success:
                     try:
                         from ivy_lsp.compilation.graph_enrichment import (
@@ -546,35 +573,42 @@ class IvyLanguageServer(LanguageServer):
                             "Enrichment failed for %s", filepath, exc_info=True
                         )
 
-                # Report $/progress
-                progress_cb(completed[0], total, filepath)
+                # Throttle $/progress and ivy/compilationProgress to 1/sec
+                # (always send the final notification)
+                now = time.time()
+                is_final = current >= total
+                if is_final or (now - last_notify_time[0]) >= 1.0:
+                    last_notify_time[0] = now
 
-                # Send ivy/compilationProgress notification
-                try:
-                    self.protocol.notify(
-                        "ivy/compilationProgress",
-                        {
-                            "completed": completed[0],
-                            "total": total,
-                            "currentFile": os.path.basename(filepath),
-                            "success": ir.success,
-                        },
-                    )
-                except Exception:
-                    logger.debug(
-                        "Failed to send compilationProgress notification",
-                        exc_info=True,
-                    )
+                    # Report $/progress
+                    progress_cb(current, total, filepath)
 
-                if completed[0] >= total:
+                    # Send ivy/compilationProgress notification
+                    try:
+                        self.protocol.notify(
+                            "ivy/compilationProgress",
+                            {
+                                "completed": current,
+                                "total": total,
+                                "currentFile": os.path.basename(filepath),
+                                "success": ir.success,
+                            },
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Failed to send compilationProgress notification",
+                            exc_info=True,
+                        )
+
+                if current >= total:
                     self._bulk_compile_running = False
                     slog.info(
                         "Bulk compilation complete: %d/%d files",
-                        completed[0],
+                        current,
                         total,
                         extra={"event": LogEvent(
                             LogCategory.PERFORMANCE, "compile_bulk",
-                            {"completed": completed[0], "total": total},
+                            {"completed": current, "total": total},
                         )},
                     )
                     self._send_model_ready_notification()
@@ -586,8 +620,9 @@ class IvyLanguageServer(LanguageServer):
                 with open(test_file) as f:
                     source = f.read()
             except OSError:
-                completed[0] += 1
-                self._bulk_compile_completed = completed[0]
+                with compile_lock:
+                    completed[0] += 1
+                    self._bulk_compile_completed = completed[0]
                 progress_cb(completed[0], total, test_file)
                 continue
             self._compiler_manager.compile_async(
@@ -600,10 +635,11 @@ class IvyLanguageServer(LanguageServer):
         handler = _LspLogHandler(self)
         handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
         root.addHandler(handler)
-        # Remove stderr handlers to avoid double-logging.
+        # Raise stderr handler level to WARNING so critical errors remain
+        # visible in raw output, but normal logs go through LSP only.
         for h in root.handlers[:]:
             if isinstance(h, logging.StreamHandler) and h.stream is sys.stderr:
-                root.removeHandler(h)
+                h.setLevel(logging.WARNING)
 
     def _setup_indexer(self):
         """Create and populate the workspace indexer."""
@@ -616,7 +652,7 @@ class IvyLanguageServer(LanguageServer):
 
         ws_folders = self.workspace.folders
         if ws_folders:
-            root = list(ws_folders.values())[0].uri.replace("file://", "")
+            root = uri_to_path(list(ws_folders.values())[0].uri)
         else:
             root = os.getcwd()
 
@@ -644,11 +680,22 @@ class IvyLanguageServer(LanguageServer):
                 )},
             )
 
-        resolver = IncludeResolver(
-            root,
-            exclude_paths=exclude_paths,
-            include_paths=include_paths,
-        )
+        try:
+            resolver = IncludeResolver(
+                root,
+                exclude_paths=exclude_paths,
+                include_paths=include_paths,
+            )
+        except Exception:
+            logger.exception("IncludeResolver construction failed")
+            self.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="Ivy include resolver failed to initialize. "
+                    "Features depending on cross-file resolution will not work.",
+                )
+            )
+            return
 
         # Create flat staging directory (mirrors ivyc's include/1.7/ model)
         try:
@@ -688,7 +735,7 @@ class IvyLanguageServer(LanguageServer):
                 "Full parser available (z3 found)",
                 extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
             )
-        except (ImportError, ModuleNotFoundError) as e:
+        except Exception as e:
             from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
 
             self._parser = FallbackOnlyParser()
@@ -702,11 +749,22 @@ class IvyLanguageServer(LanguageServer):
             )
 
         progress_cb = self._make_deep_index_progress_callback()
-        self._indexer = WorkspaceIndexer(
-            root, self._parser, resolver,
-            progress_callback=progress_cb,
-            done_callback=self._start_bulk_analysis,
-        )
+        try:
+            self._indexer = WorkspaceIndexer(
+                root, self._parser, resolver,
+                progress_callback=progress_cb,
+                done_callback=self._start_bulk_analysis,
+            )
+        except Exception:
+            logger.exception("WorkspaceIndexer construction failed")
+            self.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="Ivy workspace indexer failed to initialize. "
+                    "Code intelligence features will not be available.",
+                )
+            )
+            return
         self.state_tracker.set_indexing()
         try:
             index_start = time.time()

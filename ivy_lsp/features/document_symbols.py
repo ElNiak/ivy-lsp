@@ -12,6 +12,7 @@ from typing import List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def register(server) -> None:
         """Handle textDocument/documentSymbol requests."""
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         source = doc.source or ""
         parser = getattr(server, "_parser", None)
         indexer = getattr(server, "_indexer", None)

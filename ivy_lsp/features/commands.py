@@ -14,6 +14,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -74,7 +75,7 @@ def _detect_isolate_at_position(
     if position is None:
         return None
 
-    filepath = uri.replace("file://", "")
+    filepath = uri_to_path(uri)
     doc = server.workspace.get_text_document(uri)
     source = doc.source or ""
 
@@ -308,7 +309,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/verify")
     async def ivy_verify(params) -> Dict[str, Any]:
         uri = params.textDocument.uri
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
 
         # Smart isolate detection
@@ -337,7 +338,7 @@ def register(server: Any) -> None:
             redirected = True
             if isolate is None:
                 module_basename = os.path.basename(
-                    uri.replace("file://", "")
+                    uri_to_path(uri)
                 ).replace(".ivy", "")
                 all_isolates = _collect_all_isolates(
                     server, enclosing_test, ""
@@ -394,7 +395,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/compile")
     async def ivy_compile(params) -> Dict[str, Any]:
         uri = params.textDocument.uri
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
         target = getattr(params, "target", "test")
 
@@ -432,7 +433,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/showModel")
     async def ivy_show_model(params) -> Dict[str, Any]:
         uri = params.textDocument.uri
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
 
         # Smart isolate detection (same pattern as ivy/verify)
@@ -484,7 +485,7 @@ def register(server: Any) -> None:
             # Derive isolate from original module basename when unset
             if isolate is None:
                 module_basename = os.path.basename(
-                    uri.replace("file://", "")
+                    uri_to_path(uri)
                 ).replace(".ivy", "")
                 # Validate the derived isolate exists in the test's
                 # transitive closure (pass empty source to force the
@@ -546,7 +547,7 @@ def register(server: Any) -> None:
         for uri, doc in items:
             if not uri.startswith("file://"):
                 continue
-            filepath = uri.replace("file://", "")
+            filepath = uri_to_path(uri)
             try:
                 diags = compute_diagnostics(
                     srv._parser, doc.source or "", filepath, srv._indexer
@@ -683,7 +684,7 @@ def register(server: Any) -> None:
         if not uri or not uri.startswith("file://"):
             return
 
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
 
         try:
             graph = server._indexer._requirement_graph
@@ -718,7 +719,7 @@ def register(server: Any) -> None:
         if not uri:
             return {"success": False, "error": "No file URI provided"}
 
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
 
         manager = getattr(server, "_compiler_manager", None)
         if manager is None:

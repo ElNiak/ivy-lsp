@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
 
 
@@ -67,7 +68,7 @@ def register(server) -> None:
         if not doc.source:
             return None
         lines = doc.source.split("\n")
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         indexer = getattr(server, "_indexer", None)
         symbols = indexer.get_symbols(filepath) if indexer else None
         return compute_document_highlights(lines, params.position, symbols=symbols)

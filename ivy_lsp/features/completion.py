@@ -12,6 +12,7 @@ from lsprotocol import types as lsp
 from lsprotocol.types import SymbolKind
 
 from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -408,5 +409,5 @@ def register(server) -> None:
         if not hasattr(server, "_indexer") or server._indexer is None:
             return None
         lines = doc.source.split("\n") if doc.source else []
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         return get_completions(server._indexer, filepath, params.position, lines)

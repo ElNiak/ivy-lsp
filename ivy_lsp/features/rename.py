@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
 
 
@@ -98,7 +99,7 @@ def register(server) -> None:
         if not doc.source:
             return None
         lines = doc.source.split("\n")
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         indexer = getattr(server, "_indexer", None)
         return compute_rename(
             indexer, filepath, params.position, lines, params.new_name

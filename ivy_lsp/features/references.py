@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
 
 
@@ -81,7 +82,7 @@ def register(server) -> None:
         if not hasattr(server, "_indexer") or server._indexer is None:
             return None
         lines = doc.source.split("\n") if doc.source else []
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         include_decl = params.context.include_declaration if params.context else True
         return find_references(
             server._indexer,

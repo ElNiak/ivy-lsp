@@ -36,13 +36,16 @@ class CompilerManager:
         staging_dir: Optional[str] = None,
         timeout: float = 300.0,
         cache_ttl: float = 600.0,
+        max_concurrent: int = 1,
     ) -> None:
         self._staging_dir = staging_dir
         self._timeout = timeout
         self._cache_ttl = cache_ttl
+        self._max_concurrent = max_concurrent
         self._cache: Dict[str, _CacheEntry] = {}
         self._lock = threading.Lock()
         self._active: Dict[str, Any] = {}  # Process (spawn or fork)
+        self._semaphore = threading.Semaphore(max(1, max_concurrent))
 
     def compile_async(
         self,
@@ -69,6 +72,7 @@ class CompilerManager:
         )
 
         def _wait():
+            self._semaphore.acquire()
             try:
                 proc.start()
                 child_conn.close()
@@ -98,6 +102,7 @@ class CompilerManager:
                     pass
                 with self._lock:
                     self._active.pop(filepath, None)
+                self._semaphore.release()
 
         with self._lock:
             self._active[filepath] = proc
@@ -147,8 +152,8 @@ class CompilerManager:
     ) -> None:
         """Invalidate *filepath* and all files that transitively include it."""
         self.invalidate(filepath)
-        if hasattr(include_graph, "get_includers"):
-            for includer in include_graph.get_includers(filepath):
+        if hasattr(include_graph, "get_included_by"):
+            for includer in include_graph.get_included_by(filepath):
                 self.invalidate(includer)
 
     def shutdown(self) -> None:

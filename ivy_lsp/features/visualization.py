@@ -78,10 +78,14 @@ def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
     except Exception:
         pass
 
+    formula = req.formula_text
+    if len(formula) > 200:
+        formula = formula[:200] + "..."
+
     return {
         "id": req.id,
         "kind": req.kind,
-        "formulaText": req.formula_text,
+        "formulaText": formula,
         "line": req.line,
         "file": req.file,
         "bracketTags": list(req.bracket_tags),
@@ -160,8 +164,15 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                 k: v for k, v in actions_to_process.items() if v.file == file_filter
             }
 
+        # Pagination: limit/offset to cap response size
+        limit = params.get("limit", 50)
+        offset = params.get("offset", 0)
+        all_action_items = list(actions_to_process.items())
+        total_actions = len(all_action_items)
+        paginated_items = all_action_items[offset:offset + limit]
+
         result_actions = []
-        for action_id, action_node in actions_to_process.items():
+        for action_id, action_node in paginated_items:
             reqs = snap.get_requirements_for_action(action_id)
             before = [r for r in reqs if r.mixin_kind in ("before", "direct")]
             after = [r for r in reqs if r.mixin_kind == "after"]
@@ -183,7 +194,13 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                 except Exception:
                     pass
 
+            seen_read_ids: Set[str] = set()
             state_vars_read: List[StateVarNode] = []
+            for r in reqs:
+                for sv in snap.get_state_vars_read_by(r.id):
+                    if sv.id not in seen_read_ids:
+                        seen_read_ids.add(sv.id)
+                        state_vars_read.append(sv)
             state_vars_written = snap.get_state_vars_written_in_monitor(action_id)
 
             result_actions.append(
@@ -224,6 +241,12 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
             "modelReady": True,
+            "pagination": {
+                "total": total_actions,
+                "offset": offset,
+                "limit": limit,
+                "hasMore": offset + limit < total_actions,
+            },
         }
         logger.info(
             "handle_action_requirements: total %.1fms (snapshot %.1fms)",
@@ -587,9 +610,16 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
                             }
                         )
 
+        # Cap edges to prevent O(n^2) blowup in large models
+        max_edges = params.get("maxEdges", 500)
+        truncated = len(edges) > max_edges
+        if truncated:
+            edges = edges[:max_edges]
+
         result = {
             "nodes": nodes,
             "edges": edges,
+            "truncated": truncated,
             "scopeInfo": {
                 "testFile": scope_info.get("testFile"),
                 "scoped": scope_info.get("scoped", False),
@@ -710,9 +740,16 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
                         }
                     )
 
+        # Cap transitions to prevent O(n^2) blowup
+        max_transitions = params.get("maxTransitions", 500)
+        truncated = len(transitions) > max_transitions
+        if truncated:
+            transitions = transitions[:max_transitions]
+
         result = {
             "nodes": nodes,
             "transitions": transitions,
+            "truncated": truncated,
             "scopeInfo": {
                 "testFile": scope_info.get("testFile"),
                 "scoped": scope_info.get("scoped", False),

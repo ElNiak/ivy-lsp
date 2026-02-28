@@ -11,6 +11,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -519,7 +520,7 @@ def register(server) -> None:
     def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         source = doc.source or ""
         pipeline_result = _run_pipeline(source, filepath, "change")
         diags = compute_diagnostics(
@@ -542,7 +543,7 @@ def register(server) -> None:
             try:
                 await asyncio.sleep(DEBOUNCE_DELAY)
                 doc = server.workspace.get_text_document(uri)
-                filepath = uri.replace("file://", "")
+                filepath = uri_to_path(uri)
                 diags = compute_diagnostics(
                     server._parser, doc.source or "", filepath,
                     server._indexer, _get_semantic_model(),
@@ -567,7 +568,7 @@ def register(server) -> None:
     @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
     def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         uri = params.text_document.uri
-        filepath = uri.replace("file://", "")
+        filepath = uri_to_path(uri)
         doc = server.workspace.get_text_document(uri)
         source = doc.source or ""
         pipeline_result = _run_pipeline(source, filepath, "save")
