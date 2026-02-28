@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import InvalidStateError
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
@@ -17,6 +18,32 @@ from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
+
+
+def _patch_pygls_cancelled_future() -> None:
+    """Work around pygls 2.0.1 bug: responses to cancelled futures crash.
+
+    pygls._handle_response() calls future.set_result() without checking
+    future.cancelled(), so a late response to a timed-out or cancelled
+    request raises InvalidStateError.  This wraps the method to suppress
+    that harmless race.
+    """
+    from pygls.protocol.json_rpc import JsonRPCProtocol
+
+    _original = JsonRPCProtocol._handle_response
+
+    def _safe_handle_response(self, msg_id, result=None, error=None):
+        try:
+            _original(self, msg_id, result, error)
+        except InvalidStateError:
+            logger.debug(
+                "Ignoring response to cancelled/completed request %s", msg_id
+            )
+
+    JsonRPCProtocol._handle_response = _safe_handle_response  # type: ignore[assignment]
+
+
+_patch_pygls_cancelled_future()
 
 
 class _LspLogHandler(logging.Handler):
