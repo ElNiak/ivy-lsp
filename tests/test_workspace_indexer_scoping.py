@@ -430,3 +430,119 @@ class TestReindexInvalidation:
                 indexer.reindex_file("/fake/workspace/file.ivy")
 
         mock_compute.assert_called_once()
+
+
+# ===================================================================
+# TestInlineT1T2DuringDeepIndex
+# ===================================================================
+
+
+class TestInlineT1T2DuringDeepIndex:
+    """Verify inline T1/T2 analysis during _deep_index_serial()."""
+
+    def test_set_analysis_pipeline_stored(self):
+        """set_analysis_pipeline() stores the pipeline reference."""
+        indexer, _, _ = _make_indexer()
+        assert indexer._analysis_pipeline is None
+        mock_pipeline = MagicMock()
+        indexer.set_analysis_pipeline(mock_pipeline)
+        assert indexer._analysis_pipeline is mock_pipeline
+
+    def test_inline_t1_t2_t3_called_on_successful_parse(self, tmp_path):
+        """When pipeline is set and parse succeeds, T1+T2+T3 are called inline."""
+        source = "type cid\nexport quic_send_event\n"
+        f = tmp_path / "test.ivy"
+        f.write_text(source)
+
+        indexer, parser, _ = _make_indexer(str(tmp_path))
+
+        result = _make_parse_result(success=True, ast=MagicMock())
+        result.errors = []
+        parser.parse.return_value = result
+
+        mock_pipeline = MagicMock()
+        indexer.set_analysis_pipeline(mock_pipeline)
+
+        indexer._deep_index_serial([str(f)])
+
+        mock_pipeline.run_tier1.assert_called_once_with(source, str(f))
+        mock_pipeline.run_tier2.assert_called_once_with(
+            source, str(f), parse_result=result
+        )
+        mock_pipeline.run_tier3_background.assert_called_once_with(
+            source, str(f), track_state=False
+        )
+
+    def test_inline_t1_only_on_failed_parse(self, tmp_path):
+        """When parse fails but pipeline is set, only T1 (regex) is called."""
+        source = "broken syntax !!!\n"
+        f = tmp_path / "bad.ivy"
+        f.write_text(source)
+
+        indexer, parser, _ = _make_indexer(str(tmp_path))
+
+        result = _make_parse_result(success=False)
+        result.ast = None
+        result.errors = []
+        parser.parse.return_value = result
+
+        mock_pipeline = MagicMock()
+        indexer.set_analysis_pipeline(mock_pipeline)
+
+        indexer._deep_index_serial([str(f)])
+
+        mock_pipeline.run_tier1.assert_called_once_with(source, str(f))
+        mock_pipeline.run_tier2.assert_not_called()
+        mock_pipeline.run_tier3_background.assert_not_called()
+
+    def test_no_pipeline_no_inline_calls(self, tmp_path):
+        """When no pipeline is set, _deep_index_serial works without T1/T2."""
+        source = "type cid\nexport quic_send_event\n"
+        f = tmp_path / "test.ivy"
+        f.write_text(source)
+
+        indexer, parser, _ = _make_indexer(str(tmp_path))
+        result = _make_parse_result(success=True, ast=MagicMock())
+        result.errors = []
+        parser.parse.return_value = result
+
+        # No pipeline set — should not raise
+        indexer._deep_index_serial([str(f)])
+        assert indexer._analysis_pipeline is None
+
+    def test_inline_t1_t2_exception_does_not_crash_deep_index(self, tmp_path):
+        """If T1/T2 raises, deep indexing continues without crashing."""
+        source = "type cid\nexport quic_send_event\n"
+        f = tmp_path / "test.ivy"
+        f.write_text(source)
+
+        indexer, parser, _ = _make_indexer(str(tmp_path))
+        result = _make_parse_result(success=True, ast=MagicMock())
+        result.errors = []
+        parser.parse.return_value = result
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.run_tier1.side_effect = RuntimeError("T1 boom")
+        indexer.set_analysis_pipeline(mock_pipeline)
+
+        # Should not raise
+        indexer._deep_index_serial([str(f)])
+
+    def test_inline_t1_exception_on_failed_parse_does_not_crash(self, tmp_path):
+        """If T1 raises on a failed-parse file, deep indexing continues."""
+        source = "broken\n"
+        f = tmp_path / "bad.ivy"
+        f.write_text(source)
+
+        indexer, parser, _ = _make_indexer(str(tmp_path))
+        result = _make_parse_result(success=False)
+        result.ast = None
+        result.errors = []
+        parser.parse.return_value = result
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.run_tier1.side_effect = RuntimeError("T1 boom")
+        indexer.set_analysis_pipeline(mock_pipeline)
+
+        # Should not raise
+        indexer._deep_index_serial([str(f)])

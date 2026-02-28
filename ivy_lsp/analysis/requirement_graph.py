@@ -360,8 +360,8 @@ class RequirementGraph:
                         id=req.monitor_action,
                         name=req.monitor_action.rsplit(".", 1)[-1],
                         qualified_name=req.monitor_action,
-                        file="",
-                        line=0,
+                        file=req.file,
+                        line=req.line,
                     ))
 
     def populate_state_vars(

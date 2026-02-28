@@ -152,20 +152,31 @@ def _find_matching_brace(source: str, open_pos: int) -> Optional[int]:
 
     *open_pos* points to the opening ``{``.  Returns the position
     just before the closing ``}``, or ``None`` if unmatched.
+
+    Handles Ivy line comments (``#``) and native code blocks
+    (``<<<`` ... ``>>>``) which may contain C++ braces that must
+    not affect the depth counter.
     """
     depth = 1
     i = open_pos + 1
-    in_comment = False
 
     while i < len(source) and depth > 0:
         ch = source[i]
 
-        if ch == "#" and not in_comment:
-            # Skip to end of line (Ivy comment)
+        # Skip Ivy line comments
+        if ch == "#":
             nl = source.find("\n", i)
             if nl == -1:
                 break
             i = nl + 1
+            continue
+
+        # Skip native code blocks: <<< ... >>>
+        if ch == "<" and source[i : i + 3] == "<<<":
+            end = source.find(">>>", i + 3)
+            if end == -1:
+                break  # unterminated native block
+            i = end + 3
             continue
 
         if ch == "{":

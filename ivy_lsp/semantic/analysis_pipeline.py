@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ivy_lsp.adapters.protocols import (
     IAstEnrichmentAdapter,
@@ -23,6 +25,21 @@ from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
 from ivy_lsp.semantic.rfc_annotations import parse_file_rfc_annotations
 
 logger = logging.getLogger(__name__)
+
+
+_T3_MAX_RESULTS = 100
+
+
+@dataclass
+class Tier3FileResult:
+    """Per-file result of a Tier 3 compilation."""
+
+    filepath: str
+    success: bool
+    started_at: float
+    completed_at: float
+    duration: float
+    error_message: Optional[str] = None
 
 
 @dataclass
@@ -54,8 +71,14 @@ class AnalysisPipeline:
         self._compiler_manager = compiler_manager
         self._tier1_files: set[str] = set()
         self._tier2_files: set[str] = set()
-        self._tier3_files: set[str] = set()
+        # Lock protecting all _tier3_* and _bulk_* state that is written
+        # from background threads and read from the LSP main thread.
+        self._state_lock = threading.Lock()
+        self._tier3_results: OrderedDict[str, Tier3FileResult] = OrderedDict()
         self._tier3_running: bool = False
+        self._tier3_current_file: Optional[str] = None
+        self._tier3_last_file: Optional[str] = None
+        self._tier3_last_completed_at: Optional[float] = None
         self._bulk_running: bool = False
         self._bulk_total: int = 0
         self._bulk_completed: int = 0
@@ -82,10 +105,12 @@ class AnalysisPipeline:
 
     # -- Tier 2 ----------------------------------------------------------------
 
-    def run_tier2(self, source: str, filepath: str) -> Any:
+    def run_tier2(
+        self, source: str, filepath: str, *, parse_result: Any = None
+    ) -> Any:
         """AST-enriched analysis (<200ms, ivy parser).
 
-        - Parse with parser_adapter
+        - Parse with parser_adapter (or reuse *parse_result* if provided)
         - Extract type info with enrichment_adapter
         - Build cross-reference edges (HAS_PARAM)
         - Re-parse RFC annotations to link with AST nodes
@@ -96,8 +121,11 @@ class AnalysisPipeline:
         nodes: List[Any] = []
         edges: List[Tuple[str, SemanticEdgeType, str]] = []
 
-        # Parse
-        result = self._parser.parse(source, filepath)
+        # Parse (reuse pre-parsed result if provided)
+        if parse_result is not None and parse_result.success and parse_result.ast is not None:
+            result = parse_result
+        else:
+            result = self._parser.parse(source, filepath)
 
         if not result.success or result.ast is None:
             logger.debug("Tier 2 parse failure for %s, RFC-only mode", filepath)
@@ -162,18 +190,45 @@ class AnalysisPipeline:
 
     # -- Tier 3 ----------------------------------------------------------------
 
-    def run_tier3_background(self, source: str, filepath: str) -> None:
-        """Schedule Tier 3 compiler analysis in background thread."""
+    def run_tier3_background(
+        self, source: str, filepath: str, *, track_state: bool = True
+    ) -> None:
+        """Schedule Tier 3 compiler analysis in background thread.
+
+        Args:
+            track_state: When *False*, skip ``_tier3_running`` /
+                ``_tier3_current_file`` flag updates.  Used by the deep
+                indexer to submit many files without corrupting the
+                monitoring display.
+        """
         from ivy_lsp.adapters.protocols import CompileResult
 
+        t3_start = time.monotonic()
+
         def _on_result(result: CompileResult) -> None:
+            t3_end = time.monotonic()
+            duration = t3_end - t3_start
+            completed_at = time.time()
+
             if not result.success:
+                error_msgs = [e.message for e in result.errors]
                 logger.debug(
                     "Tier 3 compilation failed for %s: %s",
                     filepath,
-                    [e.message for e in result.errors],
+                    error_msgs,
                 )
-                self._tier3_running = False
+                self._record_tier3_result(
+                    filepath,
+                    success=False,
+                    started_at=completed_at - duration,
+                    completed_at=completed_at,
+                    duration=duration,
+                    error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
+                )
+                if track_state:
+                    with self._state_lock:
+                        self._tier3_running = False
+                        self._tier3_current_file = None
                 return
             nodes: List[Any] = []
             edges: List[Tuple[str, SemanticEdgeType, str]] = []
@@ -191,11 +246,23 @@ class AnalysisPipeline:
                     logger.debug("Tier 3 enrichment failed", exc_info=True)
 
             self._model.update_file(filepath, nodes, edges, "tier3")
-            self._tier3_files.add(filepath)
-            self._tier3_running = False
-            logger.debug("Tier 3 complete for %s", filepath)
+            self._record_tier3_result(
+                filepath,
+                success=True,
+                started_at=completed_at - duration,
+                completed_at=completed_at,
+                duration=duration,
+            )
+            if track_state:
+                with self._state_lock:
+                    self._tier3_running = False
+                    self._tier3_current_file = None
+            logger.debug("Tier 3 complete for %s (%.2fs)", filepath, duration)
 
-        self._tier3_running = True
+        if track_state:
+            with self._state_lock:
+                self._tier3_running = True
+                self._tier3_current_file = filepath
         try:
             if hasattr(self._compiler, "compile_background"):
                 self._compiler.compile_background(source, filepath, _on_result)
@@ -204,7 +271,10 @@ class AnalysisPipeline:
                 result = self._compiler.compile(source, filepath)
                 _on_result(result)
         except Exception:
-            self._tier3_running = False
+            if track_state:
+                with self._state_lock:
+                    self._tier3_running = False
+                    self._tier3_current_file = None
             raise
 
     # -- Bulk T1+T2 analysis ---------------------------------------------------
@@ -238,9 +308,10 @@ class AnalysisPipeline:
             remaining = [f for f in filepaths if f not in self._tier1_files]
 
         result = BulkAnalysisResult(total=len(remaining))
-        self._bulk_running = True
-        self._bulk_total = len(remaining)
-        self._bulk_completed = 0
+        with self._state_lock:
+            self._bulk_running = True
+            self._bulk_total = len(remaining)
+            self._bulk_completed = 0
 
         try:
             for i, filepath in enumerate(remaining):
@@ -253,7 +324,8 @@ class AnalysisPipeline:
                         source = f.read()
                 except OSError as exc:
                     result.errors.append((filepath, str(exc)))
-                    self._bulk_completed = i + 1
+                    with self._state_lock:
+                        self._bulk_completed = i + 1
                     if progress_callback is not None:
                         try:
                             progress_callback(i + 1, len(remaining), filepath)
@@ -266,7 +338,8 @@ class AnalysisPipeline:
                     result.t1_completed += 1
                 except Exception as exc:
                     result.errors.append((filepath, f"T1: {exc}"))
-                    self._bulk_completed = i + 1
+                    with self._state_lock:
+                        self._bulk_completed = i + 1
                     if progress_callback is not None:
                         try:
                             progress_callback(i + 1, len(remaining), filepath)
@@ -281,14 +354,16 @@ class AnalysisPipeline:
                     except Exception as exc:
                         result.errors.append((filepath, f"T2: {exc}"))
 
-                self._bulk_completed = i + 1
+                with self._state_lock:
+                    self._bulk_completed = i + 1
                 if progress_callback is not None:
                     try:
                         progress_callback(i + 1, len(remaining), filepath)
                     except Exception:
                         pass
         finally:
-            self._bulk_running = False
+            with self._state_lock:
+                self._bulk_running = False
 
         logger.info(
             "Bulk analysis: %d/%d T1, %d/%d T2, %d errors, cancelled=%s",
@@ -301,21 +376,88 @@ class AnalysisPipeline:
         )
         return result
 
+    # -- T3 result management --------------------------------------------------
+
+    def _record_tier3_result(
+        self,
+        filepath: str,
+        *,
+        success: bool,
+        started_at: float,
+        completed_at: float,
+        duration: float,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Store a Tier 3 file result, evicting oldest if over capacity.
+
+        Called from background threads -- acquires ``_state_lock``.
+        """
+        with self._state_lock:
+            self._tier3_results[filepath] = Tier3FileResult(
+                filepath=filepath,
+                success=success,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration=duration,
+                error_message=error_message,
+            )
+            self._tier3_last_file = filepath
+            self._tier3_last_completed_at = completed_at
+            while len(self._tier3_results) > _T3_MAX_RESULTS:
+                self._tier3_results.popitem(last=False)
+
+    def get_tier3_file_results(self) -> List[Dict[str, Any]]:
+        """Return per-file T3 results sorted by completion time (newest first).
+
+        Acquires ``_state_lock`` to snapshot results safely.
+        """
+        with self._state_lock:
+            snapshot = list(reversed(self._tier3_results.values()))
+        return [
+            {
+                "file": r.filepath,
+                "success": r.success,
+                "duration": round(r.duration, 2),
+                "error": r.error_message,
+            }
+            for r in snapshot
+        ]
+
     # -- State query -----------------------------------------------------------
 
     def get_pipeline_state(self) -> dict:
-        """Return current pipeline state for monitoring."""
+        """Return current pipeline state for monitoring.
+
+        Acquires ``_state_lock`` to get a consistent snapshot of T3 and
+        bulk analysis state.
+        """
+        with self._state_lock:
+            succeeded = sum(1 for r in self._tier3_results.values() if r.success)
+            failed = sum(1 for r in self._tier3_results.values() if not r.success)
+            t3_count = len(self._tier3_results)
+            t3_running = self._tier3_running
+            t3_current = self._tier3_current_file
+            t3_last = self._tier3_last_file
+            t3_last_at = self._tier3_last_completed_at
+            bulk_running = self._bulk_running
+            bulk_total = self._bulk_total
+            bulk_completed = self._bulk_completed
         return {
             "tier1FileCount": len(self._tier1_files),
             "tier2FileCount": len(self._tier2_files),
-            "tier3FileCount": len(self._tier3_files),
-            "tier3Running": self._tier3_running,
+            "tier3FileCount": t3_count,
+            "tier3Running": t3_running,
+            "tier3Succeeded": succeeded,
+            "tier3Failed": failed,
+            "tier3CurrentFile": t3_current,
+            "tier3LastFile": t3_last,
+            "tier3LastCompletedAt": t3_last_at,
             "semanticNodeCount": self._model.node_count(),
             "semanticEdgeCount": self._model.edge_count(),
             "semanticModelReady": self._model.node_count() > 0,
-            "bulkAnalysisRunning": self._bulk_running,
-            "bulkAnalysisTotal": self._bulk_total,
-            "bulkAnalysisCompleted": self._bulk_completed,
+            "bulkAnalysisRunning": bulk_running,
+            "bulkAnalysisTotal": bulk_total,
+            "bulkAnalysisCompleted": bulk_completed,
         }
 
     # -- Orchestration ---------------------------------------------------------

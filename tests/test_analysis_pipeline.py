@@ -391,6 +391,70 @@ class TestTier3:
         pipeline.run_tier3_background("type cid\n", "test.ivy")
         assert compiler._callback_called
 
+    def test_tier3_track_state_false_does_not_set_running_flag(self):
+        """When track_state=False, _tier3_running should NOT be set."""
+        model = SemanticModel()
+        compiler = StubCompilerAdapter(success=True)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+        )
+
+        pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=False)
+        assert pipeline._tier3_running is False
+        assert pipeline._tier3_current_file is None
+
+    def test_tier3_track_state_false_still_records_result(self):
+        """When track_state=False, _record_tier3_result() should still be called."""
+        model = SemanticModel()
+        compiler = StubCompilerAdapter(success=True)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+        )
+
+        pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=False)
+        state = pipeline.get_pipeline_state()
+        assert state["tier3FileCount"] == 1
+        assert state["tier3Succeeded"] == 1
+
+    def test_tier3_track_state_true_sets_running_flag(self):
+        """When track_state=True (default), _tier3_running is managed normally."""
+        model = SemanticModel()
+        compiler = StubCompilerAdapter(success=True)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+        )
+
+        # After synchronous completion, running should be False again
+        pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=True)
+        assert pipeline._tier3_running is False
+
+    def test_tier3_track_state_false_failure_does_not_touch_flags(self):
+        """When track_state=False and compilation fails, flags stay untouched."""
+        model = SemanticModel()
+        compiler = StubCompilerAdapter(success=False)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+        )
+
+        pipeline.run_tier3_background("bad\n", "test.ivy", track_state=False)
+        assert pipeline._tier3_running is False
+        assert pipeline._tier3_current_file is None
+        # But failure is still recorded
+        state = pipeline.get_pipeline_state()
+        assert state["tier3Failed"] == 1
+
     def test_tier3_callback_on_failure_does_not_update_model(self):
         model = SemanticModel()
         # Pre-populate with tier1 data
@@ -513,6 +577,11 @@ class TestPipelineState:
         assert state["tier2FileCount"] == 0
         assert state["tier3FileCount"] == 0
         assert state["tier3Running"] is False
+        assert state["tier3Succeeded"] == 0
+        assert state["tier3Failed"] == 0
+        assert state["tier3CurrentFile"] is None
+        assert state["tier3LastFile"] is None
+        assert state["tier3LastCompletedAt"] is None
         assert state["semanticNodeCount"] == 0
         assert state["semanticEdgeCount"] == 0
         assert state["semanticModelReady"] is False
@@ -537,12 +606,46 @@ class TestPipelineState:
         assert state["tier3FileCount"] == 1
         assert state["tier3Running"] is False
 
-    def test_tier3_not_tracked_on_failure(self):
+    def test_tier3_failure_tracked_with_error(self):
         pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=False))
         pipeline.run_tier3_background("bad\n", "d.ivy")
         state = pipeline.get_pipeline_state()
-        assert state["tier3FileCount"] == 0
+        assert state["tier3FileCount"] == 1  # failures are now tracked
+        assert state["tier3Succeeded"] == 0
+        assert state["tier3Failed"] == 1
         assert state["tier3Running"] is False
+
+    def test_tier3_success_and_failure_counts(self):
+        compiler = StubCompilerAdapter(success=True)
+        pipeline, _ = self._make_pipeline(compiler=compiler)
+        pipeline.run_tier3_background("ok\n", "a.ivy")
+        compiler._success = False
+        pipeline.run_tier3_background("bad\n", "b.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier3FileCount"] == 2
+        assert state["tier3Succeeded"] == 1
+        assert state["tier3Failed"] == 1
+        assert state["tier3LastFile"] == "b.ivy"
+        assert state["tier3LastCompletedAt"] is not None
+
+    def test_tier3_current_file_tracked(self):
+        pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=True))
+        # After synchronous completion, current_file should be None
+        pipeline.run_tier3_background("ok\n", "test.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier3CurrentFile"] is None  # completed synchronously
+
+    def test_get_tier3_file_results(self):
+        compiler = StubCompilerAdapter(success=True)
+        pipeline, _ = self._make_pipeline(compiler=compiler)
+        pipeline.run_tier3_background("ok\n", "a.ivy")
+        pipeline.run_tier3_background("ok\n", "b.ivy")
+        results = pipeline.get_tier3_file_results()
+        assert len(results) == 2
+        assert results[0]["file"] == "b.ivy"  # newest first
+        assert results[1]["file"] == "a.ivy"
+        assert all(r["success"] for r in results)
+        assert all(r["duration"] >= 0 for r in results)
 
     def test_multiple_files_counted_separately(self):
         pipeline, _ = self._make_pipeline()
@@ -557,3 +660,114 @@ class TestPipelineState:
         pipeline.run_tier1("require y; # [b]\n", "a.ivy")
         state = pipeline.get_pipeline_state()
         assert state["tier1FileCount"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 parse_result reuse tests
+# ---------------------------------------------------------------------------
+
+
+class TestTier2ParseResultReuse:
+    """Verify run_tier2() reuses a pre-parsed result when provided."""
+
+    def test_pre_parsed_result_skips_internal_parse(self):
+        """When a valid parse_result is provided, the parser should NOT be called."""
+        model = SemanticModel()
+        ta = TypeAnnotation(
+            name="cid",
+            qualified_name="quic.cid",
+            sort_name="type",
+            line=1,
+            is_enum=False,
+        )
+
+        class TrackingParser:
+            """Parser that tracks whether parse() was called."""
+
+            def __init__(self):
+                self.parse_called = False
+
+            def parse(self, source, filename):
+                self.parse_called = True
+                return ParseResult(ast={"stub": True}, errors=[], success=True, filename=filename)
+
+        tracking_parser = TrackingParser()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=tracking_parser,
+            enrichment_adapter=StubEnrichmentAdapter([ta]),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+
+        pre_parsed = ParseResult(
+            ast={"pre_parsed": True}, errors=[], success=True, filename="test.ivy"
+        )
+        pipeline.run_tier2("type cid\n", "test.ivy", parse_result=pre_parsed)
+
+        assert not tracking_parser.parse_called
+        type_nodes = model.get_nodes_by_type(TypeNode)
+        assert len(type_nodes) == 1
+        assert type_nodes[0].name == "cid"
+
+    def test_none_parse_result_calls_internal_parse(self):
+        """When parse_result is None (default), the parser should be called."""
+        model = SemanticModel()
+
+        class TrackingParser:
+            def __init__(self):
+                self.parse_called = False
+
+            def parse(self, source, filename):
+                self.parse_called = True
+                return ParseResult(ast={"stub": True}, errors=[], success=True, filename=filename)
+
+        tracking_parser = TrackingParser()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=tracking_parser,
+            enrichment_adapter=StubEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+
+        pipeline.run_tier2("type cid\n", "test.ivy")
+        assert tracking_parser.parse_called
+
+    def test_failed_parse_result_falls_back_to_internal_parse(self):
+        """When parse_result has success=False, the parser should be called."""
+        model = SemanticModel()
+
+        class TrackingParser:
+            def __init__(self):
+                self.parse_called = False
+
+            def parse(self, source, filename):
+                self.parse_called = True
+                return ParseResult(ast=None, errors=[], success=False, filename=filename)
+
+        tracking_parser = TrackingParser()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=tracking_parser,
+            enrichment_adapter=StubEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+
+        bad_result = ParseResult(ast=None, errors=[], success=False, filename="test.ivy")
+        pipeline.run_tier2("type cid\n", "test.ivy", parse_result=bad_result)
+        assert tracking_parser.parse_called
+
+    def test_pre_parsed_result_returned_by_run_tier2(self):
+        """run_tier2() should return the pre-parsed result when provided."""
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=StubParserAdapter(success=True),
+            enrichment_adapter=StubEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+
+        pre_parsed = ParseResult(
+            ast={"pre_parsed": True}, errors=[], success=True, filename="test.ivy"
+        )
+        returned = pipeline.run_tier2("type cid\n", "test.ivy", parse_result=pre_parsed)
+        assert returned is pre_parsed

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import threading
 import types
+from unittest.mock import MagicMock
 
 from ivy_lsp.compilation.ir import ActionIR, CompiledModuleIR
 
@@ -95,12 +96,22 @@ class TestBulkCompilation:
         server._indexer = FakeIndexer(graph)
         server._semantic_model = FakeSemanticModel()
         server._bulk_analysis_cancel = threading.Event()
+        server._bulk_compile_running = False
+        server._bulk_compile_total = 0
+        server._bulk_compile_completed = 0
 
-        # Bind the actual _start_bulk_compilation method
+        # Mock protocol and work_done_progress for notification tests
+        server.protocol = MagicMock()
+        server.work_done_progress = MagicMock()
+
+        # Bind the actual methods
         from ivy_lsp.server import IvyLanguageServer
 
         server._start_bulk_compilation = types.MethodType(
             IvyLanguageServer._start_bulk_compilation, server
+        )
+        server._make_bulk_compile_progress_callback = types.MethodType(
+            IvyLanguageServer._make_bulk_compile_progress_callback, server
         )
         server._send_model_ready_notification = lambda: None
 
@@ -188,3 +199,84 @@ class TestBulkCompilation:
         server._start_bulk_compilation()
         # compile_async not called for unreadable file
         assert len(server._compiler_manager.compile_calls) == 0
+
+    def test_progress_notification_sent(self, tmp_path):
+        """ivy/compilationProgress notification is sent for each compiled file."""
+        f1 = tmp_path / "test1.ivy"
+        f2 = tmp_path / "test2.ivy"
+        f1.write_text("#lang ivy1.8\ntype t\n")
+        f2.write_text("#lang ivy1.8\ntype s\n")
+
+        ir1 = CompiledModuleIR(
+            actions={"ext:send": ActionIR(name="ext:send", is_exported=True)},
+            success=True,
+            source_file=str(f1),
+        )
+        ir2 = CompiledModuleIR.empty(str(f2), errors=["parse error"])
+
+        server = self._make_server(
+            test_files=[str(f1), str(f2)],
+            compile_results={str(f1): ir1, str(f2): ir2},
+        )
+        server._start_bulk_compilation()
+
+        # Verify ivy/compilationProgress notifications were sent
+        notify_calls = [
+            c for c in server.protocol.notify.call_args_list
+            if c[0][0] == "ivy/compilationProgress"
+        ]
+        assert len(notify_calls) == 2
+
+        # Check first notification payload
+        payload0 = notify_calls[0][0][1]
+        assert payload0["total"] == 2
+        assert payload0["completed"] >= 1
+        assert "success" in payload0
+        assert "currentFile" in payload0
+
+        # Check second notification payload
+        payload1 = notify_calls[1][0][1]
+        assert payload1["total"] == 2
+        assert payload1["completed"] == 2
+
+    def test_bulk_compile_state_tracking(self, tmp_path):
+        """State tracking fields are updated during bulk compilation."""
+        f1 = tmp_path / "test1.ivy"
+        f1.write_text("#lang ivy1.8\ntype t\n")
+
+        ir1 = CompiledModuleIR(success=True, source_file=str(f1))
+
+        server = self._make_server(
+            test_files=[str(f1)],
+            compile_results={str(f1): ir1},
+        )
+
+        assert server._bulk_compile_running is False
+        assert server._bulk_compile_total == 0
+        assert server._bulk_compile_completed == 0
+
+        server._start_bulk_compilation()
+
+        # After synchronous FakeCompilerManager completes all callbacks:
+        assert server._bulk_compile_running is False  # all done
+        assert server._bulk_compile_total == 1
+        assert server._bulk_compile_completed == 1
+
+    def test_progress_callback_lifecycle(self, tmp_path):
+        """$/progress begin/report/end lifecycle is followed."""
+        f1 = tmp_path / "test1.ivy"
+        f1.write_text("#lang ivy1.8\ntype t\n")
+
+        ir1 = CompiledModuleIR(success=True, source_file=str(f1))
+
+        server = self._make_server(
+            test_files=[str(f1)],
+            compile_results={str(f1): ir1},
+        )
+        server._start_bulk_compilation()
+
+        wdp = server.work_done_progress
+        # create -> begin -> end (1 file: completed==total triggers end)
+        assert wdp.create.call_count == 1
+        assert wdp.begin.call_count == 1
+        assert wdp.end.call_count == 1

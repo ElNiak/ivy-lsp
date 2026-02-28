@@ -94,3 +94,104 @@ class TestCompilerManager:
                 )
         finally:
             mgr.shutdown()
+
+    def test_max_concurrent_default_is_one(self):
+        """Default max_concurrent is 1."""
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(staging_dir=None)
+        assert mgr._max_concurrent == 1
+        mgr.shutdown()
+
+    def test_semaphore_limits_concurrency(self):
+        """Semaphore limits the number of concurrent compilations."""
+        from unittest.mock import patch
+
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(staging_dir=None, timeout=60.0, max_concurrent=1)
+
+        # Track how many processes are running concurrently between
+        # proc.start() and when poll() returns (simulating process lifetime).
+        active_count = [0]
+        max_active = [0]
+        lock = threading.Lock()
+
+        class FakeProcess:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                with lock:
+                    active_count[0] += 1
+                    if active_count[0] > max_active[0]:
+                        max_active[0] = active_count[0]
+
+            def kill(self):
+                pass
+
+            def join(self, timeout=None):
+                pass
+
+        class FakeConn:
+            def __init__(self, filepath):
+                self._filepath = filepath
+
+            def poll(self, timeout):
+                import time
+                time.sleep(0.05)
+                # Decrement active when "process completes" (poll returns)
+                with lock:
+                    active_count[0] = max(0, active_count[0] - 1)
+                return True
+
+            def recv(self):
+                return CompiledModuleIR.empty(self._filepath)
+
+            def close(self):
+                pass
+
+        events = []
+        results = []
+        result_lock = threading.Lock()
+
+        def make_cb(idx):
+            evt = threading.Event()
+            events.append(evt)
+
+            def cb(ir):
+                with result_lock:
+                    results.append(idx)
+                evt.set()
+
+            return cb
+
+        try:
+            with patch("ivy_lsp.compilation.compiler_manager.multiprocessing") as mock_mp:
+                ctx = mock_mp.get_context.return_value
+
+                call_count = [0]
+
+                def make_pipe(duplex=False):
+                    call_count[0] += 1
+                    filepath = f"test_{call_count[0]}.ivy"
+                    parent = FakeConn(filepath)
+                    child = FakeConn(filepath)
+                    return parent, child
+
+                ctx.Pipe = make_pipe
+                ctx.Process = FakeProcess
+
+                # Fire 3 compilations with max_concurrent=1
+                for i in range(3):
+                    mgr.compile_async(f"type t{i}", f"test_{i + 1}.ivy", make_cb(i))
+
+                # Wait for all to complete
+                for evt in events:
+                    evt.wait(timeout=30)
+
+                assert len(results) == 3
+                # With max_concurrent=1, at most 1 process should be active
+                assert max_active[0] <= 1
+        finally:
+            mgr.shutdown()

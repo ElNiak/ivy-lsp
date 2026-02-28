@@ -131,6 +131,15 @@ class CompilerManager:
             filepath, errors=["Compilation did not complete"], duration=0.0
         )
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Return cache/process statistics under the internal lock."""
+        with self._lock:
+            return {
+                "cachedFiles": len(self._cache),
+                "activeProcesses": len(self._active),
+                "maxConcurrent": self._max_concurrent,
+            }
+
     def get_cached(self, filepath: str) -> Optional[CompiledModuleIR]:
         """Return cached IR for *filepath* if present and not stale."""
         with self._lock:

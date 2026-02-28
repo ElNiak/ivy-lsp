@@ -260,8 +260,11 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
     # --- Pipeline state ---
     pipeline_state = {
         "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
-        "tier3Running": False, "semanticNodeCount": 0,
-        "semanticEdgeCount": 0, "semanticModelReady": False,
+        "tier3Running": False, "tier3Succeeded": 0, "tier3Failed": 0,
+        "tier3CurrentFile": None, "tier3LastFile": None,
+        "tier3LastCompletedAt": None,
+        "semanticNodeCount": 0, "semanticEdgeCount": 0,
+        "semanticModelReady": False,
         "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
         "bulkAnalysisCompleted": 0,
     }
@@ -271,8 +274,13 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
     return {"features": features, "analysisPipeline": pipeline_state}
 
 
-def handle_deep_index_progress(server: Any) -> Dict[str, Any]:
-    """Return current deep indexing progress with per-file statuses."""
+def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[str, Any]:
+    """Return current deep indexing progress.
+
+    By default only summary counts are returned.  Pass
+    ``includeFileStatuses: true`` to include the per-file detail array
+    (which can be large for workspaces with many test files).
+    """
     if server._indexer is None:
         return {
             "running": False,
@@ -281,21 +289,28 @@ def handle_deep_index_progress(server: Any) -> Dict[str, Any]:
             "currentFile": None,
             "startedAt": None,
             "elapsedSeconds": None,
-            "fileStatuses": [],
+            "fileStatusCount": 0,
         }
     progress = server._indexer._deep_index_progress
     running = server._indexer._deep_index_running
     elapsed = None
     if progress.started_at is not None:
         elapsed = round(time.time() - progress.started_at, 1)
-    return {
+
+    include_files = (params or {}).get("includeFileStatuses", False)
+
+    result: Dict[str, Any] = {
         "running": running,
         "totalTests": progress.total_test_files,
         "completedTests": progress.completed_test_files,
         "currentFile": progress.current_file,
         "startedAt": progress.started_at,
         "elapsedSeconds": elapsed,
-        "fileStatuses": [
+        "fileStatusCount": len(progress.file_statuses),
+    }
+
+    if include_files:
+        result["fileStatuses"] = [
             {
                 "file": s.filepath,
                 "shallowIndexed": s.shallow_indexed,
@@ -309,7 +324,85 @@ def handle_deep_index_progress(server: Any) -> Dict[str, Any]:
                 ),
             }
             for s in progress.file_statuses.values()
-        ],
+        ]
+
+    return result
+
+
+def handle_compilation_progress(server: Any) -> Dict[str, Any]:
+    """Return current bulk compilation progress.
+
+    Uses ``CompilerManager.get_stats()`` to read cache/process counts
+    under its internal lock, avoiding data races.
+    """
+    mgr = getattr(server, "_compiler_manager", None)
+    stats = mgr.get_stats() if mgr else {
+        "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
+    }
+    return {
+        "running": getattr(server, "_bulk_compile_running", False),
+        "total": getattr(server, "_bulk_compile_total", 0),
+        "completed": getattr(server, "_bulk_compile_completed", 0),
+        **stats,
+    }
+
+
+def handle_analysis_pipeline_detail(
+    server: Any, params: dict | None = None
+) -> Dict[str, Any]:
+    """Combined analysis pipeline detail: tiers, T3 per-file, compilation, bulk, semantic."""
+    has_pipeline = getattr(server, "_analysis_pipeline", None) is not None
+
+    # Tier counts
+    if has_pipeline:
+        ps = server._analysis_pipeline.get_pipeline_state()
+    else:
+        ps = {
+            "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
+            "tier3Running": False, "tier3Succeeded": 0, "tier3Failed": 0,
+            "tier3CurrentFile": None, "tier3LastFile": None,
+            "tier3LastCompletedAt": None,
+            "semanticNodeCount": 0, "semanticEdgeCount": 0,
+            "semanticModelReady": False,
+            "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
+            "bulkAnalysisCompleted": 0,
+        }
+
+    # T3 detail
+    include_results = (params or {}).get("includeFileResults", False)
+    tier3: Dict[str, Any] = {
+        "running": ps.get("tier3Running", False),
+        "currentFile": ps.get("tier3CurrentFile"),
+        "fileCount": ps.get("tier3FileCount", 0),
+        "succeeded": ps.get("tier3Succeeded", 0),
+        "failed": ps.get("tier3Failed", 0),
+        "lastFile": ps.get("tier3LastFile"),
+        "lastCompletedAt": ps.get("tier3LastCompletedAt"),
+    }
+    if include_results and has_pipeline:
+        tier3["results"] = server._analysis_pipeline.get_tier3_file_results()
+
+    # Compilation status
+    compilation = handle_compilation_progress(server)
+
+    return {
+        "tiers": {
+            "t1": ps.get("tier1FileCount", 0),
+            "t2": ps.get("tier2FileCount", 0),
+            "t3": ps.get("tier3FileCount", 0),
+        },
+        "tier3": tier3,
+        "compilation": compilation,
+        "bulk": {
+            "running": ps.get("bulkAnalysisRunning", False),
+            "total": ps.get("bulkAnalysisTotal", 0),
+            "completed": ps.get("bulkAnalysisCompleted", 0),
+        },
+        "semanticModel": {
+            "nodeCount": ps.get("semanticNodeCount", 0),
+            "edgeCount": ps.get("semanticEdgeCount", 0),
+            "ready": ps.get("semanticModelReady", False),
+        },
     }
 
 
@@ -384,7 +477,19 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/deepIndexProgress")
     def on_deep_index_progress(params: Any = None) -> Dict[str, Any]:
-        return handle_deep_index_progress(server)
+        return handle_deep_index_progress(
+            server, params if isinstance(params, dict) else None
+        )
+
+    @server.feature("ivy/compilationStatus")
+    def on_compilation_status(params: Any = None) -> Dict[str, Any]:
+        return handle_compilation_progress(server)
+
+    @server.feature("ivy/analysisPipelineDetail")
+    def on_analysis_pipeline_detail(params: Any = None) -> Dict[str, Any]:
+        return handle_analysis_pipeline_detail(
+            server, params if isinstance(params, dict) else None
+        )
 
     @server.feature("ivy/testFeatureMatrix")
     def on_test_feature_matrix(params: Any = None) -> Dict[str, Any]:

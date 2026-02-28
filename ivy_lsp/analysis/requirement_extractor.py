@@ -9,10 +9,12 @@ each monitor is attached to.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ivy_lsp.analysis.requirement_graph import RequirementNode
+from ivy_lsp.parsing.ast_to_symbols import is_from_included_file
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +36,15 @@ def extract_requirements_full(
     if ast_obj is None or not hasattr(ast_obj, "decls"):
         return [], []
 
-    mixin_map = _build_mixin_map(ast_obj)
+    abs_filepath = os.path.abspath(filepath) if filepath else None
+    mixin_map = _build_mixin_map(ast_obj, filepath)
     source_lines = source.split("\n")
     requirements: List[RequirementNode] = []
     writes: List[Tuple[str, str, int]] = []
 
     for decl in ast_obj.decls:
+        if is_from_included_file(decl, abs_filepath):
+            continue
         try:
             _process_decl(
                 decl, filepath, source_lines, mixin_map, requirements, writes
@@ -367,19 +372,28 @@ def _extract_bracket_tags(
     return [t for t in tags if tag_re.match(t)]
 
 
-def _build_mixin_map(ast_obj: Any) -> Dict[str, str]:
+def _build_mixin_map(
+    ast_obj: Any, filepath: Optional[str] = None
+) -> Dict[str, str]:
     """Map mangled mixer names to mixee (monitored action) names.
 
     Scans ``MixinDecl`` entries in ``ast.decls``.  Each ``MixinDecl``
     contains a ``MixinBeforeDef`` or ``MixinAfterDef`` linking the
     mixer action to the mixee action.
+
+    Declarations originating from included files are skipped so that
+    mixin mappings from library files do not leak into the test file's
+    requirement graph.
     """
     import ivy.ivy_ast as ia
 
+    abs_filepath = os.path.abspath(filepath) if filepath else None
     mixin_map: Dict[str, str] = {}
 
     for decl in ast_obj.decls:
         if not isinstance(decl, ia.MixinDecl):
+            continue
+        if is_from_included_file(decl, abs_filepath):
             continue
 
         try:

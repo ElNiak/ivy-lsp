@@ -123,10 +123,15 @@ class WorkspaceIndexer:
         self._deep_index_progress = DeepIndexProgress()
         self._progress_lock = threading.Lock()
         self._stop_requested = threading.Event()
+        self._analysis_pipeline: Optional[Any] = None
 
     def request_stop(self) -> None:
         """Signal background threads to stop at the next safe point."""
         self._stop_requested.set()
+
+    def set_analysis_pipeline(self, pipeline: Any) -> None:
+        """Inject the analysis pipeline for inline T1/T2 during deep indexing."""
+        self._analysis_pipeline = pipeline
 
     # ------------------------------------------------------------------
     # Full workspace indexing (two-mode: fast scan + background deep parse)
@@ -403,6 +408,32 @@ class WorkspaceIndexer:
                 self._requirement_graph.remove_file(test_file)
                 self._extract_file_requirements(test_file, result, source)
                 self._extract_file_exports_imports(test_file, result, source)
+                # Inline T1+T2 if pipeline is available
+                if self._analysis_pipeline is not None:
+                    try:
+                        self._analysis_pipeline.run_tier1(source, test_file)
+                        self._analysis_pipeline.run_tier2(
+                            source, test_file, parse_result=result
+                        )
+                        self._analysis_pipeline.run_tier3_background(
+                            source, test_file, track_state=False
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Inline T1/T2/T3 failed for %s",
+                            test_file,
+                            exc_info=True,
+                        )
+            elif self._analysis_pipeline is not None:
+                # For failed parse, still run T1 (regex-only, no AST needed)
+                try:
+                    self._analysis_pipeline.run_tier1(source, test_file)
+                except Exception:
+                    logger.debug(
+                        "Inline T1 failed for %s",
+                        test_file,
+                        exc_info=True,
+                    )
 
             with self._progress_lock:
                 status = self._deep_index_progress.file_statuses.get(

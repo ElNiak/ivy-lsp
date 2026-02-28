@@ -871,6 +871,8 @@ class IvyLanguageServer(LanguageServer):
                 compiler,
                 compiler_manager=self._compiler_manager,
             )
+            if self._indexer is not None:
+                self._indexer.set_analysis_pipeline(self._analysis_pipeline)
             slog.info(
                 "Semantic model and analysis pipeline initialized",
                 extra={"event": LogEvent(LogCategory.MILESTONE, "semantic")},
