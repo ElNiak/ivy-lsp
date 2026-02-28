@@ -88,14 +88,15 @@ def handle_include_graph(server: Any) -> Dict[str, Any]:
         return {"nodes": [], "edges": []}
     graph = server._indexer._include_graph
 
-    # Derive node set from _includes and _included_by keys
+    # Snapshot dicts before iteration to avoid RuntimeError if
+    # background indexing mutates _includes/_included_by concurrently.
     all_uris: set = set()
-    includes = getattr(graph, "_includes", {})
-    included_by = getattr(graph, "_included_by", {})
+    includes = dict(getattr(graph, "_includes", {}))
+    included_by_keys = set(getattr(graph, "_included_by", {}).keys())
     all_uris.update(includes.keys())
     for targets in includes.values():
         all_uris.update(targets)
-    all_uris.update(included_by.keys())
+    all_uris.update(included_by_keys)
 
     nodes = []
     for uri in sorted(all_uris):
@@ -129,7 +130,8 @@ def handle_clear_cache(server: Any) -> Dict[str, Any]:
     if server._indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
-        staging = getattr(server._indexer, "_staging_dir", None)
+        resolver = getattr(server._indexer, "_resolver", None)
+        staging = getattr(resolver, "_staging_dir", None) if resolver else None
         if staging and os.path.exists(staging):
             shutil.rmtree(staging)
         server._indexer.reindex()
@@ -282,7 +284,7 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
     (which can be large for workspaces with many test files).
     """
     if server._indexer is None:
-        return {
+        result: Dict[str, Any] = {
             "running": False,
             "totalTests": 0,
             "completedTests": 0,
@@ -291,11 +293,19 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
             "elapsedSeconds": None,
             "fileStatusCount": 0,
         }
+        if (params or {}).get("includeFileStatuses", False):
+            result["fileStatuses"] = []
+        return result
     progress = server._indexer._deep_index_progress
-    running = server._indexer._deep_index_running
+    with server._indexer._progress_lock:
+        running = server._indexer._deep_index_running
     elapsed = None
+    started_at_iso = None
     if progress.started_at is not None:
         elapsed = round(time.time() - progress.started_at, 1)
+        started_at_iso = datetime.fromtimestamp(
+            progress.started_at, tz=timezone.utc
+        ).isoformat()
 
     include_files = (params or {}).get("includeFileStatuses", False)
 
@@ -304,7 +314,7 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
         "totalTests": progress.total_test_files,
         "completedTests": progress.completed_test_files,
         "currentFile": progress.current_file,
-        "startedAt": progress.started_at,
+        "startedAt": started_at_iso,
         "elapsedSeconds": elapsed,
         "fileStatusCount": len(progress.file_statuses),
     }
@@ -339,12 +349,17 @@ def handle_compilation_progress(server: Any) -> Dict[str, Any]:
     stats = mgr.get_stats() if mgr else {
         "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
     }
-    return {
-        "running": getattr(server, "_bulk_compile_running", False),
-        "total": getattr(server, "_bulk_compile_total", 0),
-        "completed": getattr(server, "_bulk_compile_completed", 0),
-        **stats,
-    }
+    lock = getattr(server, "_bulk_compile_lock", None)
+    if lock is not None:
+        with lock:
+            running = server._bulk_compile_running
+            total = server._bulk_compile_total
+            completed = server._bulk_compile_completed
+    else:
+        running = getattr(server, "_bulk_compile_running", False)
+        total = getattr(server, "_bulk_compile_total", 0)
+        completed = getattr(server, "_bulk_compile_completed", 0)
+    return {"running": running, "total": total, "completed": completed, **stats}
 
 
 def handle_analysis_pipeline_detail(
@@ -412,7 +427,8 @@ def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
     if server._indexer is None:
         return {"tests": []}
     progress = server._indexer._deep_index_progress
-    export_imports = server._indexer._file_export_imports
+    # Snapshot to avoid RuntimeError if background indexing mutates dict.
+    export_imports = dict(server._indexer._file_export_imports)
 
     tests = []
     for filepath, info in export_imports.items():

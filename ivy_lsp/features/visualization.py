@@ -164,11 +164,13 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                 k: v for k, v in actions_to_process.items() if v.file == file_filter
             }
 
-        # Pagination: limit/offset to cap response size
-        limit = params.get("limit", 50)
-        offset = params.get("offset", 0)
+        # Pagination: limit/offset to cap response size.
+        # Default to returning all actions when no limit is specified,
+        # so clients that don't send pagination params get complete data.
         all_action_items = list(actions_to_process.items())
         total_actions = len(all_action_items)
+        offset = params.get("offset", 0)
+        limit = params.get("limit", total_actions)
         paginated_items = all_action_items[offset:offset + limit]
 
         result_actions = []

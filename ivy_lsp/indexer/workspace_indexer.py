@@ -158,7 +158,8 @@ class WorkspaceIndexer:
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports = {}
-        self._deep_index_running = False
+        with self._progress_lock:
+            self._deep_index_running = False
 
         # Phase 1: fast lexer-only scan (no lock needed)
         self._fast_index_all_files()
@@ -178,7 +179,8 @@ class WorkspaceIndexer:
 
         has_full_parser = not isinstance(self._parser, FallbackOnlyParser)
         if has_full_parser:
-            self._deep_index_running = True
+            with self._progress_lock:
+                self._deep_index_running = True
             t = threading.Thread(
                 target=self._deep_index_from_tests,
                 daemon=True,
@@ -339,7 +341,7 @@ class WorkspaceIndexer:
 
         with self._progress_lock:
             self._deep_index_progress.current_file = None
-        self._deep_index_running = False
+            self._deep_index_running = False
         # Signal progress end (total/total)
         self._notify_progress()
         deep_duration = time.time() - (self._deep_index_progress.started_at or 0.0)
@@ -518,16 +520,16 @@ class WorkspaceIndexer:
         parse_result: Any,
     ) -> None:
         """Replace fallback-scanned symbols with AST-quality symbols for a file."""
-        # Remove old symbols for this file
+        # Build new table locally, then swap atomically to avoid a window
+        # where concurrent readers see an incomplete/empty table.
         old_symbols = list(self._symbol_table.all_symbols())
-        self._symbol_table = SymbolTable()
+        new_table = SymbolTable()
         for sym in old_symbols:
             if sym.file_path != filepath:
-                self._symbol_table.add_symbol(sym)
-
-        # Add new AST-quality symbols
+                new_table.add_symbol(sym)
         for sym in new_symbols:
-            self._symbol_table.add_symbol(sym)
+            new_table.add_symbol(sym)
+        self._symbol_table = new_table
 
         # Update cache - reuse includes from existing cache entry
         cached = self._cache.get(filepath)

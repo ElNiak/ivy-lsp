@@ -47,7 +47,8 @@ class _LspLogHandler(logging.Handler):
     def __init__(self, server: "IvyLanguageServer"):
         super().__init__()
         self._server = server
-        self._sending = False  # recursion guard
+        self._lock = threading.Lock()
+        self._sending = False  # recursion guard (per-thread via _lock)
         self._last_emit = 0.0
         self._drop_counts: dict = {}
 
@@ -64,52 +65,53 @@ class _LspLogHandler(logging.Handler):
         return ""
 
     def emit(self, record: logging.LogRecord) -> None:
-        if self._sending:
-            return
-        # Always let WARNING+ through immediately.
-        now = time.time()
-        if record.levelno < logging.WARNING:
-            msg = self.format(record)
-            cat = self._extract_category(msg)
-            min_interval = self._CAT_MIN_INTERVAL.get(
-                cat, self._DEFAULT_MIN_INTERVAL
-            )
-            if (now - self._last_emit) < min_interval:
-                cat_key = cat or "_untagged"
-                self._drop_counts[cat_key] = (
-                    self._drop_counts.get(cat_key, 0) + 1
-                )
+        with self._lock:
+            if self._sending:
                 return
-        else:
-            msg = self.format(record)
+            # Always let WARNING+ through immediately.
+            now = time.time()
+            if record.levelno < logging.WARNING:
+                msg = self.format(record)
+                cat = self._extract_category(msg)
+                min_interval = self._CAT_MIN_INTERVAL.get(
+                    cat, self._DEFAULT_MIN_INTERVAL
+                )
+                if (now - self._last_emit) < min_interval:
+                    cat_key = cat or "_untagged"
+                    self._drop_counts[cat_key] = (
+                        self._drop_counts.get(cat_key, 0) + 1
+                    )
+                    return
+            else:
+                msg = self.format(record)
 
-        # Truncate oversized messages to prevent large LSP notifications
-        if len(msg) > self._MAX_MESSAGE_LEN:
-            msg = msg[: self._MAX_MESSAGE_LEN] + "... [truncated]"
+            # Truncate oversized messages to prevent large LSP notifications
+            if len(msg) > self._MAX_MESSAGE_LEN:
+                msg = msg[: self._MAX_MESSAGE_LEN] + "... [truncated]"
 
-        self._sending = True
-        try:
-            msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
-            if self._drop_counts:
-                parts = []
-                for k, v in sorted(self._drop_counts.items()):
-                    label = k if k != "_untagged" else "other"
-                    parts.append(f"{v} {label}")
-                suppression = "[" + ", ".join(parts) + " messages suppressed]"
-                msg = f"{suppression} {msg}"
-                self._drop_counts = {}
-            self._server.window_log_message(
-                lsp.LogMessageParams(type=msg_type, message=msg)
-            )
-            self._last_emit = now
-        except Exception:
+            self._sending = True
             try:
-                sys.stderr.write(f"[ivy-lsp-fallback] {msg}\n")
-                sys.stderr.flush()
+                msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
+                if self._drop_counts:
+                    parts = []
+                    for k, v in sorted(self._drop_counts.items()):
+                        label = k if k != "_untagged" else "other"
+                        parts.append(f"{v} {label}")
+                    suppression = "[" + ", ".join(parts) + " messages suppressed]"
+                    msg = f"{suppression} {msg}"
+                    self._drop_counts = {}
+                self._server.window_log_message(
+                    lsp.LogMessageParams(type=msg_type, message=msg)
+                )
+                self._last_emit = now
             except Exception:
-                pass
-        finally:
-            self._sending = False
+                try:
+                    sys.stderr.write(f"[ivy-lsp-fallback] {msg}\n")
+                    sys.stderr.flush()
+                except Exception:
+                    pass
+            finally:
+                self._sending = False
 
 
 class IvyLanguageServer(LanguageServer):
@@ -129,6 +131,7 @@ class IvyLanguageServer(LanguageServer):
         self._shutdown_event = threading.Event()
         self.state_tracker = ServerStateTracker()
         self._compiler_manager = None
+        self._bulk_compile_lock = threading.Lock()
         self._bulk_compile_running = False
         self._bulk_compile_total = 0
         self._bulk_compile_completed = 0
@@ -554,12 +557,12 @@ class IvyLanguageServer(LanguageServer):
 
         completed = [0]
         total = len(test_files)
-        compile_lock = threading.Lock()
 
-        # Track state for polling endpoint
-        self._bulk_compile_running = True
-        self._bulk_compile_total = total
-        self._bulk_compile_completed = 0
+        # Track state for polling endpoint (under _bulk_compile_lock)
+        with self._bulk_compile_lock:
+            self._bulk_compile_running = True
+            self._bulk_compile_total = total
+            self._bulk_compile_completed = 0
 
         progress_cb = self._make_bulk_compile_progress_callback()
 
@@ -568,7 +571,7 @@ class IvyLanguageServer(LanguageServer):
 
         def _make_callback(filepath: str):
             def _on_compile(ir):
-                with compile_lock:
+                with self._bulk_compile_lock:
                     completed[0] += 1
                     current = completed[0]
                     self._bulk_compile_completed = current
@@ -618,7 +621,8 @@ class IvyLanguageServer(LanguageServer):
                         )
 
                 if current >= total:
-                    self._bulk_compile_running = False
+                    with self._bulk_compile_lock:
+                        self._bulk_compile_running = False
                     slog.info(
                         "Bulk compilation complete: %d/%d files",
                         current,
@@ -637,7 +641,7 @@ class IvyLanguageServer(LanguageServer):
                 with open(test_file) as f:
                     source = f.read()
             except OSError:
-                with compile_lock:
+                with self._bulk_compile_lock:
                     completed[0] += 1
                     self._bulk_compile_completed = completed[0]
                 progress_cb(completed[0], total, test_file)

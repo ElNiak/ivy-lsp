@@ -123,7 +123,8 @@ class TestReindex:
 
 class TestClearCache:
     def test_clears_and_reindexes(self, mock_server):
-        mock_server._indexer._staging_dir = "/tmp/staging"
+        # handle_clear_cache resolves staging via _resolver._staging_dir
+        mock_server._indexer._resolver._staging_dir = None
         result = handle_clear_cache(mock_server)
         assert result["success"] is True
 

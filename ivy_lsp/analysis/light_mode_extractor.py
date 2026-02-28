@@ -102,7 +102,8 @@ def _find_monitor_blocks(
         body_end = _find_matching_brace(source, open_brace_offset)
 
         if body_end is None:
-            body_end = len(source)
+            logger.debug("Unterminated brace in monitor block for %s at line %d", monitor_action, start_line)
+            continue
 
         blocks.append(
             {
@@ -132,7 +133,8 @@ def _find_action_blocks(
         body_end = _find_matching_brace(source, open_brace_offset)
 
         if body_end is None:
-            body_end = len(source)
+            logger.debug("Unterminated brace in action block for %s at line %d", action_name, start_line)
+            continue
 
         blocks.append(
             {
@@ -254,13 +256,15 @@ def _extract_from_block(
 
 
 def _offset_to_line(offset: int, source_lines: List[str]) -> int:
-    """Convert a character offset to a 0-based line number."""
-    running = 0
-    for i, line in enumerate(source_lines):
-        running += len(line) + 1  # +1 for newline
-        if running > offset:
-            return i
-    return max(0, len(source_lines) - 1)
+    """Convert a character offset to a 0-based line number.
+
+    Uses the same ``count('\\n')`` approach as ``extract_exports_imports_light``
+    for consistency.  The *source_lines* parameter is kept for API compatibility
+    but only its count is used as an upper bound.
+    """
+    # Reconstruct source from lines (preserving original join semantics).
+    source = "\n".join(source_lines)
+    return min(source[:offset].count("\n"), max(0, len(source_lines) - 1))
 
 
 def extract_exports_imports_light(
@@ -279,12 +283,21 @@ def extract_exports_imports_light(
     import_lines: Dict[str, int] = {}
 
     for m in EXPORT_RE.finditer(source):
+        # Skip matches inside Ivy comments (# is the comment character).
+        line_start = source.rfind("\n", 0, m.start()) + 1
+        line_text = source[line_start : m.start()]
+        if "#" in line_text:
+            continue
         name = m.group(1)
         line = source[: m.start()].count("\n")
         exports.append(name)
         export_lines[name] = line
 
     for m in IMPORT_RE.finditer(source):
+        line_start = source.rfind("\n", 0, m.start()) + 1
+        line_text = source[line_start : m.start()]
+        if "#" in line_text:
+            continue
         name = m.group(1)
         line = source[: m.start()].count("\n")
         imports.append(name)

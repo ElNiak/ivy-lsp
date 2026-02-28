@@ -96,6 +96,7 @@ class TestBulkCompilation:
         server._indexer = FakeIndexer(graph)
         server._semantic_model = FakeSemanticModel()
         server._bulk_analysis_cancel = threading.Event()
+        server._bulk_compile_lock = threading.Lock()
         server._bulk_compile_running = False
         server._bulk_compile_total = 0
         server._bulk_compile_completed = 0

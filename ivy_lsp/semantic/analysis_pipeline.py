@@ -101,7 +101,8 @@ class AnalysisPipeline:
             nodes.append(ann)
 
         self._model.update_file(filepath, nodes, edges, "tier1")
-        self._tier1_files.add(filepath)
+        with self._state_lock:
+            self._tier1_files.add(filepath)
         logger.debug("Tier 1 complete for %s: %d nodes", filepath, len(nodes))
 
     # -- Tier 2 ----------------------------------------------------------------
@@ -180,7 +181,8 @@ class AnalysisPipeline:
             nodes.append(ann)
 
         self._model.update_file(filepath, nodes, edges, "tier2")
-        self._tier2_files.add(filepath)
+        with self._state_lock:
+            self._tier2_files.add(filepath)
         logger.debug(
             "Tier 2 complete for %s: %d nodes, %d edges",
             filepath,
@@ -456,9 +458,11 @@ class AnalysisPipeline:
             bulk_running = self._bulk_running
             bulk_total = self._bulk_total
             bulk_completed = self._bulk_completed
+            t1_count = len(self._tier1_files)
+            t2_count = len(self._tier2_files)
         return {
-            "tier1FileCount": len(self._tier1_files),
-            "tier2FileCount": len(self._tier2_files),
+            "tier1FileCount": t1_count,
+            "tier2FileCount": t2_count,
             "tier3FileCount": t3_count,
             "tier3Running": t3_running,
             "tier3Succeeded": succeeded,

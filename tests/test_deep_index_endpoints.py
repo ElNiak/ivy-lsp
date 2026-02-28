@@ -1,4 +1,5 @@
 """Tests for ivy/deepIndexProgress and ivy/testFeatureMatrix handlers."""
+import threading
 from unittest.mock import MagicMock
 
 from ivy_lsp.indexer.workspace_indexer import FileIndexStatus, DeepIndexProgress
@@ -38,11 +39,12 @@ class TestDeepIndexProgressHandler:
         server._indexer = MagicMock()
         server._indexer._deep_index_running = running
         server._indexer._deep_index_progress = progress
+        server._indexer._progress_lock = threading.Lock()
         return server
 
     def test_returns_progress_structure(self):
         server = self._make_server(running=True)
-        result = handle_deep_index_progress(server)
+        result = handle_deep_index_progress(server, {"includeFileStatuses": True})
         assert result["running"] is True
         assert result["totalTests"] == 5
         assert result["completedTests"] == 3
@@ -51,7 +53,7 @@ class TestDeepIndexProgressHandler:
 
     def test_file_statuses_have_required_fields(self):
         server = self._make_server()
-        result = handle_deep_index_progress(server)
+        result = handle_deep_index_progress(server, {"includeFileStatuses": True})
         for fs in result["fileStatuses"]:
             assert "file" in fs
             assert "shallowIndexed" in fs
@@ -62,7 +64,7 @@ class TestDeepIndexProgressHandler:
     def test_no_indexer_returns_empty(self):
         server = MagicMock()
         server._indexer = None
-        result = handle_deep_index_progress(server)
+        result = handle_deep_index_progress(server, {"includeFileStatuses": True})
         assert result["running"] is False
         assert result["totalTests"] == 0
         assert result["fileStatuses"] == []
