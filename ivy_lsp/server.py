@@ -12,15 +12,22 @@ from pygls.lsp.server import LanguageServer
 
 from ivy_lsp import __version__
 from ivy_lsp.features.status import ServerStateTracker
+from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
+slog = StructuredLogAdapter(logger, {})
 
 
 class _LspLogHandler(logging.Handler):
     """Bridge Python logging -> LSP window/logMessage notifications.
 
-    Rate-limited to prevent flooding the stdio pipe, which can cause
-    write-side blocking and contribute to thread pool starvation.
+    Rate-limited with category-aware priority to prevent flooding the
+    stdio pipe, which can cause write-side blocking and contribute to
+    thread pool starvation.
+
+    Priority levels (lower = higher priority):
+      WARNING+ = 0 (always immediate)
+      MIL = 1, DIA = 2, PER = 3, ACT = 4, untagged = 5
     """
 
     _LEVEL_MAP = {
@@ -31,31 +38,60 @@ class _LspLogHandler(logging.Handler):
         logging.CRITICAL: lsp.MessageType.Error,
     }
 
-    _MIN_INTERVAL = 0.05  # 50ms between messages
+    _CAT_PRIORITY = {"MIL": 1, "DIA": 2, "PER": 3, "ACT": 4}
+    _CAT_MIN_INTERVAL = {"MIL": 0.01, "DIA": 0.01, "PER": 0.1, "ACT": 0.1}
+    _DEFAULT_MIN_INTERVAL = 0.05
 
     def __init__(self, server: "IvyLanguageServer"):
         super().__init__()
         self._server = server
         self._sending = False  # recursion guard
         self._last_emit = 0.0
-        self._drop_count = 0
+        self._drop_counts: dict = {}
+
+    @staticmethod
+    def _extract_category(msg: str) -> str:
+        if msg.startswith("[MIL"):
+            return "MIL"
+        if msg.startswith("[ACT"):
+            return "ACT"
+        if msg.startswith("[DIA"):
+            return "DIA"
+        if msg.startswith("[PER"):
+            return "PER"
+        return ""
 
     def emit(self, record: logging.LogRecord) -> None:
         if self._sending:
             return
-        # Always let WARNING+ through; throttle DEBUG/INFO.
+        # Always let WARNING+ through immediately.
         now = time.time()
         if record.levelno < logging.WARNING:
-            if (now - self._last_emit) < self._MIN_INTERVAL:
-                self._drop_count += 1
+            msg = self.format(record)
+            cat = self._extract_category(msg)
+            min_interval = self._CAT_MIN_INTERVAL.get(
+                cat, self._DEFAULT_MIN_INTERVAL
+            )
+            if (now - self._last_emit) < min_interval:
+                cat_key = cat or "_untagged"
+                self._drop_counts[cat_key] = (
+                    self._drop_counts.get(cat_key, 0) + 1
+                )
                 return
+        else:
+            msg = self.format(record)
+
         self._sending = True
         try:
             msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
-            msg = self.format(record)
-            if self._drop_count > 0:
-                msg = f"[{self._drop_count} log messages suppressed] {msg}"
-                self._drop_count = 0
+            if self._drop_counts:
+                parts = []
+                for k, v in sorted(self._drop_counts.items()):
+                    label = k if k != "_untagged" else "other"
+                    parts.append(f"{v} {label}")
+                suppression = "[" + ", ".join(parts) + " messages suppressed]"
+                msg = f"{suppression} {msg}"
+                self._drop_counts = {}
             self._server.window_log_message(
                 lsp.LogMessageParams(type=msg_type, message=msg)
             )
@@ -80,8 +116,12 @@ class IvyLanguageServer(LanguageServer):
         self._semantic_model = None
         self._analysis_pipeline = None
         self._bulk_analysis_cancel = threading.Event()
+        self._shutdown_event = threading.Event()
         self.state_tracker = ServerStateTracker()
         self._compiler_manager = None
+        self._bulk_compile_running = False
+        self._bulk_compile_total = 0
+        self._bulk_compile_completed = 0
 
         from ivy_lsp.features import (
             code_action,
@@ -123,7 +163,10 @@ class IvyLanguageServer(LanguageServer):
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
-            logger.info("Ivy Language Server initialized")
+            slog.info(
+                "Server initialized",
+                extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
+            )
             # Install the LSP log bridge early so that indexing
             # milestones (file count, symbol count, deep-index stats)
             # are forwarded as window/logMessage to the client.
@@ -136,10 +179,20 @@ class IvyLanguageServer(LanguageServer):
                     message=f"Ivy LSP running in {mode} mode",
                 )
             )
+            slog.info(
+                "Running in %s mode",
+                mode,
+                extra={"event": LogEvent(
+                    LogCategory.MILESTONE, "startup", {"mode": mode},
+                )},
+            )
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
+            self._shutdown_event.set()
             self._bulk_analysis_cancel.set()
+            if self._indexer is not None:
+                self._indexer.request_stop()
             if self._compiler_manager is not None:
                 self._compiler_manager.shutdown()
             self._cleanup_staging()
@@ -149,7 +202,10 @@ class IvyLanguageServer(LanguageServer):
         if self._indexer and hasattr(self._indexer, "_resolver"):
             try:
                 self._indexer._resolver.cleanup_staging()
-                logger.info("Staging directory cleaned up")
+                slog.info(
+                    "Staging directory cleaned up",
+                    extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "staging")},
+                )
             except Exception:
                 logger.exception("Failed to clean up staging directory")
 
@@ -163,10 +219,14 @@ class IvyLanguageServer(LanguageServer):
                 "ivy/modelReady",
                 {"actionCount": action_count, "requirementCount": req_count},
             )
-            logger.info(
-                "Sent ivy/modelReady notification: %d actions, %d requirements",
+            slog.info(
+                "Sent ivy/modelReady: %d actions, %d requirements",
                 action_count,
                 req_count,
+                extra={"event": LogEvent(
+                    LogCategory.MILESTONE, "model_ready",
+                    {"actions": action_count, "requirements": req_count},
+                )},
             )
         except Exception:
             logger.warning(
@@ -297,6 +357,66 @@ class IvyLanguageServer(LanguageServer):
 
         return _callback
 
+    def _make_bulk_compile_progress_callback(self):
+        """Create a ``$/progress`` callback for bulk compilation.
+
+        Same pattern as :meth:`_make_deep_index_progress_callback` but
+        with an "Ivy Compilation" title.
+        """
+        token = str(uuid.uuid4())
+        state = {"created": False}
+        server = self
+
+        def _callback(completed: int, total: int, current_file):
+            if not state["created"]:
+                try:
+                    server.work_done_progress.create(token)
+                    server.work_done_progress.begin(
+                        token,
+                        lsp.WorkDoneProgressBegin(
+                            title="Ivy Compilation",
+                            message=f"Compiling {total} test files...",
+                            cancellable=False,
+                            percentage=0,
+                        ),
+                    )
+                    state["created"] = True
+                except Exception:
+                    logger.debug(
+                        "Client does not support work-done progress",
+                        exc_info=True,
+                    )
+                    return
+
+            if completed >= total:
+                try:
+                    server.work_done_progress.end(
+                        token,
+                        lsp.WorkDoneProgressEnd(
+                            message=f"Compiled {total} test files",
+                        ),
+                    )
+                except Exception:
+                    logger.debug("Failed to end progress", exc_info=True)
+                return
+
+            pct = int(100 * completed / total) if total > 0 else 0
+            basename = (
+                os.path.basename(current_file) if current_file else ""
+            )
+            try:
+                server.work_done_progress.report(
+                    token,
+                    lsp.WorkDoneProgressReport(
+                        message=f"({completed}/{total}) {basename}",
+                        percentage=pct,
+                    ),
+                )
+            except Exception:
+                logger.debug("Failed to report progress", exc_info=True)
+
+        return _callback
+
     def _start_bulk_analysis(self) -> None:
         """Kick off background T1+T2 analysis of all workspace files.
 
@@ -304,7 +424,10 @@ class IvyLanguageServer(LanguageServer):
         after Phase 2 (deep indexing) completes.
         """
         if os.environ.get("IVY_LSP_BULK_ANALYSIS", "1") == "0":
-            logger.info("Bulk analysis disabled via IVY_LSP_BULK_ANALYSIS=0")
+            slog.info(
+                "Bulk analysis disabled via IVY_LSP_BULK_ANALYSIS=0",
+                extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "bulk_t1t2")},
+            )
             return
         if self._analysis_pipeline is None or self._indexer is None:
             return
@@ -324,12 +447,20 @@ class IvyLanguageServer(LanguageServer):
                     cancel_event=self._bulk_analysis_cancel,
                     include_t2=include_t2,
                 )
-                logger.info(
+                slog.info(
                     "Bulk analysis complete: %d T1, %d T2, %d errors, cancelled=%s",
                     result.t1_completed,
                     result.t2_completed,
                     len(result.errors),
                     result.cancelled,
+                    extra={"event": LogEvent(
+                        LogCategory.MILESTONE, "bulk_t1t2", {
+                            "t1": result.t1_completed,
+                            "t2": result.t2_completed,
+                            "errors": len(result.errors),
+                            "cancelled": result.cancelled,
+                        },
+                    )},
                 )
                 self._send_model_ready_notification()
                 self._start_bulk_compilation()
@@ -353,7 +484,10 @@ class IvyLanguageServer(LanguageServer):
         if self._indexer is None:
             return
         if os.environ.get("IVY_LSP_BULK_COMPILE", "1") == "0":
-            logger.info("Bulk compilation disabled via IVY_LSP_BULK_COMPILE=0")
+            slog.info(
+                "Bulk compilation disabled via IVY_LSP_BULK_COMPILE=0",
+                extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "compile_bulk")},
+            )
             return
 
         # Collect test files (files with exports)
@@ -372,14 +506,29 @@ class IvyLanguageServer(LanguageServer):
             logger.info("No test files found for bulk compilation")
             return
 
-        logger.info("Starting bulk compilation for %d test files", len(test_files))
+        slog.info(
+            "Starting bulk compilation for %d test files",
+            len(test_files),
+            extra={"event": LogEvent(
+                LogCategory.MILESTONE, "compile_bulk",
+                {"test_files": len(test_files)},
+            )},
+        )
 
         completed = [0]
         total = len(test_files)
 
+        # Track state for polling endpoint
+        self._bulk_compile_running = True
+        self._bulk_compile_total = total
+        self._bulk_compile_completed = 0
+
+        progress_cb = self._make_bulk_compile_progress_callback()
+
         def _make_callback(filepath: str):
             def _on_compile(ir):
                 completed[0] += 1
+                self._bulk_compile_completed = completed[0]
                 if ir.success:
                     try:
                         from ivy_lsp.compilation.graph_enrichment import (
@@ -396,11 +545,37 @@ class IvyLanguageServer(LanguageServer):
                         logger.debug(
                             "Enrichment failed for %s", filepath, exc_info=True
                         )
+
+                # Report $/progress
+                progress_cb(completed[0], total, filepath)
+
+                # Send ivy/compilationProgress notification
+                try:
+                    self.protocol.notify(
+                        "ivy/compilationProgress",
+                        {
+                            "completed": completed[0],
+                            "total": total,
+                            "currentFile": os.path.basename(filepath),
+                            "success": ir.success,
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to send compilationProgress notification",
+                        exc_info=True,
+                    )
+
                 if completed[0] >= total:
-                    logger.info(
+                    self._bulk_compile_running = False
+                    slog.info(
                         "Bulk compilation complete: %d/%d files",
                         completed[0],
                         total,
+                        extra={"event": LogEvent(
+                            LogCategory.PERFORMANCE, "compile_bulk",
+                            {"completed": completed[0], "total": total},
+                        )},
                     )
                     self._send_model_ready_notification()
 
@@ -412,6 +587,8 @@ class IvyLanguageServer(LanguageServer):
                     source = f.read()
             except OSError:
                 completed[0] += 1
+                self._bulk_compile_completed = completed[0]
+                progress_cb(completed[0], total, test_file)
                 continue
             self._compiler_manager.compile_async(
                 source, test_file, _make_callback(test_file)
@@ -430,6 +607,10 @@ class IvyLanguageServer(LanguageServer):
 
     def _setup_indexer(self):
         """Create and populate the workspace indexer."""
+        activity_level = os.environ.get("IVY_LSP_ACTIVITY_LEVEL", "phase")
+        if activity_level == "file":
+            logging.getLogger("ivy_lsp").setLevel(logging.DEBUG)
+
         from ivy_lsp.indexer.include_resolver import IncludeResolver
         from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
 
@@ -445,9 +626,23 @@ class IvyLanguageServer(LanguageServer):
         raw_excludes = os.environ.get("IVY_LSP_EXCLUDE_PATHS", "")
         exclude_paths = [p.strip() for p in raw_excludes.split(",") if p.strip()]
         if include_paths:
-            logger.info("Include paths: %s", include_paths)
+            slog.info(
+                "Include paths: %s",
+                include_paths,
+                extra={"event": LogEvent(
+                    LogCategory.DIAGNOSTIC, "startup",
+                    {"include_paths": include_paths},
+                )},
+            )
         if exclude_paths:
-            logger.info("Exclude paths: %s", exclude_paths)
+            slog.info(
+                "Exclude paths: %s",
+                exclude_paths,
+                extra={"event": LogEvent(
+                    LogCategory.DIAGNOSTIC, "startup",
+                    {"exclude_paths": exclude_paths},
+                )},
+            )
 
         resolver = IncludeResolver(
             root,
@@ -458,7 +653,14 @@ class IvyLanguageServer(LanguageServer):
         # Create flat staging directory (mirrors ivyc's include/1.7/ model)
         try:
             staging_dir = resolver.create_staging_directory()
-            logger.info("Created staging directory: %s", staging_dir)
+            slog.info(
+                "Created staging directory: %s",
+                staging_dir,
+                extra={"event": LogEvent(
+                    LogCategory.DIAGNOSTIC, "staging",
+                    {"staging_dir": staging_dir},
+                )},
+            )
         except Exception:
             logger.exception("Failed to create staging, falling back to direct scan")
             self.window_show_message(
@@ -482,13 +684,22 @@ class IvyLanguageServer(LanguageServer):
 
             self._parser = IvyParserWrapper(resolve_callback=resolver.resolve)
             self._full_mode = True
-            logger.info("Full parser available (z3 found)")
+            slog.info(
+                "Full parser available (z3 found)",
+                extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
+            )
         except (ImportError, ModuleNotFoundError) as e:
             from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
 
             self._parser = FallbackOnlyParser()
             self._full_mode = False
-            logger.info("z3 not available (%s); running in light mode", e)
+            slog.info(
+                "z3 not available (%s); running in light mode",
+                e,
+                extra={"event": LogEvent(
+                    LogCategory.DIAGNOSTIC, "startup", {"reason": str(e)},
+                )},
+            )
 
         progress_cb = self._make_deep_index_progress_callback()
         self._indexer = WorkspaceIndexer(
@@ -504,7 +715,16 @@ class IvyLanguageServer(LanguageServer):
             self.state_tracker.set_indexed(index_duration)
             n_files = len(self._indexer._cache._cache)
             n_symbols = sum(1 for _ in self._indexer._symbol_table.all_symbols())
-            logger.info("Indexed %d files, %d symbols", n_files, n_symbols)
+            slog.info(
+                "Indexed %d files, %d symbols",
+                n_files,
+                n_symbols,
+                extra={"event": LogEvent(
+                    LogCategory.MILESTONE, "indexing",
+                    {"files": n_files, "symbols": n_symbols,
+                     "duration_s": round(index_duration, 3)},
+                )},
+            )
             # Explicit notification bypasses the log-handler rate limiter
             # so clients always see this milestone in the Output channel.
             self.window_log_message(
@@ -554,6 +774,10 @@ class IvyLanguageServer(LanguageServer):
                             staging_dir = getattr(
                                 self._indexer._resolver, "_staging_dir", None
                             )
+                        max_concurrent = max(
+                            1,
+                            int(os.environ.get("IVY_LSP_COMPILE_WORKERS", "1")),
+                        )
                         self._compiler_manager = CompilerManager(
                             staging_dir=staging_dir,
                             timeout=float(
@@ -562,6 +786,7 @@ class IvyLanguageServer(LanguageServer):
                             cache_ttl=float(
                                 os.environ.get("IVY_LSP_COMPILE_CACHE_TTL", "600")
                             ),
+                            max_concurrent=max_concurrent,
                         )
                         compiler = CompilerAdapter(self._compiler_manager)
                     except Exception:
@@ -588,7 +813,10 @@ class IvyLanguageServer(LanguageServer):
                 compiler,
                 compiler_manager=self._compiler_manager,
             )
-            logger.info("Semantic model and analysis pipeline initialized")
+            slog.info(
+                "Semantic model and analysis pipeline initialized",
+                extra={"event": LogEvent(LogCategory.MILESTONE, "semantic")},
+            )
         except Exception:
             logger.exception("Semantic model setup failed")
             self.window_show_message(

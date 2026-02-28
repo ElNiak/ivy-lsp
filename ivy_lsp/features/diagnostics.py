@@ -10,8 +10,10 @@ from typing import Any, Dict, List
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
+slog = StructuredLogAdapter(logger, {})
 
 DEBOUNCE_DELAY = 0.5  # seconds
 
@@ -467,10 +469,24 @@ async def run_deep_diagnostics(
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
     except FileNotFoundError:
-        logger.info("%s not found on PATH", ivy_check_cmd)
+        slog.info(
+            "%s not found on PATH",
+            ivy_check_cmd,
+            extra={"event": LogEvent(
+                LogCategory.DIAGNOSTIC, "diagnostics",
+                {"tool": ivy_check_cmd},
+            )},
+        )
         return []
     except asyncio.TimeoutError:
-        logger.warning("Deep diagnostics timed out for %s", filepath)
+        slog.warning(
+            "Deep diagnostics timed out for %s",
+            filepath,
+            extra={"event": LogEvent(
+                LogCategory.DIAGNOSTIC, "diagnostics",
+                {"filepath": filepath},
+            )},
+        )
         return []
     except Exception:
         logger.warning("Deep diagnostics failed for %s", filepath, exc_info=True)

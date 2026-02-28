@@ -28,8 +28,10 @@ from ivy_lsp.analysis.test_scope import (
 from ivy_lsp.indexer.file_cache import FileCache
 from ivy_lsp.indexer.include_resolver import IncludeResolver
 from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
+from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
+slog = StructuredLogAdapter(logger, {})
 
 
 @dataclass
@@ -120,6 +122,11 @@ class WorkspaceIndexer:
         self._deep_index_running = False
         self._deep_index_progress = DeepIndexProgress()
         self._progress_lock = threading.Lock()
+        self._stop_requested = threading.Event()
+
+    def request_stop(self) -> None:
+        """Signal background threads to stop at the next safe point."""
+        self._stop_requested.set()
 
     # ------------------------------------------------------------------
     # Full workspace indexing (two-mode: fast scan + background deep parse)
@@ -256,6 +263,12 @@ class WorkspaceIndexer:
             info = extract_exports_imports_light(source, filepath)
             self._file_export_imports[filepath] = info
 
+            slog.debug(
+                "Indexed %s",
+                filepath,
+                extra={"event": LogEvent(LogCategory.ACTIVITY, "indexing")},
+            )
+
     # ------------------------------------------------------------------
     # Phase 2: Background full-parse from test entry points
     # ------------------------------------------------------------------
@@ -288,10 +301,15 @@ class WorkspaceIndexer:
             for f, info in self._file_export_imports.items()
             if info.has_exports
         ]
-        logger.info(
+        slog.info(
             "Deep index: %d test entry points out of %d files",
             len(test_files),
             len(self._file_export_imports),
+            extra={"event": LogEvent(
+                LogCategory.MILESTONE, "deep_index",
+                {"test_files": len(test_files),
+                 "total_files": len(self._file_export_imports)},
+            )},
         )
 
         with self._progress_lock:
@@ -310,15 +328,25 @@ class WorkspaceIndexer:
             self._deep_index_serial(test_files)
 
         # Re-wire graphs after all upgrades
-        self._wire_requirement_graph()
-        self._compute_test_scopes()
+        if not self._stop_requested.is_set():
+            self._wire_requirement_graph()
+            self._compute_test_scopes()
 
         with self._progress_lock:
             self._deep_index_progress.current_file = None
         self._deep_index_running = False
         # Signal progress end (total/total)
         self._notify_progress()
-        logger.info("Deep index complete for %d test files", len(test_files))
+        deep_duration = time.time() - (self._deep_index_progress.started_at or 0.0)
+        slog.info(
+            "Deep index complete for %d test files",
+            len(test_files),
+            extra={"event": LogEvent(
+                LogCategory.PERFORMANCE, "deep_index",
+                {"test_files": len(test_files),
+                 "duration_s": round(deep_duration, 3)},
+            )},
+        )
 
         if self._done_callback is not None:
             try:
@@ -331,6 +359,12 @@ class WorkspaceIndexer:
         from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
 
         for test_file in test_files:
+            if self._stop_requested.is_set():
+                logger.info(
+                    "Deep index interrupted by shutdown after %d files",
+                    self._deep_index_progress.completed_test_files,
+                )
+                break
             file_start = time.time()
             with self._progress_lock:
                 self._deep_index_progress.current_file = test_file
@@ -401,6 +435,12 @@ class WorkspaceIndexer:
         results = indexer.parse_files(test_files)
 
         for filepath, worker_result in results.items():
+            if self._stop_requested.is_set():
+                logger.info(
+                    "Deep index (parallel) interrupted by shutdown after %d files",
+                    self._deep_index_progress.completed_test_files,
+                )
+                break
             with self._progress_lock:
                 self._deep_index_progress.current_file = filepath
             if worker_result.success:

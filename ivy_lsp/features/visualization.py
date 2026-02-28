@@ -7,6 +7,7 @@ All handlers follow the pure-function pattern from monitoring.py.
 from __future__ import annotations
 
 import logging
+import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
 
@@ -17,8 +18,10 @@ from ivy_lsp.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
+from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
+slog = StructuredLogAdapter(logger, {})
 
 
 # ---------------------------------------------------------------------------
@@ -116,15 +119,28 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
     }
     graph = _get_requirement_graph(server)
     if graph is None:
+        indexer = getattr(server, '_indexer', 'MISSING')
         logger.warning("handle_action_requirements: graph is None, returning modelReady=False")
+        _not_ready["_debug"] = f"graph=None, indexer={type(indexer).__name__ if indexer != 'MISSING' else 'MISSING'}"
         return _not_ready
 
     try:
+        t0 = time.monotonic()
         snap = graph.snapshot()
+        t_snap = time.monotonic()
         logger.info(
+            "handle_action_requirements: snapshot in %.1fms, %d actions, %d reqs",
+            (t_snap - t0) * 1000, len(snap.actions), len(snap.requirements),
+        )
+        slog.info(
             "handle_action_requirements: snapshot has %d actions, %d requirements",
             len(snap.actions),
             len(snap.requirements),
+            extra={"event": LogEvent(
+                LogCategory.PERFORMANCE, "analysis",
+                {"actions": len(snap.actions),
+                 "requirements": len(snap.requirements)},
+            )},
         )
         scope_info = _resolve_scope(graph, params)
         action_filter = params.get("actionName")
@@ -201,7 +217,7 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                 }
             )
 
-        return {
+        result = {
             "actions": result_actions,
             "scopeInfo": {
                 "testFile": scope_info.get("testFile"),
@@ -209,8 +225,16 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
             },
             "modelReady": True,
         }
-    except Exception:
-        logger.exception("handle_action_requirements failed")
+        logger.info(
+            "handle_action_requirements: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+        )
+        return result
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        logger.exception("handle_action_requirements EXCEPTION: %s", exc)
+        _not_ready["_debug"] = f"exception: {type(exc).__name__}: {exc}\n{tb}"
         return _not_ready
 
 
@@ -241,7 +265,9 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
         return _not_ready
 
     try:
+        t0 = time.monotonic()
         snap = graph.snapshot()
+        t_snap = time.monotonic()
         scope_info = _resolve_scope(graph, params)
         rows: List[dict] = []
         total_reqs = 0
@@ -301,7 +327,7 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
             )
 
         coverage = snap.get_coverage_stats()
-        return {
+        result = {
             "rows": rows,
             "totals": {
                 "actions": len(snap.actions),
@@ -315,6 +341,11 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
         }
+        logger.info(
+            "handle_model_summary_table: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+        )
+        return result
     except Exception:
         logger.exception("handle_model_summary_table failed")
         return _not_ready
@@ -353,7 +384,9 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
         return _not_ready
 
     try:
+        t0 = time.monotonic()
         snap = graph.snapshot()
+        t_snap = time.monotonic()
         scope_info = _resolve_scope(graph, params)
 
         # -- Unguarded state variables --------------------------------------
@@ -421,7 +454,7 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
                     }
                 )
 
-        return {
+        result = {
             "unguardedStateVars": unguarded,
             "uncoveredRfcRequirements": uncovered_rfc_list,
             "orphanRequirements": orphans,
@@ -439,6 +472,11 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
         }
+        logger.info(
+            "handle_coverage_gaps: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+        )
+        return result
     except Exception:
         logger.exception("handle_coverage_gaps failed")
         return _not_ready
@@ -465,7 +503,9 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
         return _not_ready
 
     try:
+        t0 = time.monotonic()
         snap = graph.snapshot()
+        t_snap = time.monotonic()
         scope_info = _resolve_scope(graph, params)
         include_state_vars = params.get("includeStateVars", False)
 
@@ -547,7 +587,7 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
                             }
                         )
 
-        return {
+        result = {
             "nodes": nodes,
             "edges": edges,
             "scopeInfo": {
@@ -555,6 +595,11 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
         }
+        logger.info(
+            "handle_action_dependency_graph: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+        )
+        return result
     except Exception:
         logger.exception("handle_action_dependency_graph failed")
         return _not_ready
@@ -584,7 +629,9 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
         return _not_ready
 
     try:
+        t0 = time.monotonic()
         snap = graph.snapshot()
+        t_snap = time.monotonic()
         scope_info = _resolve_scope(graph, params)
         state_var_filter = params.get("stateVarFilter")
 
@@ -663,7 +710,7 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
                         }
                     )
 
-        return {
+        result = {
             "nodes": nodes,
             "transitions": transitions,
             "scopeInfo": {
@@ -671,6 +718,11 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
         }
+        logger.info(
+            "handle_state_machine_view: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+        )
+        return result
     except Exception:
         logger.exception("handle_state_machine_view failed")
         return _not_ready
@@ -853,28 +905,30 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/actionRequirements")
     def on_action_requirements(params: Any = None) -> Dict[str, Any]:
-        return handle_action_requirements(server, params or {})
+        return handle_action_requirements(
+            server, params if isinstance(params, dict) else {}
+        )
 
     @server.feature("ivy/modelSummaryTable")
     def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
-        return handle_model_summary_table(server, params or {})
+        return handle_model_summary_table(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/coverageGaps")
     def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
-        return handle_coverage_gaps(server, params or {})
+        return handle_coverage_gaps(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/actionDependencyGraph")
     def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
-        return handle_action_dependency_graph(server, params or {})
+        return handle_action_dependency_graph(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/stateMachineView")
     def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
-        return handle_state_machine_view(server, params or {})
+        return handle_state_machine_view(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/layeredOverview")
     def on_layered_overview(params: Any = None) -> Dict[str, Any]:
-        return handle_layered_overview(server, params or {})
+        return handle_layered_overview(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/smartSuggestions")
     def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
-        return handle_smart_suggestions(server, params or {})
+        return handle_smart_suggestions(server, params if isinstance(params, dict) else {})

@@ -13,8 +13,10 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
+slog = StructuredLogAdapter(logger, {})
 
 _VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
 
@@ -323,10 +325,14 @@ def register(server: Any) -> None:
         redirected = False
         enclosing_test = _find_enclosing_test(server, filepath)
         if enclosing_test is not None:
-            logger.info(
+            slog.info(
                 "Redirecting ivy_check from module %s to test %s",
                 filepath,
                 enclosing_test,
+                extra={"event": LogEvent(
+                    LogCategory.ACTIVITY, "verify",
+                    {"module": filepath, "test": enclosing_test},
+                )},
             )
             redirected = True
             if isolate is None:
@@ -395,10 +401,14 @@ def register(server: Any) -> None:
         # Redirect module files to their enclosing test
         enclosing_test = _find_enclosing_test(server, filepath)
         if enclosing_test is not None:
-            logger.info(
+            slog.info(
                 "Redirecting ivyc from module %s to test %s",
                 filepath,
                 enclosing_test,
+                extra={"event": LogEvent(
+                    LogCategory.ACTIVITY, "compile",
+                    {"module": filepath, "test": enclosing_test},
+                )},
             )
             filepath = enclosing_test
 
@@ -461,10 +471,14 @@ def register(server: Any) -> None:
         redirected = False
         enclosing_test = _find_enclosing_test(server, filepath)
         if enclosing_test is not None:
-            logger.info(
+            slog.info(
                 "Redirecting ivy_show from module %s to test %s",
                 filepath,
                 enclosing_test,
+                extra={"event": LogEvent(
+                    LogCategory.ACTIVITY, "show_model",
+                    {"module": filepath, "test": enclosing_test},
+                )},
             )
             redirected = True
             # Derive isolate from original module basename when unset
