@@ -47,8 +47,8 @@ class _LspLogHandler(logging.Handler):
     def __init__(self, server: "IvyLanguageServer"):
         super().__init__()
         self._server = server
-        self._lock = threading.Lock()
-        self._sending = False  # recursion guard (per-thread via _lock)
+        self._lock = threading.RLock()
+        self._sending = False  # recursion guard (checked inside _lock)
         self._last_emit = 0.0
         self._drop_counts: dict = {}
 
