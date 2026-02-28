@@ -199,6 +199,14 @@ class IvyLanguageServer(LanguageServer):
                 )
             except Exception:
                 logger.exception("on_initialized failed")
+                self.window_show_message(
+                    lsp.ShowMessageParams(
+                        type=lsp.MessageType.Error,
+                        message="Ivy LSP: Initialization failed. "
+                        "Code intelligence features may not be available. "
+                        "Check the Ivy Language Server output for details.",
+                    )
+                )
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
@@ -257,10 +265,12 @@ class IvyLanguageServer(LanguageServer):
             A callable ``(completed, total, current_file) -> None``.
         """
         token = str(uuid.uuid4())
-        state = {"created": False}
+        state = {"created": False, "disabled": False}
         server = self
 
         def _callback(completed: int, total: int, current_file):
+            if state["disabled"]:
+                return
             if not state["created"]:
                 try:
                     server.work_done_progress.create(token)
@@ -275,6 +285,7 @@ class IvyLanguageServer(LanguageServer):
                     )
                     state["created"] = True
                 except Exception:
+                    state["disabled"] = True
                     logger.debug(
                         "Client does not support work-done progress",
                         exc_info=True,
@@ -317,10 +328,12 @@ class IvyLanguageServer(LanguageServer):
         with an "Ivy Background Analysis" title.
         """
         token = str(uuid.uuid4())
-        state = {"created": False}
+        state = {"created": False, "disabled": False}
         server = self
 
         def _callback(completed: int, total: int, current_file):
+            if state["disabled"]:
+                return
             if not state["created"]:
                 try:
                     server.work_done_progress.create(token)
@@ -335,6 +348,7 @@ class IvyLanguageServer(LanguageServer):
                     )
                     state["created"] = True
                 except Exception:
+                    state["disabled"] = True
                     logger.debug(
                         "Client does not support work-done progress",
                         exc_info=True,
@@ -378,10 +392,12 @@ class IvyLanguageServer(LanguageServer):
         report per second to avoid flooding the stdio pipe.
         """
         token = str(uuid.uuid4())
-        state = {"created": False, "last_report": 0.0}
+        state = {"created": False, "disabled": False, "last_report": 0.0}
         server = self
 
         def _callback(completed: int, total: int, current_file):
+            if state["disabled"]:
+                return
             if not state["created"]:
                 try:
                     server.work_done_progress.create(token)
@@ -396,6 +412,7 @@ class IvyLanguageServer(LanguageServer):
                     )
                     state["created"] = True
                 except Exception:
+                    state["disabled"] = True
                     logger.debug(
                         "Client does not support work-done progress",
                         exc_info=True,

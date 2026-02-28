@@ -661,6 +661,61 @@ class TestPipelineState:
         state = pipeline.get_pipeline_state()
         assert state["tier1FileCount"] == 1
 
+    def test_initial_state_has_tier3_pending_zero(self):
+        pipeline, _ = self._make_pipeline()
+        state = pipeline.get_pipeline_state()
+        assert state["tier3Pending"] == 0
+
+    def test_tier3_pending_zero_after_track_state_true(self):
+        """track_state=True (default) should not touch _tier3_pending."""
+        pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=True))
+        pipeline.run_tier3_background("ok\n", "a.ivy", track_state=True)
+        state = pipeline.get_pipeline_state()
+        assert state["tier3Pending"] == 0
+
+    def test_tier3_pending_zero_after_track_state_false_completes(self):
+        """track_state=False increments then decrements on synchronous completion."""
+        pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=True))
+        pipeline.run_tier3_background("ok\n", "a.ivy", track_state=False)
+        state = pipeline.get_pipeline_state()
+        assert state["tier3Pending"] == 0
+
+    def test_tier3_pending_zero_after_track_state_false_failure(self):
+        """track_state=False decrements even on failure."""
+        pipeline, _ = self._make_pipeline(compiler=StubCompilerAdapter(success=False))
+        pipeline.run_tier3_background("bad\n", "a.ivy", track_state=False)
+        state = pipeline.get_pipeline_state()
+        assert state["tier3Pending"] == 0
+
+    def test_tier3_pending_increments_before_callback(self):
+        """Pending should be 1 while callback has not yet fired."""
+        model = SemanticModel()
+        captured_pending = []
+
+        class DelayedCompiler:
+            def compile_background(self, source, filename, callback):
+                # Before calling back, check the pending count
+                captured_pending.append(model)
+                state = pipeline.get_pipeline_state()
+                captured_pending.clear()
+                captured_pending.append(state["tier3Pending"])
+                # Now call back
+                from ivy_lsp.adapters.protocols import CompileResult
+                callback(CompileResult(success=True))
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=DelayedCompiler(),
+        )
+
+        pipeline.run_tier3_background("ok\n", "a.ivy", track_state=False)
+        # During compile_background, before callback, pending was 1
+        assert captured_pending[0] == 1
+        # After completion, pending is back to 0
+        assert pipeline.get_pipeline_state()["tier3Pending"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Tier 2 parse_result reuse tests

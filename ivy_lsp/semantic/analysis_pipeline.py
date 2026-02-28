@@ -79,6 +79,7 @@ class AnalysisPipeline:
         self._tier3_current_file: Optional[str] = None
         self._tier3_last_file: Optional[str] = None
         self._tier3_last_completed_at: Optional[float] = None
+        self._tier3_pending: int = 0
         self._bulk_running: bool = False
         self._bulk_total: int = 0
         self._bulk_completed: int = 0
@@ -225,6 +226,9 @@ class AnalysisPipeline:
                     duration=duration,
                     error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
                 )
+                if not track_state:
+                    with self._state_lock:
+                        self._tier3_pending = max(0, self._tier3_pending - 1)
                 if track_state:
                     with self._state_lock:
                         self._tier3_running = False
@@ -253,12 +257,18 @@ class AnalysisPipeline:
                 completed_at=completed_at,
                 duration=duration,
             )
+            if not track_state:
+                with self._state_lock:
+                    self._tier3_pending = max(0, self._tier3_pending - 1)
             if track_state:
                 with self._state_lock:
                     self._tier3_running = False
                     self._tier3_current_file = None
             logger.debug("Tier 3 complete for %s (%.2fs)", filepath, duration)
 
+        if not track_state:
+            with self._state_lock:
+                self._tier3_pending += 1
         if track_state:
             with self._state_lock:
                 self._tier3_running = True
@@ -271,6 +281,9 @@ class AnalysisPipeline:
                 result = self._compiler.compile(source, filepath)
                 _on_result(result)
         except Exception:
+            if not track_state:
+                with self._state_lock:
+                    self._tier3_pending = max(0, self._tier3_pending - 1)
             if track_state:
                 with self._state_lock:
                     self._tier3_running = False
@@ -439,6 +452,7 @@ class AnalysisPipeline:
             t3_current = self._tier3_current_file
             t3_last = self._tier3_last_file
             t3_last_at = self._tier3_last_completed_at
+            t3_pending = self._tier3_pending
             bulk_running = self._bulk_running
             bulk_total = self._bulk_total
             bulk_completed = self._bulk_completed
@@ -452,6 +466,7 @@ class AnalysisPipeline:
             "tier3CurrentFile": t3_current,
             "tier3LastFile": t3_last,
             "tier3LastCompletedAt": t3_last_at,
+            "tier3Pending": t3_pending,
             "semanticNodeCount": self._model.node_count(),
             "semanticEdgeCount": self._model.edge_count(),
             "semanticModelReady": self._model.node_count() > 0,

@@ -262,7 +262,7 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
         "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
         "tier3Running": False, "tier3Succeeded": 0, "tier3Failed": 0,
         "tier3CurrentFile": None, "tier3LastFile": None,
-        "tier3LastCompletedAt": None,
+        "tier3LastCompletedAt": None, "tier3Pending": 0,
         "semanticNodeCount": 0, "semanticEdgeCount": 0,
         "semanticModelReady": False,
         "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
@@ -361,7 +361,7 @@ def handle_analysis_pipeline_detail(
             "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
             "tier3Running": False, "tier3Succeeded": 0, "tier3Failed": 0,
             "tier3CurrentFile": None, "tier3LastFile": None,
-            "tier3LastCompletedAt": None,
+            "tier3LastCompletedAt": None, "tier3Pending": 0,
             "semanticNodeCount": 0, "semanticEdgeCount": 0,
             "semanticModelReady": False,
             "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
@@ -378,6 +378,7 @@ def handle_analysis_pipeline_detail(
         "failed": ps.get("tier3Failed", 0),
         "lastFile": ps.get("tier3LastFile"),
         "lastCompletedAt": ps.get("tier3LastCompletedAt"),
+        "pending": ps.get("tier3Pending", 0),
     }
     if include_results and has_pipeline:
         tier3["results"] = server._analysis_pipeline.get_tier3_file_results()

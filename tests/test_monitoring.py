@@ -12,6 +12,7 @@ from ivy_lsp.features.monitoring import (
     handle_reindex,
     handle_clear_cache,
     handle_feature_status,
+    handle_analysis_pipeline_detail,
 )
 
 
@@ -226,3 +227,43 @@ class TestFeatureStatus:
             assert "status" in f
             assert f["status"] in ("ready", "degraded", "unavailable", "loading")
             assert "reason" in f
+
+
+class TestAnalysisPipelineDetail:
+    """Tests for the ivy/analysisPipelineDetail endpoint handler."""
+
+    def test_tier3_includes_pending_field(self):
+        """tier3 section should include 'pending' from pipeline state."""
+        server = MagicMock()
+        pipeline = MagicMock()
+        pipeline.get_pipeline_state.return_value = {
+            "tier1FileCount": 5, "tier2FileCount": 3, "tier3FileCount": 2,
+            "tier3Running": False, "tier3Succeeded": 2, "tier3Failed": 0,
+            "tier3CurrentFile": None, "tier3LastFile": "a.ivy",
+            "tier3LastCompletedAt": 1700000000.0, "tier3Pending": 3,
+            "semanticNodeCount": 10, "semanticEdgeCount": 5,
+            "semanticModelReady": True,
+            "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
+            "bulkAnalysisCompleted": 0,
+        }
+        pipeline.get_tier3_file_results.return_value = []
+        server._analysis_pipeline = pipeline
+        server._compiler_manager = None
+        server._bulk_compile_running = False
+        server._bulk_compile_total = 0
+        server._bulk_compile_completed = 0
+
+        result = handle_analysis_pipeline_detail(server)
+        assert result["tier3"]["pending"] == 3
+
+    def test_tier3_pending_defaults_to_zero_without_pipeline(self):
+        """When no pipeline exists, pending should default to 0."""
+        server = MagicMock()
+        server._analysis_pipeline = None
+        server._compiler_manager = None
+        server._bulk_compile_running = False
+        server._bulk_compile_total = 0
+        server._bulk_compile_completed = 0
+
+        result = handle_analysis_pipeline_detail(server)
+        assert result["tier3"]["pending"] == 0
