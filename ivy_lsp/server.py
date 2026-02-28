@@ -332,6 +332,7 @@ class IvyLanguageServer(LanguageServer):
                     result.cancelled,
                 )
                 self._send_model_ready_notification()
+                self._start_bulk_compilation()
             except Exception:
                 logger.exception("Bulk analysis failed")
 
@@ -339,6 +340,82 @@ class IvyLanguageServer(LanguageServer):
             target=_run, daemon=True, name="ivy-bulk-analysis",
         )
         thread.start()
+
+    def _start_bulk_compilation(self) -> None:
+        """Kick off background Tier 3 compilation for all test entry points.
+
+        Called after bulk T1+T2 analysis completes.  Each test file is
+        compiled asynchronously via CompilerManager, and the resulting IR
+        enriches the RequirementGraph and SemanticModel.
+        """
+        if self._compiler_manager is None:
+            return
+        if self._indexer is None:
+            return
+        if os.environ.get("IVY_LSP_BULK_COMPILE", "1") == "0":
+            logger.info("Bulk compilation disabled via IVY_LSP_BULK_COMPILE=0")
+            return
+
+        # Collect test files (files with exports)
+        try:
+            graph = self._indexer._requirement_graph
+        except AttributeError:
+            return
+
+        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+
+        if not isinstance(graph, ScopedRequirementModel):
+            return
+
+        test_files = list(graph._test_scopes.keys())
+        if not test_files:
+            logger.info("No test files found for bulk compilation")
+            return
+
+        logger.info("Starting bulk compilation for %d test files", len(test_files))
+
+        completed = [0]
+        total = len(test_files)
+
+        def _make_callback(filepath: str):
+            def _on_compile(ir):
+                completed[0] += 1
+                if ir.success:
+                    try:
+                        from ivy_lsp.compilation.graph_enrichment import (
+                            enrich_requirement_graph,
+                            enrich_semantic_model,
+                        )
+
+                        enrich_requirement_graph(graph, ir)
+                        if self._semantic_model is not None:
+                            enrich_semantic_model(
+                                self._semantic_model, ir, filepath
+                            )
+                    except Exception:
+                        logger.debug(
+                            "Enrichment failed for %s", filepath, exc_info=True
+                        )
+                if completed[0] >= total:
+                    logger.info(
+                        "Bulk compilation complete: %d/%d files",
+                        completed[0],
+                        total,
+                    )
+                    self._send_model_ready_notification()
+
+            return _on_compile
+
+        for test_file in test_files:
+            try:
+                with open(test_file) as f:
+                    source = f.read()
+            except OSError:
+                completed[0] += 1
+                continue
+            self._compiler_manager.compile_async(
+                source, test_file, _make_callback(test_file)
+            )
 
     def _install_lsp_log_handler(self) -> None:
         """Replace stderr handler with LSP notification handler."""
