@@ -659,7 +659,7 @@ class WorkspaceIndexer:
     def detect_stale_files(self) -> List[str]:
         """Return indexed file paths that no longer exist on disk."""
         stale = []
-        for filepath in self._symbol_table._by_file:
+        for filepath in list(self._symbol_table._by_file):
             if not os.path.exists(filepath):
                 stale.append(filepath)
         return stale
@@ -671,7 +671,7 @@ class WorkspaceIndexer:
 
         # Count include edges from the _includes adjacency dict
         edge_count = sum(
-            len(targets) for targets in self._include_graph._includes.values()
+            len(targets) for targets in list(self._include_graph._includes.values())
         )
 
         test_scope_count = len(
