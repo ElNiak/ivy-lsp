@@ -426,6 +426,9 @@ def register(server) -> None:
 
     @server.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
     def code_lens(params: lsp.CodeLensParams) -> List[lsp.CodeLens]:
+        if not getattr(server, "_code_lens_enabled", True):
+            return []
+
         uri = params.text_document.uri
         filepath = uri_to_path(uri)
         doc = server.workspace.get_text_document(uri)
@@ -434,7 +437,10 @@ def register(server) -> None:
         if not server._indexer:
             return []
 
+        rfc_coverage = getattr(server, "_rfc_coverage_enabled", True)
         model = getattr(server, "_semantic_model", None)
+        if not rfc_coverage:
+            model = None
         try:
             return compute_code_lenses(
                 server._indexer, filepath, source, model

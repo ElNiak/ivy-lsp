@@ -66,6 +66,22 @@ def _resolve_scope(graph: Any, params: dict) -> dict:
     return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
 
 
+def _classify_direction(action_id: str, scope_info: dict) -> Optional[str]:
+    """Classify an action's direction (send/receive) within a test scope."""
+    scope = scope_info.get("_scope")
+    if not scope:
+        return None
+    try:
+        from ivy_lsp.analysis.test_scope import classify_action_direction
+
+        return classify_action_direction(action_id, scope).value
+    except Exception:
+        logger.debug(
+            "Direction classification failed for %s", action_id, exc_info=True
+        )
+        return None
+
+
 def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
     """Convert a RequirementNode to a JSON-serializable dict."""
     state_vars_read = [sv.name for sv in snap.get_state_vars_read_by(req.id)]
@@ -76,7 +92,7 @@ def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
 
         nct = classify_requirement(req).value
     except Exception:
-        pass
+        logger.debug("NCT classification failed for %s", req.id, exc_info=True)
 
     formula = req.formula_text
     if len(formula) > 200:
@@ -186,15 +202,7 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                 counts[r.kind] += 1
                 all_tags.update(r.bracket_tags)
 
-            direction = None
-            scope = scope_info.get("_scope")
-            if scope:
-                try:
-                    from ivy_lsp.analysis.test_scope import classify_action_direction
-
-                    direction = classify_action_direction(action_id, scope).value
-                except Exception:
-                    pass
+            direction = _classify_direction(action_id, scope_info)
 
             seen_read_ids: Set[str] = set()
             state_vars_read: List[StateVarNode] = []
@@ -256,10 +264,8 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
         )
         return result
     except Exception as exc:
-        import traceback
-        tb = traceback.format_exc()
-        logger.exception("handle_action_requirements EXCEPTION: %s", exc)
-        _not_ready["_debug"] = f"exception: {type(exc).__name__}: {exc}\n{tb}"
+        logger.exception("handle_action_requirements failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 
@@ -319,15 +325,7 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
                     vars_read_ids.add(sv.id)
             vars_written = snap.get_state_vars_written_in_monitor(action_id)
 
-            direction = None
-            scope = scope_info.get("_scope")
-            if scope:
-                try:
-                    from ivy_lsp.analysis.test_scope import classify_action_direction
-
-                    direction = classify_action_direction(action_id, scope).value
-                except Exception:
-                    pass
+            direction = _classify_direction(action_id, scope_info)
 
             total_reqs += len(reqs)
             rows.append(
@@ -371,8 +369,9 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
         return result
-    except Exception:
+    except Exception as exc:
         logger.exception("handle_model_summary_table failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 
@@ -502,8 +501,9 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
         return result
-    except Exception:
+    except Exception as exc:
         logger.exception("handle_coverage_gaps failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 
@@ -632,8 +632,9 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
         return result
-    except Exception:
+    except Exception as exc:
         logger.exception("handle_action_dependency_graph failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 
@@ -762,8 +763,9 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
         return result
-    except Exception:
+    except Exception as exc:
         logger.exception("handle_state_machine_view failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 
@@ -832,8 +834,9 @@ def handle_layered_overview(server: Any, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
         }
-    except Exception:
+    except Exception as exc:
         logger.exception("handle_layered_overview failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 
@@ -929,8 +932,9 @@ def handle_smart_suggestions(server: Any, params: dict) -> dict:
                 "action": action_name,
             },
         }
-    except Exception:
+    except Exception as exc:
         logger.exception("handle_smart_suggestions failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
         return _not_ready
 
 

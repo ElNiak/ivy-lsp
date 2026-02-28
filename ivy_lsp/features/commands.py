@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import shutil
+import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -15,21 +15,10 @@ from lsprotocol import types as lsp
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.utils import uri_to_path
+from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
-
-_VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
-
-
-def _validate_ivy_param(value: str) -> str:
-    """Validate an Ivy CLI parameter (isolate name, target, etc.).
-
-    NOTE: Duplicated in mcp_server.py — keep both in sync.
-    """
-    if not value or not _VALID_IVY_PARAM.match(value):
-        raise ValueError(f"Invalid Ivy parameter: {value!r}")
-    return value
 
 
 DEFAULT_VERIFY_TIMEOUT = 120.0
@@ -191,12 +180,52 @@ def _find_enclosing_test(
     return None
 
 
+def _get_compile_env() -> Optional[Dict[str, str]]:
+    """Build environment with system include/lib paths for C++ compilation.
+
+    On macOS, Homebrew installs headers/libs outside the default compiler
+    search paths. This adds them via CPLUS_INCLUDE_PATH and LIBRARY_PATH
+    so that g++ (invoked by ivyc) can find Z3, OpenSSL, etc.
+    """
+    if sys.platform != "darwin":
+        return None
+
+    env = dict(os.environ)
+    extra_includes: List[str] = []
+    extra_libs: List[str] = []
+
+    for prefix in ("/opt/homebrew", "/usr/local"):
+        inc = os.path.join(prefix, "include")
+        lib = os.path.join(prefix, "lib")
+        if os.path.isdir(inc):
+            extra_includes.append(inc)
+        if os.path.isdir(lib):
+            extra_libs.append(lib)
+
+    if not extra_includes and not extra_libs:
+        return None
+
+    if extra_includes:
+        existing = env.get("CPLUS_INCLUDE_PATH", "")
+        env["CPLUS_INCLUDE_PATH"] = os.pathsep.join(
+            filter(None, [existing] + extra_includes)
+        )
+    if extra_libs:
+        existing = env.get("LIBRARY_PATH", "")
+        env["LIBRARY_PATH"] = os.pathsep.join(
+            filter(None, [existing] + extra_libs)
+        )
+
+    return env
+
+
 async def _run_tool(
     cmd: List[str],
     timeout: float,
     server: Any,
     token: Optional[Union[str, int]] = None,
     cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Run an Ivy CLI tool as async subprocess with progress reporting."""
     start = time.monotonic()
@@ -222,6 +251,7 @@ async def _run_tool(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=env,
         )
 
         try:
@@ -274,6 +304,101 @@ async def _run_tool(
                 )
 
 
+async def _compile_via_executor(
+    server: Any,
+    ivy_executor: Any,
+    base_path: str,
+    filepath: str,
+    token: Optional[Union[str, int]] = None,
+) -> Dict[str, Any]:
+    """Run ivyc through the Docker-aware IvyExecutor.
+
+    Wraps the synchronous executor.execute() in a thread to avoid
+    blocking the async event loop.
+    """
+    from pathlib import Path as P
+
+    from panther_ivy.api.compiler import generate_compile_commands
+
+    compile_result = generate_compile_commands(
+        ivy_file=P(filepath),
+        base_path=base_path,
+    )
+
+    start = time.monotonic()
+
+    # Run setup + compile in a thread to avoid blocking the event loop
+    loop = asyncio.get_running_loop()
+
+    def _do_compile():
+        ivy_executor.execute(
+            compile_result.setup_commands,
+            workspace_root=os.path.dirname(filepath),
+            timeout=30,
+        )
+        return ivy_executor.execute(
+            compile_result.compile_commands,
+            workspace_root=os.path.dirname(filepath),
+            timeout=300,
+        )
+
+    exec_result = await loop.run_in_executor(None, _do_compile)
+    duration = time.monotonic() - start
+
+    output_lines = (exec_result.stderr + "\n" + exec_result.stdout).splitlines()
+
+    return {
+        "success": exec_result.exit_code == 0,
+        "message": "OK" if exec_result.exit_code == 0 else f"Exit code {exec_result.exit_code}",
+        "output": output_lines,
+        "target": exec_result.target,
+        "duration": duration,
+    }
+
+
+def _redirect_to_enclosing_test(
+    server: Any,
+    uri: str,
+    filepath: str,
+    isolate: Optional[str],
+    op_name: str,
+) -> tuple:
+    """Redirect a module file to its enclosing test if applicable.
+
+    When the user invokes verify/showModel on a non-test module,
+    we redirect to the enclosing test file and optionally infer the
+    isolate from the module basename.
+
+    Returns:
+        ``(filepath, isolate, redirected)`` — *filepath* is the test
+        file if redirection happened, original otherwise.
+    """
+    enclosing_test = _find_enclosing_test(server, filepath)
+    if enclosing_test is None:
+        return filepath, isolate, False
+
+    slog.info(
+        "Redirecting %s from module %s to test %s",
+        op_name,
+        filepath,
+        enclosing_test,
+        extra={"event": LogEvent(
+            LogCategory.ACTIVITY, op_name,
+            {"module": filepath, "test": enclosing_test},
+        )},
+    )
+
+    if isolate is None:
+        module_basename = os.path.basename(
+            uri_to_path(uri)
+        ).replace(".ivy", "")
+        all_isolates = _collect_all_isolates(server, enclosing_test, "")
+        if module_basename in all_isolates:
+            isolate = module_basename
+
+    return enclosing_test, isolate, True
+
+
 def register(server: Any) -> None:
     """Register custom Ivy command handlers."""
 
@@ -323,29 +448,9 @@ def register(server: Any) -> None:
             isolate = _detect_isolate_at_position(server, uri, position)
 
         # Redirect module files to their enclosing test
-        redirected = False
-        enclosing_test = _find_enclosing_test(server, filepath)
-        if enclosing_test is not None:
-            slog.info(
-                "Redirecting ivy_check from module %s to test %s",
-                filepath,
-                enclosing_test,
-                extra={"event": LogEvent(
-                    LogCategory.ACTIVITY, "verify",
-                    {"module": filepath, "test": enclosing_test},
-                )},
-            )
-            redirected = True
-            if isolate is None:
-                module_basename = os.path.basename(
-                    uri_to_path(uri)
-                ).replace(".ivy", "")
-                all_isolates = _collect_all_isolates(
-                    server, enclosing_test, ""
-                )
-                if module_basename in all_isolates:
-                    isolate = module_basename
-            filepath = enclosing_test
+        filepath, isolate, redirected = _redirect_to_enclosing_test(
+            server, uri, filepath, isolate, "verify"
+        )
 
         op_id = _track_start(server, "verify", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
@@ -414,8 +519,27 @@ def register(server: Any) -> None:
             filepath = enclosing_test
 
         op_id = _track_start(server, "compile", filepath)
+
+        # Try Docker executor if available
+        ivy_executor = getattr(server, "_ivy_executor", None)
+        ivy_base_path = getattr(server, "_ivy_base_path", None)
+        if ivy_executor is not None and ivy_base_path is not None:
+            try:
+                result = await _compile_via_executor(
+                    server, ivy_executor, ivy_base_path,
+                    filepath, token,
+                )
+                _track_end(server, op_id, result)
+                return result
+            except Exception:
+                logger.debug(
+                    "Docker executor failed; falling back to native",
+                    exc_info=True,
+                )
+
+        # Native subprocess fallback
         staged_filepath = _resolve_via_staging(server, filepath)
-        cmd = ["ivyc", f"target={_validate_ivy_param(target)}", staged_filepath]
+        cmd = ["ivyc", f"target={_validate_ivy_param(target)}", os.path.basename(staged_filepath)]
         try:
             result = await _run_tool(
                 cmd,
@@ -423,6 +547,7 @@ def register(server: Any) -> None:
                 server,
                 token,
                 cwd=os.path.dirname(staged_filepath),
+                env=_get_compile_env(),
             )
             _track_end(server, op_id, result)
             return result
@@ -469,33 +594,9 @@ def register(server: Any) -> None:
 
         # Redirect module files to their enclosing test to avoid
         # circular-include "redefining" errors (mirrors ivy_to_cpp.py).
-        redirected = False
-        enclosing_test = _find_enclosing_test(server, filepath)
-        if enclosing_test is not None:
-            slog.info(
-                "Redirecting ivy_show from module %s to test %s",
-                filepath,
-                enclosing_test,
-                extra={"event": LogEvent(
-                    LogCategory.ACTIVITY, "show_model",
-                    {"module": filepath, "test": enclosing_test},
-                )},
-            )
-            redirected = True
-            # Derive isolate from original module basename when unset
-            if isolate is None:
-                module_basename = os.path.basename(
-                    uri_to_path(uri)
-                ).replace(".ivy", "")
-                # Validate the derived isolate exists in the test's
-                # transitive closure (pass empty source to force the
-                # include-graph walker).
-                all_isolates = _collect_all_isolates(
-                    server, enclosing_test, ""
-                )
-                if module_basename in all_isolates:
-                    isolate = module_basename
-            filepath = enclosing_test
+        filepath, isolate, redirected = _redirect_to_enclosing_test(
+            server, uri, filepath, isolate, "show_model"
+        )
 
         op_id = _track_start(server, "showModel", filepath)
         staged_filepath = _resolve_via_staging(server, filepath)
@@ -648,13 +749,14 @@ def register(server: Any) -> None:
         op_id = _track_start(server, "compileTest", test_file)
         token = getattr(params, "workDoneToken", None)
         staged = _resolve_via_staging(server, test_file)
-        cmd = ["ivyc", "target=test", staged]
+        cmd = ["ivyc", "target=test", os.path.basename(staged)]
         try:
             result = await _run_tool(
                 cmd,
                 DEFAULT_COMPILE_TIMEOUT,
                 server,
                 token,
+                env=_get_compile_env(),
                 cwd=os.path.dirname(staged),
             )
 

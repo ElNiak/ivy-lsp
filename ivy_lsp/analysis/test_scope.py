@@ -85,17 +85,17 @@ def detect_test_role(include_closure: FrozenSet[str]) -> str:
 class NctClassification(Enum):
     """NCT role classification for a requirement node."""
 
-    ASSUMPTION = "assumption"
-    GUARANTEE = "guarantee"
-    TESTER_ONLY = "tester_only"
+    ASSUMPTION = "ASSUMPTION"
+    GUARANTEE = "GUARANTEE"
+    TESTER_ONLY = "TESTER_ONLY"
 
 
 class ActionClassification(Enum):
     """Direction classification for an action within a test scope."""
 
-    GENERATED = "generated"
-    RECEIVED = "received"
-    INTERNAL = "internal"
+    GENERATED = "GENERATED"
+    RECEIVED = "RECEIVED"
+    INTERNAL = "INTERNAL"
 
 
 def classify_requirement(req: RequirementNode) -> NctClassification:

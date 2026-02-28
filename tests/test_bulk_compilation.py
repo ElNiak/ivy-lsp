@@ -111,8 +111,8 @@ class TestBulkCompilation:
         server._start_bulk_compilation = types.MethodType(
             IvyLanguageServer._start_bulk_compilation, server
         )
-        server._make_bulk_compile_progress_callback = types.MethodType(
-            IvyLanguageServer._make_bulk_compile_progress_callback, server
+        server._make_progress_callback = types.MethodType(
+            IvyLanguageServer._make_progress_callback, server
         )
         server._send_model_ready_notification = lambda: None
 

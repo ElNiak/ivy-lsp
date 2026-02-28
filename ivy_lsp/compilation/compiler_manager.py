@@ -1,7 +1,9 @@
 """Orchestrates subprocess-based Ivy compilations with caching.
 
-Thread-safe. Used by AnalysisPipeline for Tier 3 analysis and
-by custom commands (ivy/compile, ivy/verify) for in-process module data.
+Thread-safe for concurrent ``compile_async`` calls (semaphore-guarded).
+Cache reads (``get_cached``) are protected by an internal lock.
+Used by AnalysisPipeline for Tier 3 analysis and by custom commands
+(ivy/compile, ivy/verify) for in-process module data.
 """
 
 from __future__ import annotations
@@ -98,8 +100,8 @@ class CompilerManager:
             finally:
                 try:
                     parent_conn.close()
-                except Exception:
-                    pass
+                except OSError:
+                    logger.debug("Could not close parent_conn for %s", filepath)
                 with self._lock:
                     self._active.pop(filepath, None)
                 self._semaphore.release()
@@ -172,7 +174,7 @@ class CompilerManager:
                 try:
                     proc.kill()
                     proc.join(timeout=2)
-                except Exception:
+                except (OSError, ProcessLookupError):
                     pass
             self._active.clear()
             self._cache.clear()
@@ -206,8 +208,8 @@ class CompilerManager:
             try:
                 proc.kill()
                 proc.join(timeout=2)
-            except Exception:
-                pass
+            except (OSError, ProcessLookupError):
+                logger.debug("Could not cancel process for %s", filepath)
 
 
 def _worker_entry(

@@ -513,7 +513,7 @@ def register(server) -> None:
             try:
                 return pipeline.analyze(source, filepath, trigger)
             except Exception:
-                logger.debug("Pipeline analysis failed for %s", filepath, exc_info=True)
+                logger.warning("Pipeline analysis failed for %s", filepath, exc_info=True)
         return None
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)

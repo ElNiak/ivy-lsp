@@ -1,7 +1,7 @@
 """Three-tier analysis pipeline orchestrator.
 
-Tier 1 (syntactic, <50ms): structural checks + RFC annotation parsing
-Tier 2 (AST-enriched, <200ms): parser + type info + requirement extraction
+Tier 1 (syntactic, target <50ms): structural checks + RFC annotation parsing
+Tier 2 (AST-enriched, target <200ms): parser + type info + requirement extraction
 Tier 3 (compiler, background): full compiler analysis (background thread)
 """
 
@@ -71,8 +71,9 @@ class AnalysisPipeline:
         self._compiler_manager = compiler_manager
         self._tier1_files: set[str] = set()
         self._tier2_files: set[str] = set()
-        # Lock protecting all _tier3_* and _bulk_* state that is written
-        # from background threads and read from the LSP main thread.
+        # Lock protecting _tier1_files, _tier2_files, and all _tier3_* /
+        # _bulk_* state that is written from background threads and read
+        # from the LSP main thread.
         self._state_lock = threading.Lock()
         self._tier3_results: OrderedDict[str, Tier3FileResult] = OrderedDict()
         self._tier3_running: bool = False
@@ -316,17 +317,19 @@ class AnalysisPipeline:
         Returns:
             A :class:`BulkAnalysisResult` summarising outcomes.
         """
-        # Filter out files already analysed at the requested tier
-        if include_t2:
-            remaining = [f for f in filepaths if f not in self._tier2_files]
-        else:
-            remaining = [f for f in filepaths if f not in self._tier1_files]
-
-        result = BulkAnalysisResult(total=len(remaining))
+        # Filter out files already analysed at the requested tier.
+        # Must read _tier1_files/_tier2_files under _state_lock since
+        # run_tier1/run_tier2 may mutate them from background threads.
         with self._state_lock:
+            if include_t2:
+                remaining = [f for f in filepaths if f not in self._tier2_files]
+            else:
+                remaining = [f for f in filepaths if f not in self._tier1_files]
             self._bulk_running = True
             self._bulk_total = len(remaining)
             self._bulk_completed = 0
+
+        result = BulkAnalysisResult(total=len(remaining))
 
         try:
             for i, filepath in enumerate(remaining):
@@ -345,7 +348,7 @@ class AnalysisPipeline:
                         try:
                             progress_callback(i + 1, len(remaining), filepath)
                         except Exception:
-                            pass
+                            logger.debug("Progress callback failed", exc_info=True)
                     continue
 
                 try:
@@ -359,7 +362,7 @@ class AnalysisPipeline:
                         try:
                             progress_callback(i + 1, len(remaining), filepath)
                         except Exception:
-                            pass
+                            logger.debug("Progress callback failed", exc_info=True)
                     continue
 
                 if include_t2:
@@ -375,7 +378,7 @@ class AnalysisPipeline:
                     try:
                         progress_callback(i + 1, len(remaining), filepath)
                     except Exception:
-                        pass
+                        logger.debug("Progress callback failed", exc_info=True)
         finally:
             with self._state_lock:
                 self._bulk_running = False

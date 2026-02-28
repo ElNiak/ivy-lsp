@@ -19,6 +19,8 @@ import sys
 import time
 from typing import Any
 
+from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,24 +33,11 @@ def _validate_path(root: str, relative_path: str) -> str:
     return abs_path
 
 
-_VALID_IVY_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
-
-
-def _validate_ivy_param(value: str) -> str:
-    """Validate an Ivy CLI parameter (isolate name, target, etc.).
-
-    NOTE: Duplicated in features/commands.py — keep both in sync.
-    """
-    if not value or not _VALID_IVY_PARAM.match(value):
-        raise ValueError(f"Invalid Ivy parameter: {value!r}")
-    return value
-
-
 def _find_ivy_files(root: str, exclude_dirs: set[str] | None = None) -> list[str]:
     """Walk the project and return relative paths to all .ivy files.
 
     NOTE: Default exclude_dirs overlaps with _EXCLUDED_DIR_BASENAMES in
-    indexer/include_resolver.py — keep in sync when adding new entries.
+    indexer/include_resolver.py — consider aligning when adding entries.
     """
     if exclude_dirs is None:
         exclude_dirs = {
@@ -136,6 +125,8 @@ def start_mcp(
     workspace_root: str | None = None,
     semantic_model: Any = None,
     requirement_graph: Any = None,
+    docker_image: str | None = None,
+    base_path: str | None = None,
     _return_app: bool = False,
 ) -> Any:
     """Start the MCP server exposing Ivy tools.
@@ -146,6 +137,9 @@ def start_mcp(
         requirement_graph: Optional RequirementGraph (or ScopedRequirementModel)
             for visualization tools. When provided, enables ivy_action_requirements,
             ivy_model_summary, and ivy_coverage_gaps MCP tools.
+        docker_image: Docker image for Ivy compilation (e.g. "panther_ivy:latest").
+            When set, compilation tools use Docker instead of native subprocess.
+        base_path: Base protocol-testing path for compile command generation.
         _return_app: Internal flag for testing. When True, returns the FastMCP
             instance without starting the server.
     """
@@ -159,6 +153,22 @@ def start_mcp(
         sys.exit(1)
 
     root = workspace_root or os.getcwd()
+
+    # Create executor for Docker-aware compilation
+    executor = None
+    if docker_image:
+        try:
+            from panther_ivy.api.executor import IvyExecutor
+
+            executor = IvyExecutor(docker_image=docker_image)
+            logger.info(
+                "Docker executor configured with image: %s", docker_image
+            )
+        except ImportError:
+            logger.warning(
+                "panther_ivy.api.executor not available; "
+                "falling back to native subprocess"
+            )
     mcp = FastMCP(
         "ivy-lsp",
         instructions=(
@@ -235,6 +245,10 @@ def start_mcp(
     ) -> str:
         """Compile an Ivy file to a test executable using ivyc.
 
+        When a Docker image is configured (--docker-image), compilation runs
+        inside a Docker container with all required C++ dependencies.
+        Otherwise falls back to native subprocess execution.
+
         Args:
             relative_path: Relative path to the .ivy file to compile.
             target: Compilation target (default: "test").
@@ -255,6 +269,53 @@ def start_mcp(
                 _validate_ivy_param(isolate)
         except ValueError as exc:
             return json.dumps({"success": False, "message": str(exc)})
+
+        # Try API executor path (Docker-aware compilation)
+        if executor is not None and base_path is not None:
+            try:
+                from pathlib import Path as P
+
+                from panther_ivy.api.compiler import generate_compile_commands
+
+                compile_result = generate_compile_commands(
+                    ivy_file=P(relative_path),
+                    base_path=base_path,
+                )
+
+                start = time.monotonic()
+                # Run setup commands
+                executor.execute(
+                    compile_result.setup_commands,
+                    workspace_root=root,
+                    timeout=30,
+                )
+                # Run compilation commands
+                exec_result = executor.execute(
+                    compile_result.compile_commands,
+                    workspace_root=root,
+                    timeout=300,
+                )
+                duration = time.monotonic() - start
+
+                return json.dumps({
+                    "success": exec_result.exit_code == 0,
+                    "output": (
+                        exec_result.stderr + "\n" + exec_result.stdout
+                    ).strip(),
+                    "target": exec_result.target,
+                    "duration_seconds": round(duration, 2),
+                })
+            except ImportError:
+                logger.debug(
+                    "panther_ivy.api not available; falling back to direct subprocess"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "API executor failed: %s; falling back to direct subprocess",
+                    exc,
+                )
+
+        # Direct subprocess fallback
         cmd = ["ivyc", f"target={target}"]
         if isolate:
             cmd.append(f"isolate={isolate}")
@@ -273,6 +334,7 @@ def start_mcp(
         return json.dumps({
             "success": result.returncode == 0,
             "output": (result.stderr + "\n" + result.stdout).strip(),
+            "target": "host",
             "duration_seconds": round(time.monotonic() - start, 2),
         })
 

@@ -37,8 +37,8 @@ class SemanticModel:
         self._nodes_by_file: Dict[str, Set[str]] = defaultdict(set)
         self._node_tiers: Dict[str, str] = {}  # node_id -> tier
 
-        # Edges
-        self._edges: List[Tuple[str, SemanticEdgeType, str]] = []
+        # Edges – use a set to prevent duplicate accumulation
+        self._edges: Set[Tuple[str, SemanticEdgeType, str]] = set()
         self._outgoing: Dict[str, List[Tuple[SemanticEdgeType, str]]] = defaultdict(
             list
         )
@@ -64,9 +64,12 @@ class SemanticModel:
     def add_edge(
         self, source_id: str, edge_type: SemanticEdgeType, target_id: str
     ) -> None:
-        """Add a directed edge."""
+        """Add a directed edge (idempotent)."""
         with self._lock:
-            self._edges.append((source_id, edge_type, target_id))
+            edge = (source_id, edge_type, target_id)
+            if edge in self._edges:
+                return
+            self._edges.add(edge)
             self._outgoing[source_id].append((edge_type, target_id))
             self._incoming[target_id].append((edge_type, source_id))
 
@@ -83,11 +86,11 @@ class SemanticModel:
                     if type_dict:
                         type_dict.pop(nid, None)
                 self._node_tiers.pop(nid, None)
-            self._edges = [
+            self._edges = {
                 (src, etype, dst)
                 for src, etype, dst in self._edges
                 if src not in node_ids and dst not in node_ids
-            ]
+            }
             self._rebuild_adjacency()
 
     def update_file(
@@ -129,11 +132,11 @@ class SemanticModel:
 
             # Remove old edges involving removed ids
             if ids_to_remove:
-                self._edges = [
+                self._edges = {
                     (src, etype, dst)
                     for src, etype, dst in self._edges
                     if src not in ids_to_remove and dst not in ids_to_remove
-                ]
+                }
 
             # Add new nodes (skip if existing node at higher tier)
             for node in nodes:
@@ -146,9 +149,9 @@ class SemanticModel:
                 self._nodes_by_file[filepath].add(nid)
                 self._node_tiers[nid] = tier
 
-            # Add new edges
+            # Add new edges (set prevents duplicates)
             for src, etype, dst in edges:
-                self._edges.append((src, etype, dst))
+                self._edges.add((src, etype, dst))
 
             self._rebuild_adjacency()
 

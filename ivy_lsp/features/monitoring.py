@@ -296,27 +296,38 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
         if (params or {}).get("includeFileStatuses", False):
             result["fileStatuses"] = []
         return result
-    progress = server._indexer._deep_index_progress
+    # Snapshot all progress fields under _progress_lock to avoid
+    # reading a mix of old/new values while the background indexer
+    # updates them.
     with server._indexer._progress_lock:
+        progress = server._indexer._deep_index_progress
         running = server._indexer._deep_index_running
+        total_tests = progress.total_test_files
+        completed_tests = progress.completed_test_files
+        current_file = progress.current_file
+        started_at = progress.started_at
+        file_status_count = len(progress.file_statuses)
+        include_files = (params or {}).get("includeFileStatuses", False)
+        file_statuses_snapshot = (
+            list(progress.file_statuses.values()) if include_files else []
+        )
+
     elapsed = None
     started_at_iso = None
-    if progress.started_at is not None:
-        elapsed = round(time.time() - progress.started_at, 1)
+    if started_at is not None:
+        elapsed = round(time.time() - started_at, 1)
         started_at_iso = datetime.fromtimestamp(
-            progress.started_at, tz=timezone.utc
+            started_at, tz=timezone.utc
         ).isoformat()
-
-    include_files = (params or {}).get("includeFileStatuses", False)
 
     result: Dict[str, Any] = {
         "running": running,
-        "totalTests": progress.total_test_files,
-        "completedTests": progress.completed_test_files,
-        "currentFile": progress.current_file,
+        "totalTests": total_tests,
+        "completedTests": completed_tests,
+        "currentFile": current_file,
         "startedAt": started_at_iso,
         "elapsedSeconds": elapsed,
-        "fileStatusCount": len(progress.file_statuses),
+        "fileStatusCount": file_status_count,
     }
 
     if include_files:
@@ -333,7 +344,7 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
                     else None
                 ),
             }
-            for s in progress.file_statuses.values()
+            for s in file_statuses_snapshot
         ]
 
     return result
@@ -426,15 +437,16 @@ def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
     """Return per-test feature availability matrix."""
     if server._indexer is None:
         return {"tests": []}
-    progress = server._indexer._deep_index_progress
     # Snapshot to avoid RuntimeError if background indexing mutates dict.
     export_imports = dict(server._indexer._file_export_imports)
+    with server._indexer._progress_lock:
+        file_statuses = dict(server._indexer._deep_index_progress.file_statuses)
 
     tests = []
     for filepath, info in export_imports.items():
         if not info.has_exports:
             continue
-        status = progress.file_statuses.get(filepath)
+        status = file_statuses.get(filepath)
         deep_ok = status is not None and status.deep_parse_succeeded
         if deep_ok:
             features = {

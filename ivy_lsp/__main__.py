@@ -54,10 +54,22 @@ def main():
             from ivy_lsp.mcp_server import start_mcp
 
             workspace = None
+            docker_image = os.environ.get("IVY_DOCKER_IMAGE")
+            base_path = os.environ.get("IVY_BASE_PATH")
+
             for i, arg in enumerate(sys.argv):
                 if arg == "--workspace" and i + 1 < len(sys.argv):
                     workspace = sys.argv[i + 1]
-            start_mcp(workspace_root=workspace)
+                elif arg == "--docker-image" and i + 1 < len(sys.argv):
+                    docker_image = sys.argv[i + 1]
+                elif arg == "--base-path" and i + 1 < len(sys.argv):
+                    base_path = sys.argv[i + 1]
+
+            start_mcp(
+                workspace_root=workspace,
+                docker_image=docker_image,
+                base_path=base_path,
+            )
         except ImportError as e:
             log.critical(
                 "MCP mode requires the 'mcp' package: %s\n"

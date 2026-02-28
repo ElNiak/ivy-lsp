@@ -135,6 +135,8 @@ class IvyLanguageServer(LanguageServer):
         self._bulk_compile_running = False
         self._bulk_compile_total = 0
         self._bulk_compile_completed = 0
+        self._code_lens_enabled = True
+        self._rfc_coverage_enabled = True
 
         from ivy_lsp.features import (
             code_action,
@@ -173,6 +175,25 @@ class IvyLanguageServer(LanguageServer):
         folding_range.register(self)
         monitoring.register(self)
         visualization.register(self)
+
+        @self.feature(lsp.INITIALIZE)
+        def on_initialize(params: lsp.InitializeParams) -> None:
+            opts = params.initialization_options or {}
+            if isinstance(opts, dict):
+                code_lens_opts = opts.get("codeLens", {})
+                if isinstance(code_lens_opts, dict):
+                    self._code_lens_enabled = code_lens_opts.get(
+                        "enabled", True
+                    )
+                    self._rfc_coverage_enabled = code_lens_opts.get(
+                        "rfcCoverage", True
+                    )
+            logger.info(
+                "initializationOptions: codeLens.enabled=%s, "
+                "codeLens.rfcCoverage=%s",
+                self._code_lens_enabled,
+                self._rfc_coverage_enabled,
+            )
 
         @self.feature(lsp.INITIALIZED)
         def on_initialized(params: lsp.InitializedParams) -> None:
@@ -257,142 +278,28 @@ class IvyLanguageServer(LanguageServer):
                 "Failed to send ivy/modelReady notification", exc_info=True
             )
 
-    def _make_deep_index_progress_callback(self):
-        """Create a callback that sends ``$/progress`` work-done notifications.
+    def _make_progress_callback(
+        self,
+        title: str,
+        begin_msg: str,
+        end_msg: str,
+        throttle_seconds: float = 0.0,
+    ):
+        """Create a ``$/progress`` work-done notification callback.
 
-        The callback is invoked from the deep-index background thread.
-        pygls message sending is thread-safe (queued internally), so
+        The callback is invoked from background threads.  pygls message
+        sending is thread-safe (queued internally), so
         ``work_done_progress.begin/report/end`` can be called directly.
+
+        Args:
+            title: Progress bar title (e.g. "Ivy Deep Index").
+            begin_msg: Begin message with ``{total}`` placeholder.
+            end_msg: End message with ``{total}`` placeholder.
+            throttle_seconds: Minimum interval between intermediate
+                reports (0 = no throttle).
 
         Returns:
             A callable ``(completed, total, current_file) -> None``.
-        """
-        token = str(uuid.uuid4())
-        state = {"created": False, "disabled": False}
-        server = self
-
-        def _callback(completed: int, total: int, current_file):
-            if state["disabled"]:
-                return
-            if not state["created"]:
-                try:
-                    server.work_done_progress.create(token)
-                    server.work_done_progress.begin(
-                        token,
-                        lsp.WorkDoneProgressBegin(
-                            title="Ivy Deep Index",
-                            message=f"Parsing {total} test files...",
-                            cancellable=False,
-                            percentage=0,
-                        ),
-                    )
-                    state["created"] = True
-                except Exception:
-                    state["disabled"] = True
-                    logger.debug(
-                        "Client does not support work-done progress",
-                        exc_info=True,
-                    )
-                    return
-
-            if completed >= total:
-                try:
-                    server.work_done_progress.end(
-                        token,
-                        lsp.WorkDoneProgressEnd(
-                            message=f"Indexed {total} test files",
-                        ),
-                    )
-                except Exception:
-                    logger.debug("Failed to end progress", exc_info=True)
-                return
-
-            pct = int(100 * completed / total) if total > 0 else 0
-            basename = (
-                os.path.basename(current_file) if current_file else ""
-            )
-            try:
-                server.work_done_progress.report(
-                    token,
-                    lsp.WorkDoneProgressReport(
-                        message=f"({completed}/{total}) {basename}",
-                        percentage=pct,
-                    ),
-                )
-            except Exception:
-                logger.debug("Failed to report progress", exc_info=True)
-
-        return _callback
-
-    def _make_bulk_analysis_progress_callback(self):
-        """Create a ``$/progress`` callback for bulk background analysis.
-
-        Same pattern as :meth:`_make_deep_index_progress_callback` but
-        with an "Ivy Background Analysis" title.
-        """
-        token = str(uuid.uuid4())
-        state = {"created": False, "disabled": False}
-        server = self
-
-        def _callback(completed: int, total: int, current_file):
-            if state["disabled"]:
-                return
-            if not state["created"]:
-                try:
-                    server.work_done_progress.create(token)
-                    server.work_done_progress.begin(
-                        token,
-                        lsp.WorkDoneProgressBegin(
-                            title="Ivy Background Analysis",
-                            message=f"Analysing {total} files...",
-                            cancellable=False,
-                            percentage=0,
-                        ),
-                    )
-                    state["created"] = True
-                except Exception:
-                    state["disabled"] = True
-                    logger.debug(
-                        "Client does not support work-done progress",
-                        exc_info=True,
-                    )
-                    return
-
-            if completed >= total:
-                try:
-                    server.work_done_progress.end(
-                        token,
-                        lsp.WorkDoneProgressEnd(
-                            message=f"Analysed {total} files",
-                        ),
-                    )
-                except Exception:
-                    logger.debug("Failed to end progress", exc_info=True)
-                return
-
-            pct = int(100 * completed / total) if total > 0 else 0
-            basename = (
-                os.path.basename(current_file) if current_file else ""
-            )
-            try:
-                server.work_done_progress.report(
-                    token,
-                    lsp.WorkDoneProgressReport(
-                        message=f"({completed}/{total}) {basename}",
-                        percentage=pct,
-                    ),
-                )
-            except Exception:
-                logger.debug("Failed to report progress", exc_info=True)
-
-        return _callback
-
-    def _make_bulk_compile_progress_callback(self):
-        """Create a ``$/progress`` callback for bulk compilation.
-
-        Same pattern as :meth:`_make_deep_index_progress_callback` but
-        with an "Ivy Compilation" title.  Throttled to at most 1
-        report per second to avoid flooding the stdio pipe.
         """
         token = str(uuid.uuid4())
         state = {"created": False, "disabled": False, "last_report": 0.0}
@@ -407,8 +314,8 @@ class IvyLanguageServer(LanguageServer):
                     server.work_done_progress.begin(
                         token,
                         lsp.WorkDoneProgressBegin(
-                            title="Ivy Compilation",
-                            message=f"Compiling {total} test files...",
+                            title=title,
+                            message=begin_msg.format(total=total),
                             cancellable=False,
                             percentage=0,
                         ),
@@ -427,18 +334,18 @@ class IvyLanguageServer(LanguageServer):
                     server.work_done_progress.end(
                         token,
                         lsp.WorkDoneProgressEnd(
-                            message=f"Compiled {total} test files",
+                            message=end_msg.format(total=total),
                         ),
                     )
                 except Exception:
                     logger.debug("Failed to end progress", exc_info=True)
                 return
 
-            # Throttle intermediate reports to at most 1/sec
-            now = time.time()
-            if (now - state["last_report"]) < 1.0:
-                return
-            state["last_report"] = now
+            if throttle_seconds > 0:
+                now = time.time()
+                if (now - state["last_report"]) < throttle_seconds:
+                    return
+                state["last_report"] = now
 
             pct = int(100 * completed / total) if total > 0 else 0
             basename = (
@@ -477,7 +384,11 @@ class IvyLanguageServer(LanguageServer):
         if not all_files:
             return
 
-        progress_cb = self._make_bulk_analysis_progress_callback()
+        progress_cb = self._make_progress_callback(
+            "Ivy Background Analysis",
+            "Analysing {total} files...",
+            "Analysed {total} files",
+        )
 
         def _run():
             try:
@@ -564,7 +475,12 @@ class IvyLanguageServer(LanguageServer):
             self._bulk_compile_total = total
             self._bulk_compile_completed = 0
 
-        progress_cb = self._make_bulk_compile_progress_callback()
+        progress_cb = self._make_progress_callback(
+            "Ivy Compilation",
+            "Compiling {total} test files...",
+            "Compiled {total} test files",
+            throttle_seconds=1.0,
+        )
 
         # Throttle compilation progress notifications to at most 1/sec
         last_notify_time = [0.0]
@@ -589,7 +505,7 @@ class IvyLanguageServer(LanguageServer):
                                 self._semantic_model, ir, filepath
                             )
                     except Exception:
-                        logger.debug(
+                        logger.warning(
                             "Enrichment failed for %s", filepath, exc_info=True
                         )
 
@@ -615,7 +531,7 @@ class IvyLanguageServer(LanguageServer):
                             },
                         )
                     except Exception:
-                        logger.debug(
+                        logger.warning(
                             "Failed to send compilationProgress notification",
                             exc_info=True,
                         )
@@ -769,7 +685,11 @@ class IvyLanguageServer(LanguageServer):
                 )},
             )
 
-        progress_cb = self._make_deep_index_progress_callback()
+        progress_cb = self._make_progress_callback(
+            "Ivy Deep Index",
+            "Parsing {total} test files...",
+            "Indexed {total} test files",
+        )
         try:
             self._indexer = WorkspaceIndexer(
                 root, self._parser, resolver,
@@ -848,9 +768,12 @@ class IvyLanguageServer(LanguageServer):
                     try:
                         from ivy_lsp.compilation.compiler_manager import CompilerManager
 
-                        staging_dir = None
+                        # Re-read staging dir from the resolver (not the
+                        # local var from create_staging_directory) because
+                        # CompilerManager needs the persistent path.
+                        compiler_staging_dir = None
                         if self._indexer and hasattr(self._indexer, "_resolver"):
-                            staging_dir = getattr(
+                            compiler_staging_dir = getattr(
                                 self._indexer._resolver, "_staging_dir", None
                             )
                         max_concurrent = max(
@@ -858,7 +781,7 @@ class IvyLanguageServer(LanguageServer):
                             int(os.environ.get("IVY_LSP_COMPILE_WORKERS", "1")),
                         )
                         self._compiler_manager = CompilerManager(
-                            staging_dir=staging_dir,
+                            staging_dir=compiler_staging_dir,
                             timeout=float(
                                 os.environ.get("IVY_LSP_COMPILE_TIMEOUT", "300")
                             ),
@@ -869,7 +792,7 @@ class IvyLanguageServer(LanguageServer):
                         )
                         compiler = CompilerAdapter(self._compiler_manager)
                     except Exception:
-                        logger.debug(
+                        logger.warning(
                             "CompilerManager unavailable, using legacy adapter",
                             exc_info=True,
                         )

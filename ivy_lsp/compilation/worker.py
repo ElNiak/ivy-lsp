@@ -55,16 +55,17 @@ def compiler_worker(
         ir = extract_compiled_module_ir(im.module, il.sig, filename, duration)
         result_conn.send(ir)
     except Exception as exc:
+        logger.debug("Compilation failed for %s: %s", filename, exc)
         duration = time.monotonic() - start
         ir = CompiledModuleIR.empty(
             filename, errors=[str(exc)], duration=duration
         )
         try:
             result_conn.send(ir)
-        except Exception:
-            pass  # Connection may be broken
+        except OSError:
+            logger.debug("Could not send error IR for %s: pipe broken", filename)
     finally:
         try:
             result_conn.close()
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("Could not close connection for %s", filename)

@@ -113,6 +113,7 @@ class WorkspaceIndexer:
         else:
             self._cache = FileCache()
         self._symbol_table = SymbolTable()
+        self._table_lock = threading.Lock()  # guards _symbol_table swaps
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports: Dict[str, ExportImportInfo] = {}
@@ -141,16 +142,15 @@ class WorkspaceIndexer:
         """Index the workspace in two phases for responsiveness.
 
         Phase 1 (synchronous, fast): lexer-only scan of every ``.ivy`` file.
-        No ``_ivy_state_lock`` is needed.  Populates the symbol table with
-        degraded but usable symbols, builds the include graph, extracts
-        requirements and export/import info with light-mode extractors.
+        Populates the symbol table with degraded but usable symbols,
+        builds the include graph, extracts requirements and
+        export/import info with light-mode extractors.
         The server is marked "ready" immediately after this phase.
 
         Phase 2 (background, progressive): full-parse ONLY from test entry
         points (files with exports).  Runs in a daemon thread.  As each
-        test file completes, its symbols are upgraded with AST-quality data.
-        Lock contention is minimized because only ~10-20 files are parsed
-        instead of all 238+.
+        test file completes, its symbols are upgraded with AST-quality data
+        under ``_table_lock``.
         """
         start = time.time()
         self._index_errors = []
@@ -189,13 +189,13 @@ class WorkspaceIndexer:
             t.start()
 
     # ------------------------------------------------------------------
-    # Phase 1: Fast lexer-only scan (no _ivy_state_lock)
+    # Phase 1: Fast lexer-only scan
     # ------------------------------------------------------------------
 
     def _fast_index_all_files(self) -> None:
         """Scan every .ivy file using the fallback lexer scanner.
 
-        This does NOT acquire ``_ivy_state_lock`` and completes in seconds.
+        Completes in seconds (no background lock contention).
         Provides usable symbols for completion, navigation, and document
         outline immediately.
         """
@@ -410,21 +410,31 @@ class WorkspaceIndexer:
                 self._requirement_graph.remove_file(test_file)
                 self._extract_file_requirements(test_file, result, source)
                 self._extract_file_exports_imports(test_file, result, source)
-                # Inline T1+T2 if pipeline is available
+                # Inline T1+T2+T3 if pipeline is available.
+                # Each tier is wrapped individually so a failure in one
+                # does not prevent the others from running.
                 if self._analysis_pipeline is not None:
                     try:
                         self._analysis_pipeline.run_tier1(source, test_file)
+                    except Exception:
+                        logger.warning(
+                            "Inline T1 failed for %s", test_file, exc_info=True
+                        )
+                    try:
                         self._analysis_pipeline.run_tier2(
                             source, test_file, parse_result=result
                         )
+                    except Exception:
+                        logger.warning(
+                            "Inline T2 failed for %s", test_file, exc_info=True
+                        )
+                    try:
                         self._analysis_pipeline.run_tier3_background(
                             source, test_file, track_state=False
                         )
                     except Exception:
-                        logger.debug(
-                            "Inline T1/T2/T3 failed for %s",
-                            test_file,
-                            exc_info=True,
+                        logger.warning(
+                            "Inline T3 failed for %s", test_file, exc_info=True
                         )
             elif self._analysis_pipeline is not None:
                 # For failed parse, still run T1 (regex-only, no AST needed)
@@ -520,16 +530,20 @@ class WorkspaceIndexer:
         parse_result: Any,
     ) -> None:
         """Replace fallback-scanned symbols with AST-quality symbols for a file."""
-        # Build new table locally, then swap atomically to avoid a window
-        # where concurrent readers see an incomplete/empty table.
-        old_symbols = list(self._symbol_table.all_symbols())
-        new_table = SymbolTable()
-        for sym in old_symbols:
-            if sym.file_path != filepath:
+        # The _table_lock serializes concurrent writers (e.g. two
+        # _upgrade_file_symbols calls from parallel deep indexing).
+        # The assignment to self._symbol_table is atomic at the Python
+        # level (GIL), so unsynchronized readers see either the old
+        # table or the new one — never a partially-built one.
+        with self._table_lock:
+            old_symbols = list(self._symbol_table.all_symbols())
+            new_table = SymbolTable()
+            for sym in old_symbols:
+                if sym.file_path != filepath:
+                    new_table.add_symbol(sym)
+            for sym in new_symbols:
                 new_table.add_symbol(sym)
-        for sym in new_symbols:
-            new_table.add_symbol(sym)
-        self._symbol_table = new_table
+            self._symbol_table = new_table
 
         # Update cache - reuse includes from existing cache entry
         cached = self._cache.get(filepath)
@@ -630,11 +644,13 @@ class WorkspaceIndexer:
 
     def _remove_file_symbols(self, filepath: str) -> None:
         """Rebuild the symbol table excluding all symbols from *filepath*."""
-        old_symbols = list(self._symbol_table.all_symbols())
-        self._symbol_table = SymbolTable()
-        for sym in old_symbols:
-            if sym.file_path != filepath:
-                self._symbol_table.add_symbol(sym)
+        with self._table_lock:
+            old_symbols = list(self._symbol_table.all_symbols())
+            new_table = SymbolTable()
+            for sym in old_symbols:
+                if sym.file_path != filepath:
+                    new_table.add_symbol(sym)
+            self._symbol_table = new_table
 
     # ------------------------------------------------------------------
     # Querying
