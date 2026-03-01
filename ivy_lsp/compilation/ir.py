@@ -61,14 +61,15 @@ class ActionIR:
 
 @dataclass(frozen=True)
 class MixinIR:
-    """IR representation of an Ivy mixin (before/after advice).
+    """IR representation of an Ivy mixin (before/after/around advice).
 
-    A mixin attaches a mixer action to run before or after a mixee action.
+    A mixin attaches a mixer action to run before, after, or around a
+    mixee action.
     """
 
     mixer: str
     mixee: str
-    kind: str  # "before" | "after"
+    kind: str  # "before" | "after" | "around"
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,7 @@ class RequirementIR:
     action_name: str
     kind: str  # "require" | "ensure" | "assume" | "assert"
     formula_str: str
-    mixin_kind: str = "direct"  # "before" | "after" | "implement" | "direct"
+    mixin_kind: str = "direct"  # "before" | "after" | "around" | "implement" | "direct"
 
 
 @dataclass(frozen=True)

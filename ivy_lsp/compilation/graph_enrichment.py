@@ -30,6 +30,10 @@ def enrich_semantic_model(
     Gracefully returns without mutation when ``ir.success`` is False.
     """
     if not ir.success:
+        logger.info(
+            "Skipping semantic model enrichment for %s: compilation failed",
+            filepath,
+        )
         return
 
     nodes: List[Any] = []
@@ -127,6 +131,10 @@ def enrich_requirement_graph(
     Gracefully returns without mutation when ``ir.success`` is False.
     """
     if not ir.success:
+        logger.info(
+            "Skipping requirement graph enrichment for %s: compilation failed",
+            ir.source_file,
+        )
         return
 
     from ivy_lsp.analysis.requirement_graph import ActionNode

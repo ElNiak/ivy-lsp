@@ -46,6 +46,16 @@ class TestNctClassification:
     def test_ensure_direct_is_guarantee(self):
         assert classify_requirement(_req("ensure", "direct")) == NctClassification.GUARANTEE
 
+    def test_require_around_is_guarantee(self):
+        """around mixins are conservatively classified as GUARANTEE."""
+        assert classify_requirement(_req("require", "around")) == NctClassification.GUARANTEE
+
+    def test_ensure_around_is_guarantee(self):
+        assert classify_requirement(_req("ensure", "around")) == NctClassification.GUARANTEE
+
+    def test_assume_around_is_guarantee(self):
+        assert classify_requirement(_req("assume", "around")) == NctClassification.GUARANTEE
+
 
 class TestActionClassification:
     """Test classify_action_direction() for action direction."""

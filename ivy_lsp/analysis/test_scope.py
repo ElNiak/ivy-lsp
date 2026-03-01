@@ -102,14 +102,15 @@ def classify_requirement(req: RequirementNode) -> NctClassification:
     """Classify a requirement as assumption, guarantee, or tester-only.
 
     Priority:
-    1. _generating in formula -> TESTER_ONLY
-    2. mixin_kind == "after"  -> GUARANTEE
-    3. kind in (ensure, assert) -> GUARANTEE
-    4. otherwise              -> ASSUMPTION
+    1. _generating in formula      -> TESTER_ONLY
+    2. mixin_kind == "after"       -> GUARANTEE
+    3. mixin_kind == "around"      -> GUARANTEE (conservative)
+    4. kind in (ensure, assert)    -> GUARANTEE
+    5. otherwise                   -> ASSUMPTION
     """
     if "_generating" in req.formula_text:
         return NctClassification.TESTER_ONLY
-    if req.mixin_kind == "after":
+    if req.mixin_kind in ("after", "around"):
         return NctClassification.GUARANTEE
     if req.kind in ("ensure", "assert"):
         return NctClassification.GUARANTEE
@@ -203,8 +204,13 @@ class ScopedRequirementModel(RequirementGraph):
         """Get requirement counts with NCT classification for a scoped action.
 
         Returns a list of dicts with keys: kind, count, nct_tag.
-        Only returns entries for exported (GUARANTEE) or imported (ASSUMPTION)
-        actions. Internal actions return [].
+        Uses per-requirement NCT classification via :func:`classify_requirement`
+        so that individual requirements within the same action can have
+        different NCT tags (e.g. a ``require`` in a ``before`` mixin is
+        ASSUMPTION while an ``ensure`` is GUARANTEE).
+
+        Only returns entries for exported or imported actions.
+        Internal actions return [].
         """
         scope = self._test_scopes.get(test_file)
         if scope is None:
@@ -214,33 +220,31 @@ class ScopedRequirementModel(RequirementGraph):
         if direction == ActionClassification.INTERNAL:
             return []
 
-        nct_tag = (
-            "GUARANTEE"
-            if direction == ActionClassification.GENERATED
-            else "ASSUMPTION"
-        )
-
         if direction == ActionClassification.RECEIVED:
-            # Imported actions: scan requirements directly (get_scoped_counts
-            # only handles exported actions).
-            raw_counts: Dict[str, int] = defaultdict(int)
-            for req in self.requirements.values():
+            matching_requirements = [
+                req for req in self.requirements.values()
                 if (
                     req.file in scope.include_closure
                     and req.monitor_action == action_name
-                ):
-                    raw_counts[req.kind] += 1
-            counts = dict(raw_counts)
+                )
+            ]
         else:
-            # Exported actions: reuse get_scoped_counts
-            counts = self.get_scoped_counts(test_file, action_name)
+            matching_requirements = [
+                req for req in self.get_scoped_requirements(test_file)
+                if req.monitor_action == action_name
+            ]
 
-        if not counts:
+        if not matching_requirements:
             return []
+
+        counts_by_nct: Dict[Tuple[str, str], int] = defaultdict(int)
+        for req in matching_requirements:
+            nct = classify_requirement(req)
+            counts_by_nct[(req.kind, nct.value)] += 1
 
         return [
             {"kind": kind, "count": count, "nct_tag": nct_tag}
-            for kind, count in sorted(counts.items())
+            for (kind, nct_tag), count in sorted(counts_by_nct.items())
         ]
 
     def invalidate_file(self, filepath: str) -> None:

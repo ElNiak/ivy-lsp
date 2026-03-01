@@ -142,15 +142,22 @@ class TestCacheInvalidation:
 
 
 class TestScopedNctCounts:
-    """Tests for get_scoped_nct_counts() method."""
+    """Tests for get_scoped_nct_counts() method.
 
-    def test_exported_action_tagged_guarantee(self, scoped_model):
-        """Requirements on exported actions are tagged GUARANTEE."""
+    Uses per-requirement NCT classification via classify_requirement().
+    Default _make_req creates mixin_kind="before", so:
+      require + before = ASSUMPTION
+      ensure  + before = GUARANTEE  (kind in ensure/assert)
+      require + after  = GUARANTEE  (mixin_kind after)
+    """
+
+    def test_exported_action_require_before_is_assumption(self, scoped_model):
+        """require + before mixin on exported action -> ASSUMPTION."""
         entries = scoped_model.get_scoped_nct_counts(
             "/test/test_a.ivy", "quic.send"
         )
         assert len(entries) == 1
-        assert entries[0] == {"kind": "require", "count": 2, "nct_tag": "GUARANTEE"}
+        assert entries[0] == {"kind": "require", "count": 2, "nct_tag": "ASSUMPTION"}
 
     def test_imported_action_tagged_assumption(self):
         """Requirements on imported actions are tagged ASSUMPTION."""
@@ -194,7 +201,8 @@ class TestScopedNctCounts:
         assert entries == []
 
     def test_multiple_kinds_same_action(self):
-        """An exported action with both require and ensure gets separate entries."""
+        """An exported action with both require+before and ensure+before gets
+        per-requirement NCT tags: require+before=ASSUMPTION, ensure+before=GUARANTEE."""
         model = ScopedRequirementModel()
         req1 = _make_req("/f.ivy", 10, "require", "x > 0", "quic.send")
         req2 = _make_req("/f.ivy", 20, "ensure", "y > 0", "quic.send")
@@ -213,11 +221,65 @@ class TestScopedNctCounts:
         model.register_test_scope(scope)
 
         entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
-        kinds = {e["kind"] for e in entries}
-        assert kinds == {"ensure", "require"}
-        for entry in entries:
-            assert entry["nct_tag"] == "GUARANTEE"
-            assert entry["count"] == 1
+        by_kind = {e["kind"]: e for e in entries}
+        assert "require" in by_kind
+        assert "ensure" in by_kind
+        assert by_kind["require"]["nct_tag"] == "ASSUMPTION"
+        assert by_kind["ensure"]["nct_tag"] == "GUARANTEE"
+        assert by_kind["require"]["count"] == 1
+        assert by_kind["ensure"]["count"] == 1
+
+    def test_after_mixin_require_is_guarantee(self):
+        """require + after mixin on exported action -> GUARANTEE."""
+        model = ScopedRequirementModel()
+        req = _make_req(
+            "/f.ivy", 10, "require", "x > 0", "quic.send", mixin_kind="after"
+        )
+        model.add_requirement(req)
+        model.add_edge(req.id, EdgeType.CONSTRAINS, "quic.send")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
+        assert len(entries) == 1
+        assert entries[0] == {"kind": "require", "count": 1, "nct_tag": "GUARANTEE"}
+
+    def test_mixed_mixin_kinds_produce_different_nct_tags(self):
+        """Same kind (require) with different mixin_kinds gets split entries."""
+        model = ScopedRequirementModel()
+        req1 = _make_req(
+            "/f.ivy", 10, "require", "pre > 0", "quic.send", mixin_kind="before"
+        )
+        req2 = _make_req(
+            "/f.ivy", 20, "require", "post > 0", "quic.send", mixin_kind="after"
+        )
+        model.add_requirement(req1)
+        model.add_requirement(req2)
+        model.add_edge(req1.id, EdgeType.CONSTRAINS, "quic.send")
+        model.add_edge(req2.id, EdgeType.CONSTRAINS, "quic.send")
+
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset({"/test.ivy", "/f.ivy"}),
+            exported_actions=frozenset({"quic.send"}),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
+        by_tag = {e["nct_tag"]: e for e in entries}
+        assert "ASSUMPTION" in by_tag
+        assert "GUARANTEE" in by_tag
+        assert by_tag["ASSUMPTION"]["kind"] == "require"
+        assert by_tag["GUARANTEE"]["kind"] == "require"
 
     def test_unknown_test_returns_empty(self, scoped_model):
         """Unregistered test file returns empty list."""
@@ -264,8 +326,8 @@ class TestScopedNctCounts:
             assert isinstance(entry["count"], int)
             assert entry["count"] > 0
 
-    def test_entries_sorted_by_kind(self):
-        """Returned entries are sorted alphabetically by kind."""
+    def test_entries_sorted_by_kind_and_nct_tag(self):
+        """Returned entries are sorted by (kind, nct_tag)."""
         model = ScopedRequirementModel()
         req1 = _make_req("/f.ivy", 10, "require", "x > 0", "quic.send")
         req2 = _make_req("/f.ivy", 20, "ensure", "y > 0", "quic.send")
@@ -284,5 +346,5 @@ class TestScopedNctCounts:
         model.register_test_scope(scope)
 
         entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
-        assert entries[0]["kind"] == "ensure"
-        assert entries[1]["kind"] == "require"
+        keys = [(e["kind"], e["nct_tag"]) for e in entries]
+        assert keys == sorted(keys)

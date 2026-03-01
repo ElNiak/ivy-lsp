@@ -143,11 +143,21 @@ def _make_requirement_action(kind: str, formula: str = "true") -> Any:
 
 
 class _MockMixin:
-    """Mimics an Ivy mixin (before/after advice)."""
+    """Mimics an Ivy mixin (generic / around)."""
 
     def __init__(self, mixer: str, mixee: str):
         self.args = [_ns(relname=mixer)]
         self.mixee = _ns(relname=mixee)
+
+
+class MixinBeforeDef(_MockMixin):
+    """Mimics Ivy MixinBeforeDef -- type name contains 'Before'."""
+    pass
+
+
+class MixinAfterDef(_MockMixin):
+    """Mimics Ivy MixinAfterDef -- type name contains 'After'."""
+    pass
 
 
 class _MockIsolate:
@@ -502,7 +512,7 @@ class TestExtractMixins:
     def test_extracts_before_mixin(self):
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
 
-        mixin = _MockMixin(
+        mixin = MixinBeforeDef(
             mixer="shim.before_send",
             mixee="server.handle_send",
         )
@@ -521,11 +531,12 @@ class TestExtractMixins:
         assert isinstance(m, MixinIR)
         assert m.mixer == "shim.before_send"
         assert m.mixee == "server.handle_send"
+        assert m.kind == "before"
 
     def test_extracts_after_mixin(self):
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
 
-        mixin = _MockMixin(
+        mixin = MixinAfterDef(
             mixer="shim.after_recv",
             mixee="client.handle_recv",
         )
@@ -541,14 +552,15 @@ class TestExtractMixins:
         m = mixins[0]
         assert m.kind == "after"
 
-    def test_detects_mixin_kind_from_name(self):
+    def test_detects_mixin_kind_from_type(self):
+        """Mixin kind is detected from AST class type, not mixer name."""
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
 
-        before_mixin = _MockMixin(
+        before_mixin = MixinBeforeDef(
             mixer="shim.pre_check",
             mixee="server.step",
         )
-        after_mixin = _MockMixin(
+        after_mixin = MixinAfterDef(
             mixer="log.after_step",
             mixee="server.step",
         )
@@ -562,10 +574,28 @@ class TestExtractMixins:
 
         mixins = ir.mixins["server.step"]
         assert len(mixins) == 2
-        # "pre_check" doesn't contain "after" -> "before"
         assert mixins[0].kind == "before"
-        # "after_step" contains "after" -> "after"
         assert mixins[1].kind == "after"
+
+    def test_around_mixin_detected_for_unknown_type(self):
+        """A mixin with neither 'Before' nor 'After' in type name -> 'around'."""
+        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+
+        mixin = _MockMixin(
+            mixer="shim.wrap_step",
+            mixee="server.step",
+        )
+        sig = _make_mock_sig()
+        mod = _make_mock_module(
+            sig=sig,
+            mixins={"server.step": [mixin]},
+        )
+
+        ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
+
+        mixins = ir.mixins["server.step"]
+        assert len(mixins) == 1
+        assert mixins[0].kind == "around"
 
 
 class TestExtractIsolates:
@@ -744,6 +774,73 @@ class TestExtractRequirements:
 
         reqs = [r for r in ir.requirements if r.kind == "assert"]
         assert len(reqs) >= 1
+
+
+class TestMixinKindPropagation:
+    """Verify mixin_kind propagates from mod.mixins to RequirementIR."""
+
+    def test_before_mixer_requirements_tagged_before(self):
+        """Requirements in a before-mixer action body get mixin_kind='before'."""
+        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+
+        req = _make_requirement_action("RequiresAction", "pre(x)")
+        mixer_action = _MockAction(name="shim.before_send", args=[req])
+
+        mixin = MixinBeforeDef(
+            mixer="shim.before_send",
+            mixee="server.handle_send",
+        )
+        sig = _make_mock_sig()
+        mod = _make_mock_module(
+            sig=sig,
+            actions={"shim.before_send": mixer_action, "server.handle_send": _MockAction()},
+            mixins={"server.handle_send": [mixin]},
+        )
+
+        ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
+
+        mixer_reqs = [r for r in ir.requirements if r.action_name == "shim.before_send"]
+        assert len(mixer_reqs) >= 1
+        assert mixer_reqs[0].mixin_kind == "before"
+
+    def test_after_mixer_requirements_tagged_after(self):
+        """Requirements in an after-mixer action body get mixin_kind='after'."""
+        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+
+        ens = _make_requirement_action("EnsuresAction", "post(y)")
+        mixer_action = _MockAction(name="shim.after_recv", args=[ens])
+
+        mixin = MixinAfterDef(
+            mixer="shim.after_recv",
+            mixee="client.handle_recv",
+        )
+        sig = _make_mock_sig()
+        mod = _make_mock_module(
+            sig=sig,
+            actions={"shim.after_recv": mixer_action, "client.handle_recv": _MockAction()},
+            mixins={"client.handle_recv": [mixin]},
+        )
+
+        ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
+
+        mixer_reqs = [r for r in ir.requirements if r.action_name == "shim.after_recv"]
+        assert len(mixer_reqs) >= 1
+        assert mixer_reqs[0].mixin_kind == "after"
+
+    def test_non_mixer_requirements_tagged_direct(self):
+        """Requirements in a regular action body (not a mixer) get mixin_kind='direct'."""
+        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+
+        req = _make_requirement_action("RequiresAction", "valid(x)")
+        action = _MockAction(name="server.process", args=[req])
+        sig = _make_mock_sig()
+        mod = _make_mock_module(sig=sig, actions={"server.process": action})
+
+        ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
+
+        reqs = [r for r in ir.requirements if r.action_name == "server.process"]
+        assert len(reqs) >= 1
+        assert reqs[0].mixin_kind == "direct"
 
 
 class TestHandlesExtractionErrorGracefully:

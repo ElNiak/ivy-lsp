@@ -245,8 +245,12 @@ class TestScopedStateVarReads:
 class TestNctCodeLensLabels:
     """Tests for NCT classification tags in code lens titles."""
 
-    def test_scoped_lens_shows_nct_guarantee_tag(self):
-        """Exported action requirements should show [GUARANTEE] tag."""
+    def test_scoped_lens_shows_nct_assumption_for_require_before(self):
+        """require + before mixin on exported action -> [ASSUMPTION] tag.
+
+        Per-requirement NCT classification: require in a before-mixin
+        is an assumption (precondition the tester must satisfy).
+        """
         model = ScopedRequirementModel()
         req = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "quic.send")
         model.add_requirement(req)
@@ -266,7 +270,7 @@ class TestNctCodeLensLabels:
         source = "before quic.send {\n    require x > 0;\n}\n"
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
-        assert any("[GUARANTEE]" in t for t in titles), f"Expected [GUARANTEE] in titles: {titles}"
+        assert any("[ASSUMPTION]" in t for t in titles), f"Expected [ASSUMPTION] in titles: {titles}"
 
     def test_scoped_lens_shows_nct_assumption_tag(self):
         """Imported action requirements should show [ASSUMPTION] tag."""
@@ -291,8 +295,8 @@ class TestNctCodeLensLabels:
         titles = [l.command.title for l in lenses if l.command]
         assert any("[ASSUMPTION]" in t for t in titles), f"Expected [ASSUMPTION] in titles: {titles}"
 
-    def test_nct_label_format_kind_then_tag(self):
-        """Label should be 'N kind [TAG]' not '[TAG] N kind'."""
+    def test_nct_label_format_per_requirement_tags(self):
+        """Labels show per-requirement NCT: require+before=[ASSUMPTION], ensure+before=[GUARANTEE]."""
         model = ScopedRequirementModel()
         req1 = _make_req(_abs("/f.ivy"), 10, "require", "x > 0", "quic.send")
         req2 = _make_req(_abs("/f.ivy"), 20, "ensure", "y > 0", "quic.send")
@@ -316,9 +320,9 @@ class TestNctCodeLensLabels:
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
         assert any(
-            "require [GUARANTEE]" in t and "ensure [GUARANTEE]" in t
+            "require [ASSUMPTION]" in t and "ensure [GUARANTEE]" in t
             for t in titles
-        ), f"Expected NCT format in titles: {titles}"
+        ), f"Expected per-requirement NCT format in titles: {titles}"
 
     def test_unscoped_lens_has_no_nct_tags(self):
         """Without active scope, no NCT tags should appear."""
