@@ -67,54 +67,97 @@ class CompilerManager:
 
         ctx = multiprocessing.get_context("spawn")
         parent_conn, child_conn = ctx.Pipe(duplex=False)
-        proc = ctx.Process(
-            target=_worker_entry,
-            args=(source, filepath, child_conn, self._staging_dir),
-            daemon=True,
-        )
+        try:
+            proc = ctx.Process(
+                target=_worker_entry,
+                args=(source, filepath, child_conn, self._staging_dir),
+                daemon=True,
+            )
 
-        def _wait():
-            self._semaphore.acquire()
-            try:
-                proc.start()
-                child_conn.close()
-                if parent_conn.poll(self._timeout):
-                    ir = parent_conn.recv()
-                    self._put_cache(filepath, content_hash, ir)
-                    callback(ir)
-                else:
-                    proc.kill()
-                    proc.join(timeout=5)
-                    ir = CompiledModuleIR.empty(
-                        filepath,
-                        errors=[f"Compilation timed out after {self._timeout}s"],
-                        duration=self._timeout,
-                    )
-                    callback(ir)
-            except Exception as exc:
-                callback(
-                    CompiledModuleIR.empty(
-                        filepath, errors=[str(exc)], duration=0.0
-                    )
-                )
-            finally:
+            def _wait():
+                self._semaphore.acquire()
                 try:
-                    parent_conn.close()
-                except OSError:
-                    logger.debug("Could not close parent_conn for %s", filepath)
-                with self._lock:
-                    self._active.pop(filepath, None)
-                self._semaphore.release()
+                    proc.start()
+                    child_conn.close()
+                    if parent_conn.poll(self._timeout):
+                        try:
+                            ir = parent_conn.recv()
+                        except EOFError:
+                            ir = CompiledModuleIR.empty(
+                                filepath,
+                                errors=["Compilation subprocess crashed without producing output"],
+                                duration=self._timeout,
+                            )
+                            logger.warning(
+                                "Compilation subprocess crashed for %s (EOFError on pipe)",
+                                filepath,
+                            )
+                        except Exception as recv_exc:
+                            ir = CompiledModuleIR.empty(
+                                filepath,
+                                errors=[f"Failed to read compilation result: {type(recv_exc).__name__}: {recv_exc}"],
+                                duration=self._timeout,
+                            )
+                            logger.warning(
+                                "Failed to read compilation result for %s: %s",
+                                filepath, recv_exc,
+                            )
+                        if not isinstance(ir, CompiledModuleIR):
+                            ir = CompiledModuleIR.empty(
+                                filepath,
+                                errors=["Invalid response type from compilation subprocess"],
+                                duration=self._timeout,
+                            )
+                        self._put_cache(filepath, content_hash, ir)
+                        callback(ir)
+                    else:
+                        proc.kill()
+                        try:
+                            while parent_conn.poll(0):
+                                parent_conn.recv()
+                        except (EOFError, OSError):
+                            pass
+                        proc.join(timeout=5)
+                        if proc.is_alive():
+                            logger.warning(
+                                "Compilation process for %s did not exit after kill+5s",
+                                filepath,
+                            )
+                        ir = CompiledModuleIR.empty(
+                            filepath,
+                            errors=[f"Compilation timed out after {self._timeout}s"],
+                            duration=self._timeout,
+                        )
+                        callback(ir)
+                except Exception as exc:
+                    callback(
+                        CompiledModuleIR.empty(
+                            filepath, errors=[str(exc)], duration=0.0
+                        )
+                    )
+                finally:
+                    try:
+                        parent_conn.close()
+                    except OSError:
+                        logger.debug("Could not close parent_conn for %s", filepath)
+                    with self._lock:
+                        if self._active.get(filepath) is proc:
+                            self._active.pop(filepath, None)
+                    self._semaphore.release()
 
-        with self._lock:
-            self._active[filepath] = proc
+            with self._lock:
+                self._active[filepath] = proc
 
-        t = threading.Thread(
-            target=_wait,
-            daemon=True,
-            name=f"ivy-compile-{os.path.basename(filepath)}",
-        )
-        t.start()
+            t = threading.Thread(
+                target=_wait,
+                daemon=True,
+                name=f"ivy-compile-{os.path.basename(filepath)}",
+            )
+            t.start()
+        except Exception:
+            parent_conn.close()
+            child_conn.close()
+            raise
 
     def compile_sync(
         self, source: str, filepath: str
@@ -206,9 +249,10 @@ class CompilerManager:
             proc = self._active.pop(filepath, None)
         if proc is not None:
             try:
-                proc.kill()
-                proc.join(timeout=2)
-            except (OSError, ProcessLookupError):
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=2)
+            except (OSError, ProcessLookupError, ValueError):
                 logger.debug("Could not cancel process for %s", filepath)
 
 

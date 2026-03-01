@@ -1,6 +1,7 @@
 """Tests for CompilerManager -- orchestrates subprocess compilation."""
 
 import threading
+import time
 
 import pytest
 
@@ -195,3 +196,146 @@ class TestCompilerManager:
                 assert max_active[0] <= 1
         finally:
             mgr.shutdown()
+
+    def test_recompile_same_file_does_not_lose_new_process(self):
+        """Old _wait thread must not remove new process from _active."""
+        from unittest.mock import patch
+
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(staging_dir=None, timeout=30.0, max_concurrent=2)
+
+        # Use mocks so we don't need real Ivy.
+        # First compilation takes 0.2s, second is instant.
+        call_count = [0]
+        lock = threading.Lock()
+
+        class SlowFakeProcess:
+            """Simulates a process that finishes slowly."""
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def kill(self):
+                pass
+
+            def join(self, timeout=None):
+                pass
+
+            def is_alive(self):
+                return False
+
+        class FakeConn:
+            def __init__(self, filepath, delay=0.0):
+                self._filepath = filepath
+                self._delay = delay
+
+            def poll(self, timeout):
+                if self._delay > 0:
+                    time.sleep(self._delay)
+                return True
+
+            def recv(self):
+                return CompiledModuleIR.empty(self._filepath)
+
+            def close(self):
+                pass
+
+        events = [threading.Event(), threading.Event()]
+        results = []
+
+        def cb1(ir):
+            results.append(("first", ir))
+            events[0].set()
+
+        def cb2(ir):
+            results.append(("second", ir))
+            events[1].set()
+
+        try:
+            with patch("ivy_lsp.compilation.compiler_manager.multiprocessing") as mock_mp:
+                ctx = mock_mp.get_context.return_value
+
+                def make_pipe(duplex=False):
+                    with lock:
+                        call_count[0] += 1
+                        n = call_count[0]
+                    # First call: slow poll (0.2s), second: fast
+                    delay = 0.2 if n == 1 else 0.0
+                    parent = FakeConn("/test.ivy", delay=delay)
+                    child = FakeConn("/test.ivy")
+                    return parent, child
+
+                ctx.Pipe = make_pipe
+                ctx.Process = SlowFakeProcess
+
+                mgr.compile_async("source1", "/test.ivy", cb1)
+                time.sleep(0.05)  # Let first compilation start
+                mgr.compile_async("source2", "/test.ivy", cb2)
+
+                # Wait for second (fast) to complete
+                events[1].wait(timeout=10)
+                # Also wait for first to complete
+                events[0].wait(timeout=10)
+
+                # After both complete, _active should be empty
+                assert mgr.get_stats()["activeProcesses"] == 0
+        finally:
+            mgr.shutdown()
+
+    def test_invalidate_dependents_clears_target_and_includers(self):
+        """invalidate_dependents removes target + all direct includers."""
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(timeout=30)
+        for f in ["/a.ivy", "/b.ivy", "/c.ivy"]:
+            mgr._put_cache(f, "hash", CompiledModuleIR.empty(f))
+
+        class FakeGraph:
+            def get_included_by(self, filepath):
+                if filepath == "/a.ivy":
+                    return ["/b.ivy"]
+                return []
+
+        mgr.invalidate_dependents("/a.ivy", FakeGraph())
+        assert mgr.get_cached("/a.ivy") is None
+        assert mgr.get_cached("/b.ivy") is None
+        assert mgr.get_cached("/c.ivy") is not None
+        mgr.shutdown()
+
+    def test_invalidate_dependents_without_get_included_by(self):
+        """Handles include_graph that lacks get_included_by."""
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(timeout=30)
+        mgr._put_cache("/a.ivy", "hash", CompiledModuleIR.empty("/a.ivy"))
+        mgr.invalidate_dependents("/a.ivy", object())
+        assert mgr.get_cached("/a.ivy") is None
+        mgr.shutdown()
+
+    def test_shutdown_clears_active_and_cache(self):
+        """shutdown() clears both _active and _cache."""
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(timeout=30)
+        mgr._put_cache("/a.ivy", "hash", CompiledModuleIR.empty("/a.ivy"))
+        mgr.shutdown()
+        assert mgr.get_stats()["cachedFiles"] == 0
+        assert mgr.get_stats()["activeProcesses"] == 0
+
+    def test_get_stats_returns_correct_counts(self):
+        """get_stats reflects cache population."""
+        from ivy_lsp.compilation.compiler_manager import CompilerManager
+
+        mgr = CompilerManager(timeout=30, max_concurrent=4)
+        assert mgr.get_stats() == {
+            "cachedFiles": 0,
+            "activeProcesses": 0,
+            "maxConcurrent": 4,
+        }
+        mgr._put_cache("/a.ivy", "hash", CompiledModuleIR.empty("/a.ivy"))
+        assert mgr.get_stats()["cachedFiles"] == 1
+        mgr.shutdown()
