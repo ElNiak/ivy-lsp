@@ -2,13 +2,13 @@
 
 These frozen dataclasses represent the wire format for serializing Ivy's
 Module object across process boundaries. They use only Python primitives
-(str, int, bool, list, dict, set, Optional, None) so they survive pickle
-round-trips without requiring Z3 or Ivy imports.
+(str, int, bool, tuple, dict, frozenset, Optional, None) so they survive
+pickle round-trips without requiring Z3 or Ivy imports.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, FrozenSet, Literal, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class SortIR:
     arity: int = 0
     is_uninterpreted: bool = False
     is_enumerated: bool = False
-    constructors: List[str] = field(default_factory=list)
+    constructors: Tuple[str, ...] = field(default_factory=tuple)
     interpretation: Optional[str] = None
 
 
@@ -37,7 +37,7 @@ class SymbolIR:
 
     name: str
     sort_str: str = ""
-    domain_sorts: List[str] = field(default_factory=list)
+    domain_sorts: Tuple[str, ...] = field(default_factory=tuple)
     range_sort: str = ""
     is_destructor: bool = False
     is_constructor: bool = False
@@ -53,8 +53,8 @@ class ActionIR:
     """
 
     name: str
-    formal_params: List[str] = field(default_factory=list)
-    formal_returns: List[str] = field(default_factory=list)
+    formal_params: Tuple[str, ...] = field(default_factory=tuple)
+    formal_returns: Tuple[str, ...] = field(default_factory=tuple)
     is_exported: bool = False
     is_imported: bool = False
 
@@ -69,7 +69,7 @@ class MixinIR:
 
     mixer: str
     mixee: str
-    kind: str  # "before" | "after" | "around"
+    kind: Literal["before", "after", "around"] = "before"
 
 
 @dataclass(frozen=True)
@@ -81,8 +81,8 @@ class IsolateIR:
     """
 
     name: str
-    verified_components: List[str] = field(default_factory=list)
-    present_components: List[str] = field(default_factory=list)
+    verified_components: Tuple[str, ...] = field(default_factory=tuple)
+    present_components: Tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -109,9 +109,9 @@ class RequirementIR:
     """
 
     action_name: str
-    kind: str  # "require" | "ensure" | "assume" | "assert"
-    formula_str: str
-    mixin_kind: str = "direct"  # "before" | "after" | "around" | "implement" | "direct"
+    kind: Literal["require", "ensure", "assume", "assert"] = "require"
+    formula_str: str = ""
+    mixin_kind: Literal["before", "after", "around", "implement", "direct"] = "direct"
 
 
 @dataclass(frozen=True)
@@ -128,31 +128,31 @@ class CompiledModuleIR:
     sorts: Dict[str, SortIR] = field(default_factory=dict)
     symbols: Dict[str, SymbolIR] = field(default_factory=dict)
     actions: Dict[str, ActionIR] = field(default_factory=dict)
-    public_actions: Set[str] = field(default_factory=set)
-    mixins: Dict[str, List[MixinIR]] = field(default_factory=dict)
+    public_actions: FrozenSet[str] = field(default_factory=frozenset)
+    mixins: Dict[str, Tuple[MixinIR, ...]] = field(default_factory=dict)
     isolates: Dict[str, IsolateIR] = field(default_factory=dict)
 
     # --- labeled formulas ---
-    labeled_axioms: List[LabeledFormulaIR] = field(default_factory=list)
-    labeled_properties: List[LabeledFormulaIR] = field(default_factory=list)
-    labeled_conjectures: List[LabeledFormulaIR] = field(default_factory=list)
-    definitions: List[LabeledFormulaIR] = field(default_factory=list)
+    labeled_axioms: Tuple[LabeledFormulaIR, ...] = field(default_factory=tuple)
+    labeled_properties: Tuple[LabeledFormulaIR, ...] = field(default_factory=tuple)
+    labeled_conjectures: Tuple[LabeledFormulaIR, ...] = field(default_factory=tuple)
+    definitions: Tuple[LabeledFormulaIR, ...] = field(default_factory=tuple)
 
     # --- requirements ---
-    requirements: List[RequirementIR] = field(default_factory=list)
+    requirements: Tuple[RequirementIR, ...] = field(default_factory=tuple)
 
     # --- structural metadata ---
-    hierarchy: Dict[str, Set[str]] = field(default_factory=dict)
-    exports: List[str] = field(default_factory=list)
-    imports: List[str] = field(default_factory=list)
+    hierarchy: Dict[str, FrozenSet[str]] = field(default_factory=dict)
+    exports: Tuple[str, ...] = field(default_factory=tuple)
+    imports: Tuple[str, ...] = field(default_factory=tuple)
     aliases: Dict[str, str] = field(default_factory=dict)
-    delegates: List[str] = field(default_factory=list)
-    mixord: List[str] = field(default_factory=list)
-    sort_order: List[str] = field(default_factory=list)
-    symbol_order: List[str] = field(default_factory=list)
+    delegates: Tuple[str, ...] = field(default_factory=tuple)
+    mixord: Tuple[str, ...] = field(default_factory=tuple)
+    sort_order: Tuple[str, ...] = field(default_factory=tuple)
+    symbol_order: Tuple[str, ...] = field(default_factory=tuple)
 
     # --- compilation metadata ---
-    errors: List[str] = field(default_factory=list)
+    errors: Tuple[str, ...] = field(default_factory=tuple)
     success: bool = False
     source_file: str = ""
     compile_duration: float = 0.0
@@ -160,7 +160,7 @@ class CompiledModuleIR:
     @staticmethod
     def empty(
         source_file: str,
-        errors: Optional[List[str]] = None,
+        errors: Optional[Sequence[str]] = None,
         duration: float = 0.0,
     ) -> "CompiledModuleIR":
         """Create a failed / empty IR with only metadata populated.
@@ -170,7 +170,7 @@ class CompiledModuleIR:
         """
         return CompiledModuleIR(
             source_file=source_file,
-            errors=errors if errors is not None else [],
+            errors=tuple(errors) if errors is not None else (),
             compile_duration=duration,
             success=False,
         )

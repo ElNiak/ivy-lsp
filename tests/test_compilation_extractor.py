@@ -289,7 +289,7 @@ class TestExtractSorts:
         assert s.name == "pkt_type"
         assert s.is_enumerated is True
         assert s.is_uninterpreted is False
-        assert s.constructors == ["initial", "handshake", "one_rtt"]
+        assert s.constructors == ("initial", "handshake", "one_rtt")
         assert s.arity == 0
 
     def test_extracts_uninterpreted_sort(self):
@@ -309,7 +309,7 @@ class TestExtractSorts:
         s = ir.sorts["cid"]
         assert s.is_uninterpreted is True
         assert s.is_enumerated is False
-        assert s.constructors == []
+        assert s.constructors == ()
 
     def test_extracts_interpreted_sort(self):
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
@@ -374,7 +374,7 @@ class TestExtractSymbols:
         s = ir.symbols["conn_seen"]
         assert isinstance(s, SymbolIR)
         assert s.name == "conn_seen"
-        assert s.domain_sorts == ["cid", "pkt_type"]
+        assert s.domain_sorts == ("cid", "pkt_type")
         assert s.range_sort == "bool"
         assert s.is_relation is True
 
@@ -435,7 +435,7 @@ class TestExtractSymbols:
         ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
 
         s = ir.symbols["active"]
-        assert s.domain_sorts == ["node"]
+        assert s.domain_sorts == ("node",)
         assert s.range_sort == "bool"
 
 
@@ -502,8 +502,8 @@ class TestExtractActions:
         ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
 
         a = ir.actions["init"]
-        assert a.formal_params == []
-        assert a.formal_returns == []
+        assert a.formal_params == ()
+        assert a.formal_returns == ()
 
 
 class TestExtractMixins:
@@ -621,8 +621,8 @@ class TestExtractIsolates:
         iso = ir.isolates["quic_server_test"]
         assert isinstance(iso, IsolateIR)
         assert iso.name == "quic_server_test"
-        assert iso.verified_components == ["quic_server", "tls_handshake"]
-        assert iso.present_components == ["quic_client", "quic_shim"]
+        assert iso.verified_components == ("quic_server", "tls_handshake")
+        assert iso.present_components == ("quic_client", "quic_shim")
 
     def test_extracts_empty_isolate(self):
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
@@ -637,8 +637,8 @@ class TestExtractIsolates:
         ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
 
         iso = ir.isolates["empty_iso"]
-        assert iso.verified_components == []
-        assert iso.present_components == []
+        assert iso.verified_components == ()
+        assert iso.present_components == ()
 
 
 class TestExtractLabeledFormulas:
@@ -935,8 +935,8 @@ class TestStructuralMetadata:
 
         ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
 
-        assert ir.exports == ["server.send"]
-        assert ir.imports == ["shim.recv"]
+        assert ir.exports == ("server.send",)
+        assert ir.imports == ("shim.recv",)
 
     def test_copies_aliases_delegates(self):
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
@@ -951,7 +951,7 @@ class TestStructuralMetadata:
         ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
 
         assert ir.aliases == {"pkt": "quic_packet"}
-        assert ir.delegates == ["shim"]
+        assert ir.delegates == ("shim",)
 
     def test_copies_orderings(self):
         from ivy_lsp.compilation.extractor import extract_compiled_module_ir
@@ -966,9 +966,9 @@ class TestStructuralMetadata:
 
         ir = extract_compiled_module_ir(mod, sig, "test.ivy", 0.1)
 
-        assert ir.mixord == ["a", "b"]
-        assert ir.sort_order == ["cid", "pkt"]
-        assert ir.symbol_order == ["conn_seen", "active"]
+        assert ir.mixord == ("a", "b")
+        assert ir.sort_order == ("cid", "pkt")
+        assert ir.symbol_order == ("conn_seen", "active")
 
 
 class TestCompilationMetadata:
@@ -985,4 +985,4 @@ class TestCompilationMetadata:
         assert ir.source_file == "my_module.ivy"
         assert ir.compile_duration == 2.5
         assert ir.success is True
-        assert ir.errors == []
+        assert ir.errors == ()

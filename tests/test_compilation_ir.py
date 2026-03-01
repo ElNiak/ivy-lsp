@@ -31,20 +31,20 @@ class TestSortIR:
             arity=0,
             is_uninterpreted=False,
             is_enumerated=True,
-            constructors=["initial", "handshake", "zero_rtt", "one_rtt", "retry"],
+            constructors=("initial", "handshake", "zero_rtt", "one_rtt", "retry"),
             interpretation=None,
         )
         restored = pickle.loads(pickle.dumps(sort))
         assert restored == sort
         assert restored.name == "quic_packet_type"
         assert restored.is_enumerated is True
-        assert restored.constructors == [
+        assert restored.constructors == (
             "initial",
             "handshake",
             "zero_rtt",
             "one_rtt",
             "retry",
-        ]
+        )
 
     def test_pickle_round_trip_uninterpreted(self):
         sort = SortIR(
@@ -52,7 +52,7 @@ class TestSortIR:
             arity=0,
             is_uninterpreted=True,
             is_enumerated=False,
-            constructors=[],
+            constructors=(),
             interpretation="bv[62]",
         )
         restored = pickle.loads(pickle.dumps(sort))
@@ -65,7 +65,7 @@ class TestSortIR:
         assert sort.arity == 0
         assert sort.is_uninterpreted is False
         assert sort.is_enumerated is False
-        assert sort.constructors == []
+        assert sort.constructors == ()
         assert sort.interpretation is None
 
     def test_frozen(self):
@@ -81,7 +81,7 @@ class TestSymbolIR:
         sym = SymbolIR(
             name="conn_seen",
             sort_str="cid * quic_packet_type -> bool",
-            domain_sorts=["cid", "quic_packet_type"],
+            domain_sorts=("cid", "quic_packet_type"),
             range_sort="bool",
             is_destructor=False,
             is_constructor=False,
@@ -91,14 +91,14 @@ class TestSymbolIR:
         assert restored == sym
         assert restored.name == "conn_seen"
         assert restored.is_relation is True
-        assert restored.domain_sorts == ["cid", "quic_packet_type"]
+        assert restored.domain_sorts == ("cid", "quic_packet_type")
         assert restored.range_sort == "bool"
 
     def test_pickle_round_trip_destructor(self):
         sym = SymbolIR(
             name="stream_data",
             sort_str="stream_id -> stream_data_t",
-            domain_sorts=["stream_id"],
+            domain_sorts=("stream_id",),
             range_sort="stream_data_t",
             is_destructor=True,
             is_constructor=False,
@@ -111,7 +111,7 @@ class TestSymbolIR:
     def test_defaults(self):
         sym = SymbolIR(name="x")
         assert sym.sort_str == ""
-        assert sym.domain_sorts == []
+        assert sym.domain_sorts == ()
         assert sym.range_sort == ""
         assert sym.is_destructor is False
         assert sym.is_constructor is False
@@ -129,24 +129,24 @@ class TestActionIR:
     def test_pickle_round_trip(self):
         action = ActionIR(
             name="quic_server.send_packet",
-            formal_params=["dst:cid", "pkt:quic_packet"],
-            formal_returns=["ok:bool"],
+            formal_params=("dst:cid", "pkt:quic_packet"),
+            formal_returns=("ok:bool",),
             is_exported=True,
             is_imported=False,
         )
         restored = pickle.loads(pickle.dumps(action))
         assert restored == action
         assert restored.name == "quic_server.send_packet"
-        assert restored.formal_params == ["dst:cid", "pkt:quic_packet"]
-        assert restored.formal_returns == ["ok:bool"]
+        assert restored.formal_params == ("dst:cid", "pkt:quic_packet")
+        assert restored.formal_returns == ("ok:bool",)
         assert restored.is_exported is True
         assert restored.is_imported is False
 
     def test_pickle_round_trip_imported(self):
         action = ActionIR(
             name="quic_client.recv_packet",
-            formal_params=["src:cid"],
-            formal_returns=["pkt:quic_packet"],
+            formal_params=("src:cid",),
+            formal_returns=("pkt:quic_packet",),
             is_exported=False,
             is_imported=True,
         )
@@ -156,8 +156,8 @@ class TestActionIR:
 
     def test_defaults(self):
         action = ActionIR(name="noop")
-        assert action.formal_params == []
-        assert action.formal_returns == []
+        assert action.formal_params == ()
+        assert action.formal_returns == ()
         assert action.is_exported is False
         assert action.is_imported is False
 
@@ -204,35 +204,35 @@ class TestIsolateIR:
     def test_pickle_round_trip(self):
         isolate = IsolateIR(
             name="quic_server_test",
-            verified_components=[
+            verified_components=(
                 "quic_server",
                 "tls_handshake",
                 "packet_protection",
-            ],
-            present_components=[
+            ),
+            present_components=(
                 "quic_client",
                 "quic_shim",
                 "net",
-            ],
+            ),
         )
         restored = pickle.loads(pickle.dumps(isolate))
         assert restored == isolate
         assert restored.name == "quic_server_test"
-        assert restored.verified_components == [
+        assert restored.verified_components == (
             "quic_server",
             "tls_handshake",
             "packet_protection",
-        ]
-        assert restored.present_components == [
+        )
+        assert restored.present_components == (
             "quic_client",
             "quic_shim",
             "net",
-        ]
+        )
 
     def test_defaults(self):
         isolate = IsolateIR(name="empty_isolate")
-        assert isolate.verified_components == []
-        assert isolate.present_components == []
+        assert isolate.verified_components == ()
+        assert isolate.present_components == ()
 
     def test_frozen(self):
         isolate = IsolateIR(name="x")
@@ -357,7 +357,7 @@ class TestCompiledModuleIR:
                 "quic_packet_type": SortIR(
                     name="quic_packet_type",
                     is_enumerated=True,
-                    constructors=["initial", "handshake", "one_rtt"],
+                    constructors=("initial", "handshake", "one_rtt"),
                 ),
                 "cid": SortIR(
                     name="cid",
@@ -369,7 +369,7 @@ class TestCompiledModuleIR:
                 "conn_seen": SymbolIR(
                     name="conn_seen",
                     sort_str="cid * quic_packet_type -> bool",
-                    domain_sorts=["cid", "quic_packet_type"],
+                    domain_sorts=("cid", "quic_packet_type"),
                     range_sort="bool",
                     is_relation=True,
                 ),
@@ -377,72 +377,72 @@ class TestCompiledModuleIR:
             actions={
                 "quic_server.send_packet": ActionIR(
                     name="quic_server.send_packet",
-                    formal_params=["dst:cid", "pkt:quic_packet"],
-                    formal_returns=["ok:bool"],
+                    formal_params=("dst:cid", "pkt:quic_packet"),
+                    formal_returns=("ok:bool",),
                     is_exported=True,
                 ),
             },
-            public_actions={"quic_server.send_packet"},
+            public_actions=frozenset({"quic_server.send_packet"}),
             mixins={
-                "quic_server.handle_send": [
+                "quic_server.handle_send": (
                     MixinIR(
                         mixer="quic_shim.send_event",
                         mixee="quic_server.handle_send",
                         kind="before",
                     ),
-                ],
+                ),
             },
             isolates={
                 "quic_server_test": IsolateIR(
                     name="quic_server_test",
-                    verified_components=["quic_server"],
-                    present_components=["quic_client", "quic_shim"],
+                    verified_components=("quic_server",),
+                    present_components=("quic_client", "quic_shim"),
                 ),
             },
-            labeled_axioms=[
+            labeled_axioms=(
                 LabeledFormulaIR(
                     label="ax1",
                     formula_str="forall C:cid. conn_seen(C) -> true",
                     lineno=10,
                 ),
-            ],
-            labeled_properties=[
+            ),
+            labeled_properties=(
                 LabeledFormulaIR(
                     label="prop1",
                     formula_str="forall C:cid. established(C) -> ready(C)",
                     lineno=50,
                 ),
-            ],
-            labeled_conjectures=[
+            ),
+            labeled_conjectures=(
                 LabeledFormulaIR(
                     label="conj1",
                     formula_str="eventually(done)",
                     temporal=True,
                 ),
-            ],
-            definitions=[
+            ),
+            definitions=(
                 LabeledFormulaIR(
                     label="def1",
                     formula_str="is_valid(X) = X > 0",
                 ),
-            ],
-            requirements=[
+            ),
+            requirements=(
                 RequirementIR(
                     action_name="quic_server.send_packet",
                     kind="require",
                     formula_str="conn_established(dst)",
                     mixin_kind="before",
                 ),
-            ],
-            hierarchy={"quic_server": {"send_packet", "recv_packet"}},
-            exports=["quic_server.send_packet"],
-            imports=["quic_shim.recv_event"],
+            ),
+            hierarchy={"quic_server": frozenset({"send_packet", "recv_packet"})},
+            exports=("quic_server.send_packet",),
+            imports=("quic_shim.recv_event",),
             aliases={"pkt_type": "quic_packet_type"},
-            delegates=["quic_shim"],
-            mixord=["quic_shim.send_event", "quic_server.handle_send"],
-            sort_order=["cid", "quic_packet_type"],
-            symbol_order=["conn_seen"],
-            errors=[],
+            delegates=("quic_shim",),
+            mixord=("quic_shim.send_event", "quic_server.handle_send"),
+            sort_order=("cid", "quic_packet_type"),
+            symbol_order=("conn_seen",),
+            errors=(),
             success=True,
             source_file="quic_server_test.ivy",
             compile_duration=1.234,
@@ -458,15 +458,15 @@ class TestCompiledModuleIR:
         # Verify sub-IR contents survived
         assert "quic_packet_type" in restored.sorts
         assert restored.sorts["quic_packet_type"].is_enumerated is True
-        assert restored.sorts["quic_packet_type"].constructors == [
+        assert restored.sorts["quic_packet_type"].constructors == (
             "initial",
             "handshake",
             "one_rtt",
-        ]
+        )
         assert "conn_seen" in restored.symbols
         assert restored.symbols["conn_seen"].is_relation is True
         assert "quic_server.send_packet" in restored.actions
-        assert restored.public_actions == {"quic_server.send_packet"}
+        assert restored.public_actions == frozenset({"quic_server.send_packet"})
         assert len(restored.mixins["quic_server.handle_send"]) == 1
         assert restored.isolates["quic_server_test"].name == "quic_server_test"
         assert len(restored.labeled_axioms) == 1
@@ -475,20 +475,20 @@ class TestCompiledModuleIR:
         assert len(restored.definitions) == 1
         assert len(restored.requirements) == 1
         assert restored.hierarchy == {
-            "quic_server": {"send_packet", "recv_packet"},
+            "quic_server": frozenset({"send_packet", "recv_packet"}),
         }
-        assert restored.exports == ["quic_server.send_packet"]
-        assert restored.imports == ["quic_shim.recv_event"]
+        assert restored.exports == ("quic_server.send_packet",)
+        assert restored.imports == ("quic_shim.recv_event",)
         assert restored.aliases == {"pkt_type": "quic_packet_type"}
-        assert restored.errors == []
+        assert restored.errors == ()
 
     def test_pickle_round_trip_failure(self):
         ir = CompiledModuleIR(
             source_file="broken.ivy",
-            errors=[
+            errors=(
                 "line 10: type error in sort declaration",
                 "line 25: undefined symbol 'foo'",
-            ],
+            ),
             success=False,
             compile_duration=0.5,
         )
@@ -504,22 +504,22 @@ class TestCompiledModuleIR:
         assert restored.sorts == {}
         assert restored.symbols == {}
         assert restored.actions == {}
-        assert restored.public_actions == set()
+        assert restored.public_actions == frozenset()
         assert restored.mixins == {}
         assert restored.isolates == {}
-        assert restored.labeled_axioms == []
-        assert restored.labeled_properties == []
-        assert restored.labeled_conjectures == []
-        assert restored.definitions == []
-        assert restored.requirements == []
+        assert restored.labeled_axioms == ()
+        assert restored.labeled_properties == ()
+        assert restored.labeled_conjectures == ()
+        assert restored.definitions == ()
+        assert restored.requirements == ()
         assert restored.hierarchy == {}
-        assert restored.exports == []
-        assert restored.imports == []
+        assert restored.exports == ()
+        assert restored.imports == ()
         assert restored.aliases == {}
-        assert restored.delegates == []
-        assert restored.mixord == []
-        assert restored.sort_order == []
-        assert restored.symbol_order == []
+        assert restored.delegates == ()
+        assert restored.mixord == ()
+        assert restored.sort_order == ()
+        assert restored.symbol_order == ()
 
     def test_empty_ir_factory(self):
         ir = CompiledModuleIR.empty(
@@ -529,18 +529,18 @@ class TestCompiledModuleIR:
         )
         assert ir.success is False
         assert ir.source_file == "test.ivy"
-        assert ir.errors == ["compilation failed"]
+        assert ir.errors == ("compilation failed",)
         assert ir.compile_duration == 0.1
         assert ir.sorts == {}
         assert ir.symbols == {}
         assert ir.actions == {}
-        assert ir.public_actions == set()
+        assert ir.public_actions == frozenset()
 
     def test_empty_ir_factory_defaults(self):
         ir = CompiledModuleIR.empty(source_file="minimal.ivy")
         assert ir.success is False
         assert ir.source_file == "minimal.ivy"
-        assert ir.errors == []
+        assert ir.errors == ()
         assert ir.compile_duration == 0.0
 
     def test_frozen(self):

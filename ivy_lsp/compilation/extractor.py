@@ -11,7 +11,10 @@ On any exception it returns a failed ``CompiledModuleIR`` via
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, FrozenSet, List, Literal, Optional, Set, Tuple, cast
+
+_RequirementKind = Literal["require", "ensure", "assume", "assert"]
+_MixinKind = Literal["before", "after", "around", "implement", "direct"]
 
 from ivy_lsp.compilation.ir import (
     ActionIR,
@@ -27,7 +30,7 @@ from ivy_lsp.compilation.ir import (
 logger = logging.getLogger(__name__)
 
 # Action body type names that map to requirement kinds.
-_REQUIREMENT_TYPES: Dict[str, str] = {
+_REQUIREMENT_TYPES: Dict[str, _RequirementKind] = {
     "RequiresAction": "require",
     "EnsuresAction": "ensure",
     "AssumeAction": "assume",
@@ -211,7 +214,7 @@ def _extract(
         mixord=mixord,
         sort_order=sort_order,
         symbol_order=symbol_order,
-        errors=[],
+        errors=(),
         success=True,
         source_file=source_file,
         compile_duration=duration,
@@ -249,11 +252,11 @@ def _sort_to_ir(name: str, sort_obj: Any) -> SortIR:
     is_enumerated = type_name == "EnumeratedSort"
     is_uninterpreted = type_name == "UninterpretedSort"
 
-    constructors: List[str] = []
+    constructors: Tuple[str, ...] = ()
     if is_enumerated:
         try:
             defines = sort_obj.defines()
-            constructors = [str(getattr(d, "name", d)) for d in defines]
+            constructors = tuple(str(getattr(d, "name", d)) for d in defines)
         except Exception:
             logger.debug(
                 "Failed to get constructors for sort %s", name, exc_info=True
@@ -312,12 +315,12 @@ def _symbol_to_ir(
     sort_obj = getattr(sym_obj, "sort", None)
     sort_str = str(sort_obj) if sort_obj is not None else ""
 
-    domain_sorts: List[str] = []
+    domain_sorts: Tuple[str, ...] = ()
     range_sort = ""
 
     if sort_obj is not None:
         dom = getattr(sort_obj, "dom", []) or []
-        domain_sorts = [str(d) for d in dom]
+        domain_sorts = tuple(str(d) for d in dom)
         rng = getattr(sort_obj, "rng", None)
         range_sort = str(rng) if rng is not None else ""
 
@@ -336,7 +339,7 @@ def _symbol_to_ir(
     return SymbolIR(
         name=str(name),
         sort_str=sort_str,
-        domain_sorts=domain_sorts,
+        domain_sorts=tuple(domain_sorts),
         range_sort=range_sort,
         is_destructor=is_destructor,
         is_constructor=is_constructor,
@@ -352,8 +355,8 @@ def _symbol_to_ir(
 def _extract_actions(
     actions_dict: Dict[str, Any],
     public_actions: set,
-    export_names: Set[str],
-    import_names: Set[str],
+    export_names: FrozenSet[str],
+    import_names: FrozenSet[str],
 ) -> Dict[str, ActionIR]:
     """Walk ``mod.actions`` and produce ``ActionIR`` instances."""
     result: Dict[str, ActionIR] = {}
@@ -374,8 +377,8 @@ def _action_to_ir(
     name: str,
     action_obj: Any,
     public_actions: set,
-    export_names: Set[str],
-    import_names: Set[str],
+    export_names: FrozenSet[str],
+    import_names: FrozenSet[str],
 ) -> ActionIR:
     """Convert a single Ivy action object to ``ActionIR``."""
     formal_params = _stringify_params(
@@ -390,14 +393,14 @@ def _action_to_ir(
 
     return ActionIR(
         name=str(name),
-        formal_params=formal_params,
-        formal_returns=formal_returns,
+        formal_params=tuple(formal_params),
+        formal_returns=tuple(formal_returns),
         is_exported=is_exported,
         is_imported=is_imported,
     )
 
 
-def _stringify_params(params: list) -> List[str]:
+def _stringify_params(params: list) -> Tuple[str, ...]:
     """Convert a list of parameter objects to string representations."""
     result: List[str] = []
     for p in params:
@@ -411,7 +414,7 @@ def _stringify_params(params: list) -> List[str]:
                 result.append(str(p))
         except Exception:
             result.append(str(p))
-    return result
+    return tuple(result)
 
 
 # ---------------------------------------------------------------------------
@@ -421,9 +424,9 @@ def _stringify_params(params: list) -> List[str]:
 
 def _extract_mixins(
     mixins_dict: Dict[str, list],
-) -> Dict[str, List[MixinIR]]:
+) -> Dict[str, Tuple[MixinIR, ...]]:
     """Walk ``mod.mixins`` and produce ``MixinIR`` instances."""
-    result: Dict[str, List[MixinIR]] = {}
+    result: Dict[str, Tuple[MixinIR, ...]] = {}
 
     for mixee_name, mixin_list in mixins_dict.items():
         ir_list: List[MixinIR] = []
@@ -435,7 +438,7 @@ def _extract_mixins(
                     "Failed to extract mixin for %s", mixee_name, exc_info=True
                 )
         if ir_list:
-            result[str(mixee_name)] = ir_list
+            result[str(mixee_name)] = tuple(ir_list)
 
     return result
 
@@ -491,22 +494,22 @@ def _extract_isolates(
 
 def _isolate_to_ir(name: str, iso_obj: Any) -> IsolateIR:
     """Convert a single Ivy isolate object to ``IsolateIR``."""
-    verified: List[str] = []
-    present: List[str] = []
+    verified: Tuple[str, ...] = ()
+    present: Tuple[str, ...] = ()
 
     if hasattr(iso_obj, "verified") and callable(iso_obj.verified):
         try:
-            verified = [
+            verified = tuple(
                 str(getattr(v, "relname", v)) for v in iso_obj.verified()
-            ]
+            )
         except Exception:
             logger.debug("Failed to get verified for %s", name, exc_info=True)
 
     if hasattr(iso_obj, "present") and callable(iso_obj.present):
         try:
-            present = [
+            present = tuple(
                 str(getattr(p, "relname", p)) for p in iso_obj.present()
-            ]
+            )
         except Exception:
             logger.debug("Failed to get present for %s", name, exc_info=True)
 
@@ -524,7 +527,7 @@ def _isolate_to_ir(name: str, iso_obj: Any) -> IsolateIR:
 
 def _extract_labeled_formulas(
     formulas: list,
-) -> List[LabeledFormulaIR]:
+) -> Tuple[LabeledFormulaIR, ...]:
     """Convert a list of labeled formulas to ``LabeledFormulaIR``."""
     result: List[LabeledFormulaIR] = []
 
@@ -534,7 +537,7 @@ def _extract_labeled_formulas(
         except Exception:
             logger.debug("Failed to extract labeled formula", exc_info=True)
 
-    return result
+    return tuple(result)
 
 
 def _labeled_formula_to_ir(f: Any) -> LabeledFormulaIR:
@@ -617,7 +620,7 @@ def _build_mixer_kind_map(
 def _extract_all_requirements(
     actions_dict: Dict[str, Any],
     mixer_kind_map: Optional[Dict[str, str]] = None,
-) -> List[RequirementIR]:
+) -> Tuple[RequirementIR, ...]:
     """Walk all action bodies and extract requirement nodes.
 
     Uses *mixer_kind_map* to set the correct ``mixin_kind`` for
@@ -638,7 +641,7 @@ def _extract_all_requirements(
                 exc_info=True,
             )
 
-    return result
+    return tuple(result)
 
 
 def _walk_action_body(
@@ -662,7 +665,7 @@ def _walk_action_body(
                 action_name=action_name,
                 kind=kind,
                 formula_str=formula_str,
-                mixin_kind=mixin_kind,
+                mixin_kind=cast(_MixinKind, mixin_kind),
             )
         )
 
@@ -679,19 +682,19 @@ def _walk_action_body(
 
 def _extract_hierarchy(
     raw_hierarchy: Dict[str, Any],
-) -> Dict[str, Set[str]]:
-    """Convert module hierarchy to plain dict of sets."""
-    result: Dict[str, Set[str]] = {}
+) -> Dict[str, FrozenSet[str]]:
+    """Convert module hierarchy to plain dict of frozensets."""
+    result: Dict[str, FrozenSet[str]] = {}
     for key, value in raw_hierarchy.items():
         try:
-            result[str(key)] = {str(v) for v in value}
+            result[str(key)] = frozenset(str(v) for v in value)
         except Exception:
-            result[str(key)] = set()
+            result[str(key)] = frozenset()
     return result
 
 
-def _relname_set(items: list) -> Set[str]:
-    """Extract a set of .relname strings from a list of objects."""
+def _relname_set(items: list) -> FrozenSet[str]:
+    """Extract a frozenset of .relname strings from a list of objects."""
     result: Set[str] = set()
     for i, item in enumerate(items):
         try:
@@ -705,11 +708,11 @@ def _relname_set(items: list) -> Set[str]:
                 "Failed to extract relname from item %d (type=%s)",
                 i, type(item).__name__, exc_info=True,
             )
-    return result
+    return frozenset(result)
 
 
-def _relname_list(items: list) -> List[str]:
-    """Extract a list of .relname strings from a list of objects."""
+def _relname_list(items: list) -> Tuple[str, ...]:
+    """Extract a tuple of .relname strings from a list of objects."""
     result: List[str] = []
     for i, item in enumerate(items):
         try:
@@ -723,31 +726,31 @@ def _relname_list(items: list) -> List[str]:
                 "Failed to extract relname from item %d (type=%s)",
                 i, type(item).__name__, exc_info=True,
             )
-    return result
+    return tuple(result)
 
 
-def _safe_set_of_str(raw: Any) -> Set[str]:
-    """Convert any iterable to a set of strings."""
+def _safe_set_of_str(raw: Any) -> FrozenSet[str]:
+    """Convert any iterable to a frozenset of strings."""
     try:
-        return {str(item) for item in raw}
+        return frozenset(str(item) for item in raw)
     except Exception:
         logger.warning(
-            "Failed to convert iterable to set of strings (type=%s)",
+            "Failed to convert iterable to frozenset of strings (type=%s)",
             type(raw).__name__, exc_info=True,
         )
-        return set()
+        return frozenset()
 
 
-def _safe_list_of_str(raw: Any) -> List[str]:
-    """Convert any iterable to a list of strings."""
+def _safe_list_of_str(raw: Any) -> Tuple[str, ...]:
+    """Convert any iterable to a tuple of strings."""
     try:
-        return [str(item) for item in raw]
+        return tuple(str(item) for item in raw)
     except Exception:
         logger.warning(
-            "Failed to convert iterable to list of strings (type=%s)",
+            "Failed to convert iterable to tuple of strings (type=%s)",
             type(raw).__name__, exc_info=True,
         )
-        return []
+        return ()
 
 
 def _safe_dict_str_str(raw: Any) -> Dict[str, str]:
