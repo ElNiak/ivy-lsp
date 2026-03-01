@@ -584,6 +584,7 @@ class IvyLanguageServer(LanguageServer):
                 with open(test_file) as f:
                     source = f.read()
             except OSError:
+                logger.warning("Cannot read %s for bulk compilation; skipping", test_file)
                 with self._bulk_compile_lock:
                     completed[0] += 1
                     self._bulk_compile_completed = completed[0]

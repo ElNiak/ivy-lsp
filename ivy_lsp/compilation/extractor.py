@@ -34,6 +34,41 @@ _REQUIREMENT_TYPES: Dict[str, str] = {
     "AssertAction": "assert",
 }
 
+_requirement_types_verified = False
+
+
+def verify_requirement_types() -> bool:
+    """Verify that _REQUIREMENT_TYPES keys match actual Ivy AST classes.
+
+    Called once at first extraction.  Returns True if all classes exist,
+    False (with a warning) if any are missing.
+    """
+    global _requirement_types_verified
+    if _requirement_types_verified:
+        return True
+    _requirement_types_verified = True
+    try:
+        import ivy.ivy_actions as ia
+
+        missing = [
+            name for name in _REQUIREMENT_TYPES
+            if not hasattr(ia, name)
+        ]
+        if missing:
+            logger.warning(
+                "Ivy AST class mismatch -- missing: %s. "
+                "Requirement extraction may be incomplete.",
+                missing,
+            )
+            return False
+        return True
+    except ImportError:
+        logger.warning(
+            "Could not import ivy.ivy_actions -- "
+            "requirement type verification skipped"
+        )
+        return False
+
 
 def extract_compiled_module_ir(
     mod: Any,
@@ -63,6 +98,7 @@ def extract_compiled_module_ir(
         Always returns a well-typed result.
     """
     try:
+        verify_requirement_types()
         return _extract(mod, sig, source_file, duration)
     except Exception as exc:
         logger.warning(
@@ -119,7 +155,11 @@ def _extract(
     public_actions = _safe_set_of_str(public_actions_raw)
 
     # --- mixins ---
-    mixins = _extract_mixins(getattr(mod, "mixins", {}) or {})
+    raw_mixins = getattr(mod, "mixins", {}) or {}
+    mixins = _extract_mixins(raw_mixins)
+
+    # --- build mixer->kind mapping for requirement extraction ---
+    mixer_kind_map = _build_mixer_kind_map(raw_mixins)
 
     # --- isolates ---
     isolates = _extract_isolates(getattr(mod, "isolates", {}) or {})
@@ -138,8 +178,8 @@ def _extract(
         getattr(mod, "definitions", []) or []
     )
 
-    # --- requirements (from action bodies) ---
-    requirements = _extract_all_requirements(actions_dict)
+    # --- requirements (from action bodies, with mixin kind propagation) ---
+    requirements = _extract_all_requirements(actions_dict, mixer_kind_map)
 
     # --- structural metadata ---
     hierarchy = _extract_hierarchy(getattr(mod, "hierarchy", {}) or {})
@@ -284,6 +324,14 @@ def _symbol_to_ir(
     is_destructor = str(name) in destructor_sorts
     is_constructor = str(name) in constructor_sorts
     is_relation = range_sort.lower() == "bool"
+    if not is_relation and sort_obj is not None:
+        # Fallback: check Ivy's own is_relation() if available.
+        _is_rel = getattr(sort_obj, "is_relation", None)
+        if callable(_is_rel):
+            try:
+                is_relation = bool(_is_rel())
+            except Exception:
+                pass
 
     return SymbolIR(
         name=str(name),
@@ -408,8 +456,14 @@ def _mixin_to_ir(mixee_name: str, mixin_obj: Any) -> MixinIR:
     else:
         mixee = mixee_name
 
-    # Detect kind from mixer name.
-    kind = "after" if "after" in mixer.lower() else "before"
+    # Detect kind from the Ivy AST class type (MixinAfterDef, MixinBeforeDef).
+    type_name = type(mixin_obj).__name__
+    if "After" in type_name:
+        kind = "after"
+    elif "Before" in type_name:
+        kind = "before"
+    else:
+        kind = "around"
 
     return MixinIR(mixer=mixer, mixee=mixee, kind=kind)
 
@@ -514,19 +568,69 @@ def _labeled_formula_to_ir(f: Any) -> LabeledFormulaIR:
 
 
 # ---------------------------------------------------------------------------
+# Mixer-to-kind mapping (for mixin_kind propagation to requirements)
+# ---------------------------------------------------------------------------
+
+
+def _build_mixer_kind_map(
+    raw_mixins: Dict[str, list],
+) -> Dict[str, str]:
+    """Build a mapping from mixer action names to their mixin kind.
+
+    Walks ``mod.mixins`` and records each mixer's kind (before/after/around)
+    so that requirements extracted from mixer action bodies can be tagged
+    with the correct ``mixin_kind`` instead of ``"direct"``.
+    """
+    result: Dict[str, str] = {}
+    for _mixee_name, mixin_list in raw_mixins.items():
+        for mixin_obj in (mixin_list or []):
+            try:
+                args = getattr(mixin_obj, "args", []) or []
+                if args:
+                    mixer = str(getattr(args[0], "relname", args[0]))
+                else:
+                    continue
+
+                type_name = type(mixin_obj).__name__
+                if "After" in type_name:
+                    kind = "after"
+                elif "Before" in type_name:
+                    kind = "before"
+                else:
+                    kind = "around"
+
+                result[mixer] = kind
+            except Exception:
+                logger.debug(
+                    "Failed to map mixer kind for %s",
+                    _mixee_name,
+                    exc_info=True,
+                )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Requirement extraction (walking action bodies)
 # ---------------------------------------------------------------------------
 
 
 def _extract_all_requirements(
     actions_dict: Dict[str, Any],
+    mixer_kind_map: Optional[Dict[str, str]] = None,
 ) -> List[RequirementIR]:
-    """Walk all action bodies and extract requirement nodes."""
+    """Walk all action bodies and extract requirement nodes.
+
+    Uses *mixer_kind_map* to set the correct ``mixin_kind`` for
+    requirements found inside mixer action bodies.
+    """
+    if mixer_kind_map is None:
+        mixer_kind_map = {}
     result: List[RequirementIR] = []
 
     for action_name, action_obj in actions_dict.items():
         try:
-            _walk_action_body(str(action_name), action_obj, result)
+            mixin_kind = mixer_kind_map.get(str(action_name), "direct")
+            _walk_action_body(str(action_name), action_obj, result, mixin_kind)
         except Exception:
             logger.debug(
                 "Failed to walk action body for %s",
@@ -541,6 +645,7 @@ def _walk_action_body(
     action_name: str,
     node: Any,
     result: List[RequirementIR],
+    mixin_kind: str = "direct",
 ) -> None:
     """Recursively walk an action's AST body to find requirement nodes."""
     if node is None:
@@ -557,14 +662,14 @@ def _walk_action_body(
                 action_name=action_name,
                 kind=kind,
                 formula_str=formula_str,
-                mixin_kind="direct",
+                mixin_kind=mixin_kind,
             )
         )
 
     # Recurse into children via .args.
     args = getattr(node, "args", []) or []
     for child in args:
-        _walk_action_body(action_name, child, result)
+        _walk_action_body(action_name, child, result, mixin_kind)
 
 
 # ---------------------------------------------------------------------------
@@ -588,7 +693,7 @@ def _extract_hierarchy(
 def _relname_set(items: list) -> Set[str]:
     """Extract a set of .relname strings from a list of objects."""
     result: Set[str] = set()
-    for item in items:
+    for i, item in enumerate(items):
         try:
             name = getattr(item, "relname", None)
             if name is not None:
@@ -596,14 +701,17 @@ def _relname_set(items: list) -> Set[str]:
             else:
                 result.add(str(item))
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract relname from item %d (type=%s)",
+                i, type(item).__name__, exc_info=True,
+            )
     return result
 
 
 def _relname_list(items: list) -> List[str]:
     """Extract a list of .relname strings from a list of objects."""
     result: List[str] = []
-    for item in items:
+    for i, item in enumerate(items):
         try:
             name = getattr(item, "relname", None)
             if name is not None:
@@ -611,7 +719,10 @@ def _relname_list(items: list) -> List[str]:
             else:
                 result.append(str(item))
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract relname from item %d (type=%s)",
+                i, type(item).__name__, exc_info=True,
+            )
     return result
 
 
@@ -620,6 +731,10 @@ def _safe_set_of_str(raw: Any) -> Set[str]:
     try:
         return {str(item) for item in raw}
     except Exception:
+        logger.warning(
+            "Failed to convert iterable to set of strings (type=%s)",
+            type(raw).__name__, exc_info=True,
+        )
         return set()
 
 
@@ -628,6 +743,10 @@ def _safe_list_of_str(raw: Any) -> List[str]:
     try:
         return [str(item) for item in raw]
     except Exception:
+        logger.warning(
+            "Failed to convert iterable to list of strings (type=%s)",
+            type(raw).__name__, exc_info=True,
+        )
         return []
 
 
@@ -636,6 +755,10 @@ def _safe_dict_str_str(raw: Any) -> Dict[str, str]:
     try:
         return {str(k): str(v) for k, v in raw.items()}
     except Exception:
+        logger.warning(
+            "Failed to convert mapping to dict (type=%s)",
+            type(raw).__name__, exc_info=True,
+        )
         return {}
 
 

@@ -226,6 +226,11 @@ class CompilerAdapter:
                     module_snap = ModuleSnapshot.from_ir(ir)
                     sig_snap = module_snap.signature
                 except Exception:
+                    logger.warning(
+                        "Snapshot conversion failed for successful compilation of %s",
+                        filename,
+                        exc_info=True,
+                    )
                     module_snap = None
                     sig_snap = None
                 result = CompileResult(
