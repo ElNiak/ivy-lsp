@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from collections import deque
@@ -27,15 +28,19 @@ class OperationRecord:
 
 
 class OperationTracker:
-    """In-memory ring buffer of operations with active tracking."""
+    """In-memory ring buffer of operations with active tracking.
+
+    All public methods are thread-safe (guarded by an internal lock).
+    """
 
     def __init__(self, max_history: int = 20) -> None:
         self._active: Dict[str, OperationRecord] = {}
         self._history: deque[OperationRecord] = deque(maxlen=max_history)
+        self._lock = threading.Lock()
 
     def record_start(self, op_type: str, file: Optional[str] = None) -> str:
         op_id = uuid.uuid4().hex[:12]
-        self._active[op_id] = OperationRecord(
+        record = OperationRecord(
             type=op_type,
             file=file,
             start_time=time.time(),
@@ -43,6 +48,8 @@ class OperationTracker:
             success=None,
             message="",
         )
+        with self._lock:
+            self._active[op_id] = record
         return op_id
 
     def record_end(
@@ -52,19 +59,23 @@ class OperationTracker:
         message: str,
         duration: float,
     ) -> None:
-        record = self._active.pop(op_id, None)
+        with self._lock:
+            record = self._active.pop(op_id, None)
         if record is None:
             return
         record.success = success
         record.message = message
         record.duration = duration
-        self._history.appendleft(record)
+        with self._lock:
+            self._history.appendleft(record)
 
     def get_active(self) -> List[OperationRecord]:
-        return list(self._active.values())
+        with self._lock:
+            return list(self._active.values())
 
     def get_history(self, limit: int = 20) -> List[OperationRecord]:
-        return list(self._history)[:limit]
+        with self._lock:
+            return list(self._history)[:limit]
 
 
 class ServerStateTracker:
