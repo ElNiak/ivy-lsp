@@ -6,6 +6,7 @@ All handlers follow the pure-function pattern from monitoring.py.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections import defaultdict
@@ -22,6 +23,33 @@ from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapt
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
+
+
+# ---------------------------------------------------------------------------
+# Response size cap
+# ---------------------------------------------------------------------------
+
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+def _cap_response(response: dict, list_key: str) -> dict:
+    """Truncate the main list in a response if serialized size exceeds MAX_RESPONSE_BYTES."""
+    encoded = json.dumps(response)
+    if len(encoded) <= MAX_RESPONSE_BYTES:
+        return response
+    items = response.get(list_key, [])
+    lo, hi = 0, len(items)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        response[list_key] = items[:mid]
+        if len(json.dumps(response)) <= MAX_RESPONSE_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+    response[list_key] = items[:lo]
+    response["truncated"] = True
+    response["totalCount"] = len(items)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +290,7 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
             "handle_action_requirements: total %.1fms (snapshot %.1fms)",
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
-        return result
+        return _cap_response(result, "actions")
     except Exception as exc:
         logger.exception("handle_action_requirements failed")
         _not_ready["error"] = f"{type(exc).__name__}: {exc}"
@@ -368,7 +396,7 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
             "handle_model_summary_table: total %.1fms (snapshot %.1fms)",
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
-        return result
+        return _cap_response(result, "rows")
     except Exception as exc:
         logger.exception("handle_model_summary_table failed")
         _not_ready["error"] = f"{type(exc).__name__}: {exc}"
@@ -500,6 +528,9 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
             "handle_coverage_gaps: total %.1fms (snapshot %.1fms)",
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
+        result = _cap_response(result, "unguardedStateVars")
+        result = _cap_response(result, "uncoveredRfcRequirements")
+        result = _cap_response(result, "orphanRequirements")
         return result
     except Exception as exc:
         logger.exception("handle_coverage_gaps failed")
@@ -631,7 +662,7 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
             "handle_action_dependency_graph: total %.1fms (snapshot %.1fms)",
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
-        return result
+        return _cap_response(result, "nodes")
     except Exception as exc:
         logger.exception("handle_action_dependency_graph failed")
         _not_ready["error"] = f"{type(exc).__name__}: {exc}"
@@ -762,7 +793,7 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
             "handle_state_machine_view: total %.1fms (snapshot %.1fms)",
             (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
         )
-        return result
+        return _cap_response(result, "nodes")
     except Exception as exc:
         logger.exception("handle_state_machine_view failed")
         _not_ready["error"] = f"{type(exc).__name__}: {exc}"
@@ -827,13 +858,14 @@ def handle_layered_overview(server: Any, params: dict) -> dict:
 
         layers = list(by_group.values())
 
-        return {
+        result = {
             "layers": layers,
             "scopeInfo": {
                 "testFile": scope_info.get("testFile"),
                 "scoped": scope_info.get("scoped", False),
             },
         }
+        return _cap_response(result, "layers")
     except Exception as exc:
         logger.exception("handle_layered_overview failed")
         _not_ready["error"] = f"{type(exc).__name__}: {exc}"
