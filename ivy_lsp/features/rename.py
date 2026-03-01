@@ -92,7 +92,7 @@ def register(server) -> None:
     """
 
     @server.feature(lsp.TEXT_DOCUMENT_RENAME)
-    def rename(params: lsp.RenameParams) -> Optional[lsp.WorkspaceEdit]:
+    async def rename(params: lsp.RenameParams) -> Optional[lsp.WorkspaceEdit]:
         """Handle textDocument/rename requests."""
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)

@@ -256,7 +256,7 @@ class TestCapabilities:
         register(server)
 
         assert "ivy/capabilities" in registered
-        result = registered["ivy/capabilities"](None)
+        result = asyncio.run(registered["ivy/capabilities"](None))
         assert "fullMode" in result
         assert "ivyCheckAvailable" in result
         assert "ivycAvailable" in result

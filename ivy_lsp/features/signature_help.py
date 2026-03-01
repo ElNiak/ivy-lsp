@@ -139,7 +139,7 @@ def register(server) -> None:
             trigger_characters=["(", ","],
         ),
     )
-    def signature_help(
+    async def signature_help(
         params: lsp.SignatureHelpParams,
     ) -> Optional[lsp.SignatureHelp]:
         uri = params.text_document.uri

@@ -73,7 +73,7 @@ def register(server) -> None:
     """
 
     @server.feature(lsp.TEXT_DOCUMENT_REFERENCES)
-    def references(
+    async def references(
         params: lsp.ReferenceParams,
     ) -> Optional[List[lsp.Location]]:
         """Handle textDocument/references requests."""

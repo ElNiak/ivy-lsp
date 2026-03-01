@@ -116,7 +116,7 @@ def register(server) -> None:
     """
 
     @server.feature(lsp.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
-    def document_symbol(
+    async def document_symbol(
         params: lsp.DocumentSymbolParams,
     ) -> List[lsp.DocumentSymbol]:
         """Handle textDocument/documentSymbol requests."""

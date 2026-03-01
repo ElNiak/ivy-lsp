@@ -979,31 +979,31 @@ def register(server: Any) -> None:
     """Register visualization request handlers on the server."""
 
     @server.feature("ivy/actionRequirements")
-    def on_action_requirements(params: Any = None) -> Dict[str, Any]:
+    async def on_action_requirements(params: Any = None) -> Dict[str, Any]:
         return handle_action_requirements(
             server, params if isinstance(params, dict) else {}
         )
 
     @server.feature("ivy/modelSummaryTable")
-    def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
+    async def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
         return handle_model_summary_table(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/coverageGaps")
-    def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
+    async def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
         return handle_coverage_gaps(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/actionDependencyGraph")
-    def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
+    async def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
         return handle_action_dependency_graph(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/stateMachineView")
-    def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
+    async def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
         return handle_state_machine_view(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/layeredOverview")
-    def on_layered_overview(params: Any = None) -> Dict[str, Any]:
+    async def on_layered_overview(params: Any = None) -> Dict[str, Any]:
         return handle_layered_overview(server, params if isinstance(params, dict) else {})
 
     @server.feature("ivy/smartSuggestions")
-    def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
+    async def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
         return handle_smart_suggestions(server, params if isinstance(params, dict) else {})

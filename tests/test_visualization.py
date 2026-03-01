@@ -1,5 +1,6 @@
 """Tests for visualization endpoint handlers."""
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -1161,7 +1162,16 @@ class _FakeFeatureServer:
 
     def feature(self, method_name):
         def decorator(fn):
-            self._handlers[method_name] = fn
+            if asyncio.iscoroutinefunction(fn):
+                import functools
+
+                @functools.wraps(fn)
+                def _sync(*args, **kwargs):
+                    return asyncio.run(fn(*args, **kwargs))
+
+                self._handlers[method_name] = _sync
+            else:
+                self._handlers[method_name] = fn
             return fn
 
         return decorator

@@ -622,7 +622,7 @@ def register(server: Any) -> None:
             raise
 
     @server.feature("ivy/capabilities")
-    def ivy_capabilities(params: Any = None) -> Dict[str, Any]:
+    async def ivy_capabilities(params: Any = None) -> Dict[str, Any]:
         return {
             "fullMode": getattr(server, "_full_mode", False),
             "ivyCheckAvailable": _find_tool("ivy_check") is not None,
@@ -662,7 +662,7 @@ def register(server: Any) -> None:
                 )
 
     @server.feature("ivy/setActiveTest")
-    def ivy_set_active_test(params: Any = None) -> Dict[str, Any]:
+    async def ivy_set_active_test(params: Any = None) -> Dict[str, Any]:
         """Set the active test scope for diagnostics and code lenses.
 
         On success, re-publishes diagnostics for all open documents
@@ -700,7 +700,7 @@ def register(server: Any) -> None:
         }
 
     @server.feature("ivy/listTests")
-    def ivy_list_tests(params: Any = None) -> Dict[str, Any]:
+    async def ivy_list_tests(params: Any = None) -> Dict[str, Any]:
         """List all discovered test scopes with metadata."""
         try:
             graph = server._indexer._requirement_graph
@@ -775,7 +775,7 @@ def register(server: Any) -> None:
             raise
 
     @server.feature("ivy/activeDocumentChanged")
-    def ivy_active_document_changed(params: Any = None) -> None:
+    async def ivy_active_document_changed(params: Any = None) -> None:
         """Auto-detect active test when user switches documents.
 
         If the newly focused document is a registered test file,
@@ -808,7 +808,7 @@ def register(server: Any) -> None:
         _refresh_open_diagnostics(server)
 
     @server.feature("ivy/compiledModel")
-    def ivy_compiled_model(params: Any = None) -> Dict[str, Any]:
+    async def ivy_compiled_model(params: Any = None) -> Dict[str, Any]:
         """Return the cached CompiledModuleIR for a file as JSON."""
         if params is None:
             return {"success": False, "error": "No params provided"}

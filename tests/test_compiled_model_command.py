@@ -1,6 +1,9 @@
 """Tests for the ivy/compiledModel custom command."""
 from __future__ import annotations
 
+import asyncio
+import functools
+
 from ivy_lsp.compilation.ir import (
     ActionIR,
     CompiledModuleIR,
@@ -44,7 +47,13 @@ class FakeServer:
 
     def feature(self, name):
         def decorator(fn):
-            self._handlers[name] = fn
+            if asyncio.iscoroutinefunction(fn):
+                @functools.wraps(fn)
+                def _sync(*args, **kwargs):
+                    return asyncio.run(fn(*args, **kwargs))
+                self._handlers[name] = _sync
+            else:
+                self._handlers[name] = fn
             return fn
 
         return decorator

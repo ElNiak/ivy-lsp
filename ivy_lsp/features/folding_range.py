@@ -93,7 +93,7 @@ def register(server) -> None:
     """Register the ``textDocument/foldingRange`` feature handler."""
 
     @server.feature(lsp.TEXT_DOCUMENT_FOLDING_RANGE)
-    def folding_range(
+    async def folding_range(
         params: lsp.FoldingRangeParams,
     ) -> List[lsp.FoldingRange]:
         uri = params.text_document.uri

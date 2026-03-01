@@ -479,49 +479,49 @@ def register(server: Any) -> None:
     """Register monitoring request handlers on the server."""
 
     @server.feature("ivy/serverStatus")
-    def on_server_status(params: Any = None) -> Dict[str, Any]:
+    async def on_server_status(params: Any = None) -> Dict[str, Any]:
         return handle_server_status(server)
 
     @server.feature("ivy/indexerStats")
-    def on_indexer_stats(params: Any = None) -> Dict[str, Any]:
+    async def on_indexer_stats(params: Any = None) -> Dict[str, Any]:
         return handle_indexer_stats(server)
 
     @server.feature("ivy/operationHistory")
-    def on_operation_history(params: Any = None) -> Dict[str, Any]:
+    async def on_operation_history(params: Any = None) -> Dict[str, Any]:
         return handle_operation_history(server)
 
     @server.feature("ivy/includeGraph")
-    def on_include_graph(params: Any = None) -> Dict[str, Any]:
+    async def on_include_graph(params: Any = None) -> Dict[str, Any]:
         return handle_include_graph(server)
 
     @server.feature("ivy/reindex")
-    def on_reindex(params: Any = None) -> Dict[str, Any]:
+    async def on_reindex(params: Any = None) -> Dict[str, Any]:
         return handle_reindex(server)
 
     @server.feature("ivy/clearCache")
-    def on_clear_cache(params: Any = None) -> Dict[str, Any]:
+    async def on_clear_cache(params: Any = None) -> Dict[str, Any]:
         return handle_clear_cache(server)
 
     @server.feature("ivy/featureStatus")
-    def on_feature_status(params: Any = None) -> Dict[str, Any]:
+    async def on_feature_status(params: Any = None) -> Dict[str, Any]:
         return handle_feature_status(server)
 
     @server.feature("ivy/deepIndexProgress")
-    def on_deep_index_progress(params: Any = None) -> Dict[str, Any]:
+    async def on_deep_index_progress(params: Any = None) -> Dict[str, Any]:
         return handle_deep_index_progress(
             server, params if isinstance(params, dict) else None
         )
 
     @server.feature("ivy/compilationStatus")
-    def on_compilation_status(params: Any = None) -> Dict[str, Any]:
+    async def on_compilation_status(params: Any = None) -> Dict[str, Any]:
         return handle_compilation_progress(server)
 
     @server.feature("ivy/analysisPipelineDetail")
-    def on_analysis_pipeline_detail(params: Any = None) -> Dict[str, Any]:
+    async def on_analysis_pipeline_detail(params: Any = None) -> Dict[str, Any]:
         return handle_analysis_pipeline_detail(
             server, params if isinstance(params, dict) else None
         )
 
     @server.feature("ivy/testFeatureMatrix")
-    def on_test_feature_matrix(params: Any = None) -> Dict[str, Any]:
+    async def on_test_feature_matrix(params: Any = None) -> Dict[str, Any]:
         return handle_test_feature_matrix(server)

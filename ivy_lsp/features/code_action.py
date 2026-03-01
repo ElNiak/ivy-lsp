@@ -93,7 +93,7 @@ def register(server) -> None:
             code_action_kinds=[lsp.CodeActionKind.QuickFix],
         ),
     )
-    def code_action(
+    async def code_action(
         params: lsp.CodeActionParams,
     ) -> List[lsp.CodeAction]:
         uri = params.text_document.uri

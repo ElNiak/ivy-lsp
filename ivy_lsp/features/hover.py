@@ -184,7 +184,7 @@ def register(server) -> None:
     """Register the textDocument/hover feature handler."""
 
     @server.feature(lsp.TEXT_DOCUMENT_HOVER)
-    def hover(params: lsp.HoverParams) -> Optional[lsp.Hover]:
+    async def hover(params: lsp.HoverParams) -> Optional[lsp.Hover]:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
         if not hasattr(server, "_indexer") or server._indexer is None:

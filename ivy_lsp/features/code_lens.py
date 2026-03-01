@@ -425,7 +425,7 @@ def register(server) -> None:
     """Register the code lens handler."""
 
     @server.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
-    def code_lens(params: lsp.CodeLensParams) -> List[lsp.CodeLens]:
+    async def code_lens(params: lsp.CodeLensParams) -> List[lsp.CodeLens]:
         if not getattr(server, "_code_lens_enabled", True):
             return []
 

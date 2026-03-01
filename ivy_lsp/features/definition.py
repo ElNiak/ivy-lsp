@@ -69,7 +69,7 @@ def register(server) -> None:
     """
 
     @server.feature(lsp.TEXT_DOCUMENT_DEFINITION)
-    def definition(
+    async def definition(
         params: lsp.DefinitionParams,
     ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
         """Handle textDocument/definition requests."""

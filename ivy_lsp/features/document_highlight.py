@@ -60,7 +60,7 @@ def register(server) -> None:
     """Register the ``textDocument/documentHighlight`` feature handler."""
 
     @server.feature(lsp.TEXT_DOCUMENT_DOCUMENT_HIGHLIGHT)
-    def document_highlight(
+    async def document_highlight(
         params: lsp.DocumentHighlightParams,
     ) -> Optional[List[lsp.DocumentHighlight]]:
         uri = params.text_document.uri

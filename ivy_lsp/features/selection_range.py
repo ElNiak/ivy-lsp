@@ -102,7 +102,7 @@ def register(server) -> None:
     """Register the ``textDocument/selectionRange`` feature handler."""
 
     @server.feature(lsp.TEXT_DOCUMENT_SELECTION_RANGE)
-    def selection_range(
+    async def selection_range(
         params: lsp.SelectionRangeParams,
     ) -> Optional[List[lsp.SelectionRange]]:
         uri = params.text_document.uri

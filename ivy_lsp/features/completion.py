@@ -401,7 +401,7 @@ def register(server) -> None:
         lsp.TEXT_DOCUMENT_COMPLETION,
         lsp.CompletionOptions(trigger_characters=[".", " "]),
     )
-    def completion(
+    async def completion(
         params: lsp.CompletionParams,
     ) -> Optional[List[lsp.CompletionItem]]:
         uri = params.text_document.uri

@@ -125,7 +125,7 @@ def register(server) -> None:
     """
 
     @server.feature(lsp.WORKSPACE_SYMBOL)
-    def workspace_symbol(
+    async def workspace_symbol(
         params: lsp.WorkspaceSymbolParams,
     ) -> List[lsp.WorkspaceSymbol]:
         if not hasattr(server, "_indexer") or server._indexer is None:
