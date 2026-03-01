@@ -43,7 +43,13 @@ def _patch_pygls_cancelled_future() -> None:
     JsonRPCProtocol._handle_response = _safe_handle_response  # type: ignore[assignment]
 
 
-_patch_pygls_cancelled_future()
+try:
+    import pygls as _pygls_mod
+
+    if getattr(_pygls_mod, "__version__", "").startswith("2.0."):
+        _patch_pygls_cancelled_future()
+except ImportError:
+    pass
 
 
 class _LspLogHandler(logging.Handler):

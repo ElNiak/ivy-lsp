@@ -532,8 +532,8 @@ def register(server: Any) -> None:
                 _track_end(server, op_id, result)
                 return result
             except Exception:
-                logger.debug(
-                    "Docker executor failed; falling back to native",
+                logger.warning(
+                    "Docker executor failed; falling back to native subprocess",
                     exc_info=True,
                 )
 
@@ -657,7 +657,7 @@ def register(server: Any) -> None:
                     lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
                 )
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Failed to refresh diagnostics for %s", uri, exc_info=True
                 )
 

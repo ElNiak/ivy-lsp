@@ -397,7 +397,7 @@ class WorkspaceIndexer:
             try:
                 result = self._parser.parse(source, test_file)
             except Exception:
-                logger.debug(
+                logger.info(
                     "Deep index parse failed for %s",
                     test_file,
                     exc_info=True,

@@ -55,7 +55,7 @@ def compiler_worker(
         ir = extract_compiled_module_ir(im.module, il.sig, filename, duration)
         result_conn.send(ir)
     except Exception as exc:
-        logger.warning("Compilation failed for %s: %s", filename, exc)
+        logger.warning("Compilation failed for %s: %s", filename, exc, exc_info=True)
         duration = time.monotonic() - start
         ir = CompiledModuleIR.empty(
             filename, errors=[str(exc)], duration=duration
