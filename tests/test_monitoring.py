@@ -66,6 +66,22 @@ class TestServerStatus:
         assert len(result["activeOperations"]) == 1
         assert result["activeOperations"][0]["type"] == "verify"
 
+    def test_initializing_true_when_server_is_initializing(self, mock_server):
+        mock_server._initializing = True
+        result = handle_server_status(mock_server)
+        assert result["initializing"] is True
+
+    def test_initializing_false_when_server_is_ready(self, mock_server):
+        mock_server._initializing = False
+        result = handle_server_status(mock_server)
+        assert result["initializing"] is False
+
+    def test_initializing_false_when_attribute_missing(self, mock_server):
+        # Simulate older server without the _initializing attribute
+        del mock_server._initializing
+        result = handle_server_status(mock_server)
+        assert result["initializing"] is False
+
 
 class TestIndexerStats:
     def test_returns_stats(self, mock_server):

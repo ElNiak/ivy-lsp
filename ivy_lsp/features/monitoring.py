@@ -33,9 +33,11 @@ def _get_tool_cache() -> Dict[str, bool]:
 
 def handle_server_status(server: Any) -> Dict[str, Any]:
     mode = "full" if server._full_mode else "light"
-    return server.state_tracker.to_status_dict(
+    result = server.state_tracker.to_status_dict(
         mode=mode, version=__version__, tools=_get_tool_cache()
     )
+    result["initializing"] = getattr(server, "_initializing", False)
+    return result
 
 
 def handle_indexer_stats(server: Any) -> Dict[str, Any]:

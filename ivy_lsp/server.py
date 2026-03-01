@@ -104,6 +104,10 @@ class _LspLogHandler(logging.Handler):
                 min_interval = self._CAT_MIN_INTERVAL.get(
                     cat, self._DEFAULT_MIN_INTERVAL
                 )
+                # Throttle more aggressively during initialization to
+                # keep the stdio pipe clear for request/response traffic.
+                if getattr(self._server, "_initializing", False):
+                    min_interval = max(min_interval, 1.0)
                 if (now - self._last_emit) < min_interval:
                     cat_key = cat or "_untagged"
                     self._drop_counts[cat_key] = (
@@ -165,6 +169,7 @@ class IvyLanguageServer(LanguageServer):
         self._bulk_compile_completed = 0
         self._code_lens_enabled = True
         self._rfc_coverage_enabled = True
+        self._initializing = True
 
         from ivy_lsp.features import (
             code_action,
@@ -224,7 +229,9 @@ class IvyLanguageServer(LanguageServer):
             )
 
         @self.feature(lsp.INITIALIZED)
+        @self.thread()
         def on_initialized(params: lsp.InitializedParams) -> None:
+            init_start = time.time()
             try:
                 slog.info(
                     "Server initialized",
@@ -259,6 +266,9 @@ class IvyLanguageServer(LanguageServer):
                         "Check the Ivy Language Server output for details.",
                     )
                 )
+            finally:
+                self._initializing = False
+                self._send_server_ready_notification(init_start)
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
@@ -304,6 +314,29 @@ class IvyLanguageServer(LanguageServer):
         except Exception:
             logger.warning(
                 "Failed to send ivy/modelReady notification", exc_info=True
+            )
+
+    def _send_server_ready_notification(self, init_start: float) -> None:
+        """Send ``ivy/serverReady`` notification after initialization completes."""
+        try:
+            mode = "full" if self._full_mode else "light"
+            init_duration = round(time.time() - init_start, 3)
+            self.protocol.notify(
+                "ivy/serverReady",
+                {"mode": mode, "indexingDuration": init_duration},
+            )
+            slog.info(
+                "Sent ivy/serverReady: mode=%s, duration=%.3fs",
+                mode,
+                init_duration,
+                extra={"event": LogEvent(
+                    LogCategory.MILESTONE, "server_ready",
+                    {"mode": mode, "duration_s": init_duration},
+                )},
+            )
+        except Exception:
+            logger.warning(
+                "Failed to send ivy/serverReady notification", exc_info=True
             )
 
     def _make_progress_callback(
