@@ -55,13 +55,8 @@ except ImportError:
 class _LspLogHandler(logging.Handler):
     """Bridge Python logging -> LSP window/logMessage notifications.
 
-    Rate-limited with category-aware priority to prevent flooding the
-    stdio pipe, which can cause write-side blocking and contribute to
-    thread pool starvation.
-
-    Priority levels (lower = higher priority):
-      WARNING+ = 0 (always immediate)
-      MIL = 1, DIA = 2, PER = 3, ACT = 4, untagged = 5
+    Rate-limited to prevent flooding the stdio pipe, which can cause
+    write-side blocking and contribute to thread pool starvation.
     """
 
     _LEVEL_MAP = {
@@ -601,7 +596,7 @@ class IvyLanguageServer(LanguageServer):
             )
 
     def _install_lsp_log_handler(self) -> None:
-        """Replace stderr handler with LSP notification handler."""
+        """Add LSP notification handler and demote stderr to WARNING-only."""
         root = logging.getLogger()
         handler = _LspLogHandler(self)
         handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))

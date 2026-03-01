@@ -1,6 +1,6 @@
 """Module IR extractor for subprocess-based compilation.
 
-Runs INSIDE the forked subprocess after ``ivy_from_string()`` completes.
+Runs INSIDE the spawned subprocess after ``ivy_from_string()`` completes.
 Walks the populated Module and Sig objects, converting every Z3-dependent
 object to plain-Python IR dataclasses that survive ``pickle`` round-trips.
 

@@ -2,8 +2,8 @@
 
 Thread-safe for concurrent ``compile_async`` calls (semaphore-guarded).
 Cache reads (``get_cached``) are protected by an internal lock.
-Used by AnalysisPipeline for Tier 3 analysis and by custom commands
-(ivy/compile, ivy/verify) for in-process module data.
+Used by AnalysisPipeline for Tier 3 analysis and by bulk compilation
+for background model enrichment.
 """
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ class CompilerManager:
     def invalidate_dependents(
         self, filepath: str, include_graph: Any
     ) -> None:
-        """Invalidate *filepath* and all files that transitively include it."""
+        """Invalidate *filepath* and all files that directly include it."""
         self.invalidate(filepath)
         if hasattr(include_graph, "get_included_by"):
             for includer in include_graph.get_included_by(filepath):

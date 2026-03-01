@@ -1,6 +1,6 @@
 """Subprocess worker for isolated Ivy compilation.
 
-Launched via ``multiprocessing.Process(target=compiler_worker, ...)``.
+Launched indirectly via ``compiler_manager._worker_entry()`` trampoline.
 Runs the full Ivy compiler pipeline in an isolated process, extracts
 a :class:`CompiledModuleIR`, and sends it back via a
 ``multiprocessing.Connection`` pipe.
