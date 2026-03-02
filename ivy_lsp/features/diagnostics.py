@@ -635,3 +635,15 @@ def register(server) -> None:
 
         loop = asyncio.get_running_loop()
         loop.create_task(_deep())
+
+    @server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
+    def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
+        uri = params.text_document.uri
+        # Cancel any pending debounce task for this URI
+        old_task = _debounce_tasks.pop(uri, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+        # Clear diagnostics for the closed document
+        server.text_document_publish_diagnostics(
+            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=[])
+        )
