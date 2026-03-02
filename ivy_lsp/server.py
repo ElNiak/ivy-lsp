@@ -44,28 +44,35 @@ def _patch_pygls_cancelled_future() -> None:
 
 
 class _ClosedPipeGuardWriter:
-    """Proxy that converts ``ValueError("write to closed file")`` to ``BrokenPipeError``.
+    """Proxy that converts ``ValueError("write to closed file")`` to ``BrokenPipeError``
+    on the first failure, then silently swallows all subsequent writes.
 
     pygls 2.0.1's ``_send_data()`` catches ``BrokenPipeError`` (re-raises for
     clean shutdown) but lets ``ValueError`` from a closed ``BufferedWriter``
     fall through to a generic ``except Exception`` handler that cascades via
     ``logger.exception`` + ``_report_server_error``.
 
-    By wrapping the writer, the conversion happens *before* pygls's exception
-    handlers, so the ``except BrokenPipeError`` path triggers and the server
-    shuts down cleanly.
+    After the first pipe failure, callers (``_setup_indexer``, ``on_initialized``,
+    etc.) catch the exception and attempt to send error notifications — which also
+    fail, creating a cascade.  By swallowing writes after the first failure, the
+    cascade is stopped at the source while still allowing the initial
+    ``BrokenPipeError`` to propagate for clean shutdown.
     """
 
-    __slots__ = ("_inner",)
+    __slots__ = ("_inner", "_dead")
 
     def __init__(self, inner):
         self._inner = inner
+        self._dead = False
 
     def write(self, data):
+        if self._dead:
+            return len(data)  # Silently swallow — pipe is already gone
         try:
             return self._inner.write(data)
-        except ValueError as exc:
-            if "closed" in str(exc).lower():
+        except (ValueError, BrokenPipeError, OSError) as exc:
+            self._dead = True
+            if isinstance(exc, ValueError) and "closed" in str(exc).lower():
                 raise BrokenPipeError(str(exc)) from exc
             raise
 
