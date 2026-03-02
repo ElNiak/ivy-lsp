@@ -119,15 +119,18 @@ class ServerStateTracker:
         version: str,
         tools: Dict[str, bool],
     ) -> Dict:
+        # Snapshot active ops first (acquires OperationTracker._lock only)
+        active_records = self.operation_tracker.get_active()
+        active_ops = [
+            {
+                "type": op.type,
+                "file": op.file,
+                "elapsed": round(time.time() - op.start_time, 1),
+            }
+            for op in active_records
+        ]
+        # Then read own state (acquires ServerStateTracker._lock only)
         with self._lock:
-            active_ops = [
-                {
-                    "type": op.type,
-                    "file": op.file,
-                    "elapsed": round(time.time() - op.start_time, 1),
-                }
-                for op in self.operation_tracker.get_active()
-            ]
             return {
                 "mode": mode,
                 "version": version,

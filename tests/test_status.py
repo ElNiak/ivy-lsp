@@ -141,9 +141,17 @@ class TestServerStateTracker:
 
 
 class TestStatusDictAtomicity:
-    """H3: active_ops must be read under the same lock as other state."""
+    """H4: get_active() must be called before acquiring self._lock to avoid nested locking."""
 
-    def test_active_ops_computed_under_lock(self):
+    def test_active_ops_computed_before_lock(self):
+        """get_active() must NOT be called while self._lock is held.
+
+        Acquiring OperationTracker._lock inside ServerStateTracker._lock would
+        create a nested locking order that risks deadlock if any code path ever
+        acquires the same two locks in the reverse order.  The fix snapshots
+        active operations first (OperationTracker._lock only), then reads own
+        state (ServerStateTracker._lock only), keeping the two locks disjoint.
+        """
         tracker = ServerStateTracker()
         lock_was_held = []
 
@@ -156,6 +164,7 @@ class TestStatusDictAtomicity:
         tracker.operation_tracker.get_active = tracked_get_active
         tracker.to_status_dict("full", "0.8.0", {})
 
-        assert lock_was_held == [True], (
-            "get_active() must be called while self._lock is held"
+        assert lock_was_held == [False], (
+            "get_active() must be called before self._lock is acquired to "
+            "eliminate nested locking (H4)"
         )
