@@ -666,7 +666,10 @@ class AnalysisPipeline:
                             completed_count[0], total, test_file
                         )
                     except Exception:
-                        pass
+                        logger.debug(
+                            "Bulk T3 progress callback failed in skip path",
+                            exc_info=True,
+                        )
                 continue
 
             self._compiler_manager.compile_async(

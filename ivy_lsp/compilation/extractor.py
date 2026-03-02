@@ -334,7 +334,9 @@ def _symbol_to_ir(
             try:
                 is_relation = bool(_is_rel())
             except Exception:
-                pass
+                logger.debug(
+                    "is_relation() check failed for %s", name, exc_info=True
+                )
 
     return SymbolIR(
         name=str(name),
@@ -689,6 +691,9 @@ def _extract_hierarchy(
         try:
             result[str(key)] = frozenset(str(v) for v in value)
         except Exception:
+            logger.debug(
+                "Hierarchy entry %s conversion failed", key, exc_info=True
+            )
             result[str(key)] = frozenset()
     return result
 
