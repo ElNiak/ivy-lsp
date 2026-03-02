@@ -116,6 +116,7 @@ def start_mcp(
     )
 
     _model_lock = asyncio.Lock()
+    _model_build_attempted = False
 
     @mcp.tool()
     async def ivy_verify(
@@ -391,20 +392,36 @@ def start_mcp(
 
     async def _get_model():
         """Return the semantic model, building one if needed."""
-        nonlocal semantic_model
+        nonlocal semantic_model, _model_build_attempted
+        # Fast path: model already built
         if semantic_model is not None:
             return semantic_model
+        # Fast path: previous build failed (cached failure)
+        if _model_build_attempted:
+            return None
 
         async with _model_lock:
             # Double-check after acquiring lock
             if semantic_model is not None:
                 return semantic_model
+            if _model_build_attempted:
+                return None
 
-            return await asyncio.to_thread(_build_model)
+            model = await asyncio.to_thread(_build_model)
+            if model is not None:
+                semantic_model = model
+            else:
+                _model_build_attempted = True
+            return model
 
     def _build_model():
-        """Build a lightweight semantic model from workspace files."""
-        nonlocal semantic_model
+        """Build a lightweight semantic model from workspace files.
+
+        Returns the model on success, or ``None`` when a required
+        dependency is missing (logged at WARNING).  The caller
+        (``_get_model``) is responsible for caching the result and
+        assigning the ``semantic_model`` nonlocal under the lock.
+        """
         try:
             from ivy_lsp.semantic.model import SemanticModel
             from ivy_lsp.semantic.rfc_annotations import (
@@ -431,9 +448,15 @@ def start_mcp(
                 except OSError:
                     continue
 
-            semantic_model = model
             return model
         except ImportError:
+            logger.warning(
+                "Semantic model unavailable: required modules "
+                "(ivy_lsp.semantic.model or ivy_lsp.semantic.rfc_annotations) "
+                "could not be imported. Install ivy-lsp[semantic] to enable "
+                "traceability tools.",
+                exc_info=True,
+            )
             return None
 
     @mcp.tool()
