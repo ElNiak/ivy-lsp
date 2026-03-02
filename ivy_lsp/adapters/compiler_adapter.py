@@ -191,6 +191,15 @@ class CompilerAdapter:
         def _run() -> CompileResult:
             try:
                 result = self.compile(source, filename)
+            except Exception as exc:
+                result = CompileResult(
+                    success=False,
+                    errors=[CompileError(message=str(exc), file=filename)],
+                )
+                if callback:
+                    callback(result)
+                raise
+            else:
                 if callback:
                     callback(result)
                 return result

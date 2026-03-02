@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -31,8 +32,8 @@ def find_references(
         position: The cursor position (0-based line and character).
         source_lines: The source of the current document split into lines.
         include_declaration: Whether to include the declaration site itself
-            among the returned locations.  Currently unused (all matches
-            are returned regardless), reserved for future filtering.
+            among the returned locations.  When ``False``, the match at the
+            cursor position in the current file is excluded.
 
     Returns:
         A list of :class:`lsp.Location` objects, one per match found.
@@ -49,15 +50,27 @@ def find_references(
 
     all_files = indexer._resolver.find_all_ivy_files()
 
+    abs_filepath = str(Path(filepath).resolve())
+    cursor_line = position.line
+
     locations: List[lsp.Location] = []
     for fpath in all_files:
         try:
             file_source = Path(fpath).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        abs_fpath = str(Path(fpath).resolve())
         file_lines = file_source.split("\n")
         for line_no, line in enumerate(file_lines):
             for match in pattern.finditer(line):
+                # Filter out the declaration (cursor position) when requested
+                if not include_declaration:
+                    if (
+                        abs_fpath == abs_filepath
+                        and line_no == cursor_line
+                        and match.start() <= position.character < match.end()
+                    ):
+                        continue
                 uri = Path(fpath).as_uri()
                 r = make_range(line_no, match.start(), line_no, match.end())
                 locations.append(lsp.Location(uri=uri, range=r))
@@ -84,10 +97,8 @@ def register(server) -> None:
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
         include_decl = params.context.include_declaration if params.context else True
-        return find_references(
-            server._indexer,
-            filepath,
-            params.position,
-            lines,
-            include_declaration=include_decl,
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, find_references, server._indexer,
+            filepath, params.position, lines, include_decl,
         )

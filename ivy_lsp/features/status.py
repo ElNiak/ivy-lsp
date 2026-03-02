@@ -120,15 +120,15 @@ class ServerStateTracker:
         version: str,
         tools: Dict[str, bool],
     ) -> Dict:
-        active_ops = [
-            {
-                "type": op.type,
-                "file": op.file,
-                "elapsed": round(time.time() - op.start_time, 1),
-            }
-            for op in self.operation_tracker.get_active()
-        ]
         with self._lock:
+            active_ops = [
+                {
+                    "type": op.type,
+                    "file": op.file,
+                    "elapsed": round(time.time() - op.start_time, 1),
+                }
+                for op in self.operation_tracker.get_active()
+            ]
             return {
                 "mode": mode,
                 "version": version,

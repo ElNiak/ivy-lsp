@@ -166,3 +166,18 @@ class TestRenameErrorHandling:
             "conn_id",
         )
         assert edit is not None
+
+
+class TestRenameNotBlocking:
+    """H4: rename handler must use run_in_executor for file I/O."""
+
+    def test_rename_handler_is_async_with_executor(self):
+        """Structural: verify the handler awaits run_in_executor."""
+        import inspect
+
+        from ivy_lsp.features import rename as rename_mod
+
+        source = inspect.getsource(rename_mod.register)
+        assert "run_in_executor" in source, (
+            "rename handler must use run_in_executor to avoid blocking event loop"
+        )

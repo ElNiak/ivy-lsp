@@ -1021,3 +1021,50 @@ def test_thread_safety_concurrent_read_write():
     # Verify final state is consistent
     reqs = graph.get_requirements_for_action("act")
     assert len(reqs) == 100
+
+
+# ---------------------------------------------------------------------------
+# C6: add_file_requirements must not accumulate stale edges on re-index
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeAccumulationOnReindex:
+    """C6: add_file_requirements must not accumulate stale edges on re-index."""
+
+    def test_reindex_replaces_old_requirements(self):
+        g = RequirementGraph()
+        r1 = _make_req("/a.ivy", 10, kind="require", action="act1")
+        g.add_file_requirements("/a.ivy", [r1])
+        assert len(g.requirements) == 1
+
+        # Re-index with shifted line number (different ID)
+        r2 = _make_req("/a.ivy", 11, kind="require", action="act1")
+        g.add_file_requirements("/a.ivy", [r2])
+        assert len(g.requirements) == 1
+        assert "/a.ivy:11" in g.requirements
+        assert "/a.ivy:10" not in g.requirements
+
+    def test_reindex_clears_stale_constrains_edges(self):
+        g = RequirementGraph()
+        r1 = _make_req("/a.ivy", 10, action="old_action")
+        g.add_file_requirements("/a.ivy", [r1])
+        constrains_before = [e for e in g.edges if e[1] == EdgeType.CONSTRAINS]
+        assert len(constrains_before) == 1
+
+        r2 = _make_req("/a.ivy", 10, action="new_action")
+        g.add_file_requirements("/a.ivy", [r2])
+        constrains_after = [e for e in g.edges if e[1] == EdgeType.CONSTRAINS]
+        assert len(constrains_after) == 1
+        assert constrains_after[0][2] == "new_action"
+
+    def test_reindex_clears_stale_write_edges(self):
+        g = RequirementGraph()
+        r1 = _make_req("/a.ivy", 10, action="act")
+        g.add_file_requirements("/a.ivy", [r1], writes=[("var1", "/a.ivy", 15)])
+        writes_before = [e for e in g.edges if e[1] == EdgeType.WRITES]
+        assert len(writes_before) == 1
+
+        r2 = _make_req("/a.ivy", 10, action="act")
+        g.add_file_requirements("/a.ivy", [r2], writes=[("var2", "/a.ivy", 16)])
+        writes_after = [e for e in g.edges if e[1] == EdgeType.WRITES]
+        assert len(writes_after) == 1

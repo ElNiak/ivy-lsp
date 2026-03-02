@@ -348,3 +348,77 @@ class TestScopedNctCounts:
         entries = model.get_scoped_nct_counts("/test.ivy", "quic.send")
         keys = [(e["kind"], e["nct_tag"]) for e in entries]
         assert keys == sorted(keys)
+
+
+class TestScopeCacheThreadSafety:
+    """H5: _scope_cache must be accessed under lock."""
+
+    def test_cache_invalidated_after_add_requirement(self):
+        model = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset(["/test.ivy", "/a.ivy"]),
+            exported_actions=frozenset(["act"]),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        r1 = _make_req("/a.ivy", 1, kind="require", formula="true", action="act")
+        model.add_requirement(r1)
+        result1 = model.get_scoped_requirements("/test.ivy")
+        assert len(result1) == 1
+
+        # Add another requirement -- cache must be invalidated
+        r2 = _make_req("/a.ivy", 2, kind="ensure", formula="true", action="act")
+        model.add_requirement(r2)
+        result2 = model.get_scoped_requirements("/test.ivy")
+        assert len(result2) == 2, "Cache must be invalidated after add_requirement"
+
+    def test_concurrent_read_invalidate_no_crash(self):
+        import threading
+        import time as time_mod
+
+        model = ScopedRequirementModel()
+        scope = TestScope(
+            test_file="/test.ivy",
+            include_closure=frozenset(["/test.ivy", "/a.ivy"]),
+            exported_actions=frozenset(["act1"]),
+            imported_actions=frozenset(),
+            tester_role="client",
+        )
+        model.register_test_scope(scope)
+
+        for i in range(50):
+            model.add_requirement(_make_req(
+                "/a.ivy", i, kind="require", formula="true", action="act1",
+            ))
+
+        errors = []
+        stop = threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    model.get_scoped_requirements("/test.ivy")
+                except Exception as e:
+                    errors.append(e)
+
+        def invalidator():
+            while not stop.is_set():
+                try:
+                    model.invalidate_file("/a.ivy")
+                except Exception as e:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=reader) for _ in range(3)]
+        threads += [threading.Thread(target=invalidator) for _ in range(2)]
+        for t in threads:
+            t.start()
+
+        time_mod.sleep(0.5)
+        stop.set()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert not errors, f"Thread safety errors: {errors}"

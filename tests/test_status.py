@@ -138,3 +138,24 @@ class TestServerStateTracker:
         assert "uptimeSeconds" in d
         assert d["toolAvailability"]["ivyCheck"] is True
         assert d["activeOperations"] == []
+
+
+class TestStatusDictAtomicity:
+    """H3: active_ops must be read under the same lock as other state."""
+
+    def test_active_ops_computed_under_lock(self):
+        tracker = ServerStateTracker()
+        lock_was_held = []
+
+        original_get_active = tracker.operation_tracker.get_active
+
+        def tracked_get_active():
+            lock_was_held.append(tracker._lock.locked())
+            return original_get_active()
+
+        tracker.operation_tracker.get_active = tracked_get_active
+        tracker.to_status_dict("full", "0.8.0", {})
+
+        assert lock_was_held == [True], (
+            "get_active() must be called while self._lock is held"
+        )

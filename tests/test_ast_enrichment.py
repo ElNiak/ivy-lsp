@@ -488,6 +488,62 @@ class TestExtractTypeInfoIntegration:
 # ---------------------------------------------------------------------------
 
 
+class TestTypeAnnotationNaming:
+    """M6: name should be short leaf, qualified_name should be full path."""
+
+    def test_dotted_type_name_splits_correctly(self):
+        """For 'quic.frame_type', name should be 'frame_type', qualified_name 'quic.frame_type'."""
+        adapter = AstEnrichmentAdapter()
+        decl = _make_type_decl("quic.frame_type", line=5)
+        annotations: List[TypeAnnotation] = []
+        adapter._extract_type_decl(decl, "test.ivy", annotations)
+
+        assert len(annotations) == 1
+        ta = annotations[0]
+        assert ta.name == "frame_type", f"name should be short leaf, got '{ta.name}'"
+        assert ta.qualified_name == "quic.frame_type", (
+            f"qualified_name should be full path, got '{ta.qualified_name}'"
+        )
+
+    def test_dotted_action_name_splits_correctly(self):
+        """For 'quic.connection.send', name should be 'send'."""
+        adapter = AstEnrichmentAdapter()
+        decl = _make_action_decl("quic.connection.send", line=10, params=[("x", "cid")])
+        annotations: List[TypeAnnotation] = []
+        adapter._extract_action_decl(decl, "test.ivy", annotations)
+
+        assert len(annotations) == 1
+        ta = annotations[0]
+        assert ta.name == "send", f"name should be short leaf, got '{ta.name}'"
+        assert ta.qualified_name == "quic.connection.send", (
+            f"qualified_name should be full path, got '{ta.qualified_name}'"
+        )
+
+    def test_simple_type_name_unchanged(self):
+        """Non-dotted names: name == qualified_name."""
+        adapter = AstEnrichmentAdapter()
+        decl = _make_type_decl("bool", line=1)
+        annotations: List[TypeAnnotation] = []
+        adapter._extract_type_decl(decl, "test.ivy", annotations)
+
+        assert len(annotations) == 1
+        ta = annotations[0]
+        assert ta.name == "bool"
+        assert ta.qualified_name == "bool"
+
+    def test_simple_action_name_unchanged(self):
+        """Non-dotted action names: name == qualified_name."""
+        adapter = AstEnrichmentAdapter()
+        decl = _make_action_decl("send", line=1)
+        annotations: List[TypeAnnotation] = []
+        adapter._extract_action_decl(decl, "test.ivy", annotations)
+
+        assert len(annotations) == 1
+        ta = annotations[0]
+        assert ta.name == "send"
+        assert ta.qualified_name == "send"
+
+
 class TestExtractLine:
     """Unit tests for the _extract_line helper."""
 

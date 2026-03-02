@@ -7,11 +7,14 @@ Provides quick-fix code actions for known diagnostic codes:
 
 from __future__ import annotations
 
+import logging
 from typing import List, Sequence
 
 from lsprotocol import types as lsp
 
 from ivy_lsp.utils.position_utils import make_range
+
+logger = logging.getLogger(__name__)
 
 
 def compute_code_actions(
@@ -96,7 +99,11 @@ def register(server) -> None:
     async def code_action(
         params: lsp.CodeActionParams,
     ) -> List[lsp.CodeAction]:
-        uri = params.text_document.uri
-        doc = server.workspace.get_text_document(uri)
-        source = doc.source or ""
-        return compute_code_actions(uri, source, params.context.diagnostics)
+        try:
+            uri = params.text_document.uri
+            doc = server.workspace.get_text_document(uri)
+            source = doc.source or ""
+            return compute_code_actions(uri, source, params.context.diagnostics)
+        except Exception:
+            logger.warning("code_action handler failed", exc_info=True)
+            return []

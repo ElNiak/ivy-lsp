@@ -6,12 +6,15 @@ Triggers on ``(`` and ``,`` characters.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import List, Optional
 
 from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_parameters(detail: Optional[str]) -> List[lsp.ParameterInformation]:
@@ -142,11 +145,15 @@ def register(server) -> None:
     async def signature_help(
         params: lsp.SignatureHelpParams,
     ) -> Optional[lsp.SignatureHelp]:
-        uri = params.text_document.uri
-        doc = server.workspace.get_text_document(uri)
-        if not doc.source:
+        try:
+            uri = params.text_document.uri
+            doc = server.workspace.get_text_document(uri)
+            if not doc.source:
+                return None
+            lines = doc.source.split("\n")
+            filepath = uri_to_path(uri)
+            indexer = getattr(server, "_indexer", None)
+            return compute_signature_help(indexer, filepath, lines, params.position)
+        except Exception:
+            logger.warning("signature_help handler failed", exc_info=True)
             return None
-        lines = doc.source.split("\n")
-        filepath = uri_to_path(uri)
-        indexer = getattr(server, "_indexer", None)
-        return compute_signature_help(indexer, filepath, lines, params.position)

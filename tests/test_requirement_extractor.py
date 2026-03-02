@@ -147,6 +147,27 @@ class TestMixinNameRegex:
         m = _MIXIN_NAME_RE.match("")
         assert m is None
 
+    def test_around_mixin(self):
+        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+
+        m = _MIXIN_NAME_RE.match("some_action[around1]")
+        assert m is not None
+        assert m.group(2) == "around"
+
+    def test_implement_mixin(self):
+        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+
+        m = _MIXIN_NAME_RE.match("some_action[implement0]")
+        assert m is not None
+        assert m.group(2) == "implement"
+
+    def test_nested_bracket_does_not_match(self):
+        """Greedy .+ would incorrectly match past the first bracket."""
+        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+
+        m = _MIXIN_NAME_RE.match("foo[bar][before1]")
+        assert m is None, "Nested brackets should not be valid mixin names"
+
 
 # ===========================================================================
 # Full extractor tests (require ivy + Z3)

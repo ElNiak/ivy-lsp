@@ -48,6 +48,54 @@ class TestCompilerAdapter:
             assert len(result.errors) > 0
 
 
+class TestBackgroundCallbackGuarantee:
+    """C7+H7: callback must fire even when compile() raises."""
+
+    def test_callback_fires_on_compile_exception(self):
+        import threading
+
+        adapter = CompilerAdapter()
+        results = []
+        event = threading.Event()
+
+        def capture(r):
+            results.append(r)
+            event.set()
+
+        # Monkey-patch compile to raise
+        def exploding_compile(source, filename):
+            raise RuntimeError("compile crash")
+
+        adapter.compile = exploding_compile
+
+        adapter.compile_background("#lang ivy1.7", "test.ivy", callback=capture)
+        event.wait(timeout=5)
+
+        assert len(results) == 1, "callback must be invoked exactly once"
+        assert not results[0].success
+        assert any("compile crash" in e.message for e in results[0].errors)
+
+    def test_callback_fires_once_on_success(self):
+        import threading
+
+        adapter = CompilerAdapter()
+        results = []
+        event = threading.Event()
+
+        def capture(r):
+            results.append(r)
+            event.set()
+
+        # Monkey-patch compile to succeed
+        adapter.compile = lambda src, fn: CompileResult(success=True)
+
+        adapter.compile_background("#lang ivy1.7", "test.ivy", callback=capture)
+        event.wait(timeout=5)
+
+        assert len(results) == 1, "callback must be invoked exactly once"
+        assert results[0].success
+
+
 class TestCompilerSession:
     def test_session_context_manager(self):
         """CompilerSession can enter/exit without crashing regardless of ivy availability."""

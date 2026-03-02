@@ -72,3 +72,18 @@ class TestFindReferences:
         pos = Position(line=0, character=3)
         results = find_references(indexer, str(tmp_path / "a.ivy"), pos, lines)
         assert results == []
+
+
+class TestReferencesNotBlocking:
+    """H4: references handler must use run_in_executor for file I/O."""
+
+    def test_references_handler_uses_executor(self):
+        """Structural: verify the handler uses run_in_executor."""
+        import inspect
+
+        from ivy_lsp.features import references as refs_mod
+
+        source = inspect.getsource(refs_mod.register)
+        assert "run_in_executor" in source, (
+            "references handler must use run_in_executor to avoid blocking event loop"
+        )

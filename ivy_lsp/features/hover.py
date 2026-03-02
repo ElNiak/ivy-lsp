@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import List, Optional
 
@@ -11,6 +12,8 @@ from lsprotocol.types import SymbolKind
 from ivy_lsp.parsing.symbols import IvySymbol
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import word_at_position
+
+logger = logging.getLogger(__name__)
 
 # Map SymbolKind back to Ivy keyword for display.
 _KIND_TO_KEYWORD = {
@@ -185,13 +188,17 @@ def register(server) -> None:
 
     @server.feature(lsp.TEXT_DOCUMENT_HOVER)
     async def hover(params: lsp.HoverParams) -> Optional[lsp.Hover]:
-        uri = params.text_document.uri
-        doc = server.workspace.get_text_document(uri)
-        if not hasattr(server, "_indexer") or server._indexer is None:
+        try:
+            uri = params.text_document.uri
+            doc = server.workspace.get_text_document(uri)
+            if not hasattr(server, "_indexer") or server._indexer is None:
+                return None
+            lines = doc.source.split("\n") if doc.source else []
+            filepath = uri_to_path(uri)
+            model = getattr(server, "_semantic_model", None)
+            return get_hover_info(
+                server._indexer, filepath, params.position, lines, model
+            )
+        except Exception:
+            logger.warning("hover handler failed", exc_info=True)
             return None
-        lines = doc.source.split("\n") if doc.source else []
-        filepath = uri_to_path(uri)
-        model = getattr(server, "_semantic_model", None)
-        return get_hover_info(
-            server._indexer, filepath, params.position, lines, model
-        )

@@ -120,10 +120,14 @@ def register(server) -> None:
         params: lsp.DocumentSymbolParams,
     ) -> List[lsp.DocumentSymbol]:
         """Handle textDocument/documentSymbol requests."""
-        uri = params.text_document.uri
-        doc = server.workspace.get_text_document(uri)
-        filepath = uri_to_path(uri)
-        source = doc.source or ""
-        parser = getattr(server, "_parser", None)
-        indexer = getattr(server, "_indexer", None)
-        return compute_document_symbols(parser, indexer, source, filepath)
+        try:
+            uri = params.text_document.uri
+            doc = server.workspace.get_text_document(uri)
+            filepath = uri_to_path(uri)
+            source = doc.source or ""
+            parser = getattr(server, "_parser", None)
+            indexer = getattr(server, "_indexer", None)
+            return compute_document_symbols(parser, indexer, source, filepath)
+        except Exception:
+            logger.warning("document_symbol handler failed", exc_info=True)
+            return []

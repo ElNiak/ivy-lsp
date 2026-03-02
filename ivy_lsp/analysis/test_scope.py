@@ -147,11 +147,12 @@ class ScopedRequirementModel(RequirementGraph):
         self._compilation_results: Dict[str, Any] = {}
 
     def register_test_scope(self, scope: TestScope) -> None:
-        self._test_scopes[scope.test_file] = scope
-        for f in scope.include_closure:
-            self._file_to_tests[f].add(scope.test_file)
-        self._scope_cache.pop((scope.test_file, False), None)
-        self._scope_cache.pop((scope.test_file, True), None)
+        with self._lock:
+            self._test_scopes[scope.test_file] = scope
+            for f in scope.include_closure:
+                self._file_to_tests[f].add(scope.test_file)
+            self._scope_cache.pop((scope.test_file, False), None)
+            self._scope_cache.pop((scope.test_file, True), None)
 
     def set_active_test(self, test_file: Optional[str]) -> None:
         if test_file is None or test_file in self._test_scopes:
@@ -169,24 +170,26 @@ class ScopedRequirementModel(RequirementGraph):
         self, test_file: str, include_imported: bool = False,
     ) -> List[RequirementNode]:
         cache_key = (test_file, include_imported)
-        if cache_key in self._scope_cache:
-            return self._scope_cache[cache_key]
-        scope = self._test_scopes.get(test_file)
-        if scope is None:
-            return []
-        if include_imported:
-            result = [
-                r for r in self.requirements.values()
-                if r.file in scope.include_closure
-            ]
-        else:
-            result = [
-                r for r in self.requirements.values()
-                if r.file in scope.include_closure
-                and r.monitor_action in scope.exported_actions
-            ]
-        self._scope_cache[cache_key] = result
-        return result
+        with self._lock:
+            cached = self._scope_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            scope = self._test_scopes.get(test_file)
+            if scope is None:
+                return []
+            if include_imported:
+                result = [
+                    r for r in self.requirements.values()
+                    if r.file in scope.include_closure
+                ]
+            else:
+                result = [
+                    r for r in self.requirements.values()
+                    if r.file in scope.include_closure
+                    and r.monitor_action in scope.exported_actions
+                ]
+            self._scope_cache[cache_key] = result
+            return result
 
     def get_scoped_counts(self, test_file: str, action_name: str) -> Dict[str, int]:
         scope = self._test_scopes.get(test_file)
@@ -264,6 +267,9 @@ class ScopedRequirementModel(RequirementGraph):
         self._invalidate_scope_cache_for_file(filepath)
 
     def _invalidate_scope_cache_for_file(self, filepath: str) -> None:
-        for test_file in self._file_to_tests.get(filepath, set()):
-            self._scope_cache.pop((test_file, False), None)
-            self._scope_cache.pop((test_file, True), None)
+        # Note: callers (add_requirement, add_file_requirements) already hold
+        # self._lock (RLock), so this re-entrant acquisition is safe.
+        with self._lock:
+            for test_file in self._file_to_tests.get(filepath, set()):
+                self._scope_cache.pop((test_file, False), None)
+                self._scope_cache.pop((test_file, True), None)

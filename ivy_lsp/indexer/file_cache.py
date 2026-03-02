@@ -74,19 +74,19 @@ class FileCache:
         Evicts the oldest entry if the cache exceeds *max_size*.
         Silently returns if the file cannot be stat'd.
         """
-        try:
-            mtime = os.path.getmtime(filepath)
-        except OSError:
-            logger.debug("Cannot stat %s; parse result not cached", filepath)
-            return
-        entry = CachedFile(
-            filepath=filepath,
-            mtime=mtime,
-            parse_result=result,
-            symbols=symbols,
-            includes=includes or [],
-        )
         with self._lock:
+            try:
+                mtime = os.path.getmtime(filepath)
+            except OSError:
+                logger.debug("Cannot stat %s; parse result not cached", filepath)
+                return
+            entry = CachedFile(
+                filepath=filepath,
+                mtime=mtime,
+                parse_result=result,
+                symbols=symbols,
+                includes=includes or [],
+            )
             self._cache[filepath] = entry
             self._cache.move_to_end(filepath)
             while len(self._cache) > self._max_size:

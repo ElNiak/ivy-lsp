@@ -127,6 +127,11 @@ class WorkspaceIndexer:
         self._progress_lock = threading.Lock()
         self._stop_requested = threading.Event()
         self._analysis_pipeline: Optional[Any] = None
+        # Mtime-validated source cache to avoid re-reading files across
+        # pipeline phases.  Maps filepath -> (content, mtime).
+        # Cleared after the full pipeline completes.
+        self._source_cache: Dict[str, Tuple[str, float]] = {}
+        self._source_cache_lock = threading.Lock()
 
     def request_stop(self) -> None:
         """Signal background threads to stop at the next safe point."""
@@ -135,6 +140,40 @@ class WorkspaceIndexer:
     def set_analysis_pipeline(self, pipeline: Any) -> None:
         """Inject the analysis pipeline for inline T1/T2 during deep indexing."""
         self._analysis_pipeline = pipeline
+
+    def _read_source(self, filepath: str) -> Optional[str]:
+        """Read file content with mtime-validated caching.
+
+        Returns the file content or None if the file cannot be read.
+        Cached results are validated against the file's mtime to ensure
+        freshness.  Thread-safe.
+        """
+        try:
+            current_mtime = os.path.getmtime(filepath)
+        except OSError:
+            return None
+
+        with self._source_cache_lock:
+            cached = self._source_cache.get(filepath)
+            if cached is not None:
+                content, cached_mtime = cached
+                if cached_mtime == current_mtime:
+                    return content
+
+        try:
+            with open(filepath) as f:
+                content = f.read()
+        except OSError:
+            return None
+
+        with self._source_cache_lock:
+            self._source_cache[filepath] = (content, current_mtime)
+        return content
+
+    def _clear_source_cache(self) -> None:
+        """Clear the source content cache after pipeline completion."""
+        with self._source_cache_lock:
+            self._source_cache.clear()
 
     # ------------------------------------------------------------------
     # Full workspace indexing (two-mode: fast scan + background deep parse)
@@ -221,23 +260,20 @@ class WorkspaceIndexer:
                         last_indexed_at=time.time(),
                     )
                 # Light-mode extraction still needed for requirement graph
-                try:
-                    with open(filepath) as f:
-                        source = f.read()
-                except OSError:
+                source = self._read_source(filepath)
+                if source is None:
                     continue
                 reqs, writes = extract_requirements_light(source, filepath)
                 self._requirement_graph.add_file_requirements(
                     filepath, reqs, writes
                 )
                 info = extract_exports_imports_light(source, filepath)
-                self._file_export_imports[filepath] = info
+                with self._exports_lock:
+                    self._file_export_imports[filepath] = info
                 continue
 
-            try:
-                with open(filepath) as f:
-                    source = f.read()
-            except OSError:
+            source = self._read_source(filepath)
+            if source is None:
                 logger.warning(
                     "Cannot read %s; file will not be indexed", filepath
                 )
@@ -268,9 +304,10 @@ class WorkspaceIndexer:
                 filepath, reqs, writes
             )
 
-            # Light-mode export/import extraction (regex, no lock)
+            # Light-mode export/import extraction
             info = extract_exports_imports_light(source, filepath)
-            self._file_export_imports[filepath] = info
+            with self._exports_lock:
+                self._file_export_imports[filepath] = info
 
             slog.debug(
                 "Indexed %s",
@@ -333,6 +370,11 @@ class WorkspaceIndexer:
         use_parallel = num_workers != 1 and len(test_files) > 3
 
         if use_parallel:
+            logger.warning(
+                "Parallel deep indexing uses light-mode extraction only "
+                "(T2/T3 semantic tiers skipped). Set IVY_LSP_PARSE_WORKERS=1 "
+                "for full semantic analysis."
+            )
             self._deep_index_parallel(test_files, num_workers)
         else:
             self._deep_index_serial(test_files)
@@ -341,6 +383,9 @@ class WorkspaceIndexer:
         if not self._stop_requested.is_set():
             self._wire_requirement_graph()
             self._compute_test_scopes()
+
+        # Release source cache memory now that all phases are done.
+        self._clear_source_cache()
 
         with self._progress_lock:
             self._deep_index_progress.current_file = None
@@ -379,10 +424,8 @@ class WorkspaceIndexer:
             with self._progress_lock:
                 self._deep_index_progress.current_file = test_file
 
-            try:
-                with open(test_file) as f:
-                    source = f.read()
-            except OSError:
+            source = self._read_source(test_file)
+            if source is None:
                 with self._progress_lock:
                     status = self._deep_index_progress.file_statuses.get(
                         test_file, FileIndexStatus(filepath=test_file)
@@ -497,8 +540,9 @@ class WorkspaceIndexer:
                 # full extraction isn't possible, but re-running light
                 # mode ensures consistency with the serial path.
                 try:
-                    with open(filepath) as f:
-                        source = f.read()
+                    source = self._read_source(filepath)
+                    if source is None:
+                        raise OSError(f"Cannot read {filepath}")
                     # Remove Phase 1 light requirements before re-adding
                     self._requirement_graph.remove_file(filepath)
                     reqs, writes = extract_requirements_light(source, filepath)
@@ -506,10 +550,52 @@ class WorkspaceIndexer:
                         filepath, reqs, writes
                     )
                     info = extract_exports_imports_light(source, filepath)
-                    self._file_export_imports[filepath] = info
+                    with self._exports_lock:
+                        self._file_export_imports[filepath] = info
+                    # Inline T1+T2+T3 (same pattern as serial path) so
+                    # the subsequent bulk T1+T2 run can skip these files.
+                    if self._analysis_pipeline is not None:
+                        try:
+                            self._analysis_pipeline.run_tier1(source, filepath)
+                        except Exception:
+                            logger.warning(
+                                "Parallel inline T1 failed for %s",
+                                filepath,
+                                exc_info=True,
+                            )
+                        try:
+                            self._analysis_pipeline.run_tier2(source, filepath)
+                        except Exception:
+                            logger.warning(
+                                "Parallel inline T2 failed for %s",
+                                filepath,
+                                exc_info=True,
+                            )
+                        try:
+                            self._analysis_pipeline.run_tier3_background(
+                                source, filepath, track_state=False
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Parallel inline T3 failed for %s",
+                                filepath,
+                                exc_info=True,
+                            )
                 except Exception:
                     logger.debug(
                         "Parallel: light extraction failed for %s",
+                        filepath,
+                        exc_info=True,
+                    )
+            elif self._analysis_pipeline is not None:
+                # For failed parse, still run T1 (regex-only, no AST needed)
+                try:
+                    source = self._read_source(filepath)
+                    if source is not None:
+                        self._analysis_pipeline.run_tier1(source, filepath)
+                except Exception:
+                    logger.debug(
+                        "Parallel inline T1 failed for %s",
                         filepath,
                         exc_info=True,
                     )

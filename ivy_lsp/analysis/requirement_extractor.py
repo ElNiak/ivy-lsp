@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Pattern to detect mangled mixin action names: "foo[before1]", "bar[after2]",
 # "baz[around1]", "qux[implement0]"
-_MIXIN_NAME_RE = re.compile(r"^(.+)\[(before|after|around|implement)(\d+)\]$")
+_MIXIN_NAME_RE = re.compile(r"^([^[]+)\[(before|after|around|implement)(\d+)\]$")
 
 
 def extract_requirements_full(

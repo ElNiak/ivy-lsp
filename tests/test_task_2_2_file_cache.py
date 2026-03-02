@@ -140,3 +140,62 @@ class TestFileCacheIncludes:
         entry = cache.get(str(f))
         assert entry is not None
         assert entry.includes == ["quic_types", "collections"]
+
+
+class TestFileCacheStatUnderLock:
+    """C3: os.path.getmtime must be called inside the lock."""
+
+    def test_put_acquires_lock_before_stat(self, tmp_path):
+        import threading
+        import unittest.mock
+
+        from ivy_lsp.indexer.file_cache import FileCache
+
+        f = tmp_path / "test.ivy"
+        f.write_text("#lang ivy1.7")
+        cache = FileCache(max_size=10)
+
+        call_order = []
+
+        class OrderTrackingLock:
+            """Wrapper to track acquire/release ordering."""
+
+            def __init__(self, real_lock):
+                self._real = real_lock
+
+            def acquire(self, *a, **kw):
+                call_order.append("lock_acquire")
+                return self._real.acquire(*a, **kw)
+
+            def release(self):
+                call_order.append("lock_release")
+                return self._real.release()
+
+            def __enter__(self):
+                self.acquire()
+                return self
+
+            def __exit__(self, *args):
+                self.release()
+
+        import os
+
+        original_getmtime = os.path.getmtime
+
+        def tracked_getmtime(path):
+            call_order.append("getmtime")
+            return original_getmtime(path)
+
+        cache._lock = OrderTrackingLock(threading.Lock())
+        with unittest.mock.patch(
+            "ivy_lsp.indexer.file_cache.os.path.getmtime", tracked_getmtime
+        ):
+            cache.put(str(f), None, [])
+
+        # getmtime must appear AFTER lock_acquire
+        lock_idx = call_order.index("lock_acquire")
+        mtime_idx = call_order.index("getmtime")
+        assert mtime_idx > lock_idx, (
+            f"getmtime at index {mtime_idx} must come after lock_acquire "
+            f"at {lock_idx}; order was: {call_order}"
+        )

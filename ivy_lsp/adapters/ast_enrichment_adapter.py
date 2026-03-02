@@ -106,10 +106,11 @@ class AstEnrichmentAdapter:
                     variants.append(ext_name)
 
         line = _extract_line(decl)
+        short_name = name.rsplit(".", 1)[-1] if "." in name else name
 
         annotations.append(
             TypeAnnotation(
-                name=name,
+                name=short_name,
                 qualified_name=name,
                 sort_name=sort_name,
                 is_enum=is_enum,
@@ -167,10 +168,11 @@ class AstEnrichmentAdapter:
             logger.debug("Failed to extract action params for %s", name, exc_info=True)
 
         line = _extract_line(decl)
+        short_name = name.rsplit(".", 1)[-1] if "." in name else name
 
         annotations.append(
             TypeAnnotation(
-                name=name,
+                name=short_name,
                 qualified_name=name,
                 sort_name="action",
                 arity=len(params),

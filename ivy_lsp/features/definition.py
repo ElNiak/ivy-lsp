@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -9,6 +10,8 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
+
+logger = logging.getLogger(__name__)
 
 
 def goto_definition(
@@ -73,10 +76,14 @@ def register(server) -> None:
         params: lsp.DefinitionParams,
     ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
         """Handle textDocument/definition requests."""
-        uri = params.text_document.uri
-        doc = server.workspace.get_text_document(uri)
-        if not hasattr(server, "_indexer") or server._indexer is None:
+        try:
+            uri = params.text_document.uri
+            doc = server.workspace.get_text_document(uri)
+            if not hasattr(server, "_indexer") or server._indexer is None:
+                return None
+            lines = doc.source.split("\n") if doc.source else []
+            filepath = uri_to_path(uri)
+            return goto_definition(server._indexer, filepath, params.position, lines)
+        except Exception:
+            logger.warning("definition handler failed", exc_info=True)
             return None
-        lines = doc.source.split("\n") if doc.source else []
-        filepath = uri_to_path(uri)
-        return goto_definition(server._indexer, filepath, params.position, lines)

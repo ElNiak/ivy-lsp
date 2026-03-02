@@ -6,10 +6,13 @@ lines, and consecutive include directives.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
 from lsprotocol import types as lsp
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -96,8 +99,12 @@ def register(server) -> None:
     async def folding_range(
         params: lsp.FoldingRangeParams,
     ) -> List[lsp.FoldingRange]:
-        uri = params.text_document.uri
-        doc = server.workspace.get_text_document(uri)
-        source = doc.source or ""
-        fold_ranges = compute_folding_ranges(source)
-        return [_to_lsp_folding_range(fr) for fr in fold_ranges]
+        try:
+            uri = params.text_document.uri
+            doc = server.workspace.get_text_document(uri)
+            source = doc.source or ""
+            fold_ranges = compute_folding_ranges(source)
+            return [_to_lsp_folding_range(fr) for fr in fold_ranges]
+        except Exception:
+            logger.warning("folding_range handler failed", exc_info=True)
+            return []

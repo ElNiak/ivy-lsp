@@ -246,6 +246,14 @@ class RequirementGraph:
                     removed_ids.add(vid)
                     del self.state_vars[vid]
 
+            # Also collect synthetic write-edge source IDs for this file.
+            # Write edges use IDs like "filepath:line:write:var" that aren't
+            # stored as nodes, so they must be identified from the edge list.
+            prefix = target_filepath + ":"
+            for s, etype, _d in self.edges:
+                if etype == EdgeType.WRITES and s.startswith(prefix):
+                    removed_ids.add(s)
+
             if not removed_ids:
                 return
 
@@ -265,6 +273,10 @@ class RequirementGraph:
     ) -> None:
         """Bulk-add requirements from a single file and wire CONSTRAINS edges."""
         with self._lock:
+            # Clear stale nodes/edges from previous index of this file.
+            # remove_file() also acquires self._lock (RLock), safe re-entrantly.
+            self.remove_file(filepath)
+
             for req in reqs:
                 self.add_requirement(req)
                 if req.monitor_action:

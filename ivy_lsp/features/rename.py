@@ -6,6 +6,7 @@ text matching, following the same pattern as find_references().
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -101,6 +102,8 @@ def register(server) -> None:
         lines = doc.source.split("\n")
         filepath = uri_to_path(uri)
         indexer = getattr(server, "_indexer", None)
-        return compute_rename(
-            indexer, filepath, params.position, lines, params.new_name
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, compute_rename, indexer, filepath, params.position,
+            lines, params.new_name,
         )
