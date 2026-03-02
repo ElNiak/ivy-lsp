@@ -371,6 +371,11 @@ def _extract_param(params: Any, dict_key: str) -> Optional[str]:
 
 def register(server: Any) -> None:
     """Register custom Ivy command handlers."""
+    from dataclasses import dataclass
+
+    @dataclass
+    class _ServerProxy:
+        _indexer: Any
 
     def _track_start(srv: Any, op_type: str, filepath: str) -> Optional[str]:
         tracker = getattr(srv, "state_tracker", None)
@@ -917,7 +922,7 @@ def register(server: Any) -> None:
         if indexer is None:
             return {"error": "No indexer available"}
 
-        proxy = type("_Proxy", (), {"_indexer": indexer})()
+        proxy = _ServerProxy(_indexer=indexer)
         return handle_action_requirements(proxy, viz_params)
 
     @server.feature("ivy.showPropertyDetails")

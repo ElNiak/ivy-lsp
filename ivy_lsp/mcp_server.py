@@ -762,6 +762,16 @@ def start_mcp(
 
     # --- Visualization Tools ---
 
+    from dataclasses import dataclass
+
+    @dataclass
+    class _IndexerProxy:
+        _requirement_graph: Any
+
+    @dataclass
+    class _ServerProxy:
+        _indexer: _IndexerProxy
+
     def _make_viz_server_proxy():
         """Create a minimal server-like object for visualization handlers.
 
@@ -769,10 +779,7 @@ def start_mcp(
         server object with ``server._indexer._requirement_graph``.  This
         builds a lightweight proxy that satisfies that contract.
         """
-        indexer = type("_IndexerProxy", (), {
-            "_requirement_graph": requirement_graph,
-        })()
-        return type("_ServerProxy", (), {"_indexer": indexer})()
+        return _ServerProxy(_indexer=_IndexerProxy(_requirement_graph=requirement_graph))
 
     @mcp.tool()
     async def ivy_action_requirements(
