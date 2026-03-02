@@ -56,9 +56,7 @@ class GraphSnapshot:
                 result.append(self.state_vars[target_id])
         return result
 
-    def get_state_vars_written_in_monitor(
-        self, action_name: str  # noqa: ARG002 — reserved for future per-action filtering
-    ) -> List["StateVarNode"]:
+    def get_all_state_vars_written(self) -> List["StateVarNode"]:
         written: Set[str] = set()
         for _src, etype, dst in self.edges:
             if etype == EdgeType.WRITES:
@@ -493,15 +491,12 @@ class RequirementGraph:
                     result.append(self.state_vars[target_id])
             return result
 
-    def get_state_vars_written_in_monitor(
-        self, action_name: str  # noqa: ARG002 — reserved for future per-action filtering
-    ) -> List[StateVarNode]:
-        """Return state vars written across the whole graph.
+    def get_all_state_vars_written(self) -> List[StateVarNode]:
+        """Return all state vars with WRITES edges in the graph.
 
-        **Note**: ``action_name`` is accepted for API compatibility but is
-        not used for filtering yet.  The result is a conservative superset
-        (all WRITES targets).  A future refinement can track writes
-        per-action for finer granularity.
+        Returns a conservative superset (all WRITES targets across the
+        entire graph). A future refinement may track writes per-action
+        for finer granularity.
         """
         with self._lock:
             written: Set[str] = set()

@@ -77,7 +77,14 @@ class CompilerManager:
             def _wait():
                 self._semaphore.acquire()
                 try:
-                    proc.start()
+                    try:
+                        proc.start()
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to start compilation process for %s: %s",
+                            filepath, exc,
+                        )
+                        raise
                     child_conn.close()
                     if parent_conn.poll(self._timeout):
                         try:

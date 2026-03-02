@@ -33,91 +33,23 @@ def _validate_path(root: str, relative_path: str) -> str:
     return abs_path
 
 
-def _find_ivy_files(root: str, exclude_dirs: set[str] | None = None) -> list[str]:
-    """Walk the project and return relative paths to all .ivy files.
-
-    NOTE: Default exclude_dirs overlaps with _EXCLUDED_DIR_BASENAMES in
-    indexer/include_resolver.py — consider aligning when adding entries.
-    """
-    if exclude_dirs is None:
-        exclude_dirs = {
-            ".git", ".venv", "venv", "node_modules", "__pycache__",
-            "build", "dist", "submodules", "test",
-        }
-    results = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
-        for fname in filenames:
-            if fname.endswith(".ivy"):
-                results.append(os.path.relpath(
-                    os.path.join(dirpath, fname), root
-                ))
-    return results
+from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_files
+from ivy_lsp.utils.ivy_output import parse_ivy_check_lines
+from ivy_lsp.utils.structural_lint import (
+    check_structural_issues_raw,
+    check_unresolved_includes_raw,
+)
 
 
 def _parse_ivy_check_output(output: str) -> list[dict[str, Any]]:
     """Parse ivy_check output into structured diagnostics."""
-    diagnostics: list[dict[str, Any]] = []
-    for line in output.splitlines():
-        m = re.match(r"(.*?):(\d+):\s*(error|warning):\s*(.*)", line)
-        if m:
-            diagnostics.append({
-                "file": m.group(1),
-                "line": int(m.group(2)),
-                "severity": m.group(3),
-                "message": m.group(4),
-            })
-    return diagnostics
+    return parse_ivy_check_lines(output)
 
 
 def _check_structural_issues(source: str, filepath: str) -> list[dict[str, Any]]:
     """Fast structural checks without full parsing."""
-    diags: list[dict[str, Any]] = []
-    lines = source.split("\n")
-
-    # Missing #lang header
-    stripped = source.lstrip()
-    if not stripped.startswith("#lang"):
-        diags.append({
-            "line": 1, "severity": "warning",
-            "message": "Missing '#lang ivy1.7' header", "source": "ivy-lint",
-        })
-
-    # Unmatched braces
-    depth = 0
-    for i, line_text in enumerate(lines):
-        code = line_text if line_text.strip().startswith("#lang") else line_text.split("#")[0]
-        for ch in code:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-            if depth < 0:
-                diags.append({
-                    "line": i + 1, "severity": "error",
-                    "message": "Unmatched closing brace", "source": "ivy-lint",
-                })
-                depth = 0
-    if depth > 0:
-        diags.append({
-            "line": len(lines), "severity": "error",
-            "message": f"Unmatched opening brace ({depth} unclosed)",
-            "source": "ivy-lint",
-        })
-
-    # Unresolved includes
-    parent_dir = os.path.dirname(filepath)
-    for match in re.finditer(r"^include\s+(\w+)", source, re.MULTILINE):
-        inc_name = match.group(1)
-        candidate = os.path.join(parent_dir, inc_name + ".ivy")
-        if not os.path.isfile(candidate):
-            line_no = source[: match.start()].count("\n") + 1
-            diags.append({
-                "line": line_no, "severity": "warning",
-                "message": f"Unresolved include: {inc_name}",
-                "source": "ivy-lint",
-            })
-
+    diags = check_structural_issues_raw(source, filepath)
+    diags.extend(check_unresolved_includes_raw(source, filepath))
     return diags
 
 

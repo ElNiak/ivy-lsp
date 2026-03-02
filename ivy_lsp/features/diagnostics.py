@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
@@ -52,88 +52,40 @@ def check_structural_issues(
     indexer: Any = None,
 ) -> List[lsp.Diagnostic]:
     """Check for structural problems without full parsing."""
-    diags: List[lsp.Diagnostic] = []
-    lines = source.split("\n")
+    from ivy_lsp.utils.structural_lint import (
+        check_structural_issues_raw,
+        check_unresolved_includes_raw,
+    )
 
-    # 1. Missing #lang header
-    stripped = source.lstrip()
-    if not stripped.startswith("#lang"):
-        first_len = len(lines[0]) if lines else 0
-        diags.append(
-            lsp.Diagnostic(
-                range=lsp.Range(
-                    start=lsp.Position(0, 0),
-                    end=lsp.Position(0, first_len),
-                ),
-                message="Missing '#lang ivy1.7' header",
-                severity=lsp.DiagnosticSeverity.Warning,
-                source="ivy-lsp",
-                code="missing-lang-header",
-            )
-        )
+    raw = check_structural_issues_raw(source, filepath)
 
-    # 2. Unmatched braces
-    depth = 0
-    for i, line_text in enumerate(lines):
-        # Skip comments but preserve #lang lines
-        if line_text.strip().startswith("#lang"):
-            code = line_text
-        else:
-            code = line_text.split("#")[0]
-        for ch in code:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-            if depth < 0:
-                diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(i, 0),
-                            end=lsp.Position(i, len(line_text)),
-                        ),
-                        message="Unmatched closing brace",
-                        severity=lsp.DiagnosticSeverity.Error,
-                        source="ivy-lsp",
-                    )
-                )
-                depth = 0
-    if depth > 0:
-        last = len(lines) - 1
-        last_len = len(lines[last]) if lines else 0
-        diags.append(
-            lsp.Diagnostic(
-                range=lsp.Range(
-                    start=lsp.Position(last, 0),
-                    end=lsp.Position(last, last_len),
-                ),
-                message=f"Unmatched opening brace ({depth} unclosed)",
-                severity=lsp.DiagnosticSeverity.Error,
-                source="ivy-lsp",
-            )
-        )
-
-    # 3. Unresolved includes
+    # Include resolution using proper resolver if available
+    resolve_cb = None
     if indexer:
-        for match in re.finditer(r"^include\s+(\w+)", source, re.MULTILINE):
-            inc_name = match.group(1)
-            resolved = indexer._resolver.resolve(inc_name, filepath)
-            if resolved is None:
-                line_no = source[: match.start()].count("\n")
-                line_text = lines[line_no] if line_no < len(lines) else ""
-                diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line_no, 0),
-                            end=lsp.Position(line_no, len(line_text)),
-                        ),
-                        message=f"Unresolved include: {inc_name}",
-                        severity=lsp.DiagnosticSeverity.Warning,
-                        source="ivy-lsp",
-                        code="unresolved-include",
-                    )
-                )
+        resolve_cb = indexer._resolver.resolve
+    raw.extend(check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb))
 
+    lines = source.split("\n")
+    diags: List[lsp.Diagnostic] = []
+    for entry in raw:
+        lineno = max(0, entry["line"] - 1)  # convert 1-based to 0-based
+        line_text = lines[lineno] if lineno < len(lines) else ""
+        severity = (
+            lsp.DiagnosticSeverity.Error
+            if entry["severity"] == "error"
+            else lsp.DiagnosticSeverity.Warning
+        )
+        diags.append(
+            lsp.Diagnostic(
+                range=lsp.Range(
+                    start=lsp.Position(lineno, 0),
+                    end=lsp.Position(lineno, len(line_text)),
+                ),
+                message=entry["message"],
+                severity=severity,
+                source="ivy-lsp",
+            )
+        )
     return diags
 
 
@@ -264,7 +216,9 @@ def compute_requirement_diagnostics(
     # 3. High-impact state variables (Info, threshold: 5+ readers)
     impact_threshold = 5
     for match in re.finditer(
-        r"^\s*relation\s+([\w.]+)", source, re.MULTILINE
+        r"^\s*(?:relation|function|individual|var)\s+([\w.]+)",
+        source,
+        re.MULTILINE,
     ):
         var_name = match.group(1)
         line_no = source[: match.start()].count("\n")
@@ -458,37 +412,35 @@ def compute_diagnostics(
 
 
 def parse_ivy_check_output(output: str) -> List[lsp.Diagnostic]:
-    """Parse ivy_check stderr/stdout into LSP diagnostics.
+    """Parse ivy_check stderr/stdout into LSP diagnostics."""
+    from ivy_lsp.utils.ivy_output import parse_ivy_check_lines
 
-    Looks for lines matching: filename:LINE: error|warning: message
-    """
     diags: List[lsp.Diagnostic] = []
-    for line in output.splitlines():
-        m = re.match(r".*?:(\d+):\s*(error|warning):\s*(.*)", line)
-        if m:
-            lineno = max(0, int(m.group(1)) - 1)
-            severity = (
-                lsp.DiagnosticSeverity.Error
-                if m.group(2) == "error"
-                else lsp.DiagnosticSeverity.Warning
+    for entry in parse_ivy_check_lines(output):
+        lineno = max(0, entry["line"] - 1)
+        severity = (
+            lsp.DiagnosticSeverity.Error
+            if entry["severity"] == "error"
+            else lsp.DiagnosticSeverity.Warning
+        )
+        diags.append(
+            lsp.Diagnostic(
+                range=lsp.Range(
+                    start=lsp.Position(lineno, 0),
+                    end=lsp.Position(lineno, 999),
+                ),
+                message=entry["message"],
+                severity=severity,
+                source="ivy_check",
             )
-            diags.append(
-                lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(lineno, 0),
-                        end=lsp.Position(lineno, 999),
-                    ),
-                    message=m.group(3),
-                    severity=severity,
-                    source="ivy_check",
-                )
-            )
+        )
     return diags
 
 
 async def run_deep_diagnostics(
     filepath: str,
     ivy_check_cmd: str = "ivy_check",
+    cwd: Optional[str] = None,
 ) -> List[lsp.Diagnostic]:
     """Run ivy_check as subprocess and convert output to diagnostics."""
     try:
@@ -497,6 +449,7 @@ async def run_deep_diagnostics(
             filepath,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
     except FileNotFoundError:
@@ -619,7 +572,25 @@ def register(server) -> None:
 
         async def _deep():
             try:
-                deep = await run_deep_diagnostics(filepath)
+                import os
+
+                from ivy_lsp.features.commands import (
+                    _find_enclosing_test,
+                    _resolve_via_staging,
+                )
+
+                enclosing = _find_enclosing_test(server, filepath)
+                if enclosing is not None:
+                    deep_filepath = _resolve_via_staging(server, enclosing)
+                elif not re.search(r'^\s*export\s', source, re.MULTILINE):
+                    # Module file without test scope — can't compile standalone
+                    return
+                else:
+                    deep_filepath = _resolve_via_staging(server, filepath)
+                deep = await run_deep_diagnostics(
+                    deep_filepath,
+                    cwd=os.path.dirname(deep_filepath),
+                )
                 server.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags + deep)
                 )

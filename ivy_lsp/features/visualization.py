@@ -242,7 +242,7 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                     if sv.id not in seen_read_ids:
                         seen_read_ids.add(sv.id)
                         state_vars_read.append(sv)
-            state_vars_written = snap.get_state_vars_written_in_monitor(action_id)
+            state_vars_written = snap.get_all_state_vars_written()
 
             result_actions.append(
                 {
@@ -354,7 +354,7 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
             for r in reqs:
                 for sv in snap.get_state_vars_read_by(r.id):
                     vars_read_ids.add(sv.id)
-            vars_written = snap.get_state_vars_written_in_monitor(action_id)
+            vars_written = snap.get_all_state_vars_written()
 
             direction = _classify_direction(action_id, scope_info)
 
@@ -944,7 +944,7 @@ def handle_smart_suggestions(server: Any, params: dict) -> dict:
                         }
                     )
 
-            written_vars = snap.get_state_vars_written_in_monitor(action_name)
+            written_vars = snap.get_all_state_vars_written()
             for sv in written_vars:
                 guarded = any(
                     etype == EdgeType.READS and target == sv.id

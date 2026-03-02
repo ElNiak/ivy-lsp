@@ -460,7 +460,7 @@ def compute_semantic_completions(
 
     elif action_name and block_type == "after":
         # In after blocks: suggest state vars commonly written
-        written = graph.get_state_vars_written_in_monitor(action_name)
+        written = graph.get_all_state_vars_written()
         for sv in written:
             completions.append({
                 "label": sv.name,
