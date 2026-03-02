@@ -6,6 +6,7 @@ All handlers follow the pure-function pattern from monitoring.py.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -989,30 +990,56 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/actionRequirements")
     async def on_action_requirements(params: Any = None) -> Dict[str, Any]:
-        return handle_action_requirements(
-            server, params if isinstance(params, dict) else {}
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_action_requirements,
+            server, params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/modelSummaryTable")
     async def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
-        return handle_model_summary_table(server, params if isinstance(params, dict) else {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_model_summary_table,
+            server, params if isinstance(params, dict) else {},
+        )
 
     @server.feature("ivy/coverageGaps")
     async def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
-        return handle_coverage_gaps(server, params if isinstance(params, dict) else {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_coverage_gaps,
+            server, params if isinstance(params, dict) else {},
+        )
 
     @server.feature("ivy/actionDependencyGraph")
     async def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
-        return handle_action_dependency_graph(server, params if isinstance(params, dict) else {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_action_dependency_graph,
+            server, params if isinstance(params, dict) else {},
+        )
 
     @server.feature("ivy/stateMachineView")
     async def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
-        return handle_state_machine_view(server, params if isinstance(params, dict) else {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_state_machine_view,
+            server, params if isinstance(params, dict) else {},
+        )
 
     @server.feature("ivy/layeredOverview")
     async def on_layered_overview(params: Any = None) -> Dict[str, Any]:
-        return handle_layered_overview(server, params if isinstance(params, dict) else {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_layered_overview,
+            server, params if isinstance(params, dict) else {},
+        )
 
     @server.feature("ivy/smartSuggestions")
     async def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
-        return handle_smart_suggestions(server, params if isinstance(params, dict) else {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, handle_smart_suggestions,
+            server, params if isinstance(params, dict) else {},
+        )

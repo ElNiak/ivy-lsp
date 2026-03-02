@@ -191,27 +191,37 @@ class RequirementGraph:
         self._outgoing: Dict[str, List[Tuple[EdgeType, str]]] = defaultdict(list)
         self._incoming: Dict[str, List[Tuple[EdgeType, str]]] = defaultdict(list)
 
+        # Version-stamped cache for get_active_requirements_for_file.
+        # Keyed by (filepath, version); invalidated on any graph mutation.
+        self._version: int = 0
+        self._active_reqs_cache: Dict[Tuple[str, int], List[RequirementNode]] = {}
+
     # -- Mutation -----------------------------------------------------------
 
     def add_requirement(self, node: RequirementNode) -> None:
         with self._lock:
             self.requirements[node.id] = node
+            self._version += 1
 
     def add_state_var(self, node: StateVarNode) -> None:
         with self._lock:
             self.state_vars[node.id] = node
+            self._version += 1
 
     def add_action(self, node: ActionNode) -> None:
         with self._lock:
             self.actions[node.id] = node
+            self._version += 1
 
     def add_property(self, node: PropertyNode) -> None:
         with self._lock:
             self.properties[node.id] = node
+            self._version += 1
 
     def add_rfc_requirement(self, node: RfcRequirement) -> None:
         with self._lock:
             self.rfc_requirements[node.id] = node
+            self._version += 1
 
     def add_edge(self, source_id: str, edge_type: EdgeType, target_id: str) -> None:
         with self._lock:
@@ -222,6 +232,7 @@ class RequirementGraph:
             self.edges.append(edge)
             self._outgoing[source_id].append((edge_type, target_id))
             self._incoming[target_id].append((edge_type, source_id))
+            self._version += 1
 
     def remove_file(self, target_filepath: str) -> None:
         """Remove all nodes and edges originating from *target_filepath*."""
@@ -262,6 +273,7 @@ class RequirementGraph:
             ]
             self._edge_set = set(self.edges)
             self._rebuild_adjacency()
+            self._version += 1
 
     def add_file_requirements(
         self,
@@ -351,6 +363,7 @@ class RequirementGraph:
             self.edges = [(s, t, d) for s, t, d in self.edges if t in keep_types]
             self._edge_set = set(self.edges)
             self._rebuild_adjacency()
+            self._version += 1
 
     def populate_actions_from_symbols(self, symbols: List[Any]) -> None:
         """Create ActionNodes from symbol table entries.
@@ -530,13 +543,28 @@ class RequirementGraph:
     def get_active_requirements_for_file(
         self, filepath: str, include_graph: Any
     ) -> List[RequirementNode]:
-        """Return requirements active in *filepath* (own + transitive includes)."""
+        """Return requirements active in *filepath* (own + transitive includes).
+
+        Results are cached by ``(filepath, self._version)``; any graph
+        mutation bumps the version and implicitly invalidates all entries.
+        """
         with self._lock:
+            cache_key = (filepath, self._version)
+            cached = self._active_reqs_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
             active_files = {filepath}
             active_files |= include_graph.get_transitive_includes(filepath)
-            return [
+            result = [
                 r for r in self.requirements.values() if r.file in active_files
             ]
+
+            # Keep cache bounded to avoid unbounded memory growth.
+            if len(self._active_reqs_cache) > 200:
+                self._active_reqs_cache.clear()
+            self._active_reqs_cache[cache_key] = result
+            return result
 
     def get_impact_of_state_var_change(
         self, var_name: str

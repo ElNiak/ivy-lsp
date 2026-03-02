@@ -116,52 +116,71 @@ def compute_requirement_diagnostics(
     abs_path = os.path.abspath(filepath)
     lines = source.split("\n")
 
-    # 1. Include chain propagation
+    # 1. Include chain propagation (per-include deduplicated counts)
     if include_graph:
+        resolver = getattr(indexer, "_resolver", None)
+        seen_files: set = set()
+
         for match in re.finditer(r"^include\s+(\w+)", source, re.MULTILINE):
             inc_name = match.group(1)
             line_no = source[: match.start()].count("\n")
             line_text = lines[line_no] if line_no < len(lines) else ""
 
-            # Count requirements brought in via this include chain
-            active = graph.get_active_requirements_for_file(
-                abs_path, include_graph
-            )
-            own = graph.get_all_requirements_in_file(abs_path)
-            inherited = len(active) - len(own)
+            # Resolve include to file path
+            resolved_path = None
+            if resolver is not None:
+                resolved_path = resolver.resolve(inc_name, abs_path)
+            if resolved_path is None:
+                continue
 
-            if inherited > 0:
-                related = []
-                for req in active:
-                    if req.file != abs_path:
-                        related.append(
-                            lsp.DiagnosticRelatedInformation(
-                                location=lsp.Location(
-                                    uri=f"file://{req.file}",
-                                    range=lsp.Range(
-                                        start=lsp.Position(req.line, 0),
-                                        end=lsp.Position(req.line, 80),
-                                    ),
-                                ),
-                                message=f"{req.kind}: {req.formula_text[:60]}",
-                            )
-                        )
+            # Transitive closure (resolved file + its includes)
+            transitive_files = include_graph.get_transitive_includes(
+                resolved_path
+            ) | {resolved_path}
 
-                diags.append(
-                    lsp.Diagnostic(
+            # Deduplicate: only count files not yet claimed
+            new_files = transitive_files - seen_files
+            seen_files |= new_files
+
+            # Count requirements in newly-introduced files
+            inherited_reqs = [
+                r
+                for r in graph.requirements.values()
+                if r.file in new_files
+            ]
+
+            if not inherited_reqs:
+                continue
+
+            related = [
+                lsp.DiagnosticRelatedInformation(
+                    location=lsp.Location(
+                        uri=f"file://{req.file}",
                         range=lsp.Range(
-                            start=lsp.Position(line_no, 0),
-                            end=lsp.Position(line_no, len(line_text)),
+                            start=lsp.Position(req.line, 0),
+                            end=lsp.Position(req.line, 80),
                         ),
-                        message=(
-                            f"Brings {inherited} requirements into scope "
-                            f"from {inc_name} (and transitive includes)"
-                        ),
-                        severity=lsp.DiagnosticSeverity.Information,
-                        source="ivy-lsp-reqs",
-                        related_information=related[:10],
-                    )
+                    ),
+                    message=f"{req.kind}: {req.formula_text[:60]}",
                 )
+                for req in inherited_reqs
+            ]
+
+            diags.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line_no, 0),
+                        end=lsp.Position(line_no, len(line_text)),
+                    ),
+                    message=(
+                        f"Brings {len(inherited_reqs)} requirements into scope "
+                        f"from {inc_name} (and transitive includes)"
+                    ),
+                    severity=lsp.DiagnosticSeverity.Information,
+                    source="ivy-lsp-reqs",
+                    related_information=related[:10],
+                )
+            )
 
     # 2. Unmonitored actions (Hint)
     active_scope = None
@@ -501,16 +520,20 @@ def register(server) -> None:
         return None
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
-    def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
+    async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
         filepath = uri_to_path(uri)
         source = doc.source or ""
-        pipeline_result = _run_pipeline(source, filepath, "change")
-        diags = compute_diagnostics(
+        loop = asyncio.get_running_loop()
+        pipeline_result = await loop.run_in_executor(
+            None, _run_pipeline, source, filepath, "change"
+        )
+        diags = await loop.run_in_executor(
+            None, compute_diagnostics,
             server._parser, source, filepath,
             server._indexer, _get_semantic_model(),
-            parse_result=pipeline_result,
+            pipeline_result,
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
@@ -529,11 +552,15 @@ def register(server) -> None:
                 doc = server.workspace.get_text_document(uri)
                 filepath = uri_to_path(uri)
                 source = doc.source or ""
-                pipeline_result = _run_pipeline(source, filepath, "change")
-                diags = compute_diagnostics(
+                loop = asyncio.get_running_loop()
+                pipeline_result = await loop.run_in_executor(
+                    None, _run_pipeline, source, filepath, "change"
+                )
+                diags = await loop.run_in_executor(
+                    None, compute_diagnostics,
                     server._parser, source, filepath,
                     server._indexer, _get_semantic_model(),
-                    parse_result=pipeline_result,
+                    pipeline_result,
                 )
                 server.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
@@ -553,23 +580,29 @@ def register(server) -> None:
         _debounce_tasks[uri] = task
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
-    def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
+    async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         uri = params.text_document.uri
         filepath = uri_to_path(uri)
         doc = server.workspace.get_text_document(uri)
         source = doc.source or ""
-        pipeline_result = _run_pipeline(source, filepath, "save")
-        diags = compute_diagnostics(
+        loop = asyncio.get_running_loop()
+        pipeline_result = await loop.run_in_executor(
+            None, _run_pipeline, source, filepath, "save"
+        )
+        diags = await loop.run_in_executor(
+            None, compute_diagnostics,
             server._parser, source, filepath,
             server._indexer, _get_semantic_model(),
-            parse_result=pipeline_result,
+            pipeline_result,
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
         )
 
         if filepath.endswith(".ivy") and server._indexer is not None:
-            server._indexer.reindex_file_with_dependents(filepath)
+            await loop.run_in_executor(
+                None, server._indexer.reindex_file_with_dependents, filepath
+            )
 
         async def _deep():
             try:

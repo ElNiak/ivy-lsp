@@ -99,12 +99,3 @@ def compute_coverage_hints(
             })
 
     return hints
-
-
-def register(server: Any) -> None:
-    """Hook into the diagnostic pipeline to add coverage hints.
-
-    This is a placeholder for future integration with the LSP
-    ``textDocument/publishDiagnostics`` pipeline.
-    """
-    pass

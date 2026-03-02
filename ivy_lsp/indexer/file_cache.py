@@ -25,6 +25,9 @@ class CachedFile:
     parse_result: Any
     symbols: List[Any]
     includes: List[str] = field(default_factory=list)
+    requirements: List[Any] = field(default_factory=list)
+    writes: List[Any] = field(default_factory=list)
+    export_import_info: Any = None
 
 
 class FileCache:
@@ -68,6 +71,9 @@ class FileCache:
         result: Any,
         symbols: List[Any],
         includes: Optional[List[str]] = None,
+        requirements: Optional[List[Any]] = None,
+        writes: Optional[List[Any]] = None,
+        export_import_info: Any = None,
     ) -> None:
         """Store a parse result with the file's current mtime.
 
@@ -86,6 +92,9 @@ class FileCache:
                 parse_result=result,
                 symbols=symbols,
                 includes=includes or [],
+                requirements=requirements or [],
+                writes=writes or [],
+                export_import_info=export_import_info,
             )
             self._cache[filepath] = entry
             self._cache.move_to_end(filepath)
@@ -219,8 +228,15 @@ class PersistentFileCache:
         result: Any,
         symbols: List[Any],
         includes: Optional[List[str]] = None,
+        requirements: Optional[List[Any]] = None,
+        writes: Optional[List[Any]] = None,
+        export_import_info: Any = None,
     ) -> None:
-        self._memory.put(filepath, result, symbols, includes)
+        self._memory.put(
+            filepath, result, symbols, includes,
+            requirements=requirements, writes=writes,
+            export_import_info=export_import_info,
+        )
         try:
             mtime = os.path.getmtime(filepath)
         except OSError:

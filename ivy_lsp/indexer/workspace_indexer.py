@@ -289,6 +289,16 @@ class WorkspaceIndexer:
                         shallow_indexed=True,
                         last_indexed_at=time.time(),
                     )
+                # Restore requirements from cache if available
+                if cached.requirements:
+                    self._requirement_graph.add_file_requirements(
+                        filepath, cached.requirements, cached.writes
+                    )
+                    if cached.export_import_info is not None:
+                        with self._exports_lock:
+                            self._file_export_imports[filepath] = cached.export_import_info
+                    continue
+                # Fallback: re-extract if cache entry predates this feature
                 source = self._read_source(filepath)
                 if source is None:
                     continue
@@ -320,7 +330,6 @@ class WorkspaceIndexer:
                 source, filepath, token_stream=stream
             )
             includes = self._extract_includes(source)
-            self._cache.put(filepath, None, symbols, includes)
 
             with self._progress_lock:
                 self._deep_index_progress.file_statuses[filepath] = FileIndexStatus(
@@ -350,6 +359,13 @@ class WorkspaceIndexer:
             with self._exports_lock:
                 self._file_export_imports[filepath] = info
 
+            # Cache after extraction so requirements/exports are stored too
+            self._cache.put(
+                filepath, None, symbols, includes,
+                requirements=reqs, writes=writes,
+                export_import_info=info,
+            )
+
             slog.debug(
                 "Indexed %s",
                 filepath,
@@ -374,6 +390,14 @@ class WorkspaceIndexer:
             """Thread worker: read + scan + light extract.  No shared state mutation."""
             cached = self._cache.get(filepath)
             if cached is not None:
+                # Restore requirements from cache if available
+                if cached.requirements:
+                    return (
+                        filepath, True, cached.symbols, cached.includes,
+                        None, (cached.requirements, cached.writes),
+                        cached.export_import_info,
+                    )
+                # Fallback: re-extract if cache entry predates this feature
                 source = self._read_source(filepath)
                 reqs_writes = None
                 info = None
@@ -423,7 +447,12 @@ class WorkspaceIndexer:
                 continue
 
             if not from_cache and symbols is not None:
-                self._cache.put(filepath, None, symbols, includes or [])
+                reqs_data = reqs_writes if reqs_writes is not None else ([], [])
+                self._cache.put(
+                    filepath, None, symbols, includes or [],
+                    requirements=reqs_data[0], writes=reqs_data[1],
+                    export_import_info=info,
+                )
 
             with self._progress_lock:
                 self._deep_index_progress.file_statuses[filepath] = FileIndexStatus(
@@ -839,6 +868,14 @@ class WorkspaceIndexer:
     # Incremental re-indexing
     # ------------------------------------------------------------------
 
+    def _get_compiler_manager(self) -> Optional[Any]:
+        """Return the compiler manager from the analysis pipeline, if available."""
+        pipeline = self._analysis_pipeline
+        if pipeline is not None:
+            mgr = getattr(pipeline, "_compiler_manager", None)
+            return mgr
+        return None
+
     def reindex_file(self, filepath: str) -> None:
         """Re-index a single file after it has been modified on disk."""
         abs_path = os.path.abspath(filepath)
@@ -849,6 +886,10 @@ class WorkspaceIndexer:
             self._file_export_imports.pop(abs_path, None)
         self._cache.invalidate(abs_path)
         self._cache.invalidate_dependents(abs_path, self._include_graph)
+        # Invalidate compiler cache so stale compilation results are purged
+        compiler_mgr = self._get_compiler_manager()
+        if compiler_mgr is not None:
+            compiler_mgr.invalidate_dependents(abs_path, self._include_graph)
         self._index_single_file(abs_path)
         self._wire_requirement_graph()
         self._compute_test_scopes()
@@ -865,6 +906,12 @@ class WorkspaceIndexer:
                 if dep not in dirty:
                     dirty.add(dep)
                     queue.append(dep)
+
+        # Invalidate compiler cache for all dirty files
+        compiler_mgr = self._get_compiler_manager()
+        if compiler_mgr is not None:
+            for f in dirty:
+                compiler_mgr.invalidate(f)
 
         # Re-index each dirty file
         for f in dirty:

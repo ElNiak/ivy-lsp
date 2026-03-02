@@ -8,6 +8,7 @@ LSP :class:`WorkspaceSymbol` objects.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -130,4 +131,7 @@ def register(server) -> None:
     ) -> List[lsp.WorkspaceSymbol]:
         if not hasattr(server, "_indexer") or server._indexer is None:
             return []
-        return compute_workspace_symbols(server._indexer, params.query or "")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, compute_workspace_symbols, server._indexer, params.query or "",
+        )

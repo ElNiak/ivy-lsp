@@ -86,12 +86,25 @@ class SemanticModel:
                     if type_dict:
                         type_dict.pop(nid, None)
                 self._node_tiers.pop(nid, None)
-            self._edges = {
+            edges_to_remove = {
                 (src, etype, dst)
                 for src, etype, dst in self._edges
-                if src not in node_ids and dst not in node_ids
+                if src in node_ids or dst in node_ids
             }
-            self._rebuild_adjacency()
+            self._edges -= edges_to_remove
+            for src, etype, dst in edges_to_remove:
+                adj_list = self._outgoing.get(src)
+                if adj_list is not None:
+                    try:
+                        adj_list.remove((etype, dst))
+                    except ValueError:
+                        pass
+                adj_list = self._incoming.get(dst)
+                if adj_list is not None:
+                    try:
+                        adj_list.remove((etype, src))
+                    except ValueError:
+                        pass
 
     def update_file(
         self,
@@ -130,13 +143,27 @@ class SemanticModel:
                 if file_set:
                     file_set.discard(nid)
 
-            # Remove old edges involving removed ids
+            # Remove old edges involving removed ids (incremental)
             if ids_to_remove:
-                self._edges = {
+                edges_to_remove = {
                     (src, etype, dst)
                     for src, etype, dst in self._edges
-                    if src not in ids_to_remove and dst not in ids_to_remove
+                    if src in ids_to_remove or dst in ids_to_remove
                 }
+                self._edges -= edges_to_remove
+                for src, etype, dst in edges_to_remove:
+                    adj_list = self._outgoing.get(src)
+                    if adj_list is not None:
+                        try:
+                            adj_list.remove((etype, dst))
+                        except ValueError:
+                            pass
+                    adj_list = self._incoming.get(dst)
+                    if adj_list is not None:
+                        try:
+                            adj_list.remove((etype, src))
+                        except ValueError:
+                            pass
 
             # Add new nodes (skip if existing node at higher tier)
             for node in nodes:
@@ -156,11 +183,13 @@ class SemanticModel:
                 self._nodes_by_file[filepath].add(nid)
                 self._node_tiers[nid] = tier
 
-            # Add new edges (set prevents duplicates)
+            # Add new edges (incremental, skip duplicates)
             for src, etype, dst in edges:
-                self._edges.add((src, etype, dst))
-
-            self._rebuild_adjacency()
+                edge = (src, etype, dst)
+                if edge not in self._edges:
+                    self._edges.add(edge)
+                    self._outgoing[src].append((etype, dst))
+                    self._incoming[dst].append((etype, src))
 
     def _rebuild_adjacency(self) -> None:
         """Rebuild adjacency indices from the edge list.

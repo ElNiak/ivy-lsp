@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import List, Optional, Union
@@ -83,7 +84,11 @@ def register(server) -> None:
                 return None
             lines = doc.source.split("\n") if doc.source else []
             filepath = uri_to_path(uri)
-            return goto_definition(server._indexer, filepath, params.position, lines)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, goto_definition,
+                server._indexer, filepath, params.position, lines,
+            )
         except Exception:
             logger.warning("definition handler failed", exc_info=True)
             return None

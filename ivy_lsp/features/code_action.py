@@ -3,11 +3,15 @@
 Provides quick-fix code actions for known diagnostic codes:
 - ``missing-lang-header``: Insert ``#lang ivy1.7`` at the top
 - ``unresolved-include``: Remove the offending include line
+- ``ivy.no-monitor``: Insert a skeleton ``after`` monitor block
+- ``ivy.unguarded-write``: Insert a skeleton ``require`` guard
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from typing import List, Sequence
 
 from lsprotocol import types as lsp
@@ -84,6 +88,62 @@ def compute_code_actions(
                     )
                 )
 
+        elif code == "ivy.no-monitor":
+            # Extract action name from message like "Action 'foo' has no ..."
+            m = re.search(r"Action '(\w+)'", diag.message)
+            action_name = m.group(1) if m else "action_name"
+            insert_line = diag.range.end.line + 1
+            snippet = (
+                f"\nafter {action_name} {{\n"
+                f"    ensure ...\n"
+                f"}}\n"
+            )
+            actions.append(
+                lsp.CodeAction(
+                    title=f"Add after monitor for '{action_name}'",
+                    kind=lsp.CodeActionKind.QuickFix,
+                    diagnostics=[diag],
+                    edit=lsp.WorkspaceEdit(
+                        changes={
+                            uri: [
+                                lsp.TextEdit(
+                                    range=make_range(
+                                        insert_line, 0, insert_line, 0,
+                                    ),
+                                    new_text=snippet,
+                                )
+                            ]
+                        }
+                    ),
+                )
+            )
+
+        elif code == "ivy.unguarded-write":
+            # Extract var name from message like "State var 'foo' is written ..."
+            m = re.search(r"State var '([\w.]+)'", diag.message)
+            var_name = m.group(1) if m else "state_var"
+            insert_line = diag.range.end.line + 1
+            snippet = f"    require {var_name}(...)\n"
+            actions.append(
+                lsp.CodeAction(
+                    title=f"Add require guard for '{var_name}'",
+                    kind=lsp.CodeActionKind.QuickFix,
+                    diagnostics=[diag],
+                    edit=lsp.WorkspaceEdit(
+                        changes={
+                            uri: [
+                                lsp.TextEdit(
+                                    range=make_range(
+                                        insert_line, 0, insert_line, 0,
+                                    ),
+                                    new_text=snippet,
+                                )
+                            ]
+                        }
+                    ),
+                )
+            )
+
     return actions
 
 
@@ -103,7 +163,10 @@ def register(server) -> None:
             uri = params.text_document.uri
             doc = server.workspace.get_text_document(uri)
             source = doc.source or ""
-            return compute_code_actions(uri, source, params.context.diagnostics)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, compute_code_actions, uri, source, params.context.diagnostics,
+            )
         except Exception:
             logger.warning("code_action handler failed", exc_info=True)
             return []

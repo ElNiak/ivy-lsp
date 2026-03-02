@@ -166,10 +166,6 @@ class IvyLanguageServer(LanguageServer):
         self._shutdown_event = threading.Event()
         self.state_tracker = ServerStateTracker()
         self._compiler_manager = None
-        self._bulk_compile_lock = threading.Lock()
-        self._bulk_compile_running = False
-        self._bulk_compile_total = 0
-        self._bulk_compile_completed = 0
         self._code_lens_enabled = True
         self._rfc_coverage_enabled = True
         self._initializing = True
@@ -480,7 +476,7 @@ class IvyLanguageServer(LanguageServer):
                     )},
                 )
                 self._send_model_ready_notification()
-                self._start_bulk_compilation()
+                self._start_bulk_compilation_via_pipeline()
             except Exception:
                 logger.exception("Bulk analysis failed")
 
@@ -489,16 +485,36 @@ class IvyLanguageServer(LanguageServer):
         )
         thread.start()
 
-    def _start_bulk_compilation(self) -> None:
-        """Kick off background Tier 3 compilation for all test entry points.
+    def _send_compilation_progress(
+        self, completed: int, total: int, filepath: str, success: bool
+    ) -> None:
+        """Send ``ivy/compilationProgress`` push notification to the client."""
+        try:
+            self.protocol.notify(
+                "ivy/compilationProgress",
+                {
+                    "completed": completed,
+                    "total": total,
+                    "currentFile": os.path.basename(filepath),
+                    "success": success,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Failed to send compilationProgress notification",
+                exc_info=True,
+            )
+        if completed >= total:
+            self._send_model_ready_notification()
 
-        Called after bulk T1+T2 analysis completes.  Each test file is
-        compiled asynchronously via CompilerManager, and the resulting IR
-        enriches the RequirementGraph and SemanticModel.
+    def _start_bulk_compilation_via_pipeline(self) -> None:
+        """Delegate bulk T3 compilation to the analysis pipeline.
+
+        Called after bulk T1+T2 analysis completes.
         """
-        if self._compiler_manager is None:
+        if self._analysis_pipeline is None or self._indexer is None:
             return
-        if self._indexer is None:
+        if self._compiler_manager is None:
             return
         if os.environ.get("IVY_LSP_BULK_COMPILE", "1") == "0":
             slog.info(
@@ -507,7 +523,6 @@ class IvyLanguageServer(LanguageServer):
             )
             return
 
-        # Collect test files (files with exports)
         try:
             graph = self._indexer._requirement_graph
         except AttributeError:
@@ -532,15 +547,6 @@ class IvyLanguageServer(LanguageServer):
             )},
         )
 
-        completed = [0]
-        total = len(test_files)
-
-        # Track state for polling endpoint (under _bulk_compile_lock)
-        with self._bulk_compile_lock:
-            self._bulk_compile_running = True
-            self._bulk_compile_total = total
-            self._bulk_compile_completed = 0
-
         progress_cb = self._make_progress_callback(
             "Ivy Compilation",
             "Compiling {total} test files...",
@@ -548,93 +554,11 @@ class IvyLanguageServer(LanguageServer):
             throttle_seconds=1.0,
         )
 
-        # Throttle compilation progress notifications to at most 1/sec
-        last_notify_time = [0.0]
-
-        def _make_callback(filepath: str):
-            def _on_compile(ir):
-                with self._bulk_compile_lock:
-                    completed[0] += 1
-                    current = completed[0]
-                    self._bulk_compile_completed = current
-
-                # Thread-safe: RequirementGraph and SemanticModel use
-                # internal RLock on all mutation methods, so concurrent
-                # enrichment from multiple _on_compile callbacks is safe.
-                if ir.success:
-                    try:
-                        from ivy_lsp.compilation.graph_enrichment import (
-                            enrich_requirement_graph,
-                            enrich_semantic_model,
-                        )
-
-                        enrich_requirement_graph(graph, ir)
-                        if self._semantic_model is not None:
-                            enrich_semantic_model(
-                                self._semantic_model, ir, filepath
-                            )
-                    except Exception:
-                        logger.warning(
-                            "Enrichment failed for %s", filepath, exc_info=True
-                        )
-
-                # Throttle $/progress and ivy/compilationProgress to 1/sec
-                # (always send the final notification)
-                now = time.time()
-                is_final = current >= total
-                if is_final or (now - last_notify_time[0]) >= 1.0:
-                    last_notify_time[0] = now
-
-                    # Report $/progress
-                    progress_cb(current, total, filepath)
-
-                    # Send ivy/compilationProgress notification
-                    try:
-                        self.protocol.notify(
-                            "ivy/compilationProgress",
-                            {
-                                "completed": current,
-                                "total": total,
-                                "currentFile": os.path.basename(filepath),
-                                "success": ir.success,
-                            },
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to send compilationProgress notification",
-                            exc_info=True,
-                        )
-
-                if current >= total:
-                    with self._bulk_compile_lock:
-                        self._bulk_compile_running = False
-                    slog.info(
-                        "Bulk compilation complete: %d/%d files",
-                        current,
-                        total,
-                        extra={"event": LogEvent(
-                            LogCategory.PERFORMANCE, "compile_bulk",
-                            {"completed": current, "total": total},
-                        )},
-                    )
-                    self._send_model_ready_notification()
-
-            return _on_compile
-
-        for test_file in test_files:
-            try:
-                with open(test_file) as f:
-                    source = f.read()
-            except OSError:
-                logger.warning("Cannot read %s for bulk compilation; skipping", test_file)
-                with self._bulk_compile_lock:
-                    completed[0] += 1
-                    self._bulk_compile_completed = completed[0]
-                progress_cb(completed[0], total, test_file)
-                continue
-            self._compiler_manager.compile_async(
-                source, test_file, _make_callback(test_file)
-            )
+        self._analysis_pipeline.run_bulk_tier3(
+            test_files,
+            progress_callback=progress_cb,
+            cancel_event=self._bulk_analysis_cancel,
+        )
 
     def _install_lsp_log_handler(self) -> None:
         """Add LSP notification handler and demote stderr to WARNING-only."""
@@ -837,16 +761,31 @@ class IvyLanguageServer(LanguageServer):
                     enrichment = AstEnrichmentAdapter()
 
                     # Create CompilerManager for subprocess-based compilation
+                    compiler_staging_dir = None
                     try:
                         from ivy_lsp.compilation.compiler_manager import CompilerManager
 
                         # Re-read staging dir from the resolver (not the
                         # local var from create_staging_directory) because
                         # CompilerManager needs the persistent path.
-                        compiler_staging_dir = None
                         if self._indexer and hasattr(self._indexer, "_resolver"):
                             compiler_staging_dir = getattr(
                                 self._indexer._resolver, "_staging_dir", None
+                            )
+                        if compiler_staging_dir is None:
+                            logger.warning(
+                                "No staging directory available for CompilerManager. "
+                                "Cross-directory includes will fail. "
+                                "indexer=%s, has_resolver=%s",
+                                self._indexer is not None,
+                                hasattr(self._indexer, "_resolver")
+                                if self._indexer
+                                else False,
+                            )
+                        else:
+                            logger.info(
+                                "CompilerManager using staging dir: %s",
+                                compiler_staging_dir,
                             )
                         max_concurrent = max(
                             1,
@@ -868,7 +807,9 @@ class IvyLanguageServer(LanguageServer):
                             "CompilerManager unavailable, using legacy adapter",
                             exc_info=True,
                         )
-                        compiler = CompilerAdapter()
+                        compiler = CompilerAdapter(
+                            staging_dir=compiler_staging_dir,
+                        )
                         self.window_show_message(
                             lsp.ShowMessageParams(
                                 type=lsp.MessageType.Warning,
@@ -903,6 +844,9 @@ class IvyLanguageServer(LanguageServer):
 
                 return _find_enclosing_test(self, filepath)
 
+            requirement_graph = getattr(
+                self._indexer, "_requirement_graph", None
+            )
             self._analysis_pipeline = AnalysisPipeline(
                 self._semantic_model,
                 self._parser,
@@ -910,6 +854,8 @@ class IvyLanguageServer(LanguageServer):
                 compiler,
                 compiler_manager=self._compiler_manager,
                 test_file_resolver=_resolve_test_file,
+                requirement_graph=requirement_graph,
+                notification_callback=self._send_compilation_progress,
             )
             if self._indexer is not None:
                 self._indexer.set_analysis_pipeline(self._analysis_pipeline)

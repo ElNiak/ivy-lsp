@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import logging
 import os
@@ -504,7 +505,10 @@ def register(server) -> None:
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
         graph = getattr(server._indexer, "_requirement_graph", None)
-        return get_completions(
-            server._indexer, filepath, params.position, lines,
-            requirement_graph=graph,
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: get_completions(
+                server._indexer, filepath, params.position, lines,
+                requirement_graph=graph,
+            ),
         )

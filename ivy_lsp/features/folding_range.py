@@ -6,6 +6,7 @@ lines, and consecutive include directives.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import List, Optional
@@ -103,7 +104,10 @@ def register(server) -> None:
             uri = params.text_document.uri
             doc = server.workspace.get_text_document(uri)
             source = doc.source or ""
-            fold_ranges = compute_folding_ranges(source)
+            loop = asyncio.get_running_loop()
+            fold_ranges = await loop.run_in_executor(
+                None, compute_folding_ranges, source,
+            )
             return [_to_lsp_folding_range(fr) for fr in fold_ranges]
         except Exception:
             logger.warning("folding_range handler failed", exc_info=True)

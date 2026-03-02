@@ -6,6 +6,7 @@ Triggers on ``(`` and ``,`` characters.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import List, Optional
@@ -153,7 +154,10 @@ def register(server) -> None:
             lines = doc.source.split("\n")
             filepath = uri_to_path(uri)
             indexer = getattr(server, "_indexer", None)
-            return compute_signature_help(indexer, filepath, lines, params.position)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, compute_signature_help, indexer, filepath, lines, params.position,
+            )
         except Exception:
             logger.warning("signature_help handler failed", exc_info=True)
             return None

@@ -6,6 +6,7 @@ the ``textDocument/documentSymbol`` request handler on the server.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -127,7 +128,10 @@ def register(server) -> None:
             source = doc.source or ""
             parser = getattr(server, "_parser", None)
             indexer = getattr(server, "_indexer", None)
-            return compute_document_symbols(parser, indexer, source, filepath)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, compute_document_symbols, parser, indexer, source, filepath,
+            )
         except Exception:
             logger.warning("document_symbol handler failed", exc_info=True)
             return []

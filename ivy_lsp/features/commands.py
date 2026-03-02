@@ -359,16 +359,26 @@ def _redirect_to_enclosing_test(
 def _extract_param(params: Any, dict_key: str) -> Optional[str]:
     """Extract first argument from LSP command params.
 
-    Handles params as list, dict, or object with .arguments attribute.
+    Handles params as list (possibly nested), dict, or object with
+    .arguments attribute.  Unwraps one level of nesting so that both
+    ``["quic_types"]`` and ``[["quic_types", "file://..."]]`` yield
+    ``"quic_types"``.
     """
     if isinstance(params, list) and params:
-        return params[0]
+        first = params[0]
+        # Unwrap one nesting level (e.g. workspace/executeCommand wrapping)
+        if isinstance(first, list) and first:
+            return first[0]
+        return first
     if isinstance(params, dict):
         return params.get(dict_key)
     if params is not None:
         args = getattr(params, "arguments", None)
         if args:
-            return args[0]
+            first = args[0]
+            if isinstance(first, list) and first:
+                return first[0]
+            return first
     return None
 
 
@@ -647,7 +657,8 @@ def register(server: Any) -> None:
         graph.set_active_test(test_file)
         active = graph.get_active_scope()
 
-        _refresh_open_diagnostics(server)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _refresh_open_diagnostics, server)
 
         return {
             "success": True,
@@ -764,7 +775,8 @@ def register(server: Any) -> None:
             return
 
         graph.set_active_test(filepath)
-        _refresh_open_diagnostics(server)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _refresh_open_diagnostics, server)
 
     @server.feature("ivy/compiledModel")
     async def ivy_compiled_model(params: Any = None) -> Dict[str, Any]:
@@ -857,6 +869,11 @@ def register(server: Any) -> None:
 
     # ------------------------------------------------------------------
     # Code-lens command handlers (C3 + H4)
+    #
+    # These are registered both as custom protocol methods (ivy.xxx) for
+    # direct JSON-RPC calls AND via workspace/executeCommand so that
+    # CodeLens clicks work.  The dispatch table is built at the end of
+    # this block.
     # ------------------------------------------------------------------
 
     @server.feature("ivy.showActionRequirements")
@@ -907,10 +924,18 @@ def register(server: Any) -> None:
         """Handle clicks on include directive code lenses."""
         include_name = _extract_param(params, "includeName")
 
-        # Extract from_file for include resolution context
+        # Extract from_file for include resolution context.
+        # Params may arrive flat  [includeName, fromUri]
+        #                or nested [[includeName, fromUri]]
         from_file = None
-        if isinstance(params, list) and len(params) > 1:
-            from_file = params[1]
+        if isinstance(params, list) and params:
+            inner = params[0] if isinstance(params[0], list) else params
+            if len(inner) > 1:
+                raw = inner[1]
+                if isinstance(raw, str):
+                    from_file = (
+                        uri_to_path(raw) if raw.startswith("file://") else raw
+                    )
         elif isinstance(params, dict):
             uri = params.get("uri") or params.get("fromFile")
             if uri:
@@ -972,6 +997,30 @@ def register(server: Any) -> None:
             "rfc": getattr(node, "rfc", None),
             "text": getattr(node, "text", None),
         }
+
+    # ------------------------------------------------------------------
+    # workspace/executeCommand dispatcher for CodeLens clicks
+    # ------------------------------------------------------------------
+
+    _LENS_COMMANDS: Dict[str, Any] = {
+        "ivy.showActionRequirements": ivy_show_action_requirements,
+        "ivy.showPropertyDetails": ivy_show_property_details,
+        "ivy.navigateToInclude": ivy_navigate_to_include,
+        "ivy.showRfcDetails": ivy_show_rfc_details,
+    }
+
+    @server.feature(
+        lsp.WORKSPACE_EXECUTE_COMMAND,
+        lsp.ExecuteCommandOptions(commands=list(_LENS_COMMANDS.keys())),
+    )
+    async def execute_command(
+        params: lsp.ExecuteCommandParams,
+    ) -> Optional[Dict[str, Any]]:
+        """Dispatch workspace/executeCommand to code-lens handlers."""
+        handler = _LENS_COMMANDS.get(params.command)
+        if handler is None:
+            return {"error": f"Unknown command: {params.command!r}"}
+        return await handler(params.arguments)
 
     @server.feature("ivy/recompileAll")
     async def ivy_recompile_all(params: Any = None) -> Dict[str, Any]:

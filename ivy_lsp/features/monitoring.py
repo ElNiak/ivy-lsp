@@ -233,13 +233,32 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
         })
     else:
         model_ready = server._semantic_model.node_count() > 0
-        features.append({
+        rfc_feature: Dict[str, Any] = {
             "id": "rfcCoverage", "name": "RFC Coverage",
             "status": "ready" if model_ready else "degraded",
             "reason": f"Semantic model active ({server._semantic_model.node_count()} nodes)"
             if model_ready else "No data in semantic model yet",
             "dependsOn": ["semanticAnalysis"],
-        })
+        }
+        if model_ready:
+            try:
+                from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+                from ivy_lsp.semantic.rfc_annotations import compute_coverage
+
+                annotations = server._semantic_model.get_nodes_by_type(RfcAnnotation)
+                reqs_list = server._semantic_model.get_nodes_by_type(RfcRequirement)
+                reqs = {r.id: r for r in reqs_list}
+                if reqs:
+                    stats = compute_coverage(annotations, reqs)
+                    rfc_feature["coverage"] = {
+                        "total": stats.total,
+                        "covered": stats.covered,
+                        "uncovered": stats.uncovered,
+                        "byLevel": stats.by_level,
+                    }
+            except Exception:
+                logger.debug("RFC coverage stats unavailable", exc_info=True)
+        features.append(rfc_feature)
 
     # --- Navigation (completion, definition, hover, references) ---
     if indexer_loading:
@@ -274,6 +293,9 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
         "semanticModelReady": False,
         "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
         "bulkAnalysisCompleted": 0,
+        "bulkCompileRunning": False, "bulkCompileTotal": 0,
+        "bulkCompileCompleted": 0,
+        "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
     }
     if has_pipeline:
         pipeline_state = server._analysis_pipeline.get_pipeline_state()
@@ -358,24 +380,24 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
 def handle_compilation_progress(server: Any) -> Dict[str, Any]:
     """Return current bulk compilation progress.
 
-    Uses ``CompilerManager.get_stats()`` to read cache/process counts
-    under its internal lock, avoiding data races.
+    Reads from the unified ``AnalysisPipeline.get_pipeline_state()``
+    which includes both bulk compile tracking and CompilerManager stats.
     """
-    mgr = getattr(server, "_compiler_manager", None)
-    stats = mgr.get_stats() if mgr else {
+    pipeline = getattr(server, "_analysis_pipeline", None)
+    if pipeline is not None:
+        ps = pipeline.get_pipeline_state()
+        return {
+            "running": ps.get("bulkCompileRunning", False),
+            "total": ps.get("bulkCompileTotal", 0),
+            "completed": ps.get("bulkCompileCompleted", 0),
+            "cachedFiles": ps.get("cachedFiles", 0),
+            "activeProcesses": ps.get("activeProcesses", 0),
+            "maxConcurrent": ps.get("maxConcurrent", 0),
+        }
+    return {
+        "running": False, "total": 0, "completed": 0,
         "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
     }
-    lock = getattr(server, "_bulk_compile_lock", None)
-    if lock is not None:
-        with lock:
-            running = server._bulk_compile_running
-            total = server._bulk_compile_total
-            completed = server._bulk_compile_completed
-    else:
-        running = getattr(server, "_bulk_compile_running", False)
-        total = getattr(server, "_bulk_compile_total", 0)
-        completed = getattr(server, "_bulk_compile_completed", 0)
-    return {"running": running, "total": total, "completed": completed, **stats}
 
 
 def handle_analysis_pipeline_detail(
@@ -397,6 +419,9 @@ def handle_analysis_pipeline_detail(
             "semanticModelReady": False,
             "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
             "bulkAnalysisCompleted": 0,
+            "bulkCompileRunning": False, "bulkCompileTotal": 0,
+            "bulkCompileCompleted": 0,
+            "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
         }
 
     # T3 detail
@@ -442,8 +467,9 @@ def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
     """Return per-test feature availability matrix."""
     if server._indexer is None:
         return {"tests": []}
-    # Snapshot to avoid RuntimeError if background indexing mutates dict.
-    export_imports = dict(server._indexer._file_export_imports)
+    # Snapshot under lock to avoid RuntimeError if background indexing mutates dict.
+    with server._indexer._exports_lock:
+        export_imports = dict(server._indexer._file_export_imports)
     with server._indexer._progress_lock:
         file_statuses = dict(server._indexer._deep_index_progress.file_statuses)
 
@@ -473,6 +499,19 @@ def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
             }
         tests.append({"file": filepath, "features": features})
     return {"tests": tests}
+
+
+def handle_batch_status(server: Any) -> Dict[str, Any]:
+    """Return all monitoring data in one round-trip."""
+    return {
+        "serverStatus": handle_server_status(server),
+        "indexerStats": handle_indexer_stats(server),
+        "operationHistory": handle_operation_history(server),
+        "featureStatus": handle_feature_status(server),
+        "deepIndexProgress": handle_deep_index_progress(server),
+        "testFeatureMatrix": handle_test_feature_matrix(server),
+        "analysisPipelineDetail": handle_analysis_pipeline_detail(server),
+    }
 
 
 # --- LSP wiring ---
@@ -530,3 +569,7 @@ def register(server: Any) -> None:
     @server.feature("ivy/testFeatureMatrix")
     async def on_test_feature_matrix(params: Any = None) -> Dict[str, Any]:
         return handle_test_feature_matrix(server)
+
+    @server.feature("ivy/batchStatus")
+    async def on_batch_status(params: Any = None) -> Dict[str, Any]:
+        return handle_batch_status(server)

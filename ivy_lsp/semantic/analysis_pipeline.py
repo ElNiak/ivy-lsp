@@ -100,36 +100,44 @@ class AnalysisPipeline:
 
     # -- Tier 1 ----------------------------------------------------------------
 
-    def run_tier1(self, source: str, filepath: str) -> None:
+    def run_tier1(self, source: str, filepath: str) -> List[Any]:
         """Immediate syntactic analysis (<50ms, no ivy dep).
 
         - Parse RFC annotations from comments
         - Feed into model.update_file at tier1
+
+        Returns the parsed RFC annotation nodes so callers can pass them
+        to run_tier2 via the *rfc_annotations* kwarg, avoiding a redundant
+        re-parse of the same source text.
         """
-        nodes: List[Any] = []
         edges: List[Tuple[str, SemanticEdgeType, str]] = []
 
         # RFC annotation parsing from comments
         annotations = parse_file_rfc_annotations(source, filepath)
-        for ann in annotations:
-            nodes.append(ann)
 
-        self._model.update_file(filepath, nodes, edges, "tier1")
+        self._model.update_file(filepath, list(annotations), edges, "tier1")
         with self._state_lock:
             self._tier1_files.add(filepath)
-        logger.debug("Tier 1 complete for %s: %d nodes", filepath, len(nodes))
+        logger.debug("Tier 1 complete for %s: %d nodes", filepath, len(annotations))
+        return annotations
 
     # -- Tier 2 ----------------------------------------------------------------
 
     def run_tier2(
-        self, source: str, filepath: str, *, parse_result: Any = None
+        self,
+        source: str,
+        filepath: str,
+        *,
+        parse_result: Any = None,
+        rfc_annotations: Optional[List[Any]] = None,
     ) -> Any:
         """AST-enriched analysis (<200ms, ivy parser).
 
         - Parse with parser_adapter (or reuse *parse_result* if provided)
         - Extract type info with enrichment_adapter
         - Build cross-reference edges (HAS_PARAM)
-        - Re-parse RFC annotations (coexist with AST nodes; no linking yet)
+        - Include RFC annotations (reused from T1 via *rfc_annotations*, or
+          re-parsed if not provided)
         - Feed into model.update_file at tier2
 
         Returns the ParseResult so callers can reuse it (avoiding double parse).
@@ -189,8 +197,11 @@ class AnalysisPipeline:
                                 (node.id, SemanticEdgeType.HAS_PARAM, sort_part)
                             )
 
-        # Also re-parse RFC annotations at tier2 to link them with AST nodes
-        annotations = parse_file_rfc_annotations(source, filepath)
+        # Reuse RFC annotations from T1 when provided; otherwise re-parse.
+        if rfc_annotations is not None:
+            annotations = rfc_annotations
+        else:
+            annotations = parse_file_rfc_annotations(source, filepath)
         for ann in annotations:
             nodes.append(ann)
 
@@ -419,8 +430,9 @@ class AnalysisPipeline:
                 self._bulk_progress_tick(i, len(remaining), filepath, progress_callback)
                 continue
 
+            t1_annotations = None
             try:
-                self.run_tier1(source, filepath)
+                t1_annotations = self.run_tier1(source, filepath)
                 result.t1_completed += 1
             except Exception as exc:
                 result.errors.append((filepath, f"T1: {exc}"))
@@ -435,7 +447,12 @@ class AnalysisPipeline:
                     logger.debug("Bulk T2 parse failed for %s: %s", filepath, exc)
                     result.errors.append((filepath, f"T2-parse: {exc}"))
                 try:
-                    self.run_tier2(source, filepath, parse_result=parse_result)
+                    self.run_tier2(
+                        source,
+                        filepath,
+                        parse_result=parse_result,
+                        rfc_annotations=t1_annotations,
+                    )
                     result.t2_completed += 1
                 except Exception as exc:
                     result.errors.append((filepath, f"T2: {exc}"))
@@ -460,19 +477,22 @@ class AnalysisPipeline:
 
         # Phase A: thread-parallel T1
         sources: Dict[str, str] = {}
+        t1_annotations_map: Dict[str, List[Any]] = {}
 
-        def _t1_task(filepath: str) -> Tuple[str, Optional[str], Optional[str]]:
-            """Return (filepath, source_or_None, error_or_None)."""
+        def _t1_task(
+            filepath: str,
+        ) -> Tuple[str, Optional[str], Optional[List[Any]], Optional[str]]:
+            """Return (filepath, source_or_None, annotations_or_None, error_or_None)."""
             try:
                 with open(filepath) as f:
                     src = f.read()
             except OSError as exc:
-                return filepath, None, str(exc)
+                return filepath, None, None, str(exc)
             try:
-                self.run_tier1(src, filepath)
+                anns = self.run_tier1(src, filepath)
             except Exception as exc:
-                return filepath, src, f"T1: {exc}"
-            return filepath, src, None
+                return filepath, src, None, f"T1: {exc}"
+            return filepath, src, anns, None
 
         completed = 0
         with ThreadPoolExecutor(max_workers=num_workers) as pool:
@@ -481,9 +501,11 @@ class AnalysisPipeline:
                 if cancel_event is not None and cancel_event.is_set():
                     result.cancelled = True
                     break
-                filepath, src, error = future.result()
+                filepath, src, anns, error = future.result()
                 if src is not None:
                     sources[filepath] = src
+                if anns is not None:
+                    t1_annotations_map[filepath] = anns
                 if error is not None:
                     result.errors.append((filepath, error))
                 else:
@@ -512,7 +534,12 @@ class AnalysisPipeline:
                     logger.debug("Bulk T2 parse failed for %s: %s", filepath, exc)
                     result.errors.append((filepath, f"T2-parse: {exc}"))
                 try:
-                    self.run_tier2(source, filepath, parse_result=parse_result)
+                    self.run_tier2(
+                        source,
+                        filepath,
+                        parse_result=parse_result,
+                        rfc_annotations=t1_annotations_map.get(filepath),
+                    )
                     result.t2_completed += 1
                 except Exception as exc:
                     result.errors.append((filepath, f"T2: {exc}"))
@@ -762,8 +789,10 @@ class AnalysisPipeline:
         """
         parse_result = None
         if trigger in ("change", "save"):
-            self.run_tier1(source, filepath)
-            parse_result = self.run_tier2(source, filepath)
+            t1_annotations = self.run_tier1(source, filepath)
+            parse_result = self.run_tier2(
+                source, filepath, rfc_annotations=t1_annotations
+            )
         if trigger in ("save", "command"):
             t3_source, t3_filepath = source, filepath
             redirected = False

@@ -5,6 +5,7 @@ Builds nested selection chains: word -> line -> brace block -> file.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import List, Optional, Sequence
 
@@ -110,4 +111,7 @@ def register(server) -> None:
         if not doc.source:
             return None
         lines = doc.source.split("\n")
-        return compute_selection_ranges(lines, params.positions)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, compute_selection_ranges, lines, params.positions,
+        )

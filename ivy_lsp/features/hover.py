@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import List, Optional
@@ -196,8 +197,10 @@ def register(server) -> None:
             lines = doc.source.split("\n") if doc.source else []
             filepath = uri_to_path(uri)
             model = getattr(server, "_semantic_model", None)
-            return get_hover_info(
-                server._indexer, filepath, params.position, lines, model
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, get_hover_info,
+                server._indexer, filepath, params.position, lines, model,
             )
         except Exception:
             logger.warning("hover handler failed", exc_info=True)

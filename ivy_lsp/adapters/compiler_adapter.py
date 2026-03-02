@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
@@ -79,8 +80,13 @@ class CompilerAdapter:
     to a subprocess for full isolation.
     """
 
-    def __init__(self, compiler_manager: Any = None) -> None:
+    def __init__(
+        self,
+        compiler_manager: Any = None,
+        staging_dir: Optional[str] = None,
+    ) -> None:
         self._manager = compiler_manager
+        self._staging_dir = staging_dir
 
     def compile(self, source: str, filename: str) -> CompileResult:
         """Compile *source* through the full Ivy compiler pipeline.
@@ -100,6 +106,9 @@ class CompilerAdapter:
             )
 
         with CompilerSession():
+            saved_cwd = os.getcwd()
+            if self._staging_dir:
+                os.chdir(self._staging_dir)
             try:
                 import ivy.ivy_module as im
                 import ivy.ivy_utils as iu
@@ -135,6 +144,8 @@ class CompilerAdapter:
                     file=filename,
                 )
                 return CompileResult(success=False, errors=[error])
+            finally:
+                os.chdir(saved_cwd)
 
     def _compile_via_manager(self, source: str, filename: str) -> CompileResult:
         """Compile via CompilerManager subprocess."""

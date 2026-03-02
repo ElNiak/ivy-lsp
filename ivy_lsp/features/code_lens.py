@@ -8,6 +8,7 @@ and workspace-level RFC coverage summaries.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -36,9 +37,6 @@ _INDIVIDUAL_LINE_RE = re.compile(
 _PROPERTY_LINE_RE = re.compile(
     r"^\s*(invariant|property|axiom|conjecture)\s+", re.MULTILINE
 )
-_INCLUDE_LINE_RE = re.compile(
-    r"^\s*include\s+(\w+)", re.MULTILINE
-)
 
 
 def compute_code_lenses(
@@ -66,7 +64,10 @@ def compute_code_lenses(
         # 4. Include directive lenses
         include_graph = getattr(indexer, "_include_graph", None)
         if include_graph:
-            lenses.extend(_include_lenses(lines, abs_path, graph, include_graph))
+            resolver = getattr(indexer, "_resolver", None)
+            lenses.extend(
+                _include_lenses(lines, abs_path, graph, include_graph, resolver)
+            )
 
     # 5. Semantic model lenses (RFC tags, coverage summary)
     if semantic_model is not None:
@@ -290,18 +291,51 @@ def _include_lenses(
     filepath: str,
     graph: Any,
     include_graph: Any,
+    resolver: Any,
 ) -> List[lsp.CodeLens]:
-    """Code lenses above include directives."""
+    """Code lenses above include directives.
+
+    Each include shows the number of requirements it *uniquely* brings into
+    scope.  When two includes share a transitive dependency, the first one
+    (in source order) claims the shared files' requirements.
+    """
+    from lsprotocol.types import SymbolKind
+
+    from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
     lenses = []
+
+    if resolver is None:
+        return lenses
+
     source = "\n".join(lines)
+    symbols, _ = fallback_scan(source, filepath)
+    include_symbols = [
+        s for s in symbols if s.kind == SymbolKind.File and s.detail == "include"
+    ]
 
-    for m in _INCLUDE_LINE_RE.finditer(source):
-        line = source[: m.start()].count("\n")
+    seen_files: set = set()
 
-        # Count requirements brought into scope via this include chain
-        active_reqs = graph.get_active_requirements_for_file(filepath, include_graph)
-        own_reqs = graph.get_all_requirements_in_file(filepath)
-        inherited_count = len(active_reqs) - len(own_reqs)
+    for sym in include_symbols:
+        include_name = sym.name
+        line = sym.range[0]  # 0-based line index
+
+        resolved_path = resolver.resolve(include_name, filepath)
+        if resolved_path is None:
+            continue
+
+        # Transitive closure: the resolved file + everything it includes
+        transitive_files = include_graph.get_transitive_includes(
+            resolved_path
+        ) | {resolved_path}
+
+        # Only count files not already claimed by earlier includes
+        new_files = transitive_files - seen_files
+        seen_files |= new_files
+
+        inherited_count = sum(
+            1 for r in graph.requirements.values() if r.file in new_files
+        )
 
         if inherited_count <= 0:
             continue
@@ -320,7 +354,7 @@ def _include_lenses(
                 command=lsp.Command(
                     title=title,
                     command="ivy.navigateToInclude",
-                    arguments=[m.group(1)],
+                    arguments=[include_name],
                 ),
             )
         )
@@ -448,8 +482,10 @@ def register(server) -> None:
         if not rfc_coverage:
             model = None
         try:
-            return compute_code_lenses(
-                server._indexer, filepath, source, model
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, compute_code_lenses,
+                server._indexer, filepath, source, model,
             )
         except Exception:
             logger.warning(

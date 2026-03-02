@@ -45,9 +45,41 @@ def compiler_worker(
         import ivy.ivy_logic as il
         import ivy.ivy_utils as iu
 
+        # --- ivyc-equivalent initialization ---
+        # These match what ivy_to_cpp.main_int does for target=test.
+        # Without them, ivy_from_string() fails on symbol resolution
+        # for imported actions, struct destructors, and sort interpretations.
+        try:
+            import ivy.ivy_actions as ia
+            import ivy.ivy_isolate as iso
+            import ivy.ivy_solver as slv
+
+            ia.set_determinize(True)
+            slv.set_use_native_enums(True)
+            iso.set_interpret_all_sorts(True)
+            ic.set_verifying(False)
+        except (ImportError, AttributeError) as init_err:
+            logger.debug("Optional ivyc init flags unavailable: %s", init_err)
+
+        iu.set_parameters({
+            "coi": "false",
+            "create_imports": "true",
+            "enforce_axioms": "true",
+            "ui": "none",
+            "isolate_mode": "test",
+            "assume_invariants": "false",
+            "keep_destructors": "true",
+        })
+
         iu.filename = filename
         with im.Module():
-            ic.ivy_from_string(source)
+            # Add _generating symbol for test target (QUIC tests use this)
+            try:
+                im.module.sig.add_symbol("_generating", il.BooleanSort())
+            except (AttributeError, TypeError) as sym_err:
+                logger.debug("Could not add _generating symbol: %s", sym_err)
+
+            ic.ivy_from_string(source, create_isolate=False)
 
             duration = time.monotonic() - start
 

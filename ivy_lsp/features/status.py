@@ -61,12 +61,11 @@ class OperationTracker:
     ) -> None:
         with self._lock:
             record = self._active.pop(op_id, None)
-        if record is None:
-            return
-        record.success = success
-        record.message = message
-        record.duration = duration
-        with self._lock:
+            if record is None:
+                return
+            record.success = success
+            record.message = message
+            record.duration = duration
             self._history.appendleft(record)
 
     def get_active(self) -> List[OperationRecord]:
