@@ -130,7 +130,7 @@ class _LspLogHandler(logging.Handler):
                         label = k if k != "_untagged" else "other"
                         parts.append(f"{v} {label}")
                     suppression = "[" + ", ".join(parts) + " messages suppressed]"
-                    msg = f"{suppression} {msg}"
+                    msg = f"{msg} {suppression}"
                     self._drop_counts = {}
                 self._server.window_log_message(
                     lsp.LogMessageParams(type=msg_type, message=msg)
@@ -881,12 +881,19 @@ class IvyLanguageServer(LanguageServer):
                 enrichment = NullAstEnrichmentAdapter()
                 compiler = NullCompilerAdapter()
 
+            def _resolve_test_file(filepath: str):
+                """Resolve a module file to its enclosing test file for T3."""
+                from ivy_lsp.features.commands import _find_enclosing_test
+
+                return _find_enclosing_test(self, filepath)
+
             self._analysis_pipeline = AnalysisPipeline(
                 self._semantic_model,
                 self._parser,
                 enrichment,
                 compiler,
                 compiler_manager=self._compiler_manager,
+                test_file_resolver=_resolve_test_file,
             )
             if self._indexer is not None:
                 self._indexer.set_analysis_pipeline(self._analysis_pipeline)
