@@ -98,6 +98,7 @@ class AnalysisPipeline:
         self._bulk_compile_total: int = 0
         self._bulk_compile_completed: int = 0
         self._bulk_compile_cancelled: bool = False
+        self._file_generation: Dict[str, int] = {}
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -118,6 +119,7 @@ class AnalysisPipeline:
 
         self._model.update_file(filepath, list(annotations), edges, "tier1")
         with self._state_lock:
+            self._file_generation[filepath] = self._file_generation.get(filepath, 0) + 1
             self._tier1_files.add(filepath)
         logger.debug("Tier 1 complete for %s: %d nodes", filepath, len(annotations))
         return annotations
@@ -233,6 +235,8 @@ class AnalysisPipeline:
         from ivy_lsp.adapters.protocols import CompileResult
 
         t3_start = time.time()
+        with self._state_lock:
+            gen_at_submit = self._file_generation.get(filepath, 0)
 
         def _on_result(result: CompileResult) -> None:
             t3_end = time.time()
@@ -240,6 +244,14 @@ class AnalysisPipeline:
             completed_at = t3_end
 
             try:
+                with self._state_lock:
+                    current_gen = self._file_generation.get(filepath, 0)
+                if current_gen != gen_at_submit:
+                    logger.debug(
+                        "Discarding stale T3 result for %s (gen %d vs %d)",
+                        filepath, gen_at_submit, current_gen,
+                    )
+                    return
                 if not result.success:
                     error_msgs = [e.message for e in result.errors]
                     logger.debug(
@@ -588,7 +600,32 @@ class AnalysisPipeline:
         submitted_count = [0]
 
         def _make_callback(filepath: str):
+            with self._state_lock:
+                gen_at_submit = self._file_generation.get(filepath, 0)
+
             def _on_compile(ir):
+                with self._state_lock:
+                    current_gen = self._file_generation.get(filepath, 0)
+                if current_gen != gen_at_submit:
+                    logger.debug(
+                        "Discarding stale bulk T3 result for %s (gen %d vs %d)",
+                        filepath, gen_at_submit, current_gen,
+                    )
+                    # Still count completion for progress so bulk compilation can finish
+                    with self._state_lock:
+                        completed_count[0] += 1
+                        self._bulk_compile_completed = completed_count[0]
+                        stale_is_final = completed_count[0] >= submitted_count[0]
+                    if stale_is_final:
+                        with self._state_lock:
+                            self._bulk_compile_running = False
+                        logger.info(
+                            "Bulk T3 compilation complete (stale final): %d/%d files",
+                            completed_count[0],
+                            total,
+                        )
+                    return
+
                 with self._state_lock:
                     completed_count[0] += 1
                     current = completed_count[0]
