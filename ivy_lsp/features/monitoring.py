@@ -538,12 +538,12 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/reindex")
     async def on_reindex(params: Any = None) -> Dict[str, Any]:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, handle_reindex, server)
 
     @server.feature("ivy/clearCache")
     async def on_clear_cache(params: Any = None) -> Dict[str, Any]:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, handle_clear_cache, server)
 
     @server.feature("ivy/featureStatus")

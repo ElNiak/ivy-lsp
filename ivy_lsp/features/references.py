@@ -97,7 +97,7 @@ def register(server) -> None:
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
         include_decl = params.context.include_declaration if params.context else True
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, find_references, server._indexer,
             filepath, params.position, lines, include_decl,
