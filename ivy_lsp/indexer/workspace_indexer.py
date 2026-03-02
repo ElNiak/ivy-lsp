@@ -46,7 +46,10 @@ def _try_tokenize(source: str, filepath: str) -> Optional[Any]:
         from ivy_lsp.parsing.token_stream import tokenize_ivy
 
         return tokenize_ivy(source, filepath)
+    except ImportError:
+        return None
     except Exception:
+        logger.debug("Tokenization failed for %s", filepath, exc_info=True)
         return None
 
 
