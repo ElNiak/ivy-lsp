@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Text Editors :: Integrated Development Environments (IDE)",
 ]
 dependencies = [
-    "pygls>=1.0",
+    "pygls>=2.0",
     "lsprotocol",
     "panther_ms_ivy",
 ]

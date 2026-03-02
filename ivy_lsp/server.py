@@ -90,11 +90,19 @@ def _patch_pygls_closed_pipe() -> None:
 
 try:
     import pygls as _pygls_mod
+    from importlib.metadata import version as _meta_version
 
-    if getattr(_pygls_mod, "__version__", "").startswith("2.0."):
+    _pygls_ver = getattr(
+        _pygls_mod, "__version__", None
+    ) or _meta_version("pygls")
+    if _pygls_ver.startswith("2.0."):
         _patch_pygls_cancelled_future()
         _patch_pygls_closed_pipe()
-except ImportError:
+        logger.debug(
+            "pygls %s patches applied: cancelled_future, closed_pipe_guard",
+            _pygls_ver,
+        )
+except (ImportError, Exception):
     pass
 
 
