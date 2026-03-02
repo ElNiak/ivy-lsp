@@ -38,11 +38,11 @@ class TestSubprocessResult:
 
 
 class TestGetToolSemaphore:
-    def test_returns_semaphore(self):
+    async def test_returns_semaphore(self):
         sem = get_tool_semaphore()
         assert isinstance(sem, asyncio.Semaphore)
 
-    def test_default_limit(self, monkeypatch):
+    async def test_default_limit(self, monkeypatch):
         monkeypatch.delenv("IVY_LSP_MAX_CONCURRENT_TOOLS", raising=False)
         # Reset module-level state to force re-creation
         import ivy_lsp.utils.async_subprocess as mod
@@ -53,7 +53,7 @@ class TestGetToolSemaphore:
         # Default is 4 — verify by acquiring 4 times without blocking
         assert sem._value == 4  # noqa: SLF001
 
-    def test_env_override(self, monkeypatch):
+    async def test_env_override(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         import ivy_lsp.utils.async_subprocess as mod
         mod._semaphores.clear()
@@ -62,7 +62,7 @@ class TestGetToolSemaphore:
         sem = get_tool_semaphore()
         assert sem._value == 2  # noqa: SLF001
 
-    def test_minimum_one(self, monkeypatch):
+    async def test_minimum_one(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "0")
         import ivy_lsp.utils.async_subprocess as mod
         mod._semaphores.clear()

@@ -46,10 +46,7 @@ def get_tool_semaphore() -> asyncio.Semaphore:
     global _semaphore_limit
     limit = max(1, int(os.environ.get("IVY_LSP_MAX_CONCURRENT_TOOLS", "4")))
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     loop_id = id(loop)
 
