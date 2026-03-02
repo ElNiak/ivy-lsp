@@ -250,22 +250,33 @@ def _extract_from_block(
 
         # Assignment: ... ASSIGN (:=)
         if tok.type == "ASSIGN" and i > start:
-            lhs_tok = tokens[i - 1]
-            var_name = str(lhs_tok.value)
-            # Walk backward to collect dotted prefix
-            k = i - 1
-            parts = [var_name]
-            while k >= start + 2 and tokens[k - 1].type == "DOT":
-                parts.insert(0, str(tokens[k - 2].value))
-                k -= 2
-            if len(parts) > 1:
-                var_name = ".".join(parts)
-            # Strip function call syntax from LHS: "foo(X)" -> "foo"
-            paren = var_name.find("(")
-            if paren >= 0:
-                var_name = var_name[:paren]
-            line_0based = tok.lineno - 1
-            writes.append((var_name, filepath, line_0based))
+            # Find the name token before :=, skipping past (params)
+            name_idx = i - 1
+            if name_idx >= start and tokens[name_idx].type == "RPAREN":
+                # Walk backward past parenthesized args
+                depth = 1
+                name_idx -= 1
+                while name_idx >= start and depth > 0:
+                    if tokens[name_idx].type == "RPAREN":
+                        depth += 1
+                    elif tokens[name_idx].type == "LPAREN":
+                        depth -= 1
+                    name_idx -= 1
+                # name_idx now points to the token before LPAREN
+
+            if name_idx >= start:
+                lhs_tok = tokens[name_idx]
+                var_name = str(lhs_tok.value)
+                # Walk backward to collect dotted prefix
+                k = name_idx
+                parts = [var_name]
+                while k >= start + 2 and tokens[k - 1].type == "DOT":
+                    parts.insert(0, str(tokens[k - 2].value))
+                    k -= 2
+                if len(parts) > 1:
+                    var_name = ".".join(parts)
+                line_0based = tok.lineno - 1
+                writes.append((var_name, filepath, line_0based))
 
         i += 1
 
