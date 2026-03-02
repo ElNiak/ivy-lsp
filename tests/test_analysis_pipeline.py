@@ -1466,3 +1466,92 @@ class TestTier2ReusesAnnotations:
         rfc_nodes = [n for n in nodes if isinstance(n, RfcAnnotation)]
         assert len(rfc_nodes) == 1
         assert rfc_nodes[0].tags == ["rfc9000:4.1"]
+
+
+# ---------------------------------------------------------------------------
+# Bulk T3 submitted_count race condition tests
+# ---------------------------------------------------------------------------
+
+
+class TestBulkTier3SubmittedCount:
+    """Verify submitted_count tracks correctly for is_final."""
+
+    def test_skipped_file_does_not_cause_premature_final(self, tmp_path):
+        """When a file is unreadable, bulk compile must still finish remaining files."""
+        model = SemanticModel()
+        mock_compiler = mock.MagicMock()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=mock_compiler,
+        )
+
+        good_file = tmp_path / "good.ivy"
+        good_file.write_text("# good file")
+        bad_file = tmp_path / "bad.ivy"
+        # Don't create bad_file -- OSError when opened
+
+        callbacks = []
+
+        def fake_compile_async(source, filepath, callback):
+            callbacks.append(callback)
+
+        mock_compiler.compile_async.side_effect = fake_compile_async
+
+        pipeline.run_bulk_tier3(
+            [str(bad_file), str(good_file)],
+            progress_callback=None,
+        )
+
+        assert len(callbacks) == 1, "Only the readable file should be submitted"
+        assert pipeline._bulk_compile_running is True, "Should still be running"
+
+        mock_ir = mock.MagicMock()
+        mock_ir.success = True
+        callbacks[0](mock_ir)
+
+        assert pipeline._bulk_compile_running is False, (
+            "Should be done after all submitted files complete"
+        )
+
+    def test_submitted_count_incremented_before_async_call(self):
+        """submitted_count must be >= completed_count when callback fires synchronously."""
+        model = SemanticModel()
+        mock_compiler = mock.MagicMock()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=mock_compiler,
+        )
+
+        def fire_immediately(source, filepath, callback):
+            mock_ir = mock.MagicMock()
+            mock_ir.success = True
+            callback(mock_ir)
+
+        mock_compiler.compile_async.side_effect = fire_immediately
+
+        import tempfile
+        import os
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".ivy", delete=False
+        ) as f:
+            f.write("# test file")
+            test_file = f.name
+
+        try:
+            pipeline.run_bulk_tier3(
+                [test_file],
+                progress_callback=None,
+            )
+            assert pipeline._bulk_compile_running is False
+            assert pipeline._bulk_compile_completed == 1
+        finally:
+            os.unlink(test_file)

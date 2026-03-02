@@ -699,9 +699,6 @@ class AnalysisPipeline:
                 logger.warning(
                     "Cannot read %s for bulk T3; skipping", test_file
                 )
-                with self._state_lock:
-                    completed_count[0] += 1
-                    self._bulk_compile_completed = completed_count[0]
                 if progress_callback is not None:
                     try:
                         progress_callback(
@@ -714,10 +711,10 @@ class AnalysisPipeline:
                         )
                 continue
 
+            submitted_count[0] += 1
             self._compiler_manager.compile_async(
                 source, test_file, _make_callback(test_file)
             )
-            submitted_count[0] += 1
 
     # -- T3 result management --------------------------------------------------
 
