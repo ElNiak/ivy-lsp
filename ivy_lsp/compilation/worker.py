@@ -46,13 +46,14 @@ def compiler_worker(
         import ivy.ivy_utils as iu
 
         iu.filename = filename
-        ic.ivy_from_string(source)
+        with im.Module():
+            ic.ivy_from_string(source)
 
-        duration = time.monotonic() - start
+            duration = time.monotonic() - start
 
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+            from ivy_lsp.compilation.extractor import extract_compiled_module_ir
 
-        ir = extract_compiled_module_ir(im.module, il.sig, filename, duration)
+            ir = extract_compiled_module_ir(im.module, il.sig, filename, duration)
         result_conn.send(ir)
     except Exception as exc:
         logger.warning("Compilation failed for %s: %s", filename, exc, exc_info=True)

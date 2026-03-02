@@ -101,36 +101,40 @@ class CompilerAdapter:
 
         with CompilerSession():
             try:
+                import ivy.ivy_module as im
                 import ivy.ivy_utils as iu
 
                 iu.filename = filename
-                ic.ivy_from_string(source)
+                with im.Module():
+                    ic.ivy_from_string(source)
+
+                    try:
+                        module_snap = _extract_module_snapshot()
+                        sig_snap = _extract_signature_snapshot()
+                    except Exception:
+                        logger.warning(
+                            "Snapshot extraction failed after successful compile",
+                            exc_info=True,
+                        )
+                        return CompileResult(
+                            success=False,
+                            errors=[CompileError(
+                                message="Compilation succeeded but snapshot extraction failed",
+                                file=filename,
+                            )],
+                        )
+
+                    return CompileResult(
+                        success=True,
+                        module_snapshot=module_snap,
+                        signature_snapshot=sig_snap,
+                    )
             except Exception as e:
                 error = CompileError(
                     message=str(e),
                     file=filename,
                 )
                 return CompileResult(success=False, errors=[error])
-
-            try:
-                module_snap = _extract_module_snapshot()
-                sig_snap = _extract_signature_snapshot()
-            except Exception:
-                logger.warning(
-                    "Snapshot extraction failed after successful compile",
-                    exc_info=True,
-                )
-                return CompileResult(
-                    success=True,
-                    module_snapshot=None,
-                    signature_snapshot=None,
-                )
-
-            return CompileResult(
-                success=True,
-                module_snapshot=module_snap,
-                signature_snapshot=sig_snap,
-            )
 
     def _compile_via_manager(self, source: str, filename: str) -> CompileResult:
         """Compile via CompilerManager subprocess."""
@@ -200,7 +204,7 @@ class CompilerAdapter:
             try:
                 f.result()
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Background compilation failed for %s",
                     filename,
                     exc_info=True,
