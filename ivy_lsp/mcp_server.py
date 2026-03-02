@@ -20,7 +20,6 @@ import sys
 import time
 from typing import Any
 
-from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.verification import (
     run_ivy_check as shared_ivy_check,
@@ -41,16 +40,10 @@ def _validate_path(root: str, relative_path: str) -> str:
 
 
 from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_files
-from ivy_lsp.utils.ivy_output import parse_ivy_check_lines
 from ivy_lsp.utils.structural_lint import (
     check_structural_issues_raw,
     check_unresolved_includes_raw,
 )
-
-
-def _parse_ivy_check_output(output: str) -> list[dict[str, Any]]:
-    """Parse ivy_check output into structured diagnostics."""
-    return parse_ivy_check_lines(output)
 
 
 def _check_structural_issues(source: str, filepath: str) -> list[dict[str, Any]]:
