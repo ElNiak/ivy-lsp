@@ -137,6 +137,9 @@ class ParallelDeepIndexer:
                         break
                 for future in futures:
                     filepath = futures[future]
+                    if self._stop_event is not None and self._stop_event.is_set():
+                        future.cancel()
+                        continue
                     try:
                         results[filepath] = future.result(timeout=60)
                     except (BrokenExecutor, Exception) as e:

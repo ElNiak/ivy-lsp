@@ -1042,22 +1042,12 @@ def register(server: Any) -> None:
         "ivy.noop": ivy_noop,
     }
 
-    # Register each code-lens command via @server.command() so pygls'
-    # ServerCapabilitiesBuilder includes them in executeCommandProvider.
-    # This is the sole registration path for these commands.
-    def _make_command_adapter(feature_handler):
-        """Adapt feature handler for pygls command dispatch.
-
-        pygls' _prepare_command_arguments with *args passes each
-        params.arguments item as a positional arg. The feature handlers
-        expect a list, so we reconstruct it.
-        """
-        async def _adapter(*args):
-            return await feature_handler(list(args) if args else None)
-        return _adapter
-
+    # Register each code-lens command as a custom LSP request via
+    # server.feature().  This avoids executeCommandProvider.commands
+    # which causes vscode-languageclient v9+ to auto-register VS Code
+    # commands, conflicting with the client-side handlers in extension.ts.
     for _cmd_name, _feature_handler in _LENS_COMMANDS.items():
-        server.command(_cmd_name)(_make_command_adapter(_feature_handler))
+        server.feature(_cmd_name)(_feature_handler)
 
     @server.feature("ivy/recompileAll")
     async def ivy_recompile_all(params: Any = None) -> Dict[str, Any]:
