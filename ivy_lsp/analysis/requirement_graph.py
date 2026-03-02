@@ -196,6 +196,11 @@ class RequirementGraph:
         self._version: int = 0
         self._active_reqs_cache: Dict[Tuple[str, int], List[RequirementNode]] = {}
 
+        # Versioned snapshot cache – avoids rebuilding identical snapshots
+        # when no mutations have occurred between consecutive reads.
+        self._cached_snapshot: Optional[GraphSnapshot] = None
+        self._cached_snapshot_version: int = -1
+
     # -- Mutation -----------------------------------------------------------
 
     def add_requirement(self, node: RequirementNode) -> None:
@@ -478,9 +483,16 @@ class RequirementGraph:
     # -- Snapshot -----------------------------------------------------------
 
     def snapshot(self) -> GraphSnapshot:
-        """Return a thread-safe frozen copy of all graph data for read-only use."""
+        """Return a thread-safe frozen copy of all graph data for read-only use.
+
+        Cached by graph version; repeated calls without mutations return
+        the same GraphSnapshot instance.
+        """
         with self._lock:
-            return GraphSnapshot(
+            if (self._cached_snapshot is not None
+                    and self._cached_snapshot_version == self._version):
+                return self._cached_snapshot
+            snap = GraphSnapshot(
                 actions=dict(self.actions),
                 requirements=dict(self.requirements),
                 state_vars=dict(self.state_vars),
@@ -490,6 +502,9 @@ class RequirementGraph:
                 outgoing={k: list(v) for k, v in self._outgoing.items()},
                 incoming={k: list(v) for k, v in self._incoming.items()},
             )
+            self._cached_snapshot = snap
+            self._cached_snapshot_version = self._version
+            return snap
 
     # -- Queries ------------------------------------------------------------
 

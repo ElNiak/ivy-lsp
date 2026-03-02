@@ -43,11 +43,37 @@ def _patch_pygls_cancelled_future() -> None:
     JsonRPCProtocol._handle_response = _safe_handle_response  # type: ignore[assignment]
 
 
+def _patch_pygls_closed_pipe() -> None:
+    """Convert ValueError from closed stdout to BrokenPipeError.
+
+    pygls 2.0.1 catches BrokenPipeError in _send_data() but not
+    ValueError("write to closed file"), which Python raises when
+    writing to a closed BufferedWriter.  The generic except handler
+    then cascades via logger.exception + _report_server_error.
+    Converting to BrokenPipeError lets pygls's existing handler
+    trigger a clean shutdown.
+    """
+    from pygls.protocol.json_rpc import JsonRPCProtocol
+
+    _original = JsonRPCProtocol._send_data
+
+    def _safe_send_data(self, data):
+        try:
+            _original(self, data)
+        except ValueError as exc:
+            if "closed" in str(exc).lower():
+                raise BrokenPipeError(str(exc)) from exc
+            raise
+
+    JsonRPCProtocol._send_data = _safe_send_data  # type: ignore[assignment]
+
+
 try:
     import pygls as _pygls_mod
 
     if getattr(_pygls_mod, "__version__", "").startswith("2.0."):
         _patch_pygls_cancelled_future()
+        _patch_pygls_closed_pipe()
 except ImportError:
     pass
 
@@ -80,6 +106,7 @@ class _LspLogHandler(logging.Handler):
         self._lock = threading.Lock()  # non-reentrant; no I/O under lock
         self._last_emit = 0.0
         self._drop_counts: dict = {}
+        self._pipe_dead = False
 
     @staticmethod
     def _extract_category(msg: str) -> str:
@@ -94,6 +121,8 @@ class _LspLogHandler(logging.Handler):
         return ""
 
     def emit(self, record: logging.LogRecord) -> None:
+        if self._pipe_dead:
+            return
         # Per-thread recursion guard: pygls logs inside _send_data(),
         # which would re-enter this handler. Skip to prevent infinite loop.
         if getattr(self._tls, "sending", False):
@@ -140,6 +169,7 @@ class _LspLogHandler(logging.Handler):
                 lsp.LogMessageParams(type=msg_type, message=msg)
             )
         except Exception:
+            self._pipe_dead = True
             try:
                 sys.stderr.write(f"[ivy-lsp-fallback] {msg}\n")
                 sys.stderr.flush()
@@ -293,6 +323,8 @@ class IvyLanguageServer(LanguageServer):
 
     def _send_model_ready_notification(self) -> None:
         """Send ``ivy/modelReady`` notification so the client can refresh immediately."""
+        if self._shutdown_event.is_set():
+            return
         try:
             graph = getattr(self._indexer, "_requirement_graph", None)
             action_count = len(graph.actions) if graph else 0
@@ -317,6 +349,8 @@ class IvyLanguageServer(LanguageServer):
 
     def _send_server_ready_notification(self, init_start: float) -> None:
         """Send ``ivy/serverReady`` notification after initialization completes."""
+        if self._shutdown_event.is_set():
+            return
         try:
             mode = "full" if self._full_mode else "light"
             init_duration = round(time.time() - init_start, 3)
@@ -376,6 +410,8 @@ class IvyLanguageServer(LanguageServer):
             )
 
         def _callback(completed: int, total: int, current_file):
+            if server._shutdown_event.is_set():
+                return
             with state_lock:
                 if state["disabled"]:
                     return
@@ -505,6 +541,8 @@ class IvyLanguageServer(LanguageServer):
         self, completed: int, total: int, filepath: str, success: bool
     ) -> None:
         """Send ``ivy/compilationProgress`` push notification to the client."""
+        if self._shutdown_event.is_set():
+            return
         try:
             self.protocol.notify(
                 "ivy/compilationProgress",

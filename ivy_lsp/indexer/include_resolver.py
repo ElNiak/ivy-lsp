@@ -30,6 +30,7 @@ _EXCLUDED_DIR_BASENAMES = frozenset({
     "venv",
     "submodules",
     "test",
+    "include",
 })
 
 # Glob-style patterns matched against directory basenames.

@@ -64,9 +64,14 @@ def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGra
     try:
         indexer = server._indexer
         if indexer is None:
-            logger.warning(
-                "_get_requirement_graph: indexer is None (server not initialized?)"
-            )
+            if getattr(server, "_initializing", True):
+                logger.debug(
+                    "_get_requirement_graph: server still initializing"
+                )
+            else:
+                logger.warning(
+                    "_get_requirement_graph: indexer is None (server not initialized?)"
+                )
             return None
         graph = getattr(indexer, "_requirement_graph", None)
         if graph is None:
