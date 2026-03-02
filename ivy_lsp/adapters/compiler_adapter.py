@@ -149,8 +149,13 @@ class CompilerAdapter:
             sig_snap = module_snap.signature
         except Exception:
             logger.warning("Snapshot conversion failed", exc_info=True)
-            module_snap = None
-            sig_snap = None
+            return CompileResult(
+                success=False,
+                errors=[CompileError(
+                    message="Compilation succeeded but snapshot extraction failed",
+                    file=filename,
+                )],
+            )
 
         return CompileResult(
             success=True,
@@ -244,13 +249,19 @@ class CompilerAdapter:
                         filename,
                         exc_info=True,
                     )
-                    module_snap = None
-                    sig_snap = None
-                result = CompileResult(
-                    success=True,
-                    module_snapshot=module_snap,
-                    signature_snapshot=sig_snap,
-                )
+                    result = CompileResult(
+                        success=False,
+                        errors=[CompileError(
+                            message="Compilation succeeded but snapshot extraction failed",
+                            file=filename,
+                        )],
+                    )
+                else:
+                    result = CompileResult(
+                        success=True,
+                        module_snapshot=module_snap,
+                        signature_snapshot=sig_snap,
+                    )
             if callback:
                 callback(result)
 

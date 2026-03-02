@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -341,7 +342,14 @@ def _redirect_to_enclosing_test(
         module_basename = os.path.basename(
             uri_to_path(uri)
         ).replace(".ivy", "")
-        all_isolates = _collect_all_isolates(server, enclosing_test, "")
+        # Read actual source for isolate detection
+        enc_source = ""
+        try:
+            with open(enclosing_test, "r", encoding="utf-8", errors="replace") as f:
+                enc_source = f.read()
+        except OSError:
+            logger.debug("Could not read %s for isolate detection", enclosing_test)
+        all_isolates = _collect_all_isolates(server, enclosing_test, enc_source)
         if module_basename in all_isolates:
             isolate = module_basename
 
@@ -907,6 +915,15 @@ def register(server: Any) -> None:
             if args:
                 include_name = args[0]
 
+        # Extract from_file for include resolution context
+        from_file = None
+        if isinstance(params, list) and len(params) > 1:
+            from_file = params[1]
+        elif isinstance(params, dict):
+            uri = params.get("uri") or params.get("fromFile")
+            if uri:
+                from_file = uri_to_path(uri) if uri.startswith("file://") else uri
+
         if not include_name:
             return {"error": "No include name provided"}
 
@@ -918,7 +935,11 @@ def register(server: Any) -> None:
         if resolver is None:
             return {"error": "No resolver available"}
 
-        resolved = resolver.resolve(include_name)
+        if not from_file:
+            workspace_root = getattr(indexer, "_workspace_root", "")
+            from_file = workspace_root
+
+        resolved = resolver.resolve(include_name, from_file)
         if not resolved:
             return {"error": f"Cannot resolve include {include_name!r}"}
 
@@ -966,4 +987,65 @@ def register(server: Any) -> None:
             "level": getattr(node, "level", None),
             "rfc": getattr(node, "rfc", None),
             "text": getattr(node, "text", None),
+        }
+
+    @server.feature("ivy/recompileAll")
+    async def ivy_recompile_all(params: Any = None) -> Dict[str, Any]:
+        """Re-trigger bulk compilation for all test entry points.
+
+        Validates that the pipeline, compiler manager, and requirement
+        graph are available and that no bulk compilation is already
+        running.  Delegates to ``AnalysisPipeline.run_bulk_tier3()``.
+        """
+        pipeline = getattr(server, "_analysis_pipeline", None)
+        if pipeline is None:
+            return {"success": False, "error": "Analysis pipeline not initialized"}
+
+        if getattr(pipeline, "_compiler_manager", None) is None:
+            return {"success": False, "error": "CompilerManager not available"}
+
+        ps = pipeline.get_pipeline_state()
+        if ps.get("bulkCompileRunning", False):
+            return {"success": False, "error": "Bulk compilation already running"}
+
+        try:
+            graph = server._indexer._requirement_graph
+        except AttributeError:
+            return {"success": False, "error": "Requirement graph not available"}
+
+        if not isinstance(graph, ScopedRequirementModel):
+            return {"success": False, "error": "Scoped model not available"}
+
+        test_files = list(graph._test_scopes.keys())
+        if not test_files:
+            return {"success": False, "error": "No test files found"}
+
+        cancel_event = getattr(server, "_bulk_analysis_cancel", None)
+
+        def _run():
+            progress_cb = None
+            try:
+                progress_cb = server._make_progress_callback(
+                    "Ivy Recompilation",
+                    "Recompiling {total} test files...",
+                    "Recompiled {total} test files",
+                    throttle_seconds=1.0,
+                )
+            except Exception:
+                pass
+            pipeline.run_bulk_tier3(
+                test_files,
+                progress_callback=progress_cb,
+                cancel_event=cancel_event,
+            )
+
+        thread = threading.Thread(
+            target=_run, daemon=True, name="ivy-recompile-all",
+        )
+        thread.start()
+
+        return {
+            "success": True,
+            "message": f"Recompilation started for {len(test_files)} test files",
+            "testFileCount": len(test_files),
         }

@@ -6,7 +6,7 @@ empty or failure results so the pipeline can still run Tier 1 analysis.
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, Callable, List, Optional
 
 from ivy_lsp.adapters.protocols import CompileResult, TypeAnnotation
 from ivy_lsp.parsing.parser_session import ParseResult
@@ -33,3 +33,12 @@ class NullCompilerAdapter:
 
     def compile(self, source: str, filename: str) -> CompileResult:
         return CompileResult(success=False, errors=[])
+
+    def compile_background(
+        self,
+        source: str,
+        filename: str,
+        callback: Optional[Callable[[CompileResult], None]] = None,
+    ) -> None:
+        if callback is not None:
+            callback(CompileResult(success=False, errors=[]))

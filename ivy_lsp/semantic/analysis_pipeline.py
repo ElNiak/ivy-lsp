@@ -67,6 +67,8 @@ class AnalysisPipeline:
         compiler_adapter: ICompilerAdapter,
         compiler_manager: Any = None,
         test_file_resolver: Optional[Callable[[str], Optional[str]]] = None,
+        requirement_graph: Any = None,
+        notification_callback: Optional[Callable[..., None]] = None,
     ) -> None:
         self._model = model
         self._parser = parser_adapter
@@ -74,11 +76,13 @@ class AnalysisPipeline:
         self._compiler = compiler_adapter
         self._compiler_manager = compiler_manager
         self._test_file_resolver = test_file_resolver
+        self._requirement_graph = requirement_graph
+        self._notification_callback = notification_callback
         self._tier1_files: set[str] = set()
         self._tier2_files: set[str] = set()
         # Lock protecting _tier1_files, _tier2_files, and all _tier3_* /
-        # _bulk_* state that is written from background threads and read
-        # from the LSP main thread.
+        # _bulk_* / _bulk_compile_* state that is written from background
+        # threads and read from the LSP main thread.
         self._state_lock = threading.Lock()
         self._tier3_results: OrderedDict[str, Tier3FileResult] = OrderedDict()
         self._tier3_running: bool = False
@@ -89,6 +93,10 @@ class AnalysisPipeline:
         self._bulk_running: bool = False
         self._bulk_total: int = 0
         self._bulk_completed: int = 0
+        # Bulk compilation state (workspace-wide T3)
+        self._bulk_compile_running: bool = False
+        self._bulk_compile_total: int = 0
+        self._bulk_compile_completed: int = 0
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -236,22 +244,32 @@ class AnalysisPipeline:
                         error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
                     )
                     return
-                nodes: List[Any] = []
-                edges: List[Tuple[str, SemanticEdgeType, str]] = []
+                enrichment_performed = False
 
-                # Enrich semantic model from compiled data if available
+                # Enrich semantic model and requirement graph from compiled data
                 if self._compiler_manager is not None:
                     try:
                         ir = self._compiler_manager.get_cached(filepath)
                         if ir is not None:
                             from ivy_lsp.compilation.graph_enrichment import (
+                                enrich_requirement_graph,
                                 enrich_semantic_model,
                             )
                             enrich_semantic_model(self._model, ir, filepath)
+                            enrichment_performed = True
+                            if self._requirement_graph is not None:
+                                enrich_requirement_graph(
+                                    self._requirement_graph, ir
+                                )
                     except Exception:
-                        logger.debug("Tier 3 enrichment failed", exc_info=True)
+                        logger.warning(
+                            "Tier 3 enrichment failed for %s", filepath, exc_info=True
+                        )
 
-                self._model.update_file(filepath, nodes, edges, "tier3")
+                # Only mark file as tier3-processed if enrichment didn't already
+                # call model.update_file (graph_enrichment.py does it internally)
+                if not enrichment_performed:
+                    self._model.update_file(filepath, [], [], "tier3")
                 self._record_tier3_result(
                     filepath,
                     success=True,
@@ -413,8 +431,9 @@ class AnalysisPipeline:
                 parse_result = None
                 try:
                     parse_result = self._parser.parse(source, filepath)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Bulk T2 parse failed for %s: %s", filepath, exc)
+                    result.errors.append((filepath, f"T2-parse: {exc}"))
                 try:
                     self.run_tier2(source, filepath, parse_result=parse_result)
                     result.t2_completed += 1
@@ -489,13 +508,143 @@ class AnalysisPipeline:
                 parse_result = None
                 try:
                     parse_result = self._parser.parse(source, filepath)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Bulk T2 parse failed for %s: %s", filepath, exc)
+                    result.errors.append((filepath, f"T2-parse: {exc}"))
                 try:
                     self.run_tier2(source, filepath, parse_result=parse_result)
                     result.t2_completed += 1
                 except Exception as exc:
                     result.errors.append((filepath, f"T2: {exc}"))
+
+    # -- Bulk Tier 3 (workspace-wide compilation) ------------------------------
+
+    def run_bulk_tier3(
+        self,
+        test_files: List[str],
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> None:
+        """Run Tier 3 compilation for all test entry points.
+
+        Iterates *test_files*, compiles each via ``CompilerManager.compile_async``,
+        and enriches both RequirementGraph and SemanticModel on completion.
+        Tracks ``_bulk_compile_*`` state for monitoring endpoints.
+
+        Args:
+            test_files: Absolute paths to test ``.ivy`` files.
+            progress_callback: Called after each file with ``(completed, total, filepath)``.
+            cancel_event: If set, no further compilations are submitted.
+        """
+        if self._compiler_manager is None:
+            logger.info("Bulk T3 skipped: no CompilerManager available")
+            return
+
+        with self._state_lock:
+            if self._bulk_compile_running:
+                logger.info("Bulk T3 already running, skipping")
+                return
+            self._bulk_compile_running = True
+            self._bulk_compile_total = len(test_files)
+            self._bulk_compile_completed = 0
+
+        if not test_files:
+            with self._state_lock:
+                self._bulk_compile_running = False
+            return
+
+        completed_count = [0]
+        total = len(test_files)
+        last_notify_time = [0.0]
+
+        def _make_callback(filepath: str):
+            def _on_compile(ir):
+                with self._state_lock:
+                    completed_count[0] += 1
+                    current = completed_count[0]
+                    self._bulk_compile_completed = current
+
+                if ir.success:
+                    try:
+                        from ivy_lsp.compilation.graph_enrichment import (
+                            enrich_requirement_graph,
+                            enrich_semantic_model,
+                        )
+
+                        if self._requirement_graph is not None:
+                            enrich_requirement_graph(self._requirement_graph, ir)
+                        enrich_semantic_model(self._model, ir, filepath)
+                    except Exception:
+                        logger.warning(
+                            "Bulk T3 enrichment failed for %s",
+                            filepath,
+                            exc_info=True,
+                        )
+
+                # Throttle notifications to ~1/sec (always send final)
+                now = time.time()
+                is_final = current >= total
+                if is_final or (now - last_notify_time[0]) >= 1.0:
+                    last_notify_time[0] = now
+
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(current, total, filepath)
+                        except Exception:
+                            logger.debug(
+                                "Bulk T3 progress callback failed", exc_info=True
+                            )
+
+                    if self._notification_callback is not None:
+                        try:
+                            self._notification_callback(
+                                current, total, filepath, ir.success
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Bulk T3 notification callback failed",
+                                exc_info=True,
+                            )
+
+                if is_final:
+                    with self._state_lock:
+                        self._bulk_compile_running = False
+                    logger.info(
+                        "Bulk T3 compilation complete: %d/%d files",
+                        current,
+                        total,
+                    )
+
+            return _on_compile
+
+        for test_file in test_files:
+            if cancel_event is not None and cancel_event.is_set():
+                with self._state_lock:
+                    self._bulk_compile_running = False
+                break
+
+            try:
+                with open(test_file) as f:
+                    source = f.read()
+            except OSError:
+                logger.warning(
+                    "Cannot read %s for bulk T3; skipping", test_file
+                )
+                with self._state_lock:
+                    completed_count[0] += 1
+                    self._bulk_compile_completed = completed_count[0]
+                if progress_callback is not None:
+                    try:
+                        progress_callback(
+                            completed_count[0], total, test_file
+                        )
+                    except Exception:
+                        pass
+                continue
+
+            self._compiler_manager.compile_async(
+                source, test_file, _make_callback(test_file)
+            )
 
     # -- T3 result management --------------------------------------------------
 
@@ -549,8 +698,8 @@ class AnalysisPipeline:
     def get_pipeline_state(self) -> dict:
         """Return current pipeline state for monitoring.
 
-        Acquires ``_state_lock`` to get a consistent snapshot of T3 and
-        bulk analysis state.
+        Acquires ``_state_lock`` to get a consistent snapshot of T3,
+        bulk analysis, and bulk compilation state.
         """
         with self._state_lock:
             succeeded = sum(1 for r in self._tier3_results.values() if r.success)
@@ -566,6 +715,18 @@ class AnalysisPipeline:
             bulk_completed = self._bulk_completed
             t1_count = len(self._tier1_files)
             t2_count = len(self._tier2_files)
+            bulk_compile_running = self._bulk_compile_running
+            bulk_compile_total = self._bulk_compile_total
+            bulk_compile_completed = self._bulk_compile_completed
+
+        # Compiler manager stats (cache/process counts)
+        mgr_stats = {"cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0}
+        if self._compiler_manager is not None:
+            try:
+                mgr_stats = self._compiler_manager.get_stats()
+            except Exception:
+                logger.debug("CompilerManager.get_stats() failed", exc_info=True)
+
         return {
             "tier1FileCount": t1_count,
             "tier2FileCount": t2_count,
@@ -583,6 +744,10 @@ class AnalysisPipeline:
             "bulkAnalysisRunning": bulk_running,
             "bulkAnalysisTotal": bulk_total,
             "bulkAnalysisCompleted": bulk_completed,
+            "bulkCompileRunning": bulk_compile_running,
+            "bulkCompileTotal": bulk_compile_total,
+            "bulkCompileCompleted": bulk_compile_completed,
+            **mgr_stats,
         }
 
     # -- Orchestration ---------------------------------------------------------

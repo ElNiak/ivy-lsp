@@ -1,9 +1,9 @@
 """Intermediate Representation dataclasses for subprocess serialization.
 
-These frozen dataclasses represent the wire format for serializing Ivy's
-Module object across process boundaries. They use only Python primitives
-(str, int, bool, tuple, dict, frozenset, Optional, None) so they survive
-pickle round-trips without requiring Z3 or Ivy imports.
+Leaf types (SortIR, SymbolIR, etc.) are frozen with immutable collections
+(tuple, frozenset).  The top-level CompiledModuleIR is frozen at the
+attribute level but contains Dict fields that are shallowly mutable.
+All values survive pickle round-trips without requiring Z3 or Ivy imports.
 """
 from __future__ import annotations
 
@@ -156,6 +156,12 @@ class CompiledModuleIR:
     success: bool = False
     source_file: str = ""
     compile_duration: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.success and self.errors:
+            raise ValueError(
+                "CompiledModuleIR: success=True is incompatible with non-empty errors"
+            )
 
     @staticmethod
     def empty(

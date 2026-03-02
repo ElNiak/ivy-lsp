@@ -9,7 +9,7 @@ the Protocols, never on ivy internals directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol, runtime_checkable
 
 from ivy_lsp.parsing.parser_session import ParseResult
 
@@ -84,5 +84,18 @@ class ICompilerAdapter(Protocol):
     """Compiles Ivy source through the full compiler pipeline."""
 
     def compile(self, source: str, filename: str) -> CompileResult: ...
+
+    def compile_background(
+        self,
+        source: str,
+        filename: str,
+        callback: Optional[Callable[[CompileResult], None]] = None,
+    ) -> None:
+        """Submit compilation to the background thread pool.
+
+        Implementations that do not support background compilation
+        may fall back to synchronous compilation in the calling thread.
+        """
+        ...
 
 
