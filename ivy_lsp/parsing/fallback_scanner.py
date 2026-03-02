@@ -8,13 +8,16 @@ is a degraded but useful ``List[IvySymbol]`` with correct nesting for
 
 from __future__ import annotations
 
-import copy
 import logging
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
 from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.parsing.token_stream import tokenize_ivy
+
+if TYPE_CHECKING:
+    from ivy_lsp.parsing.token_stream import TokenStream
 
 logger = logging.getLogger(__name__)
 
@@ -58,50 +61,15 @@ _DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER"}
 def _tokenize(
     source: str, filename: str = "<string>"
 ) -> Tuple[list, Optional[dict]]:
-    """Tokenize *source* using the Ivy PLY lexer.
+    """Tokenize *source* using the shared ``tokenize_ivy`` entry point.
 
     Returns ``(tokens, error_info)`` where *error_info* is ``None`` on
     success or ``{"line": int, "message": str}`` when the lexer fails on
     an illegal character.  The token list is always best-effort (partial
     results are returned on failure).
     """
-    from ivy.ivy_lexer import LexerVersion
-    from ivy.ivy_lexer import lexer as ivy_lexer
-
-    lex_copy = copy.copy(ivy_lexer)
-    tokens: list = []
-    error_info: Optional[dict] = None
-    with LexerVersion([1, 7]):
-        lex_copy.input(source)
-        while True:
-            try:
-                tok = lex_copy.token()
-            except Exception as exc:
-                # Extract line number from exception.  IvyError.lineno
-                # may be a LocationTuple with a .line attribute rather
-                # than a plain int.
-                line = 1
-                lineno = getattr(exc, "lineno", None)
-                if lineno is not None:
-                    if hasattr(lineno, "line") and isinstance(lineno.line, int):
-                        line = lineno.line
-                    elif isinstance(lineno, int):
-                        line = lineno
-                error_info = {
-                    "line": line,
-                    "message": str(exc),
-                }
-                logger.warning(
-                    "Lexer error in %s after %d tokens; returning partial results",
-                    filename,
-                    len(tokens),
-                    exc_info=True,
-                )
-                break
-            if tok is None:
-                break
-            tokens.append(tok)
-    return tokens, error_info
+    stream = tokenize_ivy(source, filename)
+    return stream.tokens, stream.error_info
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +126,9 @@ def _read_dotted_name(tokens: list, start: int) -> Tuple[Optional[str], int]:
 
 
 def fallback_scan(
-    source: str, filename: str = "<string>"
+    source: str,
+    filename: str = "<string>",
+    token_stream: Optional["TokenStream"] = None,
 ) -> Tuple[List[IvySymbol], Optional[dict]]:
     """Extract symbol declarations from Ivy source using lexer tokens only.
 
@@ -168,6 +138,10 @@ def fallback_scan(
         Raw Ivy source text.
     filename:
         File path to attach to every returned symbol.
+    token_stream:
+        Optional pre-built ``TokenStream``.  When provided, skips
+        tokenization (avoids double-tokenizing when the caller already
+        has a stream).
 
     Returns
     -------
@@ -181,15 +155,19 @@ def fallback_scan(
     if not source or not source.strip():
         return [], None
 
-    try:
-        tokens, error_info = _tokenize(source, filename)
-    except Exception:
-        logger.warning(
-            "Lexer failed entirely for %s, returning empty symbol list",
-            filename,
-            exc_info=True,
-        )
-        return [], None
+    if token_stream is not None:
+        tokens = token_stream.tokens
+        error_info = token_stream.error_info
+    else:
+        try:
+            tokens, error_info = _tokenize(source, filename)
+        except Exception:
+            logger.warning(
+                "Lexer failed entirely for %s, returning empty symbol list",
+                filename,
+                exc_info=True,
+            )
+            return [], None
 
     if not tokens:
         return [], error_info
