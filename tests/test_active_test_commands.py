@@ -303,8 +303,9 @@ class TestCompileTestHandler:
             await registered["ivy/compileTest"](params)
 
         call_args = mock_exec.call_args[0]
-        assert "/tmp/staging/quic_client_test.ivy" in call_args
+        assert "quic_client_test.ivy" in call_args
         assert "/workspace/quic_client_test.ivy" not in call_args
+        assert mock_exec.call_args.kwargs.get("cwd") == "/tmp/staging"
 
     @pytest.mark.asyncio
     async def test_compile_cmd_has_target_test(self, scoped_server):

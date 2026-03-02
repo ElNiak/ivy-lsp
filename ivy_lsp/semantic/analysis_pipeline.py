@@ -207,28 +207,55 @@ class AnalysisPipeline:
         """
         from ivy_lsp.adapters.protocols import CompileResult
 
-        t3_start = time.monotonic()
+        t3_start = time.time()
 
         def _on_result(result: CompileResult) -> None:
-            t3_end = time.monotonic()
+            t3_end = time.time()
             duration = t3_end - t3_start
-            completed_at = time.time()
+            completed_at = t3_end
 
-            if not result.success:
-                error_msgs = [e.message for e in result.errors]
-                logger.debug(
-                    "Tier 3 compilation failed for %s: %s",
-                    filepath,
-                    error_msgs,
-                )
+            try:
+                if not result.success:
+                    error_msgs = [e.message for e in result.errors]
+                    logger.debug(
+                        "Tier 3 compilation failed for %s: %s",
+                        filepath,
+                        error_msgs,
+                    )
+                    self._record_tier3_result(
+                        filepath,
+                        success=False,
+                        started_at=t3_start,
+                        completed_at=completed_at,
+                        duration=duration,
+                        error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
+                    )
+                    return
+                nodes: List[Any] = []
+                edges: List[Tuple[str, SemanticEdgeType, str]] = []
+
+                # Enrich semantic model from compiled data if available
+                if self._compiler_manager is not None:
+                    try:
+                        ir = self._compiler_manager.get_cached(filepath)
+                        if ir is not None:
+                            from ivy_lsp.compilation.graph_enrichment import (
+                                enrich_semantic_model,
+                            )
+                            enrich_semantic_model(self._model, ir, filepath)
+                    except Exception:
+                        logger.debug("Tier 3 enrichment failed", exc_info=True)
+
+                self._model.update_file(filepath, nodes, edges, "tier3")
                 self._record_tier3_result(
                     filepath,
-                    success=False,
-                    started_at=completed_at - duration,
+                    success=True,
+                    started_at=t3_start,
                     completed_at=completed_at,
                     duration=duration,
-                    error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
                 )
+                logger.debug("Tier 3 complete for %s (%.2fs)", filepath, duration)
+            finally:
                 if not track_state:
                     with self._state_lock:
                         self._tier3_pending = max(0, self._tier3_pending - 1)
@@ -236,38 +263,6 @@ class AnalysisPipeline:
                     with self._state_lock:
                         self._tier3_running = False
                         self._tier3_current_file = None
-                return
-            nodes: List[Any] = []
-            edges: List[Tuple[str, SemanticEdgeType, str]] = []
-
-            # Enrich semantic model from compiled data if available
-            if self._compiler_manager is not None:
-                try:
-                    ir = self._compiler_manager.get_cached(filepath)
-                    if ir is not None:
-                        from ivy_lsp.compilation.graph_enrichment import (
-                            enrich_semantic_model,
-                        )
-                        enrich_semantic_model(self._model, ir, filepath)
-                except Exception:
-                    logger.debug("Tier 3 enrichment failed", exc_info=True)
-
-            self._model.update_file(filepath, nodes, edges, "tier3")
-            self._record_tier3_result(
-                filepath,
-                success=True,
-                started_at=completed_at - duration,
-                completed_at=completed_at,
-                duration=duration,
-            )
-            if not track_state:
-                with self._state_lock:
-                    self._tier3_pending = max(0, self._tier3_pending - 1)
-            if track_state:
-                with self._state_lock:
-                    self._tier3_running = False
-                    self._tier3_current_file = None
-            logger.debug("Tier 3 complete for %s (%.2fs)", filepath, duration)
 
         if not track_state:
             with self._state_lock:

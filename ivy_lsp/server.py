@@ -364,49 +364,51 @@ class IvyLanguageServer(LanguageServer):
         """
         token = str(uuid.uuid4())
         state = {"created": False, "disabled": False, "last_report": 0.0}
+        state_lock = threading.Lock()
         server = self
 
         def _callback(completed: int, total: int, current_file):
-            if state["disabled"]:
-                return
-            if not state["created"]:
-                try:
-                    server.work_done_progress.create(token)
-                    server.work_done_progress.begin(
-                        token,
-                        lsp.WorkDoneProgressBegin(
-                            title=title,
-                            message=begin_msg.format(total=total),
-                            cancellable=False,
-                            percentage=0,
-                        ),
-                    )
-                    state["created"] = True
-                except Exception:
-                    state["disabled"] = True
-                    logger.debug(
-                        "Client does not support work-done progress",
-                        exc_info=True,
-                    )
+            with state_lock:
+                if state["disabled"]:
+                    return
+                if not state["created"]:
+                    try:
+                        server.work_done_progress.create(token)
+                        server.work_done_progress.begin(
+                            token,
+                            lsp.WorkDoneProgressBegin(
+                                title=title,
+                                message=begin_msg.format(total=total),
+                                cancellable=False,
+                                percentage=0,
+                            ),
+                        )
+                        state["created"] = True
+                    except Exception:
+                        state["disabled"] = True
+                        logger.debug(
+                            "Client does not support work-done progress",
+                            exc_info=True,
+                        )
+                        return
+
+                if completed >= total:
+                    try:
+                        server.work_done_progress.end(
+                            token,
+                            lsp.WorkDoneProgressEnd(
+                                message=end_msg.format(total=total),
+                            ),
+                        )
+                    except Exception:
+                        logger.debug("Failed to end progress", exc_info=True)
                     return
 
-            if completed >= total:
-                try:
-                    server.work_done_progress.end(
-                        token,
-                        lsp.WorkDoneProgressEnd(
-                            message=end_msg.format(total=total),
-                        ),
-                    )
-                except Exception:
-                    logger.debug("Failed to end progress", exc_info=True)
-                return
-
-            if throttle_seconds > 0:
-                now = time.time()
-                if (now - state["last_report"]) < throttle_seconds:
-                    return
-                state["last_report"] = now
+                if throttle_seconds > 0:
+                    now = time.time()
+                    if (now - state["last_report"]) < throttle_seconds:
+                        return
+                    state["last_report"] = now
 
             pct = int(100 * completed / total) if total > 0 else 0
             basename = (

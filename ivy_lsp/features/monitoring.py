@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -496,11 +497,13 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/reindex")
     async def on_reindex(params: Any = None) -> Dict[str, Any]:
-        return handle_reindex(server)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, handle_reindex, server)
 
     @server.feature("ivy/clearCache")
     async def on_clear_cache(params: Any = None) -> Dict[str, Any]:
-        return handle_clear_cache(server)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, handle_clear_cache, server)
 
     @server.feature("ivy/featureStatus")
     async def on_feature_status(params: Any = None) -> Dict[str, Any]:

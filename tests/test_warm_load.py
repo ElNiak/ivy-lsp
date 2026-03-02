@@ -21,6 +21,7 @@ class TestWarmLoad:
         # First run: cold index (populates persistent cache)
         idx1 = WorkspaceIndexer(
             str(tmp_path), parser, resolver, persistent_cache=True,
+            cache_dir=str(tmp_path / ".cache"),
         )
         idx1.index_workspace()
         symbols_after_cold = idx1.get_symbols(str(f))
@@ -30,6 +31,7 @@ class TestWarmLoad:
         # Second run: warm load (should use cache)
         idx2 = WorkspaceIndexer(
             str(tmp_path), parser, resolver, persistent_cache=True,
+            cache_dir=str(tmp_path / ".cache"),
         )
         idx2.index_workspace()
         symbols_after_warm = idx2.get_symbols(str(f))

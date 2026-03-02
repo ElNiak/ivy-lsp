@@ -144,6 +144,13 @@ class SemanticModel:
                 existing_tier = self._node_tiers.get(nid)
                 if existing_tier and tier_rank.get(existing_tier, 0) > new_rank:
                     continue  # preserve higher-tier node
+                # Clean up old type index entry if the node already exists
+                # (may be a different type at the old tier)
+                old_node = self._nodes.get(nid)
+                if old_node is not None:
+                    old_type_dict = self._nodes_by_type.get(type(old_node))
+                    if old_type_dict:
+                        old_type_dict.pop(nid, None)
                 self._nodes[nid] = node
                 self._nodes_by_type[type(node)][nid] = node
                 self._nodes_by_file[filepath].add(nid)

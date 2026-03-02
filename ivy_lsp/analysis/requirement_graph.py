@@ -189,6 +189,7 @@ class RequirementGraph:
         self.rfc_requirements: Dict[str, RfcRequirement] = {}
 
         self.edges: List[Tuple[str, EdgeType, str]] = []
+        self._edge_set: Set[Tuple[str, EdgeType, str]] = set()
         self._outgoing: Dict[str, List[Tuple[EdgeType, str]]] = defaultdict(list)
         self._incoming: Dict[str, List[Tuple[EdgeType, str]]] = defaultdict(list)
 
@@ -216,7 +217,11 @@ class RequirementGraph:
 
     def add_edge(self, source_id: str, edge_type: EdgeType, target_id: str) -> None:
         with self._lock:
-            self.edges.append((source_id, edge_type, target_id))
+            edge = (source_id, edge_type, target_id)
+            if edge in self._edge_set:
+                return
+            self._edge_set.add(edge)
+            self.edges.append(edge)
             self._outgoing[source_id].append((edge_type, target_id))
             self._incoming[target_id].append((edge_type, source_id))
 
@@ -249,6 +254,7 @@ class RequirementGraph:
                 for s, t, d in self.edges
                 if s not in removed_ids and d not in removed_ids
             ]
+            self._edge_set = set(self.edges)
             self._rebuild_adjacency()
 
     def add_file_requirements(
@@ -333,6 +339,7 @@ class RequirementGraph:
         with self._lock:
             keep_types = {EdgeType.CONSTRAINS, EdgeType.WRITES, EdgeType.COVERS}
             self.edges = [(s, t, d) for s, t, d in self.edges if t in keep_types]
+            self._edge_set = set(self.edges)
             self._rebuild_adjacency()
 
     def populate_actions_from_symbols(self, symbols: List[Any]) -> None:

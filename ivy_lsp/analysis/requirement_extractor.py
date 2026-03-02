@@ -18,8 +18,9 @@ from ivy_lsp.parsing.ast_to_symbols import is_from_included_file
 
 logger = logging.getLogger(__name__)
 
-# Pattern to detect mangled mixin action names: "foo[before1]", "bar[after2]"
-_MIXIN_NAME_RE = re.compile(r"^(.+)\[(before|after)(\d+)\]$")
+# Pattern to detect mangled mixin action names: "foo[before1]", "bar[after2]",
+# "baz[around1]", "qux[implement0]"
+_MIXIN_NAME_RE = re.compile(r"^(.+)\[(before|after|around|implement)(\d+)\]$")
 
 
 def extract_requirements_full(
@@ -152,7 +153,7 @@ def _process_decl(
     m = _MIXIN_NAME_RE.match(action_name)
     if m:
         base_name = m.group(1)
-        mixin_kind = m.group(2)  # "before" or "after"
+        mixin_kind = m.group(2)  # "before", "after", "around", or "implement"
         monitor_action = mixin_map.get(action_name, base_name)
     else:
         mixin_kind = "direct"

@@ -79,9 +79,14 @@ class OperationTracker:
 
 
 class ServerStateTracker:
-    """Aggregates all server state for monitoring queries."""
+    """Aggregates all server state for monitoring queries.
+
+    Multi-attribute writes and reads are guarded by a lock to prevent
+    torn reads (e.g. ``IDLE`` state with ``None`` duration).
+    """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self.start_time: float = time.time()
         self.indexing_state: IndexingState = IndexingState.IDLE
         self.indexing_error: Optional[str] = None
@@ -94,17 +99,20 @@ class ServerStateTracker:
         return time.time() - self.start_time
 
     def set_indexing(self) -> None:
-        self.indexing_state = IndexingState.INDEXING
-        self.indexing_error = None
+        with self._lock:
+            self.indexing_state = IndexingState.INDEXING
+            self.indexing_error = None
 
     def set_indexed(self, duration: float) -> None:
-        self.indexing_state = IndexingState.IDLE
-        self.last_index_duration = duration
-        self.last_index_time = time.time()
+        with self._lock:
+            self.indexing_state = IndexingState.IDLE
+            self.last_index_duration = duration
+            self.last_index_time = time.time()
 
     def set_index_error(self, error: str) -> None:
-        self.indexing_state = IndexingState.ERROR
-        self.indexing_error = error
+        with self._lock:
+            self.indexing_state = IndexingState.ERROR
+            self.indexing_error = error
 
     def to_status_dict(
         self,
@@ -120,12 +128,13 @@ class ServerStateTracker:
             }
             for op in self.operation_tracker.get_active()
         ]
-        return {
-            "mode": mode,
-            "version": version,
-            "uptimeSeconds": round(self.uptime_seconds, 1),
-            "indexingState": self.indexing_state.value,
-            "indexingError": self.indexing_error,
-            "toolAvailability": tools,
-            "activeOperations": active_ops,
-        }
+        with self._lock:
+            return {
+                "mode": mode,
+                "version": version,
+                "uptimeSeconds": round(self.uptime_seconds, 1),
+                "indexingState": self.indexing_state.value,
+                "indexingError": self.indexing_error,
+                "toolAvailability": tools,
+                "activeOperations": active_ops,
+            }

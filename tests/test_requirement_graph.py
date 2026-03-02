@@ -873,7 +873,7 @@ def test_populate_actions_includes_monitor_action_refs(graph):
     # Both the symbol-based and reference-based actions should exist
     assert "other.action" in graph.actions
     assert "unresolved.action" in graph.actions
-    assert graph.actions["unresolved.action"].file == ""  # unknown origin
+    assert graph.actions["unresolved.action"].file == "/test/file.ivy"  # fallback uses req's file
 
 
 def test_populate_actions_does_not_overwrite_existing(graph):

@@ -517,8 +517,9 @@ class TestCompileUsesStaging:
             await registered["ivy/compile"](params)
 
         call_args = mock_exec.call_args[0]
-        assert "/tmp/staging/test.ivy" in call_args
+        assert "test.ivy" in call_args
         assert "/project/sub/test.ivy" not in call_args
+        assert mock_exec.call_args.kwargs.get("cwd") == "/tmp/staging"
 
 
 # ---------------------------------------------------------------------------
@@ -1028,6 +1029,7 @@ class TestCompileRedirection:
 
         assert result["success"] is True
         call_args = mock_exec.call_args[0]
-        assert "/tests/test_quic.ivy" in call_args
+        assert "test_quic.ivy" in call_args
         assert "/modules/quic_packet.ivy" not in call_args
+        assert mock_exec.call_args.kwargs.get("cwd") == "/tests"
 

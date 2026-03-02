@@ -100,6 +100,7 @@ class WorkspaceIndexer:
             Callable[[int, int, Optional[str]], None]
         ] = None,
         done_callback: Optional[Callable[[], None]] = None,
+        cache_dir: Optional[str] = None,
     ) -> None:
         self._workspace_root = os.path.abspath(workspace_root)
         self._parser = parser
@@ -109,7 +110,7 @@ class WorkspaceIndexer:
         if persistent_cache:
             from ivy_lsp.indexer.file_cache import PersistentFileCache
 
-            self._cache = PersistentFileCache(workspace_root)
+            self._cache = PersistentFileCache(workspace_root, cache_dir=cache_dir)
         else:
             self._cache = FileCache()
         self._symbol_table = SymbolTable()
@@ -117,6 +118,7 @@ class WorkspaceIndexer:
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports: Dict[str, ExportImportInfo] = {}
+        self._exports_lock = threading.Lock()
         self._index_errors: List[Dict[str, str]] = []
         self._last_index_duration: Optional[float] = None
         self._last_index_time: Optional[float] = None
@@ -303,11 +305,12 @@ class WorkspaceIndexer:
         its symbols are upgraded to AST quality.  This progressively enriches
         the symbol table while keeping lock contention to a minimum.
         """
-        test_files = [
-            f
-            for f, info in self._file_export_imports.items()
-            if info.has_exports
-        ]
+        with self._exports_lock:
+            test_files = [
+                f
+                for f, info in self._file_export_imports.items()
+                if info.has_exports
+            ]
         slog.info(
             "Deep index: %d test entry points out of %d files",
             len(test_files),
@@ -613,7 +616,8 @@ class WorkspaceIndexer:
         self._remove_file_symbols(abs_path)
         self._requirement_graph.remove_file(abs_path)
         self._requirement_graph.invalidate_file(abs_path)
-        self._file_export_imports.pop(abs_path, None)
+        with self._exports_lock:
+            self._file_export_imports.pop(abs_path, None)
         self._cache.invalidate(abs_path)
         self._cache.invalidate_dependents(abs_path, self._include_graph)
         self._index_single_file(abs_path)
@@ -776,7 +780,8 @@ class WorkspaceIndexer:
                 info = extract_exports_imports_full(result.ast, filepath, source)
             else:
                 info = extract_exports_imports_light(source, filepath)
-            self._file_export_imports[filepath] = info
+            with self._exports_lock:
+                self._file_export_imports[filepath] = info
         except Exception:
             logger.warning(
                 "Export/import extraction failed for %s",
@@ -828,7 +833,9 @@ class WorkspaceIndexer:
 
     def _compute_test_scopes(self) -> None:
         """Build a TestScope for each file that has exports and register it."""
-        for filepath, info in self._file_export_imports.items():
+        with self._exports_lock:
+            export_items = list(self._file_export_imports.items())
+        for filepath, info in export_items:
             if not info.has_exports:
                 continue
 

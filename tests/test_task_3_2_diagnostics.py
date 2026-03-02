@@ -183,14 +183,11 @@ class TestComputeDiagnostics:
 
 
 class TestDeepDiagnostics:
-    def test_missing_ivyc_handled(self):
-        import asyncio
-
+    @pytest.mark.asyncio
+    async def test_missing_ivyc_handled(self):
         from ivy_lsp.features.diagnostics import run_deep_diagnostics
 
-        result = asyncio.get_event_loop().run_until_complete(
-            run_deep_diagnostics(
-                "nonexistent.ivy", ivy_check_cmd="nonexistent_binary_12345"
-            )
+        result = await run_deep_diagnostics(
+            "nonexistent.ivy", ivy_check_cmd="nonexistent_binary_12345"
         )
         assert result == []

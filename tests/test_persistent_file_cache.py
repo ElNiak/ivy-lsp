@@ -15,7 +15,7 @@ class TestPersistentFileCacheBasic:
             name="t", kind=SymbolKind.Class,
             range=(1, 0, 1, 6), file_path=str(f),
         )
-        cache = PersistentFileCache(str(tmp_path))
+        cache = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         cache.put(str(f), result=None, symbols=[sym], includes=["quic_types"])
         entry = cache.get(str(f))
         assert entry is not None
@@ -25,7 +25,7 @@ class TestPersistentFileCacheBasic:
         cache.close()
 
     def test_get_nonexistent_returns_none(self, tmp_path):
-        cache = PersistentFileCache(str(tmp_path))
+        cache = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         assert cache.get(str(tmp_path / "nope.ivy")) is None
         cache.close()
 
@@ -38,11 +38,11 @@ class TestPersistentFileCachePersistence:
             name="x", kind=SymbolKind.Variable,
             range=(0, 0, 0, 5), file_path=str(f),
         )
-        cache1 = PersistentFileCache(str(tmp_path))
+        cache1 = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         cache1.put(str(f), result=None, symbols=[sym], includes=[])
         cache1.close()
 
-        cache2 = PersistentFileCache(str(tmp_path))
+        cache2 = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         entry = cache2.get(str(f))
         assert entry is not None
         assert entry.symbols[0].name == "x"
@@ -51,7 +51,7 @@ class TestPersistentFileCachePersistence:
     def test_stale_mtime_invalidates(self, tmp_path):
         f = tmp_path / "a.ivy"
         f.write_text("v1")
-        cache = PersistentFileCache(str(tmp_path))
+        cache = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         cache.put(str(f), result=None, symbols=[], includes=[])
         time.sleep(0.05)
         f.write_text("v2")
@@ -63,7 +63,7 @@ class TestPersistentFileCacheInvalidation:
     def test_invalidate_removes_entry(self, tmp_path):
         f = tmp_path / "a.ivy"
         f.write_text("v1")
-        cache = PersistentFileCache(str(tmp_path))
+        cache = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         cache.put(str(f), result=None, symbols=[], includes=[])
         cache.invalidate(str(f))
         assert cache.get(str(f)) is None
@@ -75,7 +75,7 @@ class TestPersistentFileCacheInvalidation:
             f = tmp_path / f"{i}.ivy"
             f.write_text(f"v{i}")
             files.append(f)
-        cache = PersistentFileCache(str(tmp_path))
+        cache = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         for f in files:
             cache.put(str(f), result=None, symbols=[], includes=[])
         cache.clear_all()

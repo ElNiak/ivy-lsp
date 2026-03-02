@@ -130,6 +130,10 @@ class CompilerManager:
                         )
                         callback(ir)
                 except Exception as exc:
+                    try:
+                        child_conn.close()
+                    except OSError:
+                        pass
                     callback(
                         CompiledModuleIR.empty(
                             filepath, errors=[str(exc)], duration=0.0
@@ -213,14 +217,21 @@ class CompilerManager:
     def shutdown(self) -> None:
         """Kill all active compilation subprocesses."""
         with self._lock:
-            for proc in self._active.values():
+            procs = list(self._active.values())
+            for proc in procs:
                 try:
                     proc.kill()
-                    proc.join(timeout=2)
                 except (OSError, ProcessLookupError):
                     pass
             self._active.clear()
             self._cache.clear()
+        # Join outside the lock to avoid deadlock with _wait threads
+        # that need to acquire _lock in their finally block.
+        for proc in procs:
+            try:
+                proc.join(timeout=2)
+            except (OSError, ProcessLookupError):
+                pass
 
     def _get_cached_by_hash(
         self, filepath: str, content_hash: str

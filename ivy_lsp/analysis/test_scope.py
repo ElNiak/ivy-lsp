@@ -247,7 +247,23 @@ class ScopedRequirementModel(RequirementGraph):
             for (kind, nct_tag), count in sorted(counts_by_nct.items())
         ]
 
+    def add_requirement(self, node: RequirementNode) -> None:
+        super().add_requirement(node)
+        self._invalidate_scope_cache_for_file(node.file)
+
+    def add_file_requirements(
+        self,
+        filepath: str,
+        reqs: List[RequirementNode],
+        writes: Optional[List[Tuple[str, str, int]]] = None,
+    ) -> None:
+        super().add_file_requirements(filepath, reqs, writes)
+        self._invalidate_scope_cache_for_file(filepath)
+
     def invalidate_file(self, filepath: str) -> None:
+        self._invalidate_scope_cache_for_file(filepath)
+
+    def _invalidate_scope_cache_for_file(self, filepath: str) -> None:
         for test_file in self._file_to_tests.get(filepath, set()):
             self._scope_cache.pop((test_file, False), None)
             self._scope_cache.pop((test_file, True), None)
