@@ -395,21 +395,9 @@ class TestDeepTaskTracking:
         uri = "file:///tmp/test.ivy"
         _deep_tasks[uri] = mock_prior
 
-        # Mock the event loop to capture the new task creation
-        mock_loop = MagicMock()
-        mock_new_task = MagicMock(spec=asyncio.Task)
-        mock_loop.create_task.return_value = mock_new_task
-        mock_loop.run_in_executor = MagicMock(
-            return_value=asyncio.coroutine(lambda: None)()
-        )
-
-        # We can't easily run the full async did_save, but we can verify
-        # the _deep_tasks dict structure is correct by checking that
-        # prior tasks get cancelled when a new one is stored.
-        # For this, we just verify the dict is accessible and mutable.
         mock_prior.cancel.assert_not_called()
 
-        # Manually simulate what did_save should do:
+        # Simulate what did_save does: cancel prior deep task
         old_deep = _deep_tasks.pop(uri, None)
         if old_deep and not old_deep.done():
             old_deep.cancel()
