@@ -703,3 +703,55 @@ class TestHandlerConsistency:
         assert asyncio.iscoroutinefunction(handler), (
             "did_change handler must be async for pygls 2.x consistency"
         )
+
+
+class TestFallbackScanDeduplication:
+    """H4: fallback_scan should not re-run if parse result already has lexer errors."""
+
+    def test_fallback_scan_skipped_when_result_has_lexer_errors(self):
+        """If parse result carries lexer_errors, skip redundant fallback_scan."""
+        from unittest.mock import MagicMock, patch
+
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        result = MagicMock()
+        result.success = False
+        result.errors = []
+        # Indicate the result already includes lexer diagnostics
+        result.lexer_errors = [{"line": 1, "message": "bad char"}]
+
+        with patch(
+            "ivy_lsp.parsing.fallback_scanner.fallback_scan"
+        ) as mock_scan:
+            mock_scan.return_value = ([], None)
+            compute_diagnostics(
+                parser=None,
+                source="#lang ivy1.7\n",
+                filepath="test.ivy",
+                parse_result=result,
+            )
+            mock_scan.assert_not_called()
+
+    def test_fallback_scan_runs_when_no_lexer_errors(self):
+        """If parse result does not have lexer_errors, fallback_scan should run."""
+        from unittest.mock import MagicMock, patch
+
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        result = MagicMock()
+        result.success = False
+        result.errors = []
+        # No lexer_errors attribute (standard ParseResult)
+        del result.lexer_errors
+
+        with patch(
+            "ivy_lsp.parsing.fallback_scanner.fallback_scan"
+        ) as mock_scan:
+            mock_scan.return_value = ([], None)
+            compute_diagnostics(
+                parser=None,
+                source="#lang ivy1.7\n",
+                filepath="test.ivy",
+                parse_result=result,
+            )
+            mock_scan.assert_called_once()
