@@ -1,8 +1,7 @@
-"""Regex-based requirement extraction for light mode (no Z3/full parser).
+"""Requirement extraction for light mode (no Z3/full parser).
 
-Extracts requirements from Ivy source text using regular expressions and
-brace-depth tracking.  Intended as a fallback when the full Ivy parser is
-unavailable.
+Dispatches to the lexer-based extractor when the PLY lexer is available,
+falling back to regex-based extraction otherwise.
 """
 
 from __future__ import annotations
@@ -15,7 +14,34 @@ from ivy_lsp.analysis.requirement_graph import RequirementNode
 
 logger = logging.getLogger(__name__)
 
-# Regex patterns
+# ---------------------------------------------------------------------------
+# Lexer availability check
+# ---------------------------------------------------------------------------
+
+_LEXER_AVAILABLE: bool = False
+
+
+def _check_lexer() -> bool:
+    """Check (and cache) whether the PLY lexer is importable."""
+    global _LEXER_AVAILABLE
+    if _LEXER_AVAILABLE:
+        return True
+    try:
+        from ivy_lsp.parsing.token_stream import tokenize_ivy  # noqa: F401
+
+        _LEXER_AVAILABLE = True
+    except ImportError:
+        _LEXER_AVAILABLE = False
+    return _LEXER_AVAILABLE
+
+
+# Attempt import at module load time so the flag is set early.
+_check_lexer()
+
+# ---------------------------------------------------------------------------
+# Regex patterns (used by fallback path)
+# ---------------------------------------------------------------------------
+
 MONITOR_RE = re.compile(
     r"\b(before|after|around|implement)\s+([\w.]+)\s*(?:\([^)]*\))?\s*\{",
     re.MULTILINE,
@@ -42,18 +68,89 @@ IMPORT_RE = re.compile(
     re.MULTILINE,
 )
 
+# ---------------------------------------------------------------------------
+# Public API (dispatch)
+# ---------------------------------------------------------------------------
+
 
 def extract_requirements_light(
     source: str,
     filepath: str,
     known_state_vars: Optional[Set[str]] = None,
+    token_stream: Optional[Any] = None,
 ) -> Tuple[List[RequirementNode], List[Tuple[str, str, int]]]:
-    """Regex-based requirement extraction for light mode.
+    """Dispatch to lexer or regex extraction.
 
-    Returns:
-        A tuple of (requirements, writes) where writes are
-        ``(var_name, filepath, line)`` triples.
+    When the PLY lexer is available, delegates to
+    ``lexer_requirement_extractor.extract_requirements_lexer`` for
+    higher fidelity.  Falls back to regex-based extraction if the
+    lexer is unavailable or encounters errors (e.g. native blocks
+    with C++ string literals containing ``>>>``).
     """
+    if _LEXER_AVAILABLE:
+        from ivy_lsp.analysis.lexer_requirement_extractor import (
+            extract_requirements_lexer,
+        )
+
+        # If caller provided a token_stream with errors, skip lexer path.
+        if token_stream is not None and token_stream.error_info is not None:
+            return _extract_requirements_regex(
+                source, filepath, known_state_vars
+            )
+
+        # Try lexer; on tokenization error, fall back to regex.
+        from ivy_lsp.parsing.token_stream import tokenize_ivy
+
+        if token_stream is None:
+            token_stream = tokenize_ivy(source, filepath)
+
+        if token_stream.error_info is not None:
+            logger.debug(
+                "Lexer had errors for %s; falling back to regex extraction",
+                filepath,
+            )
+            return _extract_requirements_regex(
+                source, filepath, known_state_vars
+            )
+
+        return extract_requirements_lexer(
+            source, filepath, known_state_vars, token_stream=token_stream
+        )
+    return _extract_requirements_regex(source, filepath, known_state_vars)
+
+
+def extract_exports_imports_light(
+    source: str,
+    filepath: str,
+    token_stream: Optional[Any] = None,
+) -> "ExportImportInfo":
+    """Dispatch to lexer or regex export/import extraction."""
+    if _LEXER_AVAILABLE:
+        # Fall back to regex if token stream has errors.
+        if token_stream is not None and token_stream.error_info is not None:
+            return _extract_exports_imports_regex(source, filepath)
+
+        from ivy_lsp.analysis.lexer_requirement_extractor import (
+            extract_exports_imports_lexer,
+        )
+
+        return extract_exports_imports_lexer(
+            source, filepath, token_stream=token_stream
+        )
+    return _extract_exports_imports_regex(source, filepath)
+
+
+# ---------------------------------------------------------------------------
+# Regex fallback: requirements
+# ---------------------------------------------------------------------------
+
+
+def _extract_requirements_regex(
+    source: str,
+    filepath: str,
+    known_state_vars: Optional[Set[str]] = None,
+) -> Tuple[List[RequirementNode], List[Tuple[str, str, int]]]:
+    """Regex-based requirement extraction (fallback path)."""
     if not source:
         return [], []
 
@@ -90,7 +187,7 @@ def _find_monitor_blocks(
         monitor_action = m.group(2)  # action name
         open_brace_offset = m.end() - 1  # position of the opening brace
 
-        mixin_kind = mixin_kind_raw  # preserve "before", "after", "around", "implement" as-is
+        mixin_kind = mixin_kind_raw  # preserve as-is
 
         # Find the matching closing brace using depth tracking
         start_line = source[:m.start()].count("\n")
@@ -267,25 +364,21 @@ def _extract_from_block(
 
 
 def _offset_to_line(offset: int, source_lines: List[str]) -> int:
-    """Convert a character offset to a 0-based line number.
-
-    Uses the same ``count('\\n')`` approach as ``extract_exports_imports_light``
-    for consistency.  The *source_lines* parameter is kept for API compatibility
-    but only its count is used as an upper bound.
-    """
-    # Reconstruct source from lines (preserving original join semantics).
+    """Convert a character offset to a 0-based line number."""
     source = "\n".join(source_lines)
     return min(source[:offset].count("\n"), max(0, len(source_lines) - 1))
 
 
-def extract_exports_imports_light(
+# ---------------------------------------------------------------------------
+# Regex fallback: exports/imports
+# ---------------------------------------------------------------------------
+
+
+def _extract_exports_imports_regex(
     source: str,
     filepath: str,
 ) -> "ExportImportInfo":
-    """Extract export/import declarations from Ivy source text.
-
-    Returns an ExportImportInfo with names and 0-based line numbers.
-    """
+    """Regex-based export/import extraction (fallback path)."""
     from ivy_lsp.analysis.test_scope import ExportImportInfo
 
     exports: List[str] = []
