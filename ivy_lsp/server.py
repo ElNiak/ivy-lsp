@@ -43,29 +43,49 @@ def _patch_pygls_cancelled_future() -> None:
     JsonRPCProtocol._handle_response = _safe_handle_response  # type: ignore[assignment]
 
 
-def _patch_pygls_closed_pipe() -> None:
-    """Convert ValueError from closed stdout to BrokenPipeError.
+class _ClosedPipeGuardWriter:
+    """Proxy that converts ``ValueError("write to closed file")`` to ``BrokenPipeError``.
 
-    pygls 2.0.1 catches BrokenPipeError in _send_data() but not
-    ValueError("write to closed file"), which Python raises when
-    writing to a closed BufferedWriter.  The generic except handler
-    then cascades via logger.exception + _report_server_error.
-    Converting to BrokenPipeError lets pygls's existing handler
-    trigger a clean shutdown.
+    pygls 2.0.1's ``_send_data()`` catches ``BrokenPipeError`` (re-raises for
+    clean shutdown) but lets ``ValueError`` from a closed ``BufferedWriter``
+    fall through to a generic ``except Exception`` handler that cascades via
+    ``logger.exception`` + ``_report_server_error``.
+
+    By wrapping the writer, the conversion happens *before* pygls's exception
+    handlers, so the ``except BrokenPipeError`` path triggers and the server
+    shuts down cleanly.
     """
-    from pygls.protocol.json_rpc import JsonRPCProtocol
 
-    _original = JsonRPCProtocol._send_data
+    __slots__ = ("_inner",)
 
-    def _safe_send_data(self, data):
+    def __init__(self, inner):
+        self._inner = inner
+
+    def write(self, data):
         try:
-            _original(self, data)
+            return self._inner.write(data)
         except ValueError as exc:
             if "closed" in str(exc).lower():
                 raise BrokenPipeError(str(exc)) from exc
             raise
 
-    JsonRPCProtocol._send_data = _safe_send_data  # type: ignore[assignment]
+    def close(self):
+        self._inner.close()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _patch_pygls_closed_pipe() -> None:
+    """Wrap ``set_writer`` so the writer is guarded against closed-pipe ValueError."""
+    from pygls.protocol.json_rpc import JsonRPCProtocol
+
+    _original_set_writer = JsonRPCProtocol.set_writer
+
+    def _guarded_set_writer(self, writer, include_headers=True):
+        _original_set_writer(self, _ClosedPipeGuardWriter(writer), include_headers)
+
+    JsonRPCProtocol.set_writer = _guarded_set_writer  # type: ignore[assignment]
 
 
 try:
