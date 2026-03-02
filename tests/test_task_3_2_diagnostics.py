@@ -406,6 +406,124 @@ class TestDeepTaskTracking:
         assert uri not in _deep_tasks
 
 
+class TestDiagnosticEndPosition:
+    """H1: Diagnostics must use actual line length, not magic 999."""
+
+    def test_coverage_hint_end_character_not_999(self):
+        """Coverage hint diagnostics should not use magic 999."""
+        from unittest.mock import MagicMock
+
+        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        graph = RequirementGraph()
+        graph.add_action(
+            ActionNode(
+                id="foo",
+                name="foo",
+                qualified_name="q.foo",
+                file="/tmp/test.ivy",
+                line=2,
+            )
+        )
+        indexer = MagicMock()
+        indexer._requirement_graph = graph
+        indexer._include_graph = None
+        indexer._resolver = MagicMock()
+
+        # Provide a successful parse_result so compute_diagnostics reaches
+        # the coverage hint section (it returns early if both parser and
+        # parse_result are None).
+        fake_result = MagicMock()
+        fake_result.success = True
+        fake_result.errors = []
+
+        source = "#lang ivy1.7\n\naction foo(x:cid)\n"
+        diags = compute_diagnostics(
+            None, source, "/tmp/test.ivy",
+            indexer=indexer, parse_result=fake_result,
+        )
+
+        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
+        for d in coverage_diags:
+            assert d.range.end.character != 999, (
+                "Coverage diagnostic uses magic 999 instead of actual line length"
+            )
+
+    def test_coverage_hint_end_matches_line_length(self):
+        """Coverage hint end character should match the actual line length."""
+        from unittest.mock import MagicMock
+
+        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        graph = RequirementGraph()
+        graph.add_action(
+            ActionNode(
+                id="foo",
+                name="foo",
+                qualified_name="q.foo",
+                file="/tmp/test.ivy",
+                line=2,
+            )
+        )
+        indexer = MagicMock()
+        indexer._requirement_graph = graph
+        indexer._include_graph = None
+        indexer._resolver = MagicMock()
+
+        fake_result = MagicMock()
+        fake_result.success = True
+        fake_result.errors = []
+
+        source = "#lang ivy1.7\n\naction foo(x:cid)\n"
+        # Line 2 is "action foo(x:cid)" which has length 17
+        diags = compute_diagnostics(
+            None, source, "/tmp/test.ivy",
+            indexer=indexer, parse_result=fake_result,
+        )
+
+        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
+        for d in coverage_diags:
+            line_idx = d.range.start.line
+            lines = source.split("\n")
+            expected_len = len(lines[line_idx]) if line_idx < len(lines) else 0
+            assert d.range.end.character == expected_len, (
+                f"Expected end character {expected_len} for line {line_idx}, "
+                f"got {d.range.end.character}"
+            )
+
+    def test_ivy_check_output_end_character_not_999(self):
+        """parse_ivy_check_output should not use magic 999."""
+        from ivy_lsp.features.diagnostics import parse_ivy_check_output
+
+        # Format matches regex: "file:linenum: severity: message"
+        output = "test.ivy:5: error: something went wrong"
+        diags = parse_ivy_check_output(output)
+        assert len(diags) == 1, "Expected one diagnostic from ivy_check output"
+        for d in diags:
+            assert d.range.end.character != 999, (
+                "ivy_check diagnostic uses magic 999"
+            )
+
+    def test_ivy_check_output_uses_next_line_convention(self):
+        """parse_ivy_check_output should use lineno+1, char=0 for full-line span."""
+        from ivy_lsp.features.diagnostics import parse_ivy_check_output
+
+        # Format: "file:line: severity: message"
+        output = "test.ivy:5: error: something went wrong"
+        diags = parse_ivy_check_output(output)
+        assert len(diags) == 1
+        d = diags[0]
+        # lineno = max(0, 5 - 1) = 4, so end should be line 5, char 0
+        assert d.range.start.line == 4
+        assert d.range.start.character == 0
+        assert d.range.end.line == 5
+        assert d.range.end.character == 0
+
+
 class TestDeepDiagnostics:
     @pytest.mark.asyncio
     async def test_missing_ivyc_handled(self):

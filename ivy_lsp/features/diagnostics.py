@@ -404,8 +404,10 @@ def compute_diagnostics(
         if graph is not None:
             from ivy_lsp.features.coverage_hints import compute_coverage_hints
 
+            lines = source.split("\n")
             for hint in compute_coverage_hints(graph, filepath):
                 line = hint.get("line", 0)
+                line_len = len(lines[line]) if line < len(lines) else 0
                 sev_map = {
                     "hint": lsp.DiagnosticSeverity.Hint,
                     "info": lsp.DiagnosticSeverity.Information,
@@ -416,7 +418,7 @@ def compute_diagnostics(
                     lsp.Diagnostic(
                         range=lsp.Range(
                             start=lsp.Position(line=line, character=0),
-                            end=lsp.Position(line=line, character=999),
+                            end=lsp.Position(line=line, character=line_len),
                         ),
                         message=hint["message"],
                         severity=sev_map.get(
@@ -447,7 +449,7 @@ def parse_ivy_check_output(output: str) -> List[lsp.Diagnostic]:
             lsp.Diagnostic(
                 range=lsp.Range(
                     start=lsp.Position(lineno, 0),
-                    end=lsp.Position(lineno, 999),
+                    end=lsp.Position(lineno + 1, 0),
                 ),
                 message=entry["message"],
                 severity=severity,
