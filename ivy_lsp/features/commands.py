@@ -7,8 +7,6 @@ import logging
 import os
 import shutil
 import sys
-import threading
-import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from lsprotocol import types as lsp
@@ -16,6 +14,7 @@ from lsprotocol import types as lsp
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.utils import uri_to_path
+from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 
 logger = logging.getLogger(__name__)
@@ -228,9 +227,12 @@ async def _run_tool(
     cwd: Optional[str] = None,
     env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Run an Ivy CLI tool as async subprocess with progress reporting."""
-    start = time.monotonic()
+    """Run an Ivy CLI tool as async subprocess with progress reporting.
 
+    Delegates to :func:`run_ivy_subprocess` for bounded-concurrency
+    execution and wraps the result with LSP work-done progress
+    notifications.
+    """
     if token is not None:
         try:
             await server.work_done_progress.create_async(token)
@@ -247,49 +249,15 @@ async def _run_tool(
             token = None  # fall back to no progress
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
+        result = await run_ivy_subprocess(
+            cmd, timeout=timeout, cwd=cwd, env=env,
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("Process did not exit after kill; may be orphaned")
-            return {
-                "success": False,
-                "message": f"Timed out after {timeout}s",
-                "output": [],
-                "duration": time.monotonic() - start,
-            }
-
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        stderr_text = stderr.decode("utf-8", errors="replace")
-        output_lines = (stderr_text + stdout_text).splitlines()
-        success = proc.returncode == 0
-
         return {
-            "success": success,
-            "message": "OK" if success else f"Exit code {proc.returncode}",
-            "output": output_lines,
-            "duration": time.monotonic() - start,
-        }
-
-    except FileNotFoundError:
-        return {
-            "success": False,
-            "message": f"{cmd[0]} not found on PATH",
-            "output": [],
-            "duration": time.monotonic() - start,
+            "success": result.success,
+            "message": result.message,
+            "output": result.output_lines,
+            "duration": result.duration,
         }
     finally:
         if token is not None:
@@ -597,11 +565,12 @@ def register(server: Any) -> None:
             is not None,
         }
 
-    def _refresh_open_diagnostics(srv) -> None:
-        """Re-publish diagnostics for all open documents.
+    def _refresh_open_diagnostics_sync(srv) -> None:
+        """Re-publish diagnostics for all open documents (sequential).
 
-        Called after active test scope changes so that scoped
-        diagnostic filtering takes effect immediately.
+        Called from non-async contexts. For async callers prefer
+        :func:`_refresh_open_diagnostics_async` which processes
+        documents in parallel.
         """
         from ivy_lsp.features.diagnostics import compute_diagnostics
 
@@ -625,6 +594,46 @@ def register(server: Any) -> None:
                 logger.warning(
                     "Failed to refresh diagnostics for %s", uri, exc_info=True
                 )
+
+    async def _refresh_open_diagnostics_async(srv) -> None:
+        """Re-publish diagnostics for all open documents in parallel.
+
+        Uses ``asyncio.gather`` to compute diagnostics for each open
+        document concurrently via the thread-pool executor.
+        """
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        try:
+            items = list(srv.workspace.text_documents.items())
+        except (AttributeError, TypeError):
+            return
+
+        loop = asyncio.get_running_loop()
+
+        async def _process_one(uri: str, doc: Any) -> None:
+            if not uri.startswith("file://"):
+                return
+            filepath = uri_to_path(uri)
+            try:
+                diags = await loop.run_in_executor(
+                    None,
+                    compute_diagnostics,
+                    srv._parser,
+                    doc.source or "",
+                    filepath,
+                    srv._indexer,
+                )
+                srv.text_document_publish_diagnostics(
+                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to refresh diagnostics for %s", uri, exc_info=True
+                )
+
+        await asyncio.gather(
+            *(_process_one(uri, doc) for uri, doc in items)
+        )
 
     @server.feature("ivy/setActiveTest")
     async def ivy_set_active_test(params: Any = None) -> Dict[str, Any]:
@@ -657,8 +666,7 @@ def register(server: Any) -> None:
         graph.set_active_test(test_file)
         active = graph.get_active_scope()
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _refresh_open_diagnostics, server)
+        await _refresh_open_diagnostics_async(server)
 
         return {
             "success": True,
@@ -775,8 +783,7 @@ def register(server: Any) -> None:
             return
 
         graph.set_active_test(filepath)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _refresh_open_diagnostics, server)
+        await _refresh_open_diagnostics_async(server)
 
     @server.feature("ivy/compiledModel")
     async def ivy_compiled_model(params: Any = None) -> Dict[str, Any]:
@@ -1072,10 +1079,8 @@ def register(server: Any) -> None:
                 cancel_event=cancel_event,
             )
 
-        thread = threading.Thread(
-            target=_run, daemon=True, name="ivy-recompile-all",
-        )
-        thread.start()
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _run)
 
         return {
             "success": True,

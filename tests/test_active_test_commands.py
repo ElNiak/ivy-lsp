@@ -28,7 +28,7 @@ def _make_registered_handlers():
     server = MagicMock()
     registered = {}
 
-    def fake_feature(method):
+    def fake_feature(method, _options=None):
         def decorator(fn):
             registered[method] = fn
             return fn

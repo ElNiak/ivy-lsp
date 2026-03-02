@@ -45,7 +45,7 @@ class FakeServer:
         self._compiler_manager: object = None
         self._handlers = {}
 
-    def feature(self, name):
+    def feature(self, name, _options=None):
         def decorator(fn):
             if asyncio.iscoroutinefunction(fn):
                 @functools.wraps(fn)

@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ import sys
 import time
 from typing import Any
 
+from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 
 logger = logging.getLogger(__name__)
@@ -113,11 +115,10 @@ def start_mcp(
         ),
     )
 
-    import threading
-    _model_lock = threading.Lock()
+    _model_lock = asyncio.Lock()
 
     @mcp.tool()
-    def ivy_verify(
+    async def ivy_verify(
         relative_path: str,
         isolate: str | None = None,
     ) -> str:
@@ -129,8 +130,6 @@ def start_mcp(
             relative_path: Relative path to the .ivy file to check.
             isolate: Optional isolate name to check in isolation.
         """
-        import subprocess
-
         try:
             abs_path = _validate_path(root, relative_path)
         except ValueError as exc:
@@ -147,30 +146,20 @@ def start_mcp(
             cmd.append(f"isolate={isolate}")
         cmd.append(abs_path)
 
-        start = time.monotonic()
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=120, cwd=root,
-            )
-        except FileNotFoundError:
-            return json.dumps({"success": False, "message": "ivy_check not found on PATH"})
-        except subprocess.TimeoutExpired:
-            return json.dumps({"success": False, "message": "Timed out after 120s"})
-
-        duration = time.monotonic() - start
-        raw_output = result.stderr + "\n" + result.stdout
+        result = await run_ivy_subprocess(cmd, timeout=120.0, cwd=root)
+        raw_output = "\n".join(result.output_lines)
         diagnostics = _parse_ivy_check_output(raw_output)
 
         return json.dumps({
-            "success": result.returncode == 0,
+            "success": result.success,
             "diagnostics": diagnostics,
             "diagnostic_count": len(diagnostics),
             "raw_output": raw_output.strip(),
-            "duration_seconds": round(duration, 2),
+            "duration_seconds": round(result.duration, 2),
         })
 
     @mcp.tool()
-    def ivy_compile(
+    async def ivy_compile(
         relative_path: str,
         target: str = "test",
         isolate: str | None = None,
@@ -186,8 +175,6 @@ def start_mcp(
             target: Compilation target (default: "test").
             isolate: Optional isolate name to compile in isolation.
         """
-        import subprocess
-
         try:
             abs_path = _validate_path(root, relative_path)
         except ValueError as exc:
@@ -215,14 +202,15 @@ def start_mcp(
                 )
 
                 start = time.monotonic()
-                # Run setup commands
-                executor.execute(
+                # Run setup + compilation via thread pool (executor.execute is blocking)
+                await asyncio.to_thread(
+                    executor.execute,
                     compile_result.setup_commands,
                     workspace_root=root,
                     timeout=30,
                 )
-                # Run compilation commands
-                exec_result = executor.execute(
+                exec_result = await asyncio.to_thread(
+                    executor.execute,
                     compile_result.compile_commands,
                     workspace_root=root,
                     timeout=300,
@@ -253,25 +241,17 @@ def start_mcp(
             cmd.append(f"isolate={isolate}")
         cmd.append(abs_path)
 
-        start = time.monotonic()
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300, cwd=root,
-            )
-        except FileNotFoundError:
-            return json.dumps({"success": False, "message": "ivyc not found on PATH"})
-        except subprocess.TimeoutExpired:
-            return json.dumps({"success": False, "message": "Timed out after 300s"})
+        result = await run_ivy_subprocess(cmd, timeout=300.0, cwd=root)
 
         return json.dumps({
-            "success": result.returncode == 0,
-            "output": (result.stderr + "\n" + result.stdout).strip(),
+            "success": result.success,
+            "output": "\n".join(result.output_lines).strip(),
             "target": "host",
-            "duration_seconds": round(time.monotonic() - start, 2),
+            "duration_seconds": round(result.duration, 2),
         })
 
     @mcp.tool()
-    def ivy_model_info(
+    async def ivy_model_info(
         relative_path: str,
         isolate: str | None = None,
     ) -> str:
@@ -281,8 +261,6 @@ def start_mcp(
             relative_path: Relative path to the .ivy file to inspect.
             isolate: Optional isolate name for a specific isolate.
         """
-        import subprocess
-
         try:
             abs_path = _validate_path(root, relative_path)
         except ValueError as exc:
@@ -300,24 +278,18 @@ def start_mcp(
             cmd.append(f"isolate={isolate}")
         cmd.append(abs_path)
 
-        start = time.monotonic()
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30, cwd=root,
-            )
-        except FileNotFoundError:
-            return json.dumps({"success": False, "message": "ivy_show not found on PATH"})
-        except subprocess.TimeoutExpired:
-            return json.dumps({"success": False, "message": "Timed out after 30s"})
+        result = await run_ivy_subprocess(
+            cmd, timeout=30.0, cwd=root, use_semaphore=False,
+        )
 
         return json.dumps({
-            "success": result.returncode == 0,
-            "output": (result.stderr + "\n" + result.stdout).strip(),
-            "duration_seconds": round(time.monotonic() - start, 2),
+            "success": result.success,
+            "output": "\n".join(result.output_lines).strip(),
+            "duration_seconds": round(result.duration, 2),
         })
 
     @mcp.tool()
-    def ivy_lint(relative_path: str) -> str:
+    async def ivy_lint(relative_path: str) -> str:
         """Fast structural lint of an Ivy file (milliseconds, no subprocess).
 
         Checks: missing #lang header, unmatched braces, unresolved includes.
@@ -345,7 +317,7 @@ def start_mcp(
         })
 
     @mcp.tool()
-    def ivy_include_graph(relative_path: str | None = None) -> str:
+    async def ivy_include_graph(relative_path: str | None = None) -> str:
         """Return the include dependency graph for Ivy files.
 
         If a file is given, returns its includes and files that include it.
@@ -354,18 +326,24 @@ def start_mcp(
         Args:
             relative_path: Optional .ivy file to focus on.
         """
-        graph: dict[str, list[str]] = {}
-        file_by_basename: dict[str, str] = {}
 
-        for rel_path in _find_ivy_files(root):
-            basename = os.path.basename(rel_path)[:-4]
-            file_by_basename[basename] = rel_path
-            try:
-                with open(os.path.join(root, rel_path), encoding="utf-8", errors="replace") as f:
-                    source = f.read()
-                graph[rel_path] = re.findall(r"^include\s+(\w+)", source, re.MULTILINE)
-            except OSError:
-                continue
+        def _build_graph():
+            graph: dict[str, list[str]] = {}
+            file_by_basename: dict[str, str] = {}
+
+            for rel_path in _find_ivy_files(root):
+                basename = os.path.basename(rel_path)[:-4]
+                file_by_basename[basename] = rel_path
+                try:
+                    with open(os.path.join(root, rel_path), encoding="utf-8", errors="replace") as f:
+                        source = f.read()
+                    graph[rel_path] = re.findall(r"^include\s+(\w+)", source, re.MULTILINE)
+                except OSError:
+                    continue
+
+            return graph, file_by_basename
+
+        graph, file_by_basename = await asyncio.to_thread(_build_graph)
 
         if relative_path is not None:
             includes = graph.get(relative_path, [])
@@ -401,7 +379,7 @@ def start_mcp(
             })
 
     @mcp.tool()
-    def ivy_capabilities() -> str:
+    async def ivy_capabilities() -> str:
         """Report which Ivy CLI tools are available on PATH."""
         return json.dumps({
             "ivy_check": shutil.which("ivy_check") is not None,
@@ -411,18 +389,18 @@ def start_mcp(
 
     # --- Semantic / Traceability Tools ---
 
-    def _get_model():
+    async def _get_model():
         """Return the semantic model, building one if needed."""
         nonlocal semantic_model
         if semantic_model is not None:
             return semantic_model
 
-        with _model_lock:
+        async with _model_lock:
             # Double-check after acquiring lock
             if semantic_model is not None:
                 return semantic_model
 
-            return _build_model()
+            return await asyncio.to_thread(_build_model)
 
     def _build_model():
         """Build a lightweight semantic model from workspace files."""
@@ -459,7 +437,7 @@ def start_mcp(
             return None
 
     @mcp.tool()
-    def ivy_traceability_matrix(relative_path: str | None = None) -> str:
+    async def ivy_traceability_matrix(relative_path: str | None = None) -> str:
         """RFC requirement-to-annotation traceability matrix.
 
         Shows which RFC requirements are covered by bracket-tag annotations in the codebase.
@@ -467,7 +445,7 @@ def start_mcp(
         Args:
             relative_path: Optional file to scope the matrix to.
         """
-        model = _get_model()
+        model = await _get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
 
@@ -513,13 +491,13 @@ def start_mcp(
         })
 
     @mcp.tool()
-    def ivy_requirement_coverage(relative_path: str | None = None) -> str:
+    async def ivy_requirement_coverage(relative_path: str | None = None) -> str:
         """RFC requirement coverage statistics by level (MUST/SHOULD/MAY) and layer.
 
         Args:
             relative_path: Optional file to scope the analysis to.
         """
-        model = _get_model()
+        model = await _get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
 
@@ -569,13 +547,13 @@ def start_mcp(
         })
 
     @mcp.tool()
-    def ivy_impact_analysis(symbol_name: str) -> str:
+    async def ivy_impact_analysis(symbol_name: str) -> str:
         """Analyze incoming and outgoing edges for a symbol in the semantic model.
 
         Args:
             symbol_name: The name of the symbol to analyze.
         """
-        model = _get_model()
+        model = await _get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
 
@@ -615,7 +593,7 @@ def start_mcp(
         })
 
     @mcp.tool()
-    def ivy_extract_requirements(rfc_text: str) -> str:
+    async def ivy_extract_requirements(rfc_text: str) -> str:
         """Parse RFC text to extract MUST/SHOULD/MAY structured requirements.
 
         Args:
@@ -657,13 +635,13 @@ def start_mcp(
         })
 
     @mcp.tool()
-    def ivy_cross_references(node_id: str) -> str:
+    async def ivy_cross_references(node_id: str) -> str:
         """Query cross-reference graph neighborhood of a node.
 
         Args:
             node_id: The node ID to query (e.g., "test.ivy:5:send").
         """
-        model = _get_model()
+        model = await _get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
 
@@ -691,13 +669,13 @@ def start_mcp(
         })
 
     @mcp.tool()
-    def ivy_query_symbol(symbol_name: str) -> str:
+    async def ivy_query_symbol(symbol_name: str) -> str:
         """Query rich semantic info about a symbol: type, references, requirements.
 
         Args:
             symbol_name: The symbol name to query.
         """
-        model = _get_model()
+        model = await _get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
 
@@ -772,7 +750,7 @@ def start_mcp(
         return type("_ServerProxy", (), {"_indexer": indexer})()
 
     @mcp.tool()
-    def ivy_action_requirements(
+    async def ivy_action_requirements(
         action_name: str | None = None,
         file_path: str | None = None,
         test_file: str | None = None,
@@ -807,7 +785,7 @@ def start_mcp(
         return json.dumps(handle_action_requirements(server_proxy, params))
 
     @mcp.tool()
-    def ivy_model_summary(test_file: str | None = None) -> str:
+    async def ivy_model_summary(test_file: str | None = None) -> str:
         """Get per-action requirement counts, state variable usage, and RFC coverage.
 
         Returns one row per action with counts of before/after requirements by kind,
@@ -828,7 +806,7 @@ def start_mcp(
         return json.dumps(handle_model_summary_table(server_proxy, params))
 
     @mcp.tool()
-    def ivy_coverage_gaps(test_file: str | None = None) -> str:
+    async def ivy_coverage_gaps(test_file: str | None = None) -> str:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements.
 
         Finds state variables written but never guarded, RFC sections with no
@@ -849,7 +827,7 @@ def start_mcp(
         return json.dumps(handle_coverage_gaps(server_proxy, params))
 
     @mcp.tool()
-    def ivy_action_dependency_graph(
+    async def ivy_action_dependency_graph(
         test_file: str | None = None,
         include_state_vars: bool = False,
     ) -> str:
@@ -878,7 +856,7 @@ def start_mcp(
         return json.dumps(handle_action_dependency_graph(server_proxy, params))
 
     @mcp.tool()
-    def ivy_state_machine_view(
+    async def ivy_state_machine_view(
         test_file: str | None = None,
         state_var_filter: str | None = None,
     ) -> str:
@@ -906,7 +884,7 @@ def start_mcp(
         return json.dumps(handle_state_machine_view(server_proxy, params))
 
     @mcp.tool()
-    def ivy_layered_overview(
+    async def ivy_layered_overview(
         test_file: str | None = None,
         group_by: str = "file",
     ) -> str:
@@ -930,7 +908,7 @@ def start_mcp(
         return json.dumps(handle_layered_overview(server_proxy, params))
 
     @mcp.tool()
-    def ivy_smart_suggestions(
+    async def ivy_smart_suggestions(
         file_path: str | None = None,
         line: int | None = None,
         context: str | None = None,

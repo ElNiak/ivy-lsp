@@ -430,7 +430,10 @@ class IvyLanguageServer(LanguageServer):
         """Kick off background T1+T2 analysis of all workspace files.
 
         Called as the ``done_callback`` from :class:`WorkspaceIndexer`
-        after Phase 2 (deep indexing) completes.
+        after Phase 2 (deep indexing) completes.  This runs on a pygls
+        thread-pool thread, so we schedule on the event loop via
+        ``run_coroutine_threadsafe`` when possible, falling back to a
+        plain daemon thread if no loop is available.
         """
         if os.environ.get("IVY_LSP_BULK_ANALYSIS", "1") == "0":
             slog.info(
@@ -479,6 +482,15 @@ class IvyLanguageServer(LanguageServer):
                 self._start_bulk_compilation_via_pipeline()
             except Exception:
                 logger.exception("Bulk analysis failed")
+
+        # Schedule on event loop if available; fall back to daemon thread
+        try:
+            loop = self.loop  # pygls LanguageServer exposes the event loop
+            if loop is not None and loop.is_running():
+                loop.run_in_executor(None, _run)
+                return
+        except AttributeError:
+            pass
 
         thread = threading.Thread(
             target=_run, daemon=True, name="ivy-bulk-analysis",
