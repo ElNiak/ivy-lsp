@@ -634,7 +634,7 @@ class IvyLanguageServer(LanguageServer):
         """Add LSP notification handler and demote stderr to WARNING-only."""
         root = logging.getLogger()
         handler = _LspLogHandler(self)
-        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        handler.setFormatter(logging.Formatter("%(message)s"))
         root.addHandler(handler)
         # Raise stderr handler level to WARNING so critical errors remain
         # visible in raw output, but normal logs go through LSP only.
@@ -863,6 +863,16 @@ class IvyLanguageServer(LanguageServer):
                             exc_info=True,
                         )
                         compiler = CompilerAdapter()
+                        self.window_show_message(
+                            lsp.ShowMessageParams(
+                                type=lsp.MessageType.Warning,
+                                message=(
+                                    "Ivy CompilerManager unavailable; "
+                                    "using legacy compilation adapter. "
+                                    "Compilation features may be degraded."
+                                ),
+                            )
+                        )
                 except ImportError:
                     enrichment = NullAstEnrichmentAdapter()
                     compiler = NullCompilerAdapter()
