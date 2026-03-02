@@ -327,27 +327,46 @@ def _redirect_to_enclosing_test(
 def _extract_param(params: Any, dict_key: str) -> Optional[str]:
     """Extract first argument from LSP command params.
 
-    Handles params as list (possibly nested), dict, or object with
-    .arguments attribute.  Unwraps one level of nesting so that both
-    ``["quic_types"]`` and ``[["quic_types", "file://..."]]`` yield
-    ``"quic_types"``.
+    Handles three param shapes:
+    - list: unwraps one nesting level, returns first element.
+      Both ``["quic_types"]`` and ``[["quic_types", "file://..."]]``
+      yield ``"quic_types"``.
+    - dict: returns ``params[dict_key]``.
+    - object with ``.arguments``: treats ``.arguments`` as a list and
+      applies the same unwrapping as the list path.
+
+    Returns None if params is None, empty, or the extracted value is
+    not a string.
     """
+    raw: Any = None
     if isinstance(params, list) and params:
         first = params[0]
         # Unwrap one nesting level (e.g. workspace/executeCommand wrapping)
         if isinstance(first, list) and first:
-            return first[0]
-        return first
-    if isinstance(params, dict):
-        return params.get(dict_key)
-    if params is not None:
+            raw = first[0]
+        else:
+            raw = first
+    elif isinstance(params, dict):
+        raw = params.get(dict_key)
+    elif params is not None:
         args = getattr(params, "arguments", None)
         if args:
             first = args[0]
             if isinstance(first, list) and first:
-                return first[0]
-            return first
-    return None
+                raw = first[0]
+            else:
+                raw = first
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        logger.warning(
+            "Expected string parameter for %r, got %s: %r",
+            dict_key,
+            type(raw).__name__,
+            raw,
+        )
+        return None
+    return raw
 
 
 def register(server: Any) -> None:
@@ -438,7 +457,7 @@ def register(server: Any) -> None:
             )
             server.text_document_publish_diagnostics(
                 lsp.PublishDiagnosticsParams(
-                    uri=uri, diagnostics=base_diags + deep_diags
+                    uri=uri, version=doc.version, diagnostics=base_diags + deep_diags
                 )
             )
 
@@ -588,7 +607,7 @@ def register(server: Any) -> None:
                     srv._parser, doc.source or "", filepath, srv._indexer
                 )
                 srv.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+                    lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
                 )
             except Exception:
                 logger.warning(
@@ -624,7 +643,7 @@ def register(server: Any) -> None:
                     srv._indexer,
                 )
                 srv.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+                    lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
                 )
             except Exception:
                 logger.warning(
@@ -875,7 +894,7 @@ def register(server: Any) -> None:
         }
 
     # ------------------------------------------------------------------
-    # Code-lens command handlers (C3 + H4)
+    # Code-lens command handlers
     #
     # These are registered both as custom protocol methods (ivy.xxx) for
     # direct JSON-RPC calls AND via workspace/executeCommand so that
@@ -1005,6 +1024,11 @@ def register(server: Any) -> None:
             "text": getattr(node, "text", None),
         }
 
+    @server.feature("ivy.noop")
+    async def ivy_noop(params: Any = None) -> None:
+        """No-op command for informational code lenses."""
+        return None
+
     # ------------------------------------------------------------------
     # workspace/executeCommand dispatcher for CodeLens clicks
     # ------------------------------------------------------------------
@@ -1014,6 +1038,7 @@ def register(server: Any) -> None:
         "ivy.showPropertyDetails": ivy_show_property_details,
         "ivy.navigateToInclude": ivy_navigate_to_include,
         "ivy.showRfcDetails": ivy_show_rfc_details,
+        "ivy.noop": ivy_noop,
     }
 
     @server.feature(
@@ -1033,9 +1058,11 @@ def register(server: Any) -> None:
     async def ivy_recompile_all(params: Any = None) -> Dict[str, Any]:
         """Re-trigger bulk compilation for all test entry points.
 
-        Validates that the pipeline, compiler manager, and requirement
-        graph are available and that no bulk compilation is already
-        running.  Delegates to ``AnalysisPipeline.run_bulk_tier3()``.
+        Validates that the pipeline, compiler manager, scoped requirement
+        model, and test files are available, and that no bulk compilation
+        is already running.  Spawns a daemon thread that calls
+        ``AnalysisPipeline.run_bulk_tier3()`` and returns immediately
+        with the test file count.
         """
         pipeline = getattr(server, "_analysis_pipeline", None)
         if pipeline is None:
@@ -1072,7 +1099,11 @@ def register(server: Any) -> None:
                     throttle_seconds=1.0,
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "Could not create progress callback for recompilation; "
+                    "user will not see progress updates",
+                    exc_info=True,
+                )
             pipeline.run_bulk_tier3(
                 test_files,
                 progress_callback=progress_cb,

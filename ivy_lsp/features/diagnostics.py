@@ -539,7 +539,7 @@ def register(server) -> None:
             pipeline_result,
         )
         server.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+            lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
         )
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
@@ -566,7 +566,7 @@ def register(server) -> None:
                     pipeline_result,
                 )
                 server.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+                    lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
                 )
             except asyncio.CancelledError:
                 pass
@@ -599,13 +599,15 @@ def register(server) -> None:
             pipeline_result,
         )
         server.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+            lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
         )
 
         if filepath.endswith(".ivy") and server._indexer is not None:
             await loop.run_in_executor(
                 None, server._indexer.reindex_file_with_dependents, filepath
             )
+
+        doc_version = doc.version
 
         async def _deep():
             try:
@@ -629,7 +631,7 @@ def register(server) -> None:
                     cwd=os.path.dirname(deep_filepath),
                 )
                 server.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags + deep)
+                    lsp.PublishDiagnosticsParams(uri=uri, version=doc_version, diagnostics=diags + deep)
                 )
             except asyncio.CancelledError:
                 pass

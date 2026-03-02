@@ -533,3 +533,143 @@ class TestDeepDiagnostics:
             "nonexistent.ivy", ivy_check_cmd="nonexistent_binary_12345"
         )
         assert result == []
+
+
+class TestDiagnosticVersion:
+    """H2: PublishDiagnosticsParams should include document version."""
+
+    def test_did_open_publishes_with_version(self):
+        """did_open should include doc.version in published diagnostics."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from lsprotocol import types as lsp
+
+        from ivy_lsp.features.diagnostics import register
+
+        server = MagicMock()
+        handlers = {}
+
+        def fake_feature(method):
+            def decorator(fn):
+                handlers[method] = fn
+                return fn
+
+            return decorator
+
+        server.feature = fake_feature
+        server._parser = None
+        server._indexer = None
+        server._semantic_model = None
+        server._analysis_pipeline = None
+
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        doc.version = 42
+        server.workspace.get_text_document.return_value = doc
+
+        register(server)
+
+        handler = handlers[lsp.TEXT_DOCUMENT_DID_OPEN]
+        params = MagicMock()
+        params.text_document.uri = "file:///tmp/test.ivy"
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler(params))
+        except Exception:
+            pass
+        finally:
+            loop.close()
+
+        assert server.text_document_publish_diagnostics.called, (
+            "Expected publish_diagnostics to be called"
+        )
+        published = server.text_document_publish_diagnostics.call_args[0][0]
+        assert published.version == 42, (
+            f"Expected version=42, got version={published.version}"
+        )
+
+    def test_did_close_does_not_include_version(self):
+        """didClose publishes empty diagnostics without version (no doc available)."""
+        from unittest.mock import MagicMock
+
+        from lsprotocol import types as lsp
+
+        from ivy_lsp.features.diagnostics import register
+
+        server = MagicMock()
+        handlers = {}
+
+        def fake_feature(method):
+            def decorator(fn):
+                handlers[method] = fn
+                return fn
+
+            return decorator
+
+        server.feature = fake_feature
+
+        register(server)
+
+        handler = handlers[lsp.TEXT_DOCUMENT_DID_CLOSE]
+        params = MagicMock()
+        params.text_document.uri = "file:///tmp/test.ivy"
+        handler(params)
+
+        published = server.text_document_publish_diagnostics.call_args[0][0]
+        assert published.version is None, (
+            f"didClose should not set version, got version={published.version}"
+        )
+
+    def test_did_save_publishes_with_version(self):
+        """did_save should include doc.version in published diagnostics."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from lsprotocol import types as lsp
+
+        from ivy_lsp.features.diagnostics import register
+
+        server = MagicMock()
+        handlers = {}
+
+        def fake_feature(method):
+            def decorator(fn):
+                handlers[method] = fn
+                return fn
+
+            return decorator
+
+        server.feature = fake_feature
+        server._parser = None
+        server._indexer = None
+        server._semantic_model = None
+        server._analysis_pipeline = None
+
+        doc = MagicMock()
+        doc.source = "#lang ivy1.7\n"
+        doc.version = 7
+        server.workspace.get_text_document.return_value = doc
+
+        register(server)
+
+        handler = handlers[lsp.TEXT_DOCUMENT_DID_SAVE]
+        params = MagicMock()
+        params.text_document.uri = "file:///tmp/test.ivy"
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler(params))
+        except Exception:
+            pass
+        finally:
+            loop.close()
+
+        assert server.text_document_publish_diagnostics.called, (
+            "Expected publish_diagnostics to be called"
+        )
+        published = server.text_document_publish_diagnostics.call_args[0][0]
+        assert published.version == 7, (
+            f"Expected version=7, got version={published.version}"
+        )
