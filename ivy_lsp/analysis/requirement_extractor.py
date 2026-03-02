@@ -358,19 +358,13 @@ def _extract_bracket_tags(
 ) -> List[str]:
     """Parse bracket annotations from comment suffix.
 
-    Supports single tags ``# [4]`` and comma-separated multi-tags
-    ``# [rfc9000:4.1, rfc9000:8.1]``.
+    Delegates to rfc_annotations.parse_rfc_tags for the actual parsing.
     """
     if line < 0 or line >= len(source_lines):
         return []
-    line_text = source_lines[line]
-    m = re.search(r"#\s*\[([\w:.,\s]+)\]\s*$", line_text)
-    if not m:
-        return []
-    raw = m.group(1)
-    tags = [t.strip() for t in raw.split(",") if t.strip()]
-    tag_re = re.compile(r"^\w+(?::\w+(?:\.\w+)*)?$")
-    return [t for t in tags if tag_re.match(t)]
+    from ivy_lsp.semantic.rfc_annotations import parse_rfc_tags
+
+    return parse_rfc_tags(source_lines[line])
 
 
 def _build_mixin_map(
