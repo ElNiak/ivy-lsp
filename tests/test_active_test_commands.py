@@ -422,6 +422,7 @@ class TestSetActiveTestDiagnosticRefresh:
         mock_doc = MagicMock()
         mock_doc.uri = "file:///workspace/quic_stack.ivy"
         mock_doc.source = "action quic.send(x:t)\n"
+        mock_doc.version = 1
         server.workspace.text_documents = {mock_doc.uri: mock_doc}
 
         with patch(
@@ -444,6 +445,7 @@ class TestSetActiveTestDiagnosticRefresh:
         mock_doc = MagicMock()
         mock_doc.uri = "file:///workspace/quic_stack.ivy"
         mock_doc.source = "#lang ivy1.7\naction quic.send(x:t)\n"
+        mock_doc.version = 1
         server.workspace.text_documents = {mock_doc.uri: mock_doc}
 
         with patch(
@@ -519,6 +521,7 @@ class TestSetActiveTestDiagnosticRefresh:
             doc = MagicMock()
             doc.uri = f"file:///workspace/{name}"
             doc.source = f"# {name}\n"
+            doc.version = 1
             docs[doc.uri] = doc
         server.workspace.text_documents = docs
 
@@ -613,6 +616,7 @@ class TestActiveDocumentChanged:
         mock_doc = MagicMock()
         mock_doc.uri = "file:///workspace/quic_stack.ivy"
         mock_doc.source = "action quic.send(x:t)\n"
+        mock_doc.version = 1
         server.workspace.text_documents = {mock_doc.uri: mock_doc}
 
         with patch(

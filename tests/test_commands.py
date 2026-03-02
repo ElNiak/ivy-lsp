@@ -90,6 +90,7 @@ class TestDetectIsolateAtPosition:
         server = MagicMock()
         doc = MagicMock()
         doc.source = "#lang ivy1.7\nisolate test_iso = {\n  type t\n}\n"
+        doc.version = 1
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
         server._indexer = MagicMock()
@@ -246,7 +247,7 @@ class TestCapabilities:
         server = MagicMock()
         registered = {}
 
-        def fake_feature(method):
+        def fake_feature(method, _options=None):
             def decorator(fn):
                 registered[method] = fn
                 return fn
@@ -270,7 +271,7 @@ class TestVerifyHandler:
         server = MagicMock()
         registered = {}
 
-        def fake_feature(method):
+        def fake_feature(method, _options=None):
             def decorator(fn):
                 registered[method] = fn
                 return fn
@@ -297,7 +298,7 @@ def _make_registered_handlers():
     server = MagicMock()
     registered = {}
 
-    def fake_feature(method):
+    def fake_feature(method, _options=None):
         def decorator(fn):
             registered[method] = fn
             return fn
@@ -379,6 +380,7 @@ class TestVerifyHandlerParams:
         # verify handler calls compute_diagnostics which needs doc.source as a string
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
+        doc.version = 1
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
         server._indexer = MagicMock()
@@ -464,6 +466,7 @@ class TestVerifyUsesStaging:
         server, registered = _make_registered_handlers()
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
+        doc.version = 1
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
         server._indexer = MagicMock()
@@ -891,6 +894,7 @@ class TestVerifyRedirection:
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
+        doc.version = 1
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
 
@@ -935,6 +939,7 @@ class TestVerifyRedirection:
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
+        doc.version = 1
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
 
@@ -973,6 +978,7 @@ class TestVerifyRedirection:
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
+        doc.version = 1
         server.workspace.get_text_document.return_value = doc
         server._parser = MagicMock()
 
