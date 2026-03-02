@@ -543,7 +543,7 @@ def register(server) -> None:
         )
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
-    def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
+    async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
         uri = params.text_document.uri
         old_task = _debounce_tasks.pop(uri, None)
         if old_task and not old_task.done():

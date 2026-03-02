@@ -673,3 +673,33 @@ class TestDiagnosticVersion:
         assert published.version == 7, (
             f"Expected version=7, got version={published.version}"
         )
+
+
+class TestHandlerConsistency:
+    """H3: All diagnostic handlers should be async for pygls 2.x consistency."""
+
+    def test_did_change_is_async(self):
+        """did_change handler should be an async function."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from lsprotocol import types as lsp
+
+        from ivy_lsp.features.diagnostics import register
+
+        server = MagicMock()
+        handlers = {}
+
+        def fake_feature(method):
+            def decorator(fn):
+                handlers[method] = fn
+                return fn
+            return decorator
+        server.feature = fake_feature
+
+        register(server)
+
+        handler = handlers[lsp.TEXT_DOCUMENT_DID_CHANGE]
+        assert asyncio.iscoroutinefunction(handler), (
+            "did_change handler must be async for pygls 2.x consistency"
+        )
