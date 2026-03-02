@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import re
@@ -145,6 +146,7 @@ class WorkspaceIndexer:
         self._deep_index_progress = DeepIndexProgress()
         self._progress_lock = threading.Lock()
         self._stop_requested = threading.Event()
+        atexit.register(self._stop_requested.set)
         self._analysis_pipeline: Optional[Any] = None
         # Mtime-validated source cache to avoid re-reading files across
         # pipeline phases.  Maps filepath -> (content, mtime).
@@ -517,6 +519,19 @@ class WorkspaceIndexer:
         its symbols are upgraded to AST quality.  This progressively enriches
         the symbol table while keeping lock contention to a minimum.
         """
+        try:
+            self._deep_index_from_tests_impl()
+        except RuntimeError as e:
+            if "shutdown" in str(e).lower() or "interpreter" in str(e).lower():
+                return
+            logger.exception("Unexpected error in deep indexer thread")
+        except Exception:
+            if self._stop_requested.is_set():
+                return
+            logger.exception("Unexpected error in deep indexer thread")
+
+    def _deep_index_from_tests_impl(self) -> None:
+        """Inner implementation of deep indexing (separated for clean shutdown)."""
         with self._exports_lock:
             test_files = [
                 f
@@ -544,13 +559,26 @@ class WorkspaceIndexer:
         num_workers = int(os.environ.get("IVY_LSP_PARSE_WORKERS", "0"))
         use_parallel = num_workers != 1 and len(test_files) > 3
 
+        if self._stop_requested.is_set():
+            return
+
         if use_parallel:
+            if self._stop_requested.is_set():
+                return
             logger.warning(
                 "Parallel deep indexing uses light-mode extraction only "
                 "(T2/T3 semantic tiers skipped). Set 'ivy.lsp.parseWorkers' "
                 "to 1 in VS Code settings for full semantic analysis."
             )
-            self._deep_index_parallel(test_files, num_workers)
+            try:
+                self._deep_index_parallel(test_files, num_workers)
+            except RuntimeError as e:
+                if "shutdown" in str(e).lower():
+                    logger.debug(
+                        "Parallel indexer interrupted by interpreter shutdown"
+                    )
+                    return
+                raise
         else:
             self._deep_index_serial(test_files)
 
@@ -695,12 +723,16 @@ class WorkspaceIndexer:
         self, test_files: List[str], num_workers: int,
     ) -> None:
         """Parallel deep indexing using ProcessPoolExecutor."""
+        if self._stop_requested.is_set():
+            return
+
         from ivy_lsp.indexer.parallel_indexer import ParallelDeepIndexer
         from ivy_lsp.parsing.symbols import IvySymbol
 
         indexer = ParallelDeepIndexer(
             num_workers=num_workers,
             resolver_config=self._resolver.to_config_dict(),
+            stop_event=self._stop_requested,
         )
         results = indexer.parse_files(test_files)
 

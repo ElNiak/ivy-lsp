@@ -507,9 +507,17 @@ class AnalysisPipeline:
                 return filepath, src, None, f"T1: {exc}"
             return filepath, src, anns, None
 
+        if cancel_event is not None and cancel_event.is_set():
+            result.cancelled = True
+            return
+
         completed = 0
         with ThreadPoolExecutor(max_workers=num_workers) as pool:
-            futures = {pool.submit(_t1_task, fp): fp for fp in remaining}
+            futures: Dict[Any, str] = {}
+            for fp in remaining:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                futures[pool.submit(_t1_task, fp)] = fp
             for future in as_completed(futures):
                 if cancel_event is not None and cancel_event.is_set():
                     result.cancelled = True

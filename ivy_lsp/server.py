@@ -44,35 +44,46 @@ def _patch_pygls_cancelled_future() -> None:
 
 
 class _ClosedPipeGuardWriter:
-    """Proxy that converts ``ValueError("write to closed file")`` to ``BrokenPipeError``
-    on the first failure, then silently swallows all subsequent writes.
+    """Proxy that converts ``ValueError("write to closed file")`` to
+    ``BrokenPipeError`` on the first failure, then silently swallows all
+    subsequent writes.
 
-    pygls 2.0.1's ``_send_data()`` catches ``BrokenPipeError`` (re-raises for
-    clean shutdown) but lets ``ValueError`` from a closed ``BufferedWriter``
-    fall through to a generic ``except Exception`` handler that cascades via
-    ``logger.exception`` + ``_report_server_error``.
+    pygls 2.0.x's ``_send_data()`` catches ``BrokenPipeError`` (re-raises
+    for clean shutdown) but lets ``ValueError`` from a closed
+    ``BufferedWriter`` fall through to a generic ``except Exception``
+    handler that cascades via ``logger.exception`` +
+    ``_report_server_error``.
 
-    After the first pipe failure, callers (``_setup_indexer``, ``on_initialized``,
-    etc.) catch the exception and attempt to send error notifications — which also
-    fail, creating a cascade.  By swallowing writes after the first failure, the
-    cascade is stopped at the source while still allowing the initial
-    ``BrokenPipeError`` to propagate for clean shutdown.
+    On the first failure the guard also fires an optional
+    ``on_pipe_break`` callback to signal shutdown to background threads
+    (indexer, bulk analysis, compiler) before raising.  After the first
+    failure ``_dead`` is set and subsequent writes return ``len(data)``
+    without touching the dead pipe, preventing any cascade.
     """
 
-    __slots__ = ("_inner", "_dead")
+    __slots__ = ("_inner", "_dead", "_on_pipe_break")
 
-    def __init__(self, inner):
+    def __init__(self, inner, on_pipe_break=None):
         self._inner = inner
         self._dead = False
+        self._on_pipe_break = on_pipe_break
 
     def write(self, data):
         if self._dead:
-            return len(data)  # Silently swallow — pipe is already gone
+            return len(data)
         try:
             return self._inner.write(data)
         except (ValueError, BrokenPipeError, OSError) as exc:
             self._dead = True
-            if isinstance(exc, ValueError) and "closed" in str(exc).lower():
+            if self._on_pipe_break is not None:
+                try:
+                    self._on_pipe_break()
+                except Exception:
+                    pass
+            # Convert ValueError to BrokenPipeError so pygls triggers
+            # its clean-shutdown path instead of cascading through the
+            # generic Exception handler.
+            if isinstance(exc, ValueError):
                 raise BrokenPipeError(str(exc)) from exc
             raise
 
@@ -90,7 +101,29 @@ def _patch_pygls_closed_pipe() -> None:
     _original_set_writer = JsonRPCProtocol.set_writer
 
     def _guarded_set_writer(self, writer, include_headers=True):
-        _original_set_writer(self, _ClosedPipeGuardWriter(writer), include_headers)
+        def _on_pipe_break():
+            srv = getattr(self, "_server", None)
+            if srv is None:
+                return
+            for attr in ("_shutdown_event", "_bulk_analysis_cancel"):
+                ev = getattr(srv, attr, None)
+                if ev is not None:
+                    ev.set()
+            indexer = getattr(srv, "_indexer", None)
+            if indexer is not None:
+                indexer.request_stop()
+            compiler = getattr(srv, "_compiler_manager", None)
+            if compiler is not None:
+                try:
+                    compiler.shutdown()
+                except Exception:
+                    pass
+
+        _original_set_writer(
+            self,
+            _ClosedPipeGuardWriter(writer, _on_pipe_break),
+            include_headers,
+        )
 
     JsonRPCProtocol.set_writer = _guarded_set_writer  # type: ignore[assignment]
 
@@ -555,7 +588,15 @@ class IvyLanguageServer(LanguageServer):
                 )
                 self._send_model_ready_notification()
                 self._start_bulk_compilation_via_pipeline()
+            except RuntimeError as exc:
+                msg = str(exc).lower()
+                if "shutdown" in msg or "interpreter" in msg:
+                    logger.debug("Bulk analysis interrupted by interpreter shutdown")
+                else:
+                    logger.exception("Bulk analysis failed")
             except Exception:
+                if self._shutdown_event.is_set():
+                    return
                 logger.exception("Bulk analysis failed")
 
         # Schedule on event loop if available; fall back to daemon thread

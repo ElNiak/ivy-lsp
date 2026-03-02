@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ProcessPoolExecutor
+import threading
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -104,32 +105,50 @@ class ParallelDeepIndexer:
         self,
         num_workers: int = 0,
         resolver_config: Optional[dict] = None,
+        stop_event: Optional[threading.Event] = None,
     ) -> None:
         if num_workers <= 0:
             num_workers = max(1, (os.cpu_count() or 1) // 2)
         self._num_workers = num_workers
         self._resolver_config = resolver_config
+        self._stop_event = stop_event
 
     def parse_files(
         self, filepaths: List[str],
     ) -> Dict[str, WorkerResult]:
+        if self._stop_event is not None and self._stop_event.is_set():
+            return {}
+
         cfg = self._resolver_config
         if len(filepaths) <= self.SERIAL_THRESHOLD:
             return {f: worker_parse_file(f, cfg) for f in filepaths}
 
         results: Dict[str, WorkerResult] = {}
-        with ProcessPoolExecutor(max_workers=self._num_workers) as pool:
-            futures = {
-                pool.submit(worker_parse_file, f, cfg): f
-                for f in filepaths
-            }
-            for future in futures:
-                filepath = futures[future]
-                try:
-                    results[filepath] = future.result(timeout=60)
-                except Exception as e:
-                    results[filepath] = WorkerResult(
-                        filepath=filepath, success=False,
-                        symbols=[], errors=[str(e)],
-                    )
+        try:
+            with ProcessPoolExecutor(max_workers=self._num_workers) as pool:
+                futures = {}
+                for f in filepaths:
+                    if self._stop_event is not None and self._stop_event.is_set():
+                        break
+                    try:
+                        futures[pool.submit(worker_parse_file, f, cfg)] = f
+                    except RuntimeError:
+                        # Interpreter shutting down — stop submitting
+                        break
+                for future in futures:
+                    filepath = futures[future]
+                    try:
+                        results[filepath] = future.result(timeout=60)
+                    except (BrokenExecutor, Exception) as e:
+                        results[filepath] = WorkerResult(
+                            filepath=filepath, success=False,
+                            symbols=[], errors=[str(e)],
+                        )
+        except (FileNotFoundError, OSError) as exc:
+            if self._stop_event is not None and self._stop_event.is_set():
+                logger.debug(
+                    "Parallel indexer pool interrupted during shutdown: %s", exc,
+                )
+            else:
+                raise
         return results
