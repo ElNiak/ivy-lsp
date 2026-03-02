@@ -44,21 +44,23 @@ def _patch_pygls_cancelled_future() -> None:
 
 
 class _ClosedPipeGuardWriter:
-    """Proxy that converts ``ValueError("write to closed file")`` to
-    ``BrokenPipeError`` on the first failure, then silently swallows all
-    subsequent writes.
+    """Proxy that silently swallows writes once the pipe is dead.
 
-    pygls 2.0.x's ``_send_data()`` catches ``BrokenPipeError`` (re-raises
-    for clean shutdown) but lets ``ValueError`` from a closed
-    ``BufferedWriter`` fall through to a generic ``except Exception``
-    handler that cascades via ``logger.exception`` +
-    ``_report_server_error``.
+    When the LSP client disconnects, the stdout pipe closes and
+    ``BufferedWriter.write()`` raises ``ValueError`` or
+    ``BrokenPipeError``.  pygls's ``_send_data()`` catches
+    ``BrokenPipeError`` but logs it at ERROR level with a full
+    traceback before re-raising — producing noisy shutdown output.
 
-    On the first failure the guard also fires an optional
-    ``on_pipe_break`` callback to signal shutdown to background threads
-    (indexer, bulk analysis, compiler) before raising.  After the first
-    failure ``_dead`` is set and subsequent writes return ``len(data)``
-    without touching the dead pipe, preventing any cascade.
+    This guard prevents that noise entirely: on the first write failure
+    it marks the pipe as dead, fires an ``on_pipe_break`` callback to
+    signal background threads (indexer, bulk analysis, compiler), and
+    returns ``len(data)`` as if the write succeeded.  All subsequent
+    writes are silently swallowed.
+
+    The server still shuts down cleanly via the stdin-EOF path: when
+    the client disconnects, stdin closes, the read loop exits, and
+    pygls calls ``shutdown()`` in its ``finally`` block.
     """
 
     __slots__ = ("_inner", "_dead", "_on_pipe_break")
@@ -73,19 +75,14 @@ class _ClosedPipeGuardWriter:
             return len(data)
         try:
             return self._inner.write(data)
-        except (ValueError, BrokenPipeError, OSError) as exc:
+        except (ValueError, BrokenPipeError, OSError):
             self._dead = True
             if self._on_pipe_break is not None:
                 try:
                     self._on_pipe_break()
                 except Exception:
                     pass
-            # Convert ValueError to BrokenPipeError so pygls triggers
-            # its clean-shutdown path instead of cascading through the
-            # generic Exception handler.
-            if isinstance(exc, ValueError):
-                raise BrokenPipeError(str(exc)) from exc
-            raise
+            return len(data)
 
     def close(self):
         self._inner.close()
