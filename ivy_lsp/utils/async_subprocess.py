@@ -9,13 +9,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-_semaphore: Optional[asyncio.Semaphore] = None
+_semaphore_lock = threading.Lock()
+_semaphores: Dict[int, asyncio.Semaphore] = {}
 _semaphore_limit: Optional[int] = None
 
 
@@ -31,20 +33,34 @@ class SubprocessResult:
 
 
 def get_tool_semaphore() -> asyncio.Semaphore:
-    """Return the module-level concurrency semaphore.
+    """Return a concurrency semaphore for the current event loop.
 
-    Configured via the ``IVY_LSP_MAX_CONCURRENT_TOOLS`` environment
-    variable (default: **4**).  The semaphore is created lazily on first
-    call and reused thereafter.  A global bound ensures that both the
-    LSP and MCP code paths (when running in shared-process mode) respect
+    Each event loop gets its own ``asyncio.Semaphore`` instance (since
+    asyncio primitives are not thread-safe across loops). Configured
+    via ``IVY_LSP_MAX_CONCURRENT_TOOLS`` env var (default: 4).
+
+    The semaphore is created lazily per loop on first call and reused
+    thereafter. A global bound ensures that all code paths respect
     the same concurrency limit.
     """
-    global _semaphore, _semaphore_limit
+    global _semaphore_limit
     limit = max(1, int(os.environ.get("IVY_LSP_MAX_CONCURRENT_TOOLS", "4")))
-    if _semaphore is None or _semaphore_limit != limit:
-        _semaphore = asyncio.Semaphore(limit)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+
+    loop_id = id(loop)
+
+    with _semaphore_lock:
+        existing = _semaphores.get(loop_id)
+        if existing is not None and _semaphore_limit == limit:
+            return existing
+        sem = asyncio.Semaphore(limit)
+        _semaphores[loop_id] = sem
         _semaphore_limit = limit
-    return _semaphore
+        return sem
 
 
 async def run_ivy_subprocess(

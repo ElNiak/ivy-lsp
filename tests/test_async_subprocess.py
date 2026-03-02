@@ -46,7 +46,7 @@ class TestGetToolSemaphore:
         monkeypatch.delenv("IVY_LSP_MAX_CONCURRENT_TOOLS", raising=False)
         # Reset module-level state to force re-creation
         import ivy_lsp.utils.async_subprocess as mod
-        mod._semaphore = None
+        mod._semaphores.clear()
         mod._semaphore_limit = None
 
         sem = get_tool_semaphore()
@@ -56,7 +56,7 @@ class TestGetToolSemaphore:
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         import ivy_lsp.utils.async_subprocess as mod
-        mod._semaphore = None
+        mod._semaphores.clear()
         mod._semaphore_limit = None
 
         sem = get_tool_semaphore()
@@ -65,7 +65,7 @@ class TestGetToolSemaphore:
     def test_minimum_one(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "0")
         import ivy_lsp.utils.async_subprocess as mod
-        mod._semaphore = None
+        mod._semaphores.clear()
         mod._semaphore_limit = None
 
         sem = get_tool_semaphore()
@@ -159,7 +159,7 @@ class TestSemaphoreLimiting:
     async def test_bounds_concurrency(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         import ivy_lsp.utils.async_subprocess as mod
-        mod._semaphore = None
+        mod._semaphores.clear()
         mod._semaphore_limit = None
 
         # Use a script that takes a measurable amount of time
