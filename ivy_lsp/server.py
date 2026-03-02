@@ -72,11 +72,12 @@ class _LspLogHandler(logging.Handler):
     _DEFAULT_MIN_INTERVAL = 0.05
     _MAX_MESSAGE_LEN = 8192  # 8 KB cap per log message
 
+    _tls = threading.local()  # per-thread recursion guard
+
     def __init__(self, server: "IvyLanguageServer"):
         super().__init__()
         self._server = server
-        self._lock = threading.RLock()
-        self._sending = False  # recursion guard (checked inside _lock)
+        self._lock = threading.Lock()  # non-reentrant; no I/O under lock
         self._last_emit = 0.0
         self._drop_counts: dict = {}
 
@@ -93,10 +94,13 @@ class _LspLogHandler(logging.Handler):
         return ""
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Per-thread recursion guard: pygls logs inside _send_data(),
+        # which would re-enter this handler. Skip to prevent infinite loop.
+        if getattr(self._tls, "sending", False):
+            return
+
+        # --- fast path: all state under lock (no I/O) ---
         with self._lock:
-            if self._sending:
-                return
-            # Always let WARNING+ through immediately.
             now = time.time()
             if record.levelno < logging.WARNING:
                 msg = self.format(record)
@@ -104,8 +108,6 @@ class _LspLogHandler(logging.Handler):
                 min_interval = self._CAT_MIN_INTERVAL.get(
                     cat, self._DEFAULT_MIN_INTERVAL
                 )
-                # Throttle more aggressively during initialization to
-                # keep the stdio pipe clear for request/response traffic.
                 if getattr(self._server, "_initializing", False):
                     min_interval = max(min_interval, 1.0)
                 if (now - self._last_emit) < min_interval:
@@ -117,33 +119,34 @@ class _LspLogHandler(logging.Handler):
             else:
                 msg = self.format(record)
 
-            # Truncate oversized messages to prevent large LSP notifications
             if len(msg) > self._MAX_MESSAGE_LEN:
                 msg = msg[: self._MAX_MESSAGE_LEN] + "... [truncated]"
 
-            self._sending = True
+            msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
+            if self._drop_counts:
+                parts = []
+                for k, v in sorted(self._drop_counts.items()):
+                    label = k if k != "_untagged" else "other"
+                    parts.append(f"{v} {label}")
+                suppression = "[" + ", ".join(parts) + " messages suppressed]"
+                msg = f"{msg} {suppression}"
+                self._drop_counts = {}
+            self._last_emit = now
+
+        # --- slow path: send notification WITHOUT holding lock ---
+        self._tls.sending = True
+        try:
+            self._server.window_log_message(
+                lsp.LogMessageParams(type=msg_type, message=msg)
+            )
+        except Exception:
             try:
-                msg_type = self._LEVEL_MAP.get(record.levelno, lsp.MessageType.Log)
-                if self._drop_counts:
-                    parts = []
-                    for k, v in sorted(self._drop_counts.items()):
-                        label = k if k != "_untagged" else "other"
-                        parts.append(f"{v} {label}")
-                    suppression = "[" + ", ".join(parts) + " messages suppressed]"
-                    msg = f"{msg} {suppression}"
-                    self._drop_counts = {}
-                self._server.window_log_message(
-                    lsp.LogMessageParams(type=msg_type, message=msg)
-                )
-                self._last_emit = now
+                sys.stderr.write(f"[ivy-lsp-fallback] {msg}\n")
+                sys.stderr.flush()
             except Exception:
-                try:
-                    sys.stderr.write(f"[ivy-lsp-fallback] {msg}\n")
-                    sys.stderr.flush()
-                except Exception:
-                    pass
-            finally:
-                self._sending = False
+                pass
+        finally:
+            self._tls.sending = False
 
 
 class IvyLanguageServer(LanguageServer):
