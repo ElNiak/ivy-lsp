@@ -467,7 +467,10 @@ class TestInlineT1T2DuringDeepIndex:
 
         mock_pipeline.run_tier1.assert_called_once_with(source, str(f))
         mock_pipeline.run_tier2.assert_called_once_with(
-            source, str(f), parse_result=result
+            source,
+            str(f),
+            parse_result=result,
+            rfc_annotations=mock_pipeline.run_tier1.return_value,
         )
         mock_pipeline.run_tier3_background.assert_called_once_with(
             source, str(f), track_state=False

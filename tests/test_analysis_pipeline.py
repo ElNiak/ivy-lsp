@@ -1,5 +1,7 @@
 """Tests for the three-tier analysis pipeline orchestrator."""
 
+import unittest.mock as mock
+
 from ivy_lsp.adapters.null_adapter import (
     NullAstEnrichmentAdapter,
     NullCompilerAdapter,
@@ -1133,3 +1135,334 @@ class TestTier3DoubleDecrement:
         with pipeline._state_lock:
             assert pipeline._tier3_running is False
             assert pipeline._tier3_current_file is None
+
+
+# ---------------------------------------------------------------------------
+# Unified compilation tests (RequirementGraph enrichment + bulk T3)
+# ---------------------------------------------------------------------------
+
+
+class _FakeCompiledModuleIR:
+    """Minimal stand-in for CompiledModuleIR used in enrichment tests."""
+
+    def __init__(self, source_file="test.ivy", success=True, actions=None):
+        self.source_file = source_file
+        self.success = success
+        self.actions = actions or {}
+        self.sorts = {}
+        self.symbols = {}
+        self.labeled_axioms = []
+        self.labeled_conjectures = []
+        self.requirements = []
+        self.errors = []
+        self.mixins = {}
+        self.isolates = {}
+        self.compile_duration = 0.1
+
+
+class _FakeCompilerManager:
+    """CompilerManager stub that invokes callbacks synchronously."""
+
+    def __init__(self, ir=None):
+        self._ir = ir or _FakeCompiledModuleIR()
+        self._cache = {}
+
+    def compile_async(self, source, filepath, callback):
+        # Use pre-populated cache entry if available, else create a fake IR
+        if filepath in self._cache:
+            ir = self._cache[filepath]
+        else:
+            ir = _FakeCompiledModuleIR(source_file=filepath, success=self._ir.success)
+            self._cache[filepath] = ir
+        callback(ir)
+
+    def get_cached(self, filepath):
+        return self._cache.get(filepath)
+
+    def get_stats(self):
+        return {
+            "cachedFiles": len(self._cache),
+            "activeProcesses": 0,
+            "maxConcurrent": 1,
+        }
+
+
+class _FakeRequirementGraph:
+    """Minimal requirement graph to verify enrichment calls."""
+
+    def __init__(self):
+        self.actions = {}
+        self.enrich_calls = []
+
+    def add_action(self, action):
+        self.actions[action.id] = action
+        self.enrich_calls.append(action.id)
+
+    def add_action_if_absent(self, action):
+        if action.id not in self.actions:
+            self.add_action(action)
+
+
+class TestRequirementGraphEnrichmentInT3:
+    """Verify that T3 _on_result enriches RequirementGraph when provided."""
+
+    def test_t3_enriches_requirement_graph_on_success(self):
+        """When requirement_graph is set, T3 should call enrich_requirement_graph."""
+        model = SemanticModel()
+        fake_mgr = _FakeCompilerManager()
+        fake_graph = _FakeRequirementGraph()
+
+        compiler = StubCompilerAdapter(success=True)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+            compiler_manager=fake_mgr,
+            requirement_graph=fake_graph,
+        )
+
+        # Pre-populate the cache so _on_result finds the IR
+        from ivy_lsp.compilation.ir import CompiledModuleIR, ActionIR
+
+        ir = CompiledModuleIR(
+            source_file="test.ivy",
+            success=True,
+            actions={
+                "quic.send": ActionIR(
+                    name="quic.send",
+                    formal_params=("src",),
+                    formal_returns=(),
+                ),
+            },
+        )
+        fake_mgr._cache["test.ivy"] = ir
+
+        pipeline.run_tier3_background("type cid\n", "test.ivy")
+
+        assert "quic.send" in fake_graph.actions
+
+    def test_t3_does_not_enrich_graph_when_not_provided(self):
+        """When requirement_graph is None, T3 should not attempt graph enrichment."""
+        model = SemanticModel()
+        fake_mgr = _FakeCompilerManager()
+
+        compiler = StubCompilerAdapter(success=True)
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=compiler,
+            compiler_manager=fake_mgr,
+            requirement_graph=None,
+        )
+
+        # Should not raise even though requirement_graph is None
+        pipeline.run_tier3_background("type cid\n", "test.ivy")
+        state = pipeline.get_pipeline_state()
+        assert state["tier3FileCount"] == 1
+
+
+class TestBulkTier3:
+    """Verify run_bulk_tier3 state tracking and enrichment."""
+
+    def test_bulk_tier3_updates_state(self, tmp_path):
+        """run_bulk_tier3 should update _bulk_compile_* state fields."""
+        model = SemanticModel()
+        fake_mgr = _FakeCompilerManager()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=fake_mgr,
+        )
+
+        # Create test files
+        f1 = tmp_path / "test1.ivy"
+        f2 = tmp_path / "test2.ivy"
+        f1.write_text("type cid\n")
+        f2.write_text("type pkt_num\n")
+
+        pipeline.run_bulk_tier3([str(f1), str(f2)])
+
+        state = pipeline.get_pipeline_state()
+        assert state["bulkCompileTotal"] == 2
+        assert state["bulkCompileCompleted"] == 2
+        assert state["bulkCompileRunning"] is False
+
+    def test_bulk_tier3_skips_when_no_compiler_manager(self):
+        """Without a CompilerManager, run_bulk_tier3 should be a no-op."""
+        model = SemanticModel()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=None,
+        )
+
+        pipeline.run_bulk_tier3(["nonexistent.ivy"])
+
+        state = pipeline.get_pipeline_state()
+        assert state["bulkCompileRunning"] is False
+        assert state["bulkCompileTotal"] == 0
+
+    def test_bulk_tier3_skips_when_already_running(self, tmp_path):
+        """If already running, run_bulk_tier3 should return immediately."""
+        model = SemanticModel()
+        fake_mgr = _FakeCompilerManager()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=fake_mgr,
+        )
+
+        # Manually set running flag
+        with pipeline._state_lock:
+            pipeline._bulk_compile_running = True
+
+        f1 = tmp_path / "test.ivy"
+        f1.write_text("type cid\n")
+
+        pipeline.run_bulk_tier3([str(f1)])
+
+        # Should still show the pre-set state (not overwritten)
+        state = pipeline.get_pipeline_state()
+        assert state["bulkCompileRunning"] is True
+        assert state["bulkCompileTotal"] == 0  # was not overwritten
+
+        # Cleanup
+        with pipeline._state_lock:
+            pipeline._bulk_compile_running = False
+
+    def test_bulk_tier3_calls_notification_callback(self, tmp_path):
+        """Notification callback should be invoked at least once."""
+        model = SemanticModel()
+        fake_mgr = _FakeCompilerManager()
+        notifications = []
+
+        def _on_notify(completed, total, filepath, success):
+            notifications.append((completed, total, filepath, success))
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=fake_mgr,
+            notification_callback=_on_notify,
+        )
+
+        f1 = tmp_path / "test.ivy"
+        f1.write_text("type cid\n")
+
+        pipeline.run_bulk_tier3([str(f1)])
+
+        # At least the final notification should have fired
+        assert len(notifications) >= 1
+        last = notifications[-1]
+        assert last[0] == 1  # completed
+        assert last[1] == 1  # total
+
+
+class TestGetPipelineStateCompilation:
+    """Verify get_pipeline_state includes compilation fields."""
+
+    def test_pipeline_state_includes_bulk_compile_fields(self):
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+
+        state = pipeline.get_pipeline_state()
+        assert "bulkCompileRunning" in state
+        assert "bulkCompileTotal" in state
+        assert "bulkCompileCompleted" in state
+        assert state["bulkCompileRunning"] is False
+        assert state["bulkCompileTotal"] == 0
+        assert state["bulkCompileCompleted"] == 0
+
+    def test_pipeline_state_includes_compiler_manager_stats(self):
+        model = SemanticModel()
+        fake_mgr = _FakeCompilerManager()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=fake_mgr,
+        )
+
+        state = pipeline.get_pipeline_state()
+        assert "cachedFiles" in state
+        assert "activeProcesses" in state
+        assert "maxConcurrent" in state
+        assert state["maxConcurrent"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Tier 1 -> Tier 2 annotation reuse tests
+# ---------------------------------------------------------------------------
+
+
+class TestTier1ReturnAnnotations:
+    """run_tier1 should return parsed annotations for reuse by tier2."""
+
+    def test_tier1_returns_annotations_list(self):
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+        source = "require x > 0; # [rfc9000:4.1]\naction foo"
+        result = pipeline.run_tier1(source, "test.ivy")
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].tags == ["rfc9000:4.1"]
+
+
+class TestTier2ReusesAnnotations:
+    """run_tier2 should accept rfc_annotations kwarg and skip re-parsing."""
+
+    def test_tier2_skips_reparse_when_annotations_provided(self):
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        )
+        source = "require x > 0; # [rfc9000:4.1]"
+        pre_annotations = [
+            RfcAnnotation(
+                id="test.ivy:0:0",
+                file="test.ivy",
+                line=0,
+                tags=["rfc9000:4.1"],
+            )
+        ]
+
+        with mock.patch(
+            "ivy_lsp.semantic.analysis_pipeline.parse_file_rfc_annotations"
+        ) as mock_parse:
+            pipeline.run_tier2(
+                source, "test.ivy", rfc_annotations=pre_annotations
+            )
+            mock_parse.assert_not_called()
+
+        nodes = model.get_nodes_in_file("test.ivy")
+        rfc_nodes = [n for n in nodes if isinstance(n, RfcAnnotation)]
+        assert len(rfc_nodes) == 1
+        assert rfc_nodes[0].tags == ["rfc9000:4.1"]

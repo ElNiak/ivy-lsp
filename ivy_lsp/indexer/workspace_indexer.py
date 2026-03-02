@@ -632,15 +632,21 @@ class WorkspaceIndexer:
                 # Each tier is wrapped individually so a failure in one
                 # does not prevent the others from running.
                 if self._analysis_pipeline is not None:
+                    t1_annotations = None
                     try:
-                        self._analysis_pipeline.run_tier1(source, test_file)
+                        t1_annotations = self._analysis_pipeline.run_tier1(
+                            source, test_file
+                        )
                     except Exception:
                         logger.warning(
                             "Inline T1 failed for %s", test_file, exc_info=True
                         )
                     try:
                         self._analysis_pipeline.run_tier2(
-                            source, test_file, parse_result=result
+                            source,
+                            test_file,
+                            parse_result=result,
+                            rfc_annotations=t1_annotations,
                         )
                     except Exception:
                         logger.warning(
@@ -727,8 +733,11 @@ class WorkspaceIndexer:
                     # Inline T1+T2+T3 (same pattern as serial path) so
                     # the subsequent bulk T1+T2 run can skip these files.
                     if self._analysis_pipeline is not None:
+                        t1_annotations = None
                         try:
-                            self._analysis_pipeline.run_tier1(source, filepath)
+                            t1_annotations = self._analysis_pipeline.run_tier1(
+                                source, filepath
+                            )
                         except Exception:
                             logger.warning(
                                 "Parallel inline T1 failed for %s",
@@ -736,7 +745,11 @@ class WorkspaceIndexer:
                                 exc_info=True,
                             )
                         try:
-                            self._analysis_pipeline.run_tier2(source, filepath)
+                            self._analysis_pipeline.run_tier2(
+                                source,
+                                filepath,
+                                rfc_annotations=t1_annotations,
+                            )
                         except Exception:
                             logger.warning(
                                 "Parallel inline T2 failed for %s",
