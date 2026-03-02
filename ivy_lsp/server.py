@@ -362,17 +362,25 @@ class IvyLanguageServer(LanguageServer):
             A callable ``(completed, total, current_file) -> None``.
         """
         token = str(uuid.uuid4())
-        state = {"created": False, "disabled": False, "last_report": 0.0}
+        state = {"begun": False, "disabled": False, "last_report": 0.0}
         state_lock = threading.Lock()
         server = self
+
+        # Eagerly create the progress token (outside any callback)
+        try:
+            server.work_done_progress.create(token)
+        except Exception:
+            state["disabled"] = True
+            logger.debug(
+                "Client does not support work-done progress", exc_info=True
+            )
 
         def _callback(completed: int, total: int, current_file):
             with state_lock:
                 if state["disabled"]:
                     return
-                if not state["created"]:
+                if not state["begun"]:
                     try:
-                        server.work_done_progress.create(token)
                         server.work_done_progress.begin(
                             token,
                             lsp.WorkDoneProgressBegin(
@@ -382,13 +390,9 @@ class IvyLanguageServer(LanguageServer):
                                 percentage=0,
                             ),
                         )
-                        state["created"] = True
+                        state["begun"] = True
                     except Exception:
                         state["disabled"] = True
-                        logger.debug(
-                            "Client does not support work-done progress",
-                            exc_info=True,
-                        )
                         return
 
                 if completed >= total:
