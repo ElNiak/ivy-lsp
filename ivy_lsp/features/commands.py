@@ -90,6 +90,26 @@ def _detect_isolate_at_position(
     return _find_containing(symbols, position.line)
 
 
+def _detect_isolate_from_params(
+    server: Any, uri: str, params: Any
+) -> tuple:
+    """Extract explicit isolate from params, or detect from cursor position.
+
+    Returns (isolate, position) where either may be None.
+    Used by ivy/verify and ivy/showModel which share this detection pattern.
+    """
+    position = None
+    raw_pos = getattr(params, "position", None)
+    if raw_pos is not None:
+        position = lsp.Position(line=raw_pos.line, character=raw_pos.character)
+
+    isolate = getattr(params, "isolate", None)
+    if isolate is None and position is not None:
+        isolate = _detect_isolate_at_position(server, uri, position)
+
+    return isolate, position
+
+
 def _collect_all_isolates(
     server: Any,
     filepath: str,
@@ -412,15 +432,7 @@ def register(server: Any) -> None:
         filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
 
-        # Smart isolate detection
-        position = None
-        raw_pos = getattr(params, "position", None)
-        if raw_pos is not None:
-            position = lsp.Position(line=raw_pos.line, character=raw_pos.character)
-
-        isolate = getattr(params, "isolate", None)
-        if isolate is None and position is not None:
-            isolate = _detect_isolate_at_position(server, uri, position)
+        isolate, position = _detect_isolate_from_params(server, uri, params)
 
         # Redirect module files to their enclosing test
         filepath, isolate, redirected = _redirect_to_enclosing_test(
@@ -518,18 +530,7 @@ def register(server: Any) -> None:
         filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
 
-        # Smart isolate detection (same pattern as ivy/verify)
-        position = None
-        raw_pos = getattr(params, "position", None)
-        if raw_pos is not None:
-            position = lsp.Position(line=raw_pos.line, character=raw_pos.character)
-
-        # Accept explicit isolate from extension (e.g., quick pick retry)
-        isolate = getattr(params, "isolate", None)
-
-        # Try cursor-based detection
-        if isolate is None and position is not None:
-            isolate = _detect_isolate_at_position(server, uri, position)
+        isolate, position = _detect_isolate_from_params(server, uri, params)
 
         # If still no isolate, collect from file + transitive includes
         if isolate is None:
