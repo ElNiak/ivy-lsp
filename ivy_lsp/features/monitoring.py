@@ -534,7 +534,8 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/includeGraph")
     async def on_include_graph(params: Any = None) -> Dict[str, Any]:
-        return handle_include_graph(server)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, handle_include_graph, server)
 
     @server.feature("ivy/reindex")
     async def on_reindex(params: Any = None) -> Dict[str, Any]:
@@ -572,4 +573,5 @@ def register(server: Any) -> None:
 
     @server.feature("ivy/batchStatus")
     async def on_batch_status(params: Any = None) -> Dict[str, Any]:
-        return handle_batch_status(server)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, handle_batch_status, server)
