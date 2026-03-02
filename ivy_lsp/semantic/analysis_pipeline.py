@@ -97,6 +97,7 @@ class AnalysisPipeline:
         self._bulk_compile_running: bool = False
         self._bulk_compile_total: int = 0
         self._bulk_compile_completed: int = 0
+        self._bulk_compile_cancelled: bool = False
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -574,6 +575,7 @@ class AnalysisPipeline:
             self._bulk_compile_running = True
             self._bulk_compile_total = len(test_files)
             self._bulk_compile_completed = 0
+            self._bulk_compile_cancelled = False
 
         if not test_files:
             with self._state_lock:
@@ -583,6 +585,7 @@ class AnalysisPipeline:
         completed_count = [0]
         total = len(test_files)
         last_notify_time = [0.0]
+        submitted_count = [0]
 
         def _make_callback(filepath: str):
             def _on_compile(ir):
@@ -592,7 +595,7 @@ class AnalysisPipeline:
                     self._bulk_compile_completed = current
                     # Throttle check under lock to prevent bursts
                     now = time.time()
-                    is_final = current >= total
+                    is_final = current >= submitted_count[0]
                     should_notify = is_final or (now - last_notify_time[0]) >= 1.0
                     if should_notify:
                         last_notify_time[0] = now
@@ -649,6 +652,7 @@ class AnalysisPipeline:
             if cancel_event is not None and cancel_event.is_set():
                 with self._state_lock:
                     self._bulk_compile_running = False
+                    self._bulk_compile_cancelled = True
                 break
 
             try:
@@ -676,6 +680,7 @@ class AnalysisPipeline:
             self._compiler_manager.compile_async(
                 source, test_file, _make_callback(test_file)
             )
+            submitted_count[0] += 1
 
     # -- T3 result management --------------------------------------------------
 
@@ -749,6 +754,7 @@ class AnalysisPipeline:
             bulk_compile_running = self._bulk_compile_running
             bulk_compile_total = self._bulk_compile_total
             bulk_compile_completed = self._bulk_compile_completed
+            bulk_compile_cancelled = self._bulk_compile_cancelled
 
         # Compiler manager stats (cache/process counts)
         mgr_stats = {"cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0}
@@ -778,6 +784,7 @@ class AnalysisPipeline:
             "bulkCompileRunning": bulk_compile_running,
             "bulkCompileTotal": bulk_compile_total,
             "bulkCompileCompleted": bulk_compile_completed,
+            "bulkCompileCancelled": bulk_compile_cancelled,
             **mgr_stats,
         }
 
