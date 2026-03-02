@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 # Without this, a background CompilerSession can clobber state mid-parse.
 _ivy_state_lock = threading.Lock()
 
+_DEFAULT_LOCK_TIMEOUT = float(os.environ.get("IVY_LSP_LOCK_TIMEOUT", "30"))
+
 
 @dataclass
 class ParseResult:
@@ -32,14 +34,21 @@ class ParserSession:
 
     Acquires ``_ivy_state_lock`` on entry so that only one thread can
     touch the shared Ivy globals at a time.
+
+    Args:
+        timeout: Seconds to wait for the lock.  ``None`` uses the default
+            from ``IVY_LSP_LOCK_TIMEOUT`` (30 s).
     """
 
+    def __init__(self, timeout: Optional[float] = None) -> None:
+        self._timeout = timeout if timeout is not None else _DEFAULT_LOCK_TIMEOUT
+
     def __enter__(self):
-        self._lock_acquired = _ivy_state_lock.acquire(timeout=15)
+        self._lock_acquired = _ivy_state_lock.acquire(timeout=self._timeout)
         if not self._lock_acquired:
             raise TimeoutError(
-                "Failed to acquire Ivy parser state lock within 15s; "
-                "another parse may be stuck"
+                f"Failed to acquire Ivy parser state lock within "
+                f"{self._timeout}s; another parse may be stuck"
             )
 
         import ivy.ivy_ast as ia
@@ -127,15 +136,30 @@ class IvyParserWrapper:
     ) -> None:
         self._resolve_callback = resolve_callback
 
-    def parse(self, source: str, filename: str = "<string>") -> ParseResult:
+    def parse(
+        self,
+        source: str,
+        filename: str = "<string>",
+        timeout: Optional[float] = None,
+    ) -> ParseResult:
         """Parse Ivy source with full global state isolation.
 
-        Never raises — captures all errors into ParseResult.
+        Args:
+            source: Ivy source code to parse.
+            filename: Logical filename for error messages.
+            timeout: Seconds to wait for the parser lock.  ``None`` uses
+                the default.  Use a short value (e.g. 0.5) for UI features
+                that can fall back to cached data.
+
+        Raises:
+            TimeoutError: If the lock cannot be acquired within *timeout*.
+
+        Never raises for parse errors — captures those into ParseResult.
         """
         import ivy.ivy_parser as ip
         import ivy.ivy_utils as iu
 
-        with ParserSession():
+        with ParserSession(timeout=timeout):
             iu.filename = filename
 
             def _lsp_importer(name: str):

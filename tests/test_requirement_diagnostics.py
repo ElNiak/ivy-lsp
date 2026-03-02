@@ -102,9 +102,14 @@ class TestIncludeChainPropagation:
         graph.add_requirement(req)
 
         include_graph = MagicMock()
-        include_graph.get_transitive_includes.return_value = {other_file}
+        include_graph.get_transitive_includes.return_value = set()
 
-        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        resolver = MagicMock()
+        resolver.resolve.return_value = other_file
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
         source = "#lang ivy1.7\ninclude types\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
@@ -120,12 +125,18 @@ class TestIncludeChainPropagation:
     def test_include_with_no_inherited_requirements(self):
         """Include bringing zero new requirements emits no diagnostic."""
         filepath = _abs("main.ivy")
+        other_file = _abs("types.ivy")
         graph = RequirementGraph()
 
         include_graph = MagicMock()
         include_graph.get_transitive_includes.return_value = set()
 
-        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        resolver = MagicMock()
+        resolver.resolve.return_value = other_file
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
         source = "#lang ivy1.7\ninclude types\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
@@ -151,9 +162,14 @@ class TestIncludeChainPropagation:
         graph.add_requirement(req)
 
         include_graph = MagicMock()
-        include_graph.get_transitive_includes.return_value = {other_file}
+        include_graph.get_transitive_includes.return_value = set()
 
-        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        resolver = MagicMock()
+        resolver.resolve.return_value = other_file
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
         source = "#lang ivy1.7\ninclude helper\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
@@ -188,6 +204,136 @@ class TestIncludeChainPropagation:
 
         include_diags = [d for d in diags if "brings" in d.message.lower()]
         assert len(include_diags) == 0
+
+    def test_include_multiple_each_get_own_count(self):
+        """Each include gets its own per-include count, not the file total."""
+        filepath = _abs("main.ivy")
+        types_file = _abs("types.ivy")
+        utils_file = _abs("utils.ivy")
+        graph = RequirementGraph()
+
+        # 3 reqs in types.ivy
+        for i in range(3):
+            graph.add_requirement(
+                RequirementNode(
+                    id=f"{types_file}:{i}",
+                    kind="require",
+                    formula_text=f"r{i}",
+                    line=i,
+                    col=0,
+                    file=types_file,
+                    monitor_action="foo.step",
+                    mixin_kind="before",
+                )
+            )
+        # 1 req in utils.ivy
+        graph.add_requirement(
+            RequirementNode(
+                id=f"{utils_file}:0",
+                kind="ensure",
+                formula_text="s0",
+                line=0,
+                col=0,
+                file=utils_file,
+                monitor_action="bar.check",
+                mixin_kind="after",
+            )
+        )
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = set()
+
+        resolver = MagicMock()
+        resolver.resolve.side_effect = lambda name, _from: (
+            types_file
+            if name == "types"
+            else utils_file
+            if name == "utils"
+            else None
+        )
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
+        source = "include types\ninclude utils\n"
+        diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
+
+        include_diags = [d for d in diags if "brings" in d.message.lower()]
+        assert len(include_diags) == 2
+        assert "3" in include_diags[0].message
+        assert "1" in include_diags[1].message
+
+    def test_include_shared_dep_deduplicated_in_diagnostic(self):
+        """Shared transitive dep is claimed by the first include only."""
+        filepath = _abs("main.ivy")
+        a_file = _abs("a.ivy")
+        b_file = _abs("b.ivy")
+        shared_file = _abs("shared.ivy")
+        graph = RequirementGraph()
+
+        # 1 req in a.ivy
+        graph.add_requirement(
+            RequirementNode(
+                id=f"{a_file}:0",
+                kind="require",
+                formula_text="ra",
+                line=0,
+                col=0,
+                file=a_file,
+                monitor_action="foo.step",
+                mixin_kind="before",
+            )
+        )
+        # 1 req in shared.ivy
+        graph.add_requirement(
+            RequirementNode(
+                id=f"{shared_file}:0",
+                kind="require",
+                formula_text="rs",
+                line=0,
+                col=0,
+                file=shared_file,
+                monitor_action="foo.step",
+                mixin_kind="before",
+            )
+        )
+        # 1 req in b.ivy
+        graph.add_requirement(
+            RequirementNode(
+                id=f"{b_file}:0",
+                kind="ensure",
+                formula_text="rb",
+                line=0,
+                col=0,
+                file=b_file,
+                monitor_action="bar.check",
+                mixin_kind="after",
+            )
+        )
+
+        include_graph = MagicMock()
+        # Both a and b transitively include shared
+        include_graph.get_transitive_includes.side_effect = lambda path: (
+            {shared_file} if path in (a_file, b_file) else set()
+        )
+
+        resolver = MagicMock()
+        resolver.resolve.side_effect = lambda name, _from: (
+            a_file if name == "a" else b_file if name == "b" else None
+        )
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
+        source = "include a\ninclude b\n"
+        diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
+
+        include_diags = [d for d in diags if "brings" in d.message.lower()]
+        assert len(include_diags) == 2
+        # First include claims a.ivy + shared.ivy = 2 reqs
+        assert "2" in include_diags[0].message
+        # Second include only gets b.ivy = 1 req (shared already claimed)
+        assert "1" in include_diags[1].message
 
 
 class TestUnmonitoredAction:
@@ -478,7 +624,7 @@ class TestComputeDiagnosticsIntegration:
         graph.add_requirement(req)
 
         include_graph = MagicMock()
-        include_graph.get_transitive_includes.return_value = {other_file}
+        include_graph.get_transitive_includes.return_value = set()
 
         resolver = MagicMock()
         resolver.resolve.return_value = other_file  # include resolves

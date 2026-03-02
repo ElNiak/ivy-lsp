@@ -296,6 +296,17 @@ class TestPropertyLenses:
         filepath = _abs("test.ivy")
         graph = RequirementGraph()
 
+        # State variable that both property and requirement read
+        sv = StateVarNode(
+            id="r",
+            name="r",
+            qualified_name="r",
+            file=filepath,
+            line=0,
+            is_relation=True,
+        )
+        graph.add_state_var(sv)
+
         prop = PropertyNode(
             id=f"{filepath}:0",
             kind="axiom",
@@ -354,6 +365,17 @@ class TestPropertyLenses:
         filepath = _abs("test.ivy")
         graph = RequirementGraph()
 
+        # State variable shared by property and requirement
+        sv = StateVarNode(
+            id="connected",
+            name="connected",
+            qualified_name="connected",
+            file=filepath,
+            line=0,
+            is_relation=True,
+        )
+        graph.add_state_var(sv)
+
         prop = PropertyNode(
             id=f"{filepath}:0",
             kind="invariant",
@@ -408,9 +430,14 @@ class TestIncludeLenses:
         graph.add_requirement(req)
 
         include_graph = MagicMock()
-        include_graph.get_transitive_includes.return_value = {other_file}
+        include_graph.get_transitive_includes.return_value = set()
 
-        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        resolver = MagicMock()
+        resolver.resolve.return_value = other_file
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
         source = "include quic_types\n"
         lenses = compute_code_lenses(indexer, filepath, source)
 
@@ -422,12 +449,18 @@ class TestIncludeLenses:
     def test_include_no_inherited_requirements_no_lens(self):
         """When include brings 0 new requirements, no lens is shown."""
         filepath = _abs("main.ivy")
+        other_file = _abs("types.ivy")
         graph = RequirementGraph()
 
         include_graph = MagicMock()
         include_graph.get_transitive_includes.return_value = set()
 
-        indexer = _make_indexer(graph=graph, include_graph=include_graph)
+        resolver = MagicMock()
+        resolver.resolve.return_value = other_file  # resolves but has 0 reqs
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
         source = "include quic_types\n"
         lenses = compute_code_lenses(indexer, filepath, source)
         assert len(lenses) == 0
@@ -457,34 +490,235 @@ class TestIncludeLenses:
         assert len(include_lenses) == 0
 
     def test_multiple_includes_each_get_lens(self):
-        """Multiple include lines each get a lens when inherited reqs exist."""
+        """Multiple includes show per-file counts, not the same total."""
         filepath = _abs("main.ivy")
-        other_file = _abs("types.ivy")
+        types_file = _abs("types.ivy")
+        utils_file = _abs("utils.ivy")
         graph = RequirementGraph()
 
+        # 3 requirements in types.ivy
         for i in range(3):
             req = RequirementNode(
-                id=f"{other_file}:{i}",
+                id=f"{types_file}:{i}",
                 kind="require",
                 formula_text=f"cond_{i}",
                 line=i,
                 col=0,
-                file=other_file,
+                file=types_file,
                 monitor_action="foo.step",
                 mixin_kind="before",
             )
             graph.add_requirement(req)
 
+        # 1 requirement in utils.ivy
+        req_u = RequirementNode(
+            id=f"{utils_file}:0",
+            kind="require",
+            formula_text="util_cond",
+            line=0,
+            col=0,
+            file=utils_file,
+            monitor_action="bar.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req_u)
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = set()
+
+        resolver = MagicMock()
+        resolver.resolve.side_effect = lambda name, _: {
+            "types": types_file,
+            "utils": utils_file,
+        }.get(name)
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
+        source = "include types\ninclude utils\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        include_lenses = [l for l in lenses if "brings" in l.command.title.lower()]
+        assert len(include_lenses) == 2
+        # First include (types) shows 3, second (utils) shows 1
+        assert "3" in include_lenses[0].command.title
+        assert "1" in include_lenses[1].command.title
+
+    def test_include_unresolvable_no_lens(self):
+        """When the resolver cannot find a file, no lens is generated."""
+        filepath = _abs("main.ivy")
+        graph = RequirementGraph()
+
+        include_graph = MagicMock()
+        resolver = MagicMock()
+        resolver.resolve.return_value = None  # unresolvable
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
+        source = "include missing_module\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        include_lenses = [
+            l for l in lenses if "brings" in (l.command.title or "").lower()
+        ]
+        assert len(include_lenses) == 0
+
+    def test_include_no_resolver_no_lens(self):
+        """When resolver is None, include lenses degrade gracefully."""
+        filepath = _abs("main.ivy")
+        other_file = _abs("types.ivy")
+        graph = RequirementGraph()
+
+        req = RequirementNode(
+            id=f"{other_file}:0",
+            kind="require",
+            formula_text="x > 0",
+            line=0,
+            col=0,
+            file=other_file,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+
         include_graph = MagicMock()
         include_graph.get_transitive_includes.return_value = {other_file}
 
-        indexer = _make_indexer(graph=graph, include_graph=include_graph)
-        source = "include types\ninclude other\n"
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=None
+        )
+        source = "include types\n"
         lenses = compute_code_lenses(indexer, filepath, source)
 
-        # Both include lines should get a lens (same inherited count)
+        include_lenses = [
+            l for l in lenses if "brings" in (l.command.title or "").lower()
+        ]
+        assert len(include_lenses) == 0
+
+    def test_include_transitive_requirements_counted(self):
+        """Transitive deps of an include are counted in its lens."""
+        filepath = _abs("main.ivy")
+        types_file = _abs("types.ivy")
+        base_file = _abs("base.ivy")
+        graph = RequirementGraph()
+
+        # 1 requirement directly in types.ivy
+        req_t = RequirementNode(
+            id=f"{types_file}:0",
+            kind="require",
+            formula_text="t > 0",
+            line=0,
+            col=0,
+            file=types_file,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req_t)
+
+        # 2 requirements in base.ivy (transitively included by types.ivy)
+        for i in range(2):
+            req_b = RequirementNode(
+                id=f"{base_file}:{i}",
+                kind="require",
+                formula_text=f"base_{i}",
+                line=i,
+                col=0,
+                file=base_file,
+                monitor_action="bar.step",
+                mixin_kind="before",
+            )
+            graph.add_requirement(req_b)
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = {base_file}
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = types_file
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
+        source = "include types\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
+        include_lenses = [l for l in lenses if "brings" in l.command.title.lower()]
+        assert len(include_lenses) == 1
+        assert "3" in include_lenses[0].command.title  # 1 own + 2 transitive
+
+    def test_include_shared_dependency_deduplicated(self):
+        """Shared transitive deps are only counted for the first include."""
+        filepath = _abs("main.ivy")
+        types_file = _abs("types.ivy")
+        utils_file = _abs("utils.ivy")
+        base_file = _abs("base.ivy")
+        graph = RequirementGraph()
+
+        # types.ivy: 1 own requirement
+        req_t = RequirementNode(
+            id=f"{types_file}:0",
+            kind="require",
+            formula_text="t > 0",
+            line=0,
+            col=0,
+            file=types_file,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req_t)
+
+        # utils.ivy: 1 own requirement
+        req_u = RequirementNode(
+            id=f"{utils_file}:0",
+            kind="require",
+            formula_text="u > 0",
+            line=0,
+            col=0,
+            file=utils_file,
+            monitor_action="bar.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req_u)
+
+        # base.ivy: 2 requirements (shared transitive dep)
+        for i in range(2):
+            req_b = RequirementNode(
+                id=f"{base_file}:{i}",
+                kind="require",
+                formula_text=f"base_{i}",
+                line=i,
+                col=0,
+                file=base_file,
+                monitor_action="baz.step",
+                mixin_kind="before",
+            )
+            graph.add_requirement(req_b)
+
+        include_graph = MagicMock()
+        # Both types and utils transitively include base
+        include_graph.get_transitive_includes.side_effect = lambda f: {
+            types_file: {base_file},
+            utils_file: {base_file},
+        }.get(f, set())
+
+        resolver = MagicMock()
+        resolver.resolve.side_effect = lambda name, _: {
+            "types": types_file,
+            "utils": utils_file,
+        }.get(name)
+
+        indexer = _make_indexer(
+            graph=graph, include_graph=include_graph, resolver=resolver
+        )
+        source = "include types\ninclude utils\n"
+        lenses = compute_code_lenses(indexer, filepath, source)
+
         include_lenses = [l for l in lenses if "brings" in l.command.title.lower()]
         assert len(include_lenses) == 2
+        # types claims: own (1) + base (2) = 3
+        assert "3" in include_lenses[0].command.title
+        # utils claims: own (1) only, base already claimed = 1
+        assert "1" in include_lenses[1].command.title
 
 
 class TestLensRange:
@@ -600,3 +834,73 @@ class TestClickableCodeLenses:
         assert sv_lens.command.command == "ivy.showActionRequirements"
         assert sv_lens.command.arguments is not None
         assert "connected" in sv_lens.command.arguments
+
+
+class TestRegisterHandler:
+    """Tests for the async handler registered by code_lens.register()."""
+
+    def _make_server_and_handler(self):
+        from ivy_lsp.features.code_lens import register
+
+        server = MagicMock()
+        registered = {}
+
+        def fake_feature(method):
+            def decorator(fn):
+                registered[method] = fn
+                return fn
+            return decorator
+
+        server.feature = fake_feature
+        register(server)
+        return server, registered.get(lsp.TEXT_DOCUMENT_CODE_LENS)
+
+    @pytest.mark.asyncio
+    async def test_code_lens_disabled_returns_empty(self):
+        server, handler = self._make_server_and_handler()
+        assert handler is not None
+        server._code_lens_enabled = False
+        params = MagicMock()
+        result = await handler(params)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_no_indexer_returns_empty(self):
+        server, handler = self._make_server_and_handler()
+        server._code_lens_enabled = True
+        server._indexer = None
+        params = MagicMock()
+        params.text_document.uri = "file:///test.ivy"
+        doc = MagicMock()
+        doc.source = "before foo {\n}\n"
+        server.workspace.get_text_document.return_value = doc
+        result = await handler(params)
+        assert result == []
+
+
+class TestComputeCodeLensesErrorPaths:
+    """Verify error handling in compute_code_lenses.
+
+    Note: compute_code_lenses does NOT catch exceptions itself --
+    the handler in register() catches them. These tests verify
+    that errors propagate correctly for the handler to catch.
+    """
+
+    def test_attribute_error_propagates(self):
+        """AttributeError from graph propagates (handler will catch it)."""
+        indexer = MagicMock()
+        indexer._requirement_graph = MagicMock()
+        indexer._requirement_graph.get_requirements_for_action.side_effect = (
+            AttributeError("bad attr")
+        )
+        indexer._include_graph = None
+        indexer._resolver = None
+
+        with pytest.raises(AttributeError, match="bad attr"):
+            compute_code_lenses(indexer, "test.ivy", "before foo {\n}\n")
+
+    def test_none_graph_returns_empty(self):
+        """A None graph (no _requirement_graph attr) yields empty list."""
+        indexer = MagicMock(spec=[])
+        result = compute_code_lenses(indexer, "test.ivy", "before foo {\n}\n")
+        assert result == []

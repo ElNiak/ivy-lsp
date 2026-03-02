@@ -199,3 +199,81 @@ class TestFileCacheStatUnderLock:
             f"getmtime at index {mtime_idx} must come after lock_acquire "
             f"at {lock_idx}; order was: {call_order}"
         )
+
+
+class TestCachedFileExtended:
+    """CachedFile should store requirements, writes, and export_import_info."""
+
+    def test_cache_stores_requirements(self):
+        """CachedFile should store requirements alongside symbols."""
+        from ivy_lsp.indexer.file_cache import CachedFile
+        from ivy_lsp.analysis.requirement_graph import RequirementNode
+
+        req = RequirementNode(
+            id="test:5", kind="require", formula_text="x>0",
+            line=5, col=0, file="test.ivy",
+            monitor_action="act", mixin_kind="before",
+        )
+        entry = CachedFile(
+            filepath="test.ivy",
+            mtime=1234.0,
+            parse_result=None,
+            symbols=[],
+            includes=[],
+            requirements=[req],
+            writes=[("act", "x", 5)],
+            export_import_info={"exports": [], "imports": []},
+        )
+        assert len(entry.requirements) == 1
+        assert entry.requirements[0].kind == "require"
+        assert len(entry.writes) == 1
+        assert entry.export_import_info is not None
+
+    def test_cache_defaults_empty(self):
+        """New fields default to empty when not provided."""
+        from ivy_lsp.indexer.file_cache import CachedFile
+
+        entry = CachedFile(
+            filepath="test.ivy",
+            mtime=1234.0,
+            parse_result=None,
+            symbols=[],
+        )
+        assert entry.requirements == []
+        assert entry.writes == []
+        assert entry.export_import_info is None
+
+    def test_put_stores_requirements(self, tmp_path):
+        """FileCache.put should accept and store requirement data."""
+        from ivy_lsp.indexer.file_cache import FileCache
+
+        f = tmp_path / "a.ivy"
+        f.write_text("#lang ivy1.7\ntype t\n")
+        cache = FileCache()
+        reqs = [{"kind": "require", "formula": "x>0"}]
+        writes = [("act", "x", 5)]
+        info = {"exports": ["foo"], "imports": ["bar"]}
+        cache.put(
+            str(f), result=None, symbols=[],
+            requirements=reqs, writes=writes,
+            export_import_info=info,
+        )
+        entry = cache.get(str(f))
+        assert entry is not None
+        assert entry.requirements == reqs
+        assert entry.writes == writes
+        assert entry.export_import_info == info
+
+    def test_put_defaults_requirements_empty(self, tmp_path):
+        """FileCache.put without new params still works, defaults empty."""
+        from ivy_lsp.indexer.file_cache import FileCache
+
+        f = tmp_path / "a.ivy"
+        f.write_text("#lang ivy1.7\n")
+        cache = FileCache()
+        cache.put(str(f), result=None, symbols=[])
+        entry = cache.get(str(f))
+        assert entry is not None
+        assert entry.requirements == []
+        assert entry.writes == []
+        assert entry.export_import_info is None

@@ -87,10 +87,11 @@ def compute_document_symbols(
     """Parse source and return LSP DocumentSymbol list.
 
     Strategy:
-    1. If parser available: parse source, convert AST to symbols
+    1. If parser available: parse source (short 0.5s timeout), convert AST
     2. If parse fails: fallback scanner
-    3. If no parser but indexer available: use cached indexed symbols
-    4. If neither: return empty list
+    3. If lock busy (TimeoutError): use cached indexed symbols, then fallback
+    4. If no parser but indexer available: use cached indexed symbols
+    5. If neither: return empty list
     """
     symbols: List[IvySymbol] = []
 
@@ -98,11 +99,20 @@ def compute_document_symbols(
         from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        result = parser.parse(source, filepath)
-        if result.success and result.ast is not None:
-            symbols = ast_to_symbols(result.ast, filepath, source)
-        else:
-            symbols, _error_info = fallback_scan(source, filepath)
+        try:
+            result = parser.parse(source, filepath, timeout=0.5)
+            if result.success and result.ast is not None:
+                symbols = ast_to_symbols(result.ast, filepath, source)
+            else:
+                symbols, _error_info = fallback_scan(source, filepath)
+        except TimeoutError:
+            logger.debug(
+                "Parser lock busy, using cached symbols for %s", filepath
+            )
+            if indexer is not None:
+                symbols = indexer.get_symbols(filepath) or []
+            if not symbols:
+                symbols, _error_info = fallback_scan(source, filepath)
     elif indexer is not None:
         symbols = indexer.get_symbols(filepath) or []
 

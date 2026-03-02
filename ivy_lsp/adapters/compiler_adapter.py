@@ -34,12 +34,19 @@ class CompilerSession:
     Saves and restores ``ivy_module``, ``ivy_logic``, and ``ivy_compiler``
     globals in addition to the parser globals already handled by
     :class:`~ivy_lsp.parsing.parser_session.ParserSession`.
+
+    Args:
+        timeout: Seconds to wait for the parser lock.  Passed through to
+            :class:`ParserSession`.
     """
+
+    def __init__(self, timeout: Optional[float] = None) -> None:
+        self._timeout = timeout
 
     def __enter__(self) -> CompilerSession:
         from ivy_lsp.parsing.parser_session import ParserSession
 
-        self._parser_session = ParserSession()
+        self._parser_session = ParserSession(timeout=self._timeout)
         self._parser_session.__enter__()
 
         try:

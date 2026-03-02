@@ -149,6 +149,57 @@ class TestSemanticModelUpdateFileEdgeCleanup:
         assert outgoing[0] == (SemanticEdgeType.WRITES, "ext")
 
 
+class TestIncrementalAdjacency:
+    """Adjacency indices must stay correct after incremental updates."""
+
+    def test_remove_file_preserves_unrelated_edges(self):
+        model = SemanticModel()
+        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
+        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1)
+        s3 = SymbolNode(id="s3", name="c", qualified_name="c", kind="action", file="b.ivy", line=2)
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_node(s3)
+        model.add_edge("s1", SemanticEdgeType.READS, "s2")
+        model.add_edge("s2", SemanticEdgeType.WRITES, "s3")
+
+        model.remove_file("a.ivy")
+
+        assert model.edge_count() == 1
+        assert len(model.get_outgoing("s2")) == 1
+        assert len(model.get_incoming("s2")) == 0
+
+    def test_update_file_replaces_edges_correctly(self):
+        model = SemanticModel()
+        n1 = SymbolNode(id="n1", name="x", qualified_name="x", kind="action", file="f.ivy", line=1, tier="tier1")
+        n2 = SymbolNode(id="n2", name="y", qualified_name="y", kind="action", file="f.ivy", line=2, tier="tier1")
+        model.update_file("f.ivy", [n1, n2], [("n1", SemanticEdgeType.READS, "n2")], "tier1")
+
+        assert model.edge_count() == 1
+        assert len(model.get_outgoing("n1")) == 1
+
+        n1b = SymbolNode(id="n1", name="x", qualified_name="x", kind="action", file="f.ivy", line=1, tier="tier2")
+        n3 = SymbolNode(id="n3", name="z", qualified_name="z", kind="action", file="f.ivy", line=3, tier="tier2")
+        model.update_file("f.ivy", [n1b, n3], [("n1", SemanticEdgeType.WRITES, "n3")], "tier2")
+
+        assert len(model.get_outgoing("n1", SemanticEdgeType.READS)) == 0
+        assert len(model.get_outgoing("n1", SemanticEdgeType.WRITES)) == 1
+
+    def test_cross_file_edges_preserved_on_single_file_update(self):
+        model = SemanticModel()
+        a = SymbolNode(id="a", name="a", qualified_name="a", kind="action", file="a.ivy", line=1, tier="tier1")
+        b = SymbolNode(id="b", name="b", qualified_name="b", kind="action", file="b.ivy", line=1, tier="tier1")
+        model.update_file("a.ivy", [a], [], "tier1")
+        model.update_file("b.ivy", [b], [], "tier1")
+        model.add_edge("a", SemanticEdgeType.HAS_PARAM, "b")
+
+        a2 = SymbolNode(id="a", name="a", qualified_name="a", kind="action", file="a.ivy", line=1, tier="tier2")
+        model.update_file("a.ivy", [a2], [("a", SemanticEdgeType.READS, "b")], "tier2")
+
+        assert len(model.get_outgoing("a", SemanticEdgeType.HAS_PARAM)) == 0
+        assert len(model.get_outgoing("a", SemanticEdgeType.READS)) == 1
+
+
 class TestSemanticModelThreadSafety:
     def test_concurrent_reads_during_update(self):
         model = SemanticModel()

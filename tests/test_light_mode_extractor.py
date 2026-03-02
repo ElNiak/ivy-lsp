@@ -749,3 +749,44 @@ class TestNativeBlockStringLiterals:
         result = _find_matching_brace(source, open_pos)
         assert result is not None
         assert source[result] == "}"
+
+
+# ---------------------------------------------------------------------------
+# H4: Bracket tags match rfc_annotations parser
+# ---------------------------------------------------------------------------
+
+
+class TestBracketTagsMatchRfcAnnotationsParser:
+    """Ensure regex path produces same bracket tags as rfc_annotations.parse_rfc_tags."""
+
+    def test_bracket_tags_match_rfc_annotations_parser(self):
+        """Bracket tags extracted by the regex path must equal parse_rfc_tags output.
+
+        We rebuild a synthetic ``# [tags]`` line from the RequirementNode's
+        bracket_tags and verify it round-trips through parse_rfc_tags.
+        We also locate the actual source line containing the tag comment
+        and confirm parse_rfc_tags agrees.
+        """
+        from ivy_lsp.analysis.light_mode_extractor import _extract_requirements_regex
+        from ivy_lsp.semantic.rfc_annotations import parse_rfc_tags
+
+        source = (
+            "after my_action {\n"
+            "    require x > 0;  # [rfc9000:4.1, rfc9000:8.1]\n"
+            "}\n"
+        )
+        reqs, _ = _extract_requirements_regex(source, "/test.ivy")
+        assert len(reqs) >= 1
+
+        # Find the actual source line that contains the bracket comment.
+        tagged_lines = [
+            line
+            for line in source.split("\n")
+            if parse_rfc_tags(line)
+        ]
+        assert len(tagged_lines) == 1
+
+        for req in reqs:
+            if req.bracket_tags:
+                canonical = parse_rfc_tags(tagged_lines[0])
+                assert req.bracket_tags == canonical

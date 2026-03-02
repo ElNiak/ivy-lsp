@@ -1,9 +1,12 @@
 """Code lens provider for Ivy requirement and RFC traceability analysis.
 
-Displays inline annotations above monitor blocks, state variable declarations,
-property/axiom/invariant declarations, include directives, and RFC bracket tags
-showing requirement counts, state variable reads, cross-file propagation,
-and workspace-level RFC coverage summaries.
+Provides six lens types:
+1. Monitor lenses -- requirement counts above before/after/around blocks
+2. State variable lenses -- reader counts above relation/function/individual
+3. Property lenses -- shared-state analysis above invariant/axiom/conjecture
+4. Include lenses -- uniquely-scoped requirement counts above include directives
+5. RFC tag lenses -- bracket-tag annotations on annotated source lines
+6. Coverage summary -- workspace-wide RFC coverage at line 0
 """
 
 from __future__ import annotations
@@ -17,6 +20,8 @@ from typing import Any, List
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.parsing.fallback_scanner import fallback_scan
+from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
@@ -37,6 +42,28 @@ _INDIVIDUAL_LINE_RE = re.compile(
 _PROPERTY_LINE_RE = re.compile(
     r"^\s*(invariant|property|axiom|conjecture)\s+", re.MULTILINE
 )
+
+
+def _make_lens(
+    lines: List[str],
+    line: int,
+    title: str,
+    command: str,
+    arguments: List[Any] | None = None,
+) -> lsp.CodeLens:
+    """Build a CodeLens at the given source line."""
+    end_char = len(lines[line]) if line < len(lines) else 0
+    return lsp.CodeLens(
+        range=lsp.Range(
+            start=lsp.Position(line=line, character=0),
+            end=lsp.Position(line=line, character=end_char),
+        ),
+        command=lsp.Command(
+            title=title,
+            command=command,
+            arguments=arguments or [],
+        ),
+    )
 
 
 def compute_code_lenses(
@@ -72,7 +99,7 @@ def compute_code_lenses(
     # 5. Semantic model lenses (RFC tags, coverage summary)
     if semantic_model is not None:
         lenses.extend(_rfc_tag_lenses(lines, abs_path, semantic_model))
-        lenses.extend(_coverage_summary_lens(abs_path, semantic_model))
+        lenses.extend(_coverage_summary_lens(semantic_model))
 
     return lenses
 
@@ -82,11 +109,19 @@ def _monitor_lenses(
     filepath: str,
     graph: Any,
 ) -> List[lsp.CodeLens]:
-    """Code lenses above before/after/around lines."""
+    """Code lenses above before/after/around monitor lines.
+
+    Three retrieval paths depending on graph capabilities:
+    1. NCT-scoped: per-requirement NCT tags (GUARANTEE/ASSUMPTION/TESTER_ONLY)
+    2. Scoped (non-NCT): kind-based counts for exported actions only
+    3. Unscoped: graph-wide requirement counts
+
+    Each lens also reports the number of state variables read.
+    """
     lenses = []
     source = "\n".join(lines)
 
-    # Determine active scope once (immutable during iteration)
+    # Determine active scope once
     active_scope = None
     if isinstance(graph, ScopedRequirementModel):
         active_scope = graph.get_active_scope()
@@ -103,7 +138,7 @@ def _monitor_lenses(
             )
 
         if nct_entries:
-            # NCT path: covers both exported (GUARANTEE) and imported (ASSUMPTION)
+            # NCT path: per-requirement classification (GUARANTEE/ASSUMPTION/TESTER_ONLY)
             counts = {e["kind"]: e["count"] for e in nct_entries}
             reqs = [
                 r
@@ -111,7 +146,7 @@ def _monitor_lenses(
                 if r.monitor_action == action_name
             ]
         elif active_scope is not None:
-            # Scoped, no NCT entries (internal action) — try regular scoped counts
+            # Scoped but no NCT entries -- fall back to regular scoped counts
             counts = graph.get_scoped_counts(active_scope.test_file, action_name)
             if not counts:
                 continue
@@ -130,14 +165,11 @@ def _monitor_lenses(
         if not counts:
             continue
 
-        # Count state vars read
+        # Count state vars read (uses lock-protected public API)
         var_ids: set = set()
         for req in reqs:
-            for etype, target in graph._outgoing.get(req.id, []):
-                from ivy_lsp.analysis.requirement_graph import EdgeType
-
-                if etype == EdgeType.READS:
-                    var_ids.add(target)
+            for sv in graph.get_state_vars_read_by(req.id):
+                var_ids.add(sv.id)
 
         # --- Title building ---
         parts = []
@@ -155,19 +187,7 @@ def _monitor_lenses(
 
         title = " | ".join(parts) if parts else f"{len(reqs)} requirements"
 
-        lenses.append(
-            lsp.CodeLens(
-                range=lsp.Range(
-                    start=lsp.Position(line=line, character=0),
-                    end=lsp.Position(line=line, character=len(lines[line]) if line < len(lines) else 0),
-                ),
-                command=lsp.Command(
-                    title=title,
-                    command="ivy.showActionRequirements",
-                    arguments=[action_name],
-                ),
-            )
-        )
+        lenses.append(_make_lens(lines, line, title, "ivy.showActionRequirements", [action_name]))
 
     return lenses
 
@@ -193,22 +213,7 @@ def _state_var_lenses(
             files: set = {r.file for r in readers}
             title = f"read by {len(readers)} requirements across {len(files)} files"
 
-            lenses.append(
-                lsp.CodeLens(
-                    range=lsp.Range(
-                        start=lsp.Position(line=line, character=0),
-                        end=lsp.Position(
-                            line=line,
-                            character=len(lines[line]) if line < len(lines) else 0,
-                        ),
-                    ),
-                    command=lsp.Command(
-                        title=title,
-                        command="ivy.showActionRequirements",
-                        arguments=[var_name],
-                    ),
-                )
-            )
+            lenses.append(_make_lens(lines, line, title, "ivy.showActionRequirements", [var_name]))
 
     return lenses
 
@@ -226,6 +231,8 @@ def _property_lenses(
         line = source[: m.start()].count("\n")
 
         # Find property node at this line
+        # NOTE: graph.properties is accessed without lock.
+        # Property lens tolerates stale data; worst case is a missing lens.
         prop_node = None
         for p in graph.properties.values():
             if p.file == filepath and p.line == line:
@@ -235,14 +242,8 @@ def _property_lenses(
         if prop_node is None:
             continue
 
-        # Find shared state vars with requirements
-        from ivy_lsp.analysis.requirement_graph import EdgeType
-
-        var_ids = {
-            target
-            for etype, target in graph._outgoing.get(prop_node.id, [])
-            if etype == EdgeType.READS
-        }
+        # Find shared state vars with requirements (lock-protected API)
+        var_ids = {sv.id for sv in graph.get_state_vars_read_by(prop_node.id)}
 
         shared_reqs: set = set()
         for var_id in var_ids:
@@ -266,22 +267,7 @@ def _property_lenses(
 
         title = " | ".join(parts)
 
-        lenses.append(
-            lsp.CodeLens(
-                range=lsp.Range(
-                    start=lsp.Position(line=line, character=0),
-                    end=lsp.Position(
-                        line=line,
-                        character=len(lines[line]) if line < len(lines) else 0,
-                    ),
-                ),
-                command=lsp.Command(
-                    title=title,
-                    command="ivy.showPropertyDetails",
-                    arguments=[prop_node.id],
-                ),
-            )
-        )
+        lenses.append(_make_lens(lines, line, title, "ivy.showPropertyDetails", [prop_node.id]))
 
     return lenses
 
@@ -299,10 +285,6 @@ def _include_lenses(
     scope.  When two includes share a transitive dependency, the first one
     (in source order) claims the shared files' requirements.
     """
-    from lsprotocol.types import SymbolKind
-
-    from ivy_lsp.parsing.fallback_scanner import fallback_scan
-
     lenses = []
 
     if resolver is None:
@@ -311,7 +293,7 @@ def _include_lenses(
     source = "\n".join(lines)
     symbols, _ = fallback_scan(source, filepath)
     include_symbols = [
-        s for s in symbols if s.kind == SymbolKind.File and s.detail == "include"
+        s for s in symbols if s.kind == lsp.SymbolKind.File and s.detail == "include"
     ]
 
     seen_files: set = set()
@@ -333,6 +315,8 @@ def _include_lenses(
         new_files = transitive_files - seen_files
         seen_files |= new_files
 
+        # NOTE: graph.requirements dict access is not lock-protected here.
+        # Acceptable because include lenses tolerate stale data.
         inherited_count = sum(
             1 for r in graph.requirements.values() if r.file in new_files
         )
@@ -342,22 +326,7 @@ def _include_lenses(
 
         title = f"brings {inherited_count} requirements into scope"
 
-        lenses.append(
-            lsp.CodeLens(
-                range=lsp.Range(
-                    start=lsp.Position(line=line, character=0),
-                    end=lsp.Position(
-                        line=line,
-                        character=len(lines[line]) if line < len(lines) else 0,
-                    ),
-                ),
-                command=lsp.Command(
-                    title=title,
-                    command="ivy.navigateToInclude",
-                    arguments=[include_name],
-                ),
-            )
-        )
+        lenses.append(_make_lens(lines, line, title, "ivy.navigateToInclude", [include_name]))
 
     return lenses
 
@@ -367,16 +336,14 @@ def _rfc_tag_lenses(
     filepath: str,
     semantic_model: Any,
 ) -> List[lsp.CodeLens]:
-    """Code lenses showing RFC bracket tags on monitor lines."""
-    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-
+    """Code lenses showing RFC bracket tags on annotated source lines."""
     lenses = []
-    abs_path = os.path.abspath(filepath)
+    # filepath is already absolute from compute_code_lenses
     annotations = [
         n
         for n in semantic_model.get_nodes_by_type(RfcAnnotation)
         if n.file
-        and (n.file == abs_path or n.file == filepath or os.path.abspath(n.file) == abs_path)
+        and (n.file == filepath or os.path.abspath(n.file) == filepath)
     ]
 
     for ann in annotations:
@@ -396,33 +363,18 @@ def _rfc_tag_lenses(
             continue
 
         title = "RFC: " + ", ".join(tag_parts)
-        lenses.append(
-            lsp.CodeLens(
-                range=lsp.Range(
-                    start=lsp.Position(line=line, character=0),
-                    end=lsp.Position(
-                        line=line,
-                        character=len(lines[line]) if line < len(lines) else 0,
-                    ),
-                ),
-                command=lsp.Command(
-                    title=title,
-                    command="ivy.showRfcDetails",
-                    arguments=[ann.tags[0] if ann.tags else ""],
-                ),
-            )
-        )
+        lenses.append(_make_lens(
+            lines, line, title, "ivy.showRfcDetails",
+            [ann.tags[0] if ann.tags else ""],
+        ))
 
     return lenses
 
 
 def _coverage_summary_lens(
-    filepath: str,
     semantic_model: Any,
 ) -> List[lsp.CodeLens]:
-    """File-level coverage summary lens at line 0."""
-    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-
+    """Workspace-wide RFC coverage summary lens placed at line 0."""
     requirements = semantic_model.get_nodes_by_type(RfcRequirement)
     if not requirements:
         return []
@@ -456,7 +408,7 @@ def _coverage_summary_lens(
                 start=lsp.Position(line=0, character=0),
                 end=lsp.Position(line=0, character=0),
             ),
-            command=lsp.Command(title=title, command=""),
+            command=lsp.Command(title=title, command="ivy.noop"),
         )
     ]
 
@@ -487,9 +439,16 @@ def register(server) -> None:
                 None, compute_code_lenses,
                 server._indexer, filepath, source, model,
             )
-        except Exception:
+        except (IndexError, KeyError, ValueError) as exc:
             logger.warning(
-                "Code lens computation failed for %s",
+                "Code lens data inconsistency for %s: %s",
+                filepath,
+                exc,
+            )
+            return []
+        except Exception:
+            logger.error(
+                "Unexpected error computing code lenses for %s",
                 filepath,
                 exc_info=True,
             )
