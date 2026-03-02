@@ -1,8 +1,10 @@
 """Tests for Task 2.3: Workspace Indexer."""
 
+import logging
 import sys
 import time
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -153,3 +155,34 @@ class TestWorkspaceIndexerQuicStack:
             str(QUIC_STACK_DIR / "quic_frame.ivy")
         )
         assert len(frame_scope) > 5
+
+
+class TestTryTokenize:
+    """Tests for _try_tokenize exception handling (H-SF1 fix)."""
+
+    def test_import_error_returns_none_silently(self):
+        from ivy_lsp.indexer.workspace_indexer import _try_tokenize
+
+        # Setting a module to None in sys.modules makes `from X import Y` raise ImportError
+        saved = sys.modules.get("ivy_lsp.parsing.token_stream")
+        sys.modules["ivy_lsp.parsing.token_stream"] = None  # type: ignore[assignment]
+        try:
+            result = _try_tokenize("type foo", "test.ivy")
+        finally:
+            if saved is not None:
+                sys.modules["ivy_lsp.parsing.token_stream"] = saved
+            else:
+                sys.modules.pop("ivy_lsp.parsing.token_stream", None)
+        assert result is None
+
+    def test_unexpected_error_logs_and_returns_none(self, caplog):
+        from ivy_lsp.indexer.workspace_indexer import _try_tokenize
+
+        with mock.patch(
+            "ivy_lsp.parsing.token_stream.tokenize_ivy",
+            side_effect=RuntimeError("tokenizer bug"),
+        ):
+            with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.workspace_indexer"):
+                result = _try_tokenize("type foo", "test.ivy")
+        assert result is None
+        assert any("Tokenization failed" in r.message for r in caplog.records)
