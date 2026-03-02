@@ -42,6 +42,31 @@ from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 def _build_graph() -> ScopedRequirementModel:
     """Build a small graph for testing."""
     graph = ScopedRequirementModel()
+    # Add requirements FIRST — add_file_requirements() calls remove_file()
+    # internally, which deletes all nodes from that filepath.  Actions and
+    # state vars must be added AFTER so they are not wiped out.
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+        bracket_tags=["rfc9000:4.1"],
+    )
+    r2 = RequirementNode(
+        id="/test/quic.ivy:15",
+        kind="ensure",
+        formula_text="sent(C, P)",
+        line=15,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1, r2])
     graph.add_action(
         ActionNode(
             id="send_pkt",
@@ -70,28 +95,6 @@ def _build_graph() -> ScopedRequirementModel:
             is_relation=True,
         )
     )
-    r1 = RequirementNode(
-        id="/test/quic.ivy:12",
-        kind="require",
-        formula_text="conn_state(C) = open",
-        line=12,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="before",
-        bracket_tags=["rfc9000:4.1"],
-    )
-    r2 = RequirementNode(
-        id="/test/quic.ivy:15",
-        kind="ensure",
-        formula_text="sent(C, P)",
-        line=15,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="after",
-    )
-    graph.add_file_requirements("/test/quic.ivy", [r1, r2])
     graph.add_edge(r1.id, EdgeType.READS, "sent")
     return graph
 
@@ -297,6 +300,20 @@ def _build_graph_with_gaps() -> ScopedRequirementModel:
     """Build a graph with unguarded state vars, orphan reqs, and RFC coverage gaps."""
     graph = ScopedRequirementModel()
 
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+        bracket_tags=["rfc9000:4.1"],
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1])
+
     # Action with requirements
     graph.add_action(
         ActionNode(
@@ -332,19 +349,6 @@ def _build_graph_with_gaps() -> ScopedRequirementModel:
         )
     )
 
-    # Requirement that reads conn_state (guards it)
-    r1 = RequirementNode(
-        id="/test/quic.ivy:12",
-        kind="require",
-        formula_text="conn_state(C) = open",
-        line=12,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="before",
-        bracket_tags=["rfc9000:4.1"],
-    )
-    graph.add_file_requirements("/test/quic.ivy", [r1])
     graph.add_edge(r1.id, EdgeType.READS, "conn_state")
 
     # pkt_count is written but never read by any requirement
@@ -359,17 +363,7 @@ def _build_graph_with_orphan() -> ScopedRequirementModel:
     """Build a graph with an orphan requirement (action not in graph)."""
     graph = ScopedRequirementModel()
 
-    graph.add_action(
-        ActionNode(
-            id="send_pkt",
-            name="send_pkt",
-            qualified_name="quic.send_pkt",
-            file="/test/quic.ivy",
-            line=10,
-        )
-    )
-
-    # Normal requirement pointing at a known action
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
     r1 = RequirementNode(
         id="/test/quic.ivy:12",
         kind="require",
@@ -380,8 +374,6 @@ def _build_graph_with_orphan() -> ScopedRequirementModel:
         monitor_action="send_pkt",
         mixin_kind="before",
     )
-
-    # Orphan: monitor_action refers to a non-existent action
     r_orphan = RequirementNode(
         id="/test/quic.ivy:30",
         kind="ensure",
@@ -392,14 +384,7 @@ def _build_graph_with_orphan() -> ScopedRequirementModel:
         monitor_action="nonexistent_action",
         mixin_kind="after",
     )
-
     graph.add_file_requirements("/test/quic.ivy", [r1, r_orphan])
-    return graph
-
-
-def _build_graph_with_rfc_coverage() -> ScopedRequirementModel:
-    """Build a graph with RFC requirements, some covered and some not."""
-    graph = ScopedRequirementModel()
 
     graph.add_action(
         ActionNode(
@@ -410,6 +395,13 @@ def _build_graph_with_rfc_coverage() -> ScopedRequirementModel:
             line=10,
         )
     )
+
+    return graph
+
+
+def _build_graph_with_rfc_coverage() -> ScopedRequirementModel:
+    """Build a graph with RFC requirements, some covered and some not."""
+    graph = ScopedRequirementModel()
 
     # Add RFC requirements to the graph
     graph.add_rfc_requirement(
@@ -440,7 +432,7 @@ def _build_graph_with_rfc_coverage() -> ScopedRequirementModel:
         )
     )
 
-    # Requirement that covers rfc9000:4.1 (via bracket_tags)
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
     r1 = RequirementNode(
         id="/test/quic.ivy:12",
         kind="require",
@@ -452,8 +444,17 @@ def _build_graph_with_rfc_coverage() -> ScopedRequirementModel:
         mixin_kind="before",
         bracket_tags=["rfc9000:4.1"],
     )
-
     graph.add_file_requirements("/test/quic.ivy", [r1])
+
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
     # rfc9000:8.1 and rfc9000:17.2 are NOT covered by any requirement
 
     return graph
@@ -611,6 +612,28 @@ class TestHandleCoverageGaps:
 def _build_graph_with_shared_state() -> ScopedRequirementModel:
     """Build a graph where two actions share a state variable."""
     graph = ScopedRequirementModel()
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:15",
+        kind="ensure",
+        formula_text="conn_state(C) = sending",
+        line=15,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
+    )
+    r2 = RequirementNode(
+        id="/test/quic.ivy:25",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=25,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="recv_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1, r2])
     graph.add_action(
         ActionNode(
             id="send_pkt",
@@ -639,29 +662,6 @@ def _build_graph_with_shared_state() -> ScopedRequirementModel:
             is_relation=False,
         )
     )
-    # send_pkt writes conn_state
-    r1 = RequirementNode(
-        id="/test/quic.ivy:15",
-        kind="ensure",
-        formula_text="conn_state(C) = sending",
-        line=15,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="after",
-    )
-    # recv_pkt reads conn_state
-    r2 = RequirementNode(
-        id="/test/quic.ivy:25",
-        kind="require",
-        formula_text="conn_state(C) = open",
-        line=25,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="recv_pkt",
-        mixin_kind="before",
-    )
-    graph.add_file_requirements("/test/quic.ivy", [r1, r2])
     graph.add_edge(r1.id, EdgeType.WRITES, "conn_state")
     graph.add_edge(r2.id, EdgeType.READS, "conn_state")
     return graph
@@ -729,26 +729,7 @@ class TestHandleActionDependencyGraph:
     def test_no_self_edges(self):
         """Actions should not have edges to themselves via shared state vars."""
         graph = ScopedRequirementModel()
-        graph.add_action(
-            ActionNode(
-                id="act_a",
-                name="act_a",
-                qualified_name="quic.act_a",
-                file="/test/quic.ivy",
-                line=10,
-            )
-        )
-        graph.add_state_var(
-            StateVarNode(
-                id="var_x",
-                name="var_x",
-                qualified_name="quic.var_x",
-                file="/test/quic.ivy",
-                line=3,
-                is_relation=False,
-            )
-        )
-        # act_a both writes and reads var_x
+        # Requirements FIRST (add_file_requirements calls remove_file internally)
         r1 = RequirementNode(
             id="/test/quic.ivy:12",
             kind="ensure",
@@ -770,6 +751,25 @@ class TestHandleActionDependencyGraph:
             mixin_kind="before",
         )
         graph.add_file_requirements("/test/quic.ivy", [r1, r2])
+        graph.add_action(
+            ActionNode(
+                id="act_a",
+                name="act_a",
+                qualified_name="quic.act_a",
+                file="/test/quic.ivy",
+                line=10,
+            )
+        )
+        graph.add_state_var(
+            StateVarNode(
+                id="var_x",
+                name="var_x",
+                qualified_name="quic.var_x",
+                file="/test/quic.ivy",
+                line=3,
+                is_relation=False,
+            )
+        )
         graph.add_edge(r1.id, EdgeType.WRITES, "var_x")
         graph.add_edge(r2.id, EdgeType.READS, "var_x")
         server = _FakeServer(graph)
@@ -851,6 +851,39 @@ def _build_graph_for_state_machine() -> ScopedRequirementModel:
     """
     graph = ScopedRequirementModel()
 
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:15",
+        kind="ensure",
+        formula_text="conn_state(C) := sending",
+        line=15,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
+    )
+    r2 = RequirementNode(
+        id="/test/quic.ivy:25",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=25,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="recv_pkt",
+        mixin_kind="before",
+    )
+    r3 = RequirementNode(
+        id="/test/quic.ivy:26",
+        kind="assume",
+        formula_text="conn_state(C) ~= closed",
+        line=26,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="recv_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1, r2, r3])
+
     graph.add_action(
         ActionNode(
             id="send_pkt",
@@ -879,41 +912,6 @@ def _build_graph_for_state_machine() -> ScopedRequirementModel:
             is_relation=False,
         )
     )
-
-    # send_pkt writes conn_state (after-ensure)
-    r1 = RequirementNode(
-        id="/test/quic.ivy:15",
-        kind="ensure",
-        formula_text="conn_state(C) := sending",
-        line=15,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="after",
-    )
-    # recv_pkt reads conn_state (before-require guard)
-    r2 = RequirementNode(
-        id="/test/quic.ivy:25",
-        kind="require",
-        formula_text="conn_state(C) = open",
-        line=25,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="recv_pkt",
-        mixin_kind="before",
-    )
-    # recv_pkt has an assume guard (also reads conn_state)
-    r3 = RequirementNode(
-        id="/test/quic.ivy:26",
-        kind="assume",
-        formula_text="conn_state(C) ~= closed",
-        line=26,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="recv_pkt",
-        mixin_kind="before",
-    )
-    graph.add_file_requirements("/test/quic.ivy", [r1, r2, r3])
     graph.add_edge(r1.id, EdgeType.WRITES, "conn_state")
     graph.add_edge(r2.id, EdgeType.READS, "conn_state")
     graph.add_edge(r3.id, EdgeType.READS, "conn_state")
@@ -1051,7 +1049,10 @@ class TestHandleStateMachineView:
             monitor_action="send_pkt",
             mixin_kind="after",
         )
-        graph.add_file_requirements("/test/quic.ivy", [r_extra])
+        # Use add_requirement (not add_file_requirements) to avoid wiping
+        # existing nodes via remove_file.
+        graph.add_requirement(r_extra)
+        graph.add_edge(r_extra.id, EdgeType.CONSTRAINS, r_extra.monitor_action)
         graph.add_edge(r_extra.id, EdgeType.WRITES, "pkt_num")
 
         server = _FakeServer(graph)

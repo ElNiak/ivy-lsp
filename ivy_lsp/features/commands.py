@@ -895,3 +895,127 @@ def register(server: Any) -> None:
             "requirementCount": len(ir.requirements),
             "errors": list(ir.errors),
         }
+
+    # ------------------------------------------------------------------
+    # Code-lens command handlers (C3 + H4)
+    # ------------------------------------------------------------------
+
+    @server.feature("ivy.showActionRequirements")
+    async def ivy_show_action_requirements(params: Any = None) -> Dict[str, Any]:
+        """Handle clicks on monitor/state-var code lenses."""
+        from ivy_lsp.features.visualization import handle_action_requirements
+
+        action_name = None
+        if isinstance(params, list) and params:
+            action_name = params[0]
+        elif isinstance(params, dict):
+            action_name = params.get("actionName")
+        elif params is not None:
+            args = getattr(params, "arguments", None)
+            if args:
+                action_name = args[0]
+
+        viz_params: Dict[str, Any] = {}
+        if action_name:
+            viz_params["actionName"] = action_name
+
+        indexer = getattr(server, "_indexer", None)
+        if indexer is None:
+            return {"error": "No indexer available"}
+
+        proxy = type("_Proxy", (), {"_indexer": indexer})()
+        return handle_action_requirements(proxy, viz_params)
+
+    @server.feature("ivy.showPropertyDetails")
+    async def ivy_show_property_details(params: Any = None) -> Dict[str, Any]:
+        """Handle clicks on property/axiom/invariant code lenses."""
+        prop_id = None
+        if isinstance(params, list) and params:
+            prop_id = params[0]
+        elif isinstance(params, dict):
+            prop_id = params.get("propertyId")
+        elif params is not None:
+            args = getattr(params, "arguments", None)
+            if args:
+                prop_id = args[0]
+
+        indexer = getattr(server, "_indexer", None)
+        if indexer is None:
+            return {"error": "No indexer available"}
+
+        graph = getattr(indexer, "_requirement_graph", None)
+        if graph is None or prop_id is None:
+            return {"error": "No data available"}
+
+        prop = graph.properties.get(prop_id)
+        if prop is None:
+            return {"error": f"Property {prop_id!r} not found"}
+
+        return {
+            "id": prop.id,
+            "kind": prop.kind,
+            "file": prop.file,
+            "line": prop.line,
+            "formulaText": prop.formula_text,
+        }
+
+    @server.feature("ivy.navigateToInclude")
+    async def ivy_navigate_to_include(params: Any = None) -> Dict[str, Any]:
+        """Handle clicks on include directive code lenses."""
+        include_name = None
+        if isinstance(params, list) and params:
+            include_name = params[0]
+        elif isinstance(params, dict):
+            include_name = params.get("includeName")
+        elif params is not None:
+            args = getattr(params, "arguments", None)
+            if args:
+                include_name = args[0]
+
+        if not include_name:
+            return {"error": "No include name provided"}
+
+        indexer = getattr(server, "_indexer", None)
+        if indexer is None:
+            return {"error": "No indexer available"}
+
+        resolver = getattr(indexer, "_resolver", None)
+        if resolver is None:
+            return {"error": "No resolver available"}
+
+        resolved = resolver.resolve(include_name)
+        if not resolved:
+            return {"error": f"Cannot resolve include {include_name!r}"}
+
+        return {"resolved": resolved, "uri": "file://" + resolved}
+
+    @server.feature("ivy.showRfcDetails")
+    async def ivy_show_rfc_details(params: Any = None) -> Dict[str, Any]:
+        """Handle clicks on RFC tag code lenses."""
+        tag = None
+        if isinstance(params, list) and params:
+            tag = params[0]
+        elif isinstance(params, dict):
+            tag = params.get("tag")
+        elif params is not None:
+            args = getattr(params, "arguments", None)
+            if args:
+                tag = args[0]
+
+        if not tag:
+            return {"error": "No RFC tag provided"}
+
+        model = getattr(server, "_semantic_model", None)
+        if model is None:
+            return {"error": "No semantic model available"}
+
+        node = model.get_node(tag)
+        if node is None:
+            return {"error": f"RFC tag {tag!r} not found"}
+
+        return {
+            "id": node.id,
+            "level": getattr(node, "level", None),
+            "rfc": getattr(node, "rfc", None),
+            "text": getattr(node, "text", None),
+        }

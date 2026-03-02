@@ -424,6 +424,36 @@ def compute_diagnostics(
     sem_diags = compute_semantic_diagnostics(semantic_model, filepath, source)
     diags.extend(sem_diags)
 
+    # Coverage hint diagnostics (C1)
+    if indexer is not None:
+        graph = getattr(indexer, "_requirement_graph", None)
+        if graph is not None:
+            from ivy_lsp.features.coverage_hints import compute_coverage_hints
+
+            for hint in compute_coverage_hints(graph, filepath):
+                line = hint.get("line", 0)
+                sev_map = {
+                    "hint": lsp.DiagnosticSeverity.Hint,
+                    "info": lsp.DiagnosticSeverity.Information,
+                    "warning": lsp.DiagnosticSeverity.Warning,
+                    "error": lsp.DiagnosticSeverity.Error,
+                }
+                diags.append(
+                    lsp.Diagnostic(
+                        range=lsp.Range(
+                            start=lsp.Position(line=line, character=0),
+                            end=lsp.Position(line=line, character=999),
+                        ),
+                        message=hint["message"],
+                        severity=sev_map.get(
+                            hint.get("severity", "hint"),
+                            lsp.DiagnosticSeverity.Hint,
+                        ),
+                        source="ivy-lsp-coverage",
+                        code=hint.get("code"),
+                    )
+                )
+
     return diags
 
 
@@ -544,9 +574,12 @@ def register(server) -> None:
                 await asyncio.sleep(DEBOUNCE_DELAY)
                 doc = server.workspace.get_text_document(uri)
                 filepath = uri_to_path(uri)
+                source = doc.source or ""
+                pipeline_result = _run_pipeline(source, filepath, "change")
                 diags = compute_diagnostics(
-                    server._parser, doc.source or "", filepath,
+                    server._parser, source, filepath,
                     server._indexer, _get_semantic_model(),
+                    parse_result=pipeline_result,
                 )
                 server.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)

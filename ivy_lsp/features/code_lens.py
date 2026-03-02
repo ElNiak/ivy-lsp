@@ -276,7 +276,8 @@ def _property_lenses(
                 ),
                 command=lsp.Command(
                     title=title,
-                    command="",
+                    command="ivy.showPropertyDetails",
+                    arguments=[prop_node.id],
                 ),
             )
         )
@@ -318,7 +319,8 @@ def _include_lenses(
                 ),
                 command=lsp.Command(
                     title=title,
-                    command="",
+                    command="ivy.navigateToInclude",
+                    arguments=[m.group(1)],
                 ),
             )
         )
@@ -369,7 +371,11 @@ def _rfc_tag_lenses(
                         character=len(lines[line]) if line < len(lines) else 0,
                     ),
                 ),
-                command=lsp.Command(title=title, command=""),
+                command=lsp.Command(
+                    title=title,
+                    command="ivy.showRfcDetails",
+                    arguments=[ann.tags[0] if ann.tags else ""],
+                ),
             )
         )
 

@@ -21,6 +21,14 @@ from ivy_lsp.features.coverage_hints import compute_coverage_hints  # noqa: E402
 
 def _build_hint_graph():
     graph = RequirementGraph()
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12", kind="ensure",
+        formula_text="pkt_count(C) = old + 1",
+        line=12, col=0, file="/test/quic.ivy",
+        monitor_action="send_pkt", mixin_kind="after",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1])
     graph.add_action(ActionNode(
         id="send_pkt", name="send_pkt", qualified_name="quic.send_pkt",
         file="/test/quic.ivy", line=10,
@@ -35,13 +43,6 @@ def _build_hint_graph():
         id="pkt_count", name="pkt_count", qualified_name="quic.pkt_count",
         file="/test/quic.ivy", line=4, is_relation=False,
     ))
-    r1 = RequirementNode(
-        id="/test/quic.ivy:12", kind="ensure",
-        formula_text="pkt_count(C) = old + 1",
-        line=12, col=0, file="/test/quic.ivy",
-        monitor_action="send_pkt", mixin_kind="after",
-    )
-    graph.add_file_requirements("/test/quic.ivy", [r1])
     graph.add_edge(r1.id, EdgeType.WRITES, "pkt_count")
     return graph
 

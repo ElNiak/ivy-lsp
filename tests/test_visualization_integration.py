@@ -42,6 +42,44 @@ def _build_realistic_graph() -> ScopedRequirementModel:
     """Build a multi-file graph resembling a small QUIC model."""
     graph = ScopedRequirementModel()
 
+    # -- Requirements FIRST --------------------------------------------------
+    # add_file_requirements() calls remove_file() internally, which deletes
+    # all nodes from that filepath.  Actions and state vars must be added
+    # AFTER so they are not wiped out.
+    r1 = RequirementNode(
+        id="/model/quic_packet.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/model/quic_packet.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+        bracket_tags=["rfc9000:17.2"],
+    )
+    r2 = RequirementNode(
+        id="/model/quic_packet.ivy:15",
+        kind="ensure",
+        formula_text="pkt_num(C) = old_pkt_num + 1",
+        line=15,
+        col=0,
+        file="/model/quic_packet.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
+    )
+    r3 = RequirementNode(
+        id="/model/quic_connection.ivy:12",
+        kind="ensure",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/model/quic_connection.ivy",
+        monitor_action="open_connection",
+        mixin_kind="after",
+    )
+    graph.add_file_requirements("/model/quic_packet.ivy", [r1, r2])
+    graph.add_file_requirements("/model/quic_connection.ivy", [r3])
+
     # -- File 1: quic_connection.ivy -----------------------------------------
     graph.add_action(
         ActionNode(
@@ -102,40 +140,7 @@ def _build_realistic_graph() -> ScopedRequirementModel:
         )
     )
 
-    # -- Requirements --------------------------------------------------------
-    r1 = RequirementNode(
-        id="/model/quic_packet.ivy:12",
-        kind="require",
-        formula_text="conn_state(C) = open",
-        line=12,
-        col=0,
-        file="/model/quic_packet.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="before",
-        bracket_tags=["rfc9000:17.2"],
-    )
-    r2 = RequirementNode(
-        id="/model/quic_packet.ivy:15",
-        kind="ensure",
-        formula_text="pkt_num(C) = old_pkt_num + 1",
-        line=15,
-        col=0,
-        file="/model/quic_packet.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="after",
-    )
-    r3 = RequirementNode(
-        id="/model/quic_connection.ivy:12",
-        kind="ensure",
-        formula_text="conn_state(C) = open",
-        line=12,
-        col=0,
-        file="/model/quic_connection.ivy",
-        monitor_action="open_connection",
-        mixin_kind="after",
-    )
-    graph.add_file_requirements("/model/quic_packet.ivy", [r1, r2])
-    graph.add_file_requirements("/model/quic_connection.ivy", [r3])
+    # -- Edges ---------------------------------------------------------------
     graph.add_edge(r1.id, EdgeType.READS, "conn_state")
     graph.add_edge(r2.id, EdgeType.WRITES, "pkt_num")
     graph.add_edge(r3.id, EdgeType.WRITES, "conn_state")

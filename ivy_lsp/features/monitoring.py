@@ -93,23 +93,25 @@ def handle_include_graph(server: Any) -> Dict[str, Any]:
 
     # Snapshot dicts before iteration to avoid RuntimeError if
     # background indexing mutates _includes/_included_by concurrently.
-    all_uris: set = set()
+    all_paths: set = set()
     includes = dict(getattr(graph, "_includes", {}))
     included_by_keys = set(getattr(graph, "_included_by", {}).keys())
-    all_uris.update(includes.keys())
+    all_paths.update(includes.keys())
     for targets in includes.values():
-        all_uris.update(targets)
-    all_uris.update(included_by_keys)
+        all_paths.update(targets)
+    all_paths.update(included_by_keys)
 
     nodes = []
-    for uri in sorted(all_uris):
-        symbol_count = len(server._indexer.get_symbols(uri))
-        nodes.append({"uri": uri, "symbolCount": symbol_count, "hasErrors": False})
+    for fpath in sorted(all_paths):
+        # Normalize to absolute path so get_symbols() cache lookup works
+        abs_path = os.path.abspath(fpath)
+        symbol_count = len(server._indexer.get_symbols(abs_path))
+        nodes.append({"uri": abs_path, "symbolCount": symbol_count, "hasErrors": False})
 
     edges = []
     for src, targets in includes.items():
         for tgt in targets:
-            edges.append({"from": src, "to": tgt})
+            edges.append({"from": os.path.abspath(src), "to": os.path.abspath(tgt)})
 
     return {"nodes": nodes, "edges": edges}
 

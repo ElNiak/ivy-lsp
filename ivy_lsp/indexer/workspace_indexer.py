@@ -239,12 +239,26 @@ class WorkspaceIndexer:
         Completes in seconds (no background lock contention).
         Provides usable symbols for completion, navigation, and document
         outline immediately.
+
+        When ``IVY_LSP_FAST_INDEX_WORKERS`` > 1 (default 4), file scanning
+        runs in a thread pool for faster I/O throughput.  All shared-state
+        mutations are performed on the calling thread after collection.
         """
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         files = self._resolver.find_all_ivy_files()
+        num_workers = int(os.environ.get("IVY_LSP_FAST_INDEX_WORKERS", "4"))
+
+        if num_workers > 1 and len(files) > 5:
+            self._fast_index_parallel(files, num_workers, fallback_scan)
+        else:
+            self._fast_index_sequential(files, fallback_scan)
+
+    def _fast_index_sequential(
+        self, files: List[str], fallback_scan: Any,
+    ) -> None:
+        """Sequential fast index (original path)."""
         for filepath in files:
-            # Warm-load from persistent cache if available
             cached = self._cache.get(filepath)
             if cached is not None:
                 for sym in cached.symbols:
@@ -259,7 +273,6 @@ class WorkspaceIndexer:
                         shallow_indexed=True,
                         last_indexed_at=time.time(),
                     )
-                # Light-mode extraction still needed for requirement graph
                 source = self._read_source(filepath)
                 if source is None:
                     continue
@@ -298,16 +311,102 @@ class WorkspaceIndexer:
                 if resolved:
                     self._include_graph.add_edge(filepath, resolved)
 
-            # Light-mode requirement extraction (regex, no lock)
             reqs, writes = extract_requirements_light(source, filepath)
             self._requirement_graph.add_file_requirements(
                 filepath, reqs, writes
             )
 
-            # Light-mode export/import extraction
             info = extract_exports_imports_light(source, filepath)
             with self._exports_lock:
                 self._file_export_imports[filepath] = info
+
+            slog.debug(
+                "Indexed %s",
+                filepath,
+                extra={"event": LogEvent(LogCategory.ACTIVITY, "indexing")},
+            )
+
+    def _fast_index_parallel(
+        self, files: List[str], num_workers: int, fallback_scan: Any,
+    ) -> None:
+        """Parallel fast index: scan in threads, merge on main thread.
+
+        Thread workers perform I/O (file reads) and CPU-bound scanning
+        (PLY lexer + regex extraction) without mutating shared state.
+        The calling thread merges results into the symbol table, include
+        graph, and requirement graph sequentially.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _process_file(
+            filepath: str,
+        ) -> Tuple[str, bool, Optional[list], Optional[List[str]], Optional[str], Optional[tuple], Optional[Any]]:
+            """Thread worker: read + scan + light extract.  No shared state mutation."""
+            cached = self._cache.get(filepath)
+            if cached is not None:
+                source = self._read_source(filepath)
+                reqs_writes = None
+                info = None
+                if source is not None:
+                    reqs, writes = extract_requirements_light(source, filepath)
+                    reqs_writes = (reqs, writes)
+                    info = extract_exports_imports_light(source, filepath)
+                return filepath, True, cached.symbols, cached.includes, source, reqs_writes, info
+
+            source = self._read_source(filepath)
+            if source is None:
+                return filepath, False, None, None, None, None, None
+
+            symbols, _error_info = fallback_scan(source, filepath)
+            includes = self._extract_includes(source)
+            reqs, writes = extract_requirements_light(source, filepath)
+            info = extract_exports_imports_light(source, filepath)
+            return filepath, False, symbols, includes, source, (reqs, writes), info
+
+        # Collect results from thread pool
+        results = []
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            futures = {pool.submit(_process_file, fp): fp for fp in files}
+            for future in as_completed(futures):
+                results.append(future.result())
+
+        # Merge on main thread (all shared-state mutations)
+        for filepath, from_cache, symbols, includes, _source, reqs_writes, info in results:
+            if symbols is None and not from_cache:
+                logger.warning(
+                    "Cannot read %s; file will not be indexed", filepath
+                )
+                continue
+
+            if not from_cache and symbols is not None:
+                self._cache.put(filepath, None, symbols, includes or [])
+
+            with self._progress_lock:
+                self._deep_index_progress.file_statuses[filepath] = FileIndexStatus(
+                    filepath=filepath,
+                    shallow_indexed=True,
+                    last_indexed_at=time.time(),
+                )
+
+            if symbols is not None:
+                for sym in symbols:
+                    self._symbol_table.add_symbol(sym)
+
+            if includes is not None:
+                for inc_name in includes:
+                    resolved = self._resolver.resolve(inc_name, filepath)
+                    if resolved:
+                        self._include_graph.add_edge(filepath, resolved)
+
+            if reqs_writes is not None:
+                reqs, writes = reqs_writes
+                self._requirement_graph.add_file_requirements(
+                    filepath, reqs, writes
+                )
+
+            if info is not None:
+                with self._exports_lock:
+                    self._file_export_imports[filepath] = info
 
             slog.debug(
                 "Indexed %s",

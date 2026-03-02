@@ -8,7 +8,6 @@ from ivy_lsp.adapters.protocols import (
     IAstEnrichmentAdapter,
     ICompilerAdapter,
     IParserAdapter,
-    ISemanticModelQuery,
     TypeAnnotation,
 )
 
@@ -27,8 +26,6 @@ class TestProtocolDefinitions:
     def test_icompiler_adapter_is_runtime_checkable(self):
         assert isinstance(ICompilerAdapter, type)
 
-    def test_isemantic_model_query_is_runtime_checkable(self):
-        assert isinstance(ISemanticModelQuery, type)
 
 
 class TestDataClasses:

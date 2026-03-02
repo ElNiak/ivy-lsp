@@ -973,6 +973,58 @@ def start_mcp(
             params["stateVarFilter"] = state_var_filter
         return json.dumps(handle_state_machine_view(server_proxy, params))
 
+    @mcp.tool()
+    def ivy_layered_overview(
+        test_file: str | None = None,
+        group_by: str = "file",
+    ) -> str:
+        """Get a layered overview of the Ivy model organized by file or module.
+
+        Args:
+            test_file: Optional test file to scope the overview to (relative path).
+            group_by: Grouping strategy: "file" (default) or "module".
+        """
+        from ivy_lsp.features.visualization import handle_layered_overview
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if test_file:
+            try:
+                params["testFile"] = _validate_path(root, test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        if group_by:
+            params["groupBy"] = group_by
+        return json.dumps(handle_layered_overview(server_proxy, params))
+
+    @mcp.tool()
+    def ivy_smart_suggestions(
+        file_path: str | None = None,
+        line: int | None = None,
+        context: str | None = None,
+    ) -> str:
+        """Get context-aware suggestions for improving the Ivy specification.
+
+        Args:
+            file_path: File to analyze (relative path).
+            line: Optional line number for cursor-local suggestions.
+            context: Optional context hint (e.g., "monitor", "property").
+        """
+        from ivy_lsp.features.visualization import handle_smart_suggestions
+
+        server_proxy = _make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if file_path:
+            try:
+                params["filePath"] = _validate_path(root, file_path)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        if line is not None:
+            params["line"] = line
+        if context:
+            params["context"] = context
+        return json.dumps(handle_smart_suggestions(server_proxy, params))
+
     if _return_app:
         return mcp
 

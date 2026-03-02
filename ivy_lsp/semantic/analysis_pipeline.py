@@ -8,9 +8,11 @@ Tier 3 (compiler, background): full compiler analysis (background thread)
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -303,6 +305,10 @@ class AnalysisPipeline:
         deep indexing completes.  Each file is processed independently;
         errors are recorded but never crash the batch.
 
+        When ``IVY_LSP_BULK_WORKERS`` > 1 (default 4), T1 analysis runs
+        in a thread pool for ~2-4x speedup.  T2 remains sequential
+        because the Ivy parser may have global state.
+
         Args:
             filepaths: Absolute paths to ``.ivy`` files.
             progress_callback: Called after each file with (completed, total, current_file).
@@ -312,9 +318,6 @@ class AnalysisPipeline:
         Returns:
             A :class:`BulkAnalysisResult` summarising outcomes.
         """
-        # Filter out files already analysed at the requested tier.
-        # Must read _tier1_files/_tier2_files under _state_lock since
-        # run_tier1/run_tier2 may mutate them from background threads.
         with self._state_lock:
             if include_t2:
                 remaining = [f for f in filepaths if f not in self._tier2_files]
@@ -326,54 +329,16 @@ class AnalysisPipeline:
 
         result = BulkAnalysisResult(total=len(remaining))
 
+        num_workers = int(os.environ.get("IVY_LSP_BULK_WORKERS", "4"))
         try:
-            for i, filepath in enumerate(remaining):
-                if cancel_event is not None and cancel_event.is_set():
-                    result.cancelled = True
-                    break
-
-                try:
-                    with open(filepath) as f:
-                        source = f.read()
-                except OSError as exc:
-                    result.errors.append((filepath, str(exc)))
-                    with self._state_lock:
-                        self._bulk_completed = i + 1
-                    if progress_callback is not None:
-                        try:
-                            progress_callback(i + 1, len(remaining), filepath)
-                        except Exception:
-                            logger.debug("Progress callback failed", exc_info=True)
-                    continue
-
-                try:
-                    self.run_tier1(source, filepath)
-                    result.t1_completed += 1
-                except Exception as exc:
-                    result.errors.append((filepath, f"T1: {exc}"))
-                    with self._state_lock:
-                        self._bulk_completed = i + 1
-                    if progress_callback is not None:
-                        try:
-                            progress_callback(i + 1, len(remaining), filepath)
-                        except Exception:
-                            logger.debug("Progress callback failed", exc_info=True)
-                    continue
-
-                if include_t2:
-                    try:
-                        self.run_tier2(source, filepath)
-                        result.t2_completed += 1
-                    except Exception as exc:
-                        result.errors.append((filepath, f"T2: {exc}"))
-
-                with self._state_lock:
-                    self._bulk_completed = i + 1
-                if progress_callback is not None:
-                    try:
-                        progress_callback(i + 1, len(remaining), filepath)
-                    except Exception:
-                        logger.debug("Progress callback failed", exc_info=True)
+            if num_workers > 1 and len(remaining) > 3:
+                self._run_bulk_parallel_t1(
+                    remaining, result, progress_callback, cancel_event, include_t2,
+                )
+            else:
+                self._run_bulk_sequential(
+                    remaining, result, progress_callback, cancel_event, include_t2,
+                )
         finally:
             with self._state_lock:
                 self._bulk_running = False
@@ -388,6 +353,140 @@ class AnalysisPipeline:
             result.cancelled,
         )
         return result
+
+    def _bulk_progress_tick(
+        self,
+        idx: int,
+        total: int,
+        filepath: str,
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]],
+    ) -> None:
+        """Update bulk progress counter and invoke callback."""
+        with self._state_lock:
+            self._bulk_completed = idx + 1
+        if progress_callback is not None:
+            try:
+                progress_callback(idx + 1, total, filepath)
+            except Exception:
+                logger.debug("Progress callback failed", exc_info=True)
+
+    def _run_bulk_sequential(
+        self,
+        remaining: List[str],
+        result: BulkAnalysisResult,
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]],
+        cancel_event: Optional[threading.Event],
+        include_t2: bool,
+    ) -> None:
+        """Sequential bulk T1+T2 with parse-result reuse."""
+        for i, filepath in enumerate(remaining):
+            if cancel_event is not None and cancel_event.is_set():
+                result.cancelled = True
+                break
+
+            try:
+                with open(filepath) as f:
+                    source = f.read()
+            except OSError as exc:
+                result.errors.append((filepath, str(exc)))
+                self._bulk_progress_tick(i, len(remaining), filepath, progress_callback)
+                continue
+
+            try:
+                self.run_tier1(source, filepath)
+                result.t1_completed += 1
+            except Exception as exc:
+                result.errors.append((filepath, f"T1: {exc}"))
+                self._bulk_progress_tick(i, len(remaining), filepath, progress_callback)
+                continue
+
+            if include_t2:
+                parse_result = None
+                try:
+                    parse_result = self._parser.parse(source, filepath)
+                except Exception:
+                    pass
+                try:
+                    self.run_tier2(source, filepath, parse_result=parse_result)
+                    result.t2_completed += 1
+                except Exception as exc:
+                    result.errors.append((filepath, f"T2: {exc}"))
+
+            self._bulk_progress_tick(i, len(remaining), filepath, progress_callback)
+
+    def _run_bulk_parallel_t1(
+        self,
+        remaining: List[str],
+        result: BulkAnalysisResult,
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]],
+        cancel_event: Optional[threading.Event],
+        include_t2: bool,
+    ) -> None:
+        """Parallel T1 + sequential T2.
+
+        T1 (regex-based) is fully thread-safe and runs in a thread pool.
+        T2 (Ivy parser) runs sequentially afterwards because the parser
+        may have global state.
+        """
+        num_workers = int(os.environ.get("IVY_LSP_BULK_WORKERS", "4"))
+
+        # Phase A: thread-parallel T1
+        sources: Dict[str, str] = {}
+
+        def _t1_task(filepath: str) -> Tuple[str, Optional[str], Optional[str]]:
+            """Return (filepath, source_or_None, error_or_None)."""
+            try:
+                with open(filepath) as f:
+                    src = f.read()
+            except OSError as exc:
+                return filepath, None, str(exc)
+            try:
+                self.run_tier1(src, filepath)
+            except Exception as exc:
+                return filepath, src, f"T1: {exc}"
+            return filepath, src, None
+
+        completed = 0
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            futures = {pool.submit(_t1_task, fp): fp for fp in remaining}
+            for future in as_completed(futures):
+                if cancel_event is not None and cancel_event.is_set():
+                    result.cancelled = True
+                    break
+                filepath, src, error = future.result()
+                if src is not None:
+                    sources[filepath] = src
+                if error is not None:
+                    result.errors.append((filepath, error))
+                else:
+                    result.t1_completed += 1
+                completed += 1
+                self._bulk_progress_tick(
+                    completed - 1, len(remaining), filepath, progress_callback,
+                )
+
+        if result.cancelled:
+            return
+
+        # Phase B: sequential T2 (parser may have global state)
+        if include_t2:
+            for filepath in remaining:
+                if cancel_event is not None and cancel_event.is_set():
+                    result.cancelled = True
+                    break
+                source = sources.get(filepath)
+                if source is None:
+                    continue
+                parse_result = None
+                try:
+                    parse_result = self._parser.parse(source, filepath)
+                except Exception:
+                    pass
+                try:
+                    self.run_tier2(source, filepath, parse_result=parse_result)
+                    result.t2_completed += 1
+                except Exception as exc:
+                    result.errors.append((filepath, f"T2: {exc}"))
 
     # -- T3 result management --------------------------------------------------
 

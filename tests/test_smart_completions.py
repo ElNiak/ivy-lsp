@@ -20,6 +20,18 @@ from ivy_lsp.features.completion import compute_semantic_completions
 
 def _build_completion_graph():
     graph = RequirementGraph()
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/quic.ivy:12",
+        kind="require",
+        formula_text="conn_state(C) = open",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1])
     graph.add_action(
         ActionNode(
             id="send_pkt",
@@ -49,17 +61,6 @@ def _build_completion_graph():
             is_relation=False,
         )
     )
-    r1 = RequirementNode(
-        id="/test/quic.ivy:12",
-        kind="require",
-        formula_text="conn_state(C) = open",
-        line=12,
-        col=0,
-        file="/test/quic.ivy",
-        monitor_action="send_pkt",
-        mixin_kind="before",
-    )
-    graph.add_file_requirements("/test/quic.ivy", [r1])
     graph.add_edge(r1.id, EdgeType.READS, "conn_state")
     return graph
 

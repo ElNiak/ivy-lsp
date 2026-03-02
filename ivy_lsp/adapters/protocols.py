@@ -9,7 +9,7 @@ the Protocols, never on ivy internals directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, List, Optional, Protocol, runtime_checkable
 
 from ivy_lsp.parsing.parser_session import ParseResult
 
@@ -86,18 +86,3 @@ class ICompilerAdapter(Protocol):
     def compile(self, source: str, filename: str) -> CompileResult: ...
 
 
-@runtime_checkable
-class ISemanticModelQuery(Protocol):
-    """Future query facade -- not yet implemented."""
-
-    def get_symbol_info(self, name: str) -> Optional[Dict[str, Any]]: ...
-
-    def get_cross_references(self, node_id: str) -> Dict[str, Any]: ...
-
-    def get_rfc_annotations(self, file: str) -> List[Dict[str, Any]]: ...
-
-    def get_coverage_stats(self) -> Dict[str, Any]: ...
-
-    def get_impact_analysis(self, symbol: str) -> Dict[str, Any]: ...
-
-    def query_graph(self, query: Dict[str, Any]) -> List[Dict[str, Any]]: ...

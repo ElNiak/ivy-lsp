@@ -647,6 +647,8 @@ class IvyLanguageServer(LanguageServer):
         activity_level = os.environ.get("IVY_LSP_ACTIVITY_LEVEL", "phase")
         if activity_level == "file":
             logging.getLogger("ivy_lsp").setLevel(logging.DEBUG)
+        elif activity_level == "phase":
+            logging.getLogger("ivy_lsp").setLevel(logging.INFO)
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
         from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
@@ -867,6 +869,13 @@ class IvyLanguageServer(LanguageServer):
                     logger.warning(
                         "Full-mode adapters unavailable; falling back to null adapters. "
                         "Tier 2/3 analysis will be inactive."
+                    )
+                    self.window_show_message(
+                        lsp.ShowMessageParams(
+                            type=lsp.MessageType.Warning,
+                            message="Ivy full-mode adapters unavailable (missing Z3 or ivy). "
+                            "Type enrichment, compilation, and semantic diagnostics are disabled.",
+                        )
                     )
             else:
                 enrichment = NullAstEnrichmentAdapter()

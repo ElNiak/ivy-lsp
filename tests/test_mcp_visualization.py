@@ -38,6 +38,29 @@ from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 def _build_test_graph() -> ScopedRequirementModel:
     """Build a small requirement graph for MCP tool testing."""
     graph = ScopedRequirementModel()
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/q.ivy:12",
+        kind="require",
+        formula_text="x > 0",
+        line=12,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="before",
+        bracket_tags=["rfc9000:4.1"],
+    )
+    r2 = RequirementNode(
+        id="/test/q.ivy:15",
+        kind="ensure",
+        formula_text="sent(C, P)",
+        line=15,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="after",
+    )
+    graph.add_file_requirements("/test/q.ivy", [r1, r2])
     graph.add_action(
         ActionNode(
             id="send",
@@ -66,28 +89,6 @@ def _build_test_graph() -> ScopedRequirementModel:
             is_relation=False,
         )
     )
-    r1 = RequirementNode(
-        id="/test/q.ivy:12",
-        kind="require",
-        formula_text="x > 0",
-        line=12,
-        col=0,
-        file="/test/q.ivy",
-        monitor_action="send",
-        mixin_kind="before",
-        bracket_tags=["rfc9000:4.1"],
-    )
-    r2 = RequirementNode(
-        id="/test/q.ivy:15",
-        kind="ensure",
-        formula_text="sent(C, P)",
-        line=15,
-        col=0,
-        file="/test/q.ivy",
-        monitor_action="send",
-        mixin_kind="after",
-    )
-    graph.add_file_requirements("/test/q.ivy", [r1, r2])
     graph.add_edge(r1.id, EdgeType.READS, "conn_open")
     return graph
 
@@ -330,6 +331,23 @@ def _build_dependency_graph() -> ScopedRequirementModel:
     This creates a dependency edge: send -> recv via "pkt_sent".
     """
     graph = ScopedRequirementModel()
+    # Requirements FIRST (add_file_requirements calls remove_file internally)
+    r1 = RequirementNode(
+        id="/test/q.ivy:12", kind="require", formula_text="conn_open",
+        line=12, col=0, file="/test/q.ivy",
+        monitor_action="send", mixin_kind="before",
+    )
+    r2 = RequirementNode(
+        id="/test/q.ivy:15", kind="ensure", formula_text="pkt_sent",
+        line=15, col=0, file="/test/q.ivy",
+        monitor_action="send", mixin_kind="after",
+    )
+    r3 = RequirementNode(
+        id="/test/q.ivy:22", kind="require", formula_text="pkt_sent",
+        line=22, col=0, file="/test/q.ivy",
+        monitor_action="recv", mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/q.ivy", [r1, r2, r3])
     graph.add_action(
         ActionNode(
             id="send", name="send", qualified_name="quic.send",
@@ -356,22 +374,6 @@ def _build_dependency_graph() -> ScopedRequirementModel:
             file="/test/q.ivy", line=6, is_relation=False,
         )
     )
-    r1 = RequirementNode(
-        id="/test/q.ivy:12", kind="require", formula_text="conn_open",
-        line=12, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="before",
-    )
-    r2 = RequirementNode(
-        id="/test/q.ivy:15", kind="ensure", formula_text="pkt_sent",
-        line=15, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="after",
-    )
-    r3 = RequirementNode(
-        id="/test/q.ivy:22", kind="require", formula_text="pkt_sent",
-        line=22, col=0, file="/test/q.ivy",
-        monitor_action="recv", mixin_kind="before",
-    )
-    graph.add_file_requirements("/test/q.ivy", [r1, r2, r3])
     # send reads conn_open, writes pkt_sent
     graph.add_edge(r1.id, EdgeType.READS, "conn_open")
     graph.add_edge(r2.id, EdgeType.WRITES, "pkt_sent")

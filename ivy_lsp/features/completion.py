@@ -183,7 +183,16 @@ def detect_context(
     if include_match:
         return CompletionContext.INCLUDE, include_match.group(1), ""
 
-    # 3. General (extract prefix)
+    # 3. After keyword (C7)
+    kw_match = re.match(
+        r"^\s*(type|relation|function|individual|instance|action|var"
+        r"|before|after|around|module|object|isolate)\s+(\w*)$",
+        text_before,
+    )
+    if kw_match:
+        return CompletionContext.AFTER_KEYWORD, kw_match.group(2), kw_match.group(1)
+
+    # 4. General (extract prefix)
     prefix_match = re.search(r"(\w*)$", text_before)
     prefix = prefix_match.group(1) if prefix_match else ""
     return CompletionContext.GENERAL, prefix, ""
@@ -194,6 +203,7 @@ def get_completions(
     filepath: str,
     position: lsp.Position,
     source_lines: List[str],
+    requirement_graph: Any = None,
 ) -> List[lsp.CompletionItem]:
     """Compute completion items for the given position."""
     if position.line < 0 or position.line >= len(source_lines):
@@ -206,8 +216,34 @@ def get_completions(
         return _dot_access_completions(indexer, filepath, scope_name, prefix)
     elif ctx == CompletionContext.INCLUDE:
         return _include_completions(indexer, filepath, prefix)
+    elif ctx == CompletionContext.AFTER_KEYWORD:
+        return _after_keyword_completions(
+            indexer, filepath, prefix, scope_name, requirement_graph
+        )
     else:
-        return _general_completions(indexer, filepath, prefix)
+        items = _general_completions(indexer, filepath, prefix)
+        # Merge semantic completions when available (C6)
+        if requirement_graph is not None:
+            block_type = _detect_block_type(source_lines, position.line)
+            sem_dicts = compute_semantic_completions(
+                requirement_graph, filepath, position.line, block_type,
+            )
+            kind_map = {
+                "variable": lsp.CompletionItemKind.Variable,
+                "function": lsp.CompletionItemKind.Function,
+                "class": lsp.CompletionItemKind.Class,
+            }
+            for d in sem_dicts:
+                items.append(
+                    lsp.CompletionItem(
+                        label=d["label"],
+                        kind=kind_map.get(d.get("kind", ""), lsp.CompletionItemKind.Text),
+                        detail=d.get("detail"),
+                        insert_text=d.get("insertText"),
+                        sort_text=d.get("sortText"),
+                    )
+                )
+        return items
 
 
 def _dot_access_completions(
@@ -316,6 +352,63 @@ def _add_symbol_completions(
         _add_symbol_completions(child, lower_prefix, seen, items)
 
 
+def _detect_block_type(source_lines: List[str], line: int) -> str:
+    """Scan backwards from *line* to find if cursor is in a before/after/around block."""
+    for i in range(line, -1, -1):
+        stripped = source_lines[i].strip()
+        if re.match(r"^before\s+", stripped):
+            return "before"
+        elif re.match(r"^after\s+", stripped):
+            return "after"
+        elif re.match(r"^around\s+", stripped):
+            return "around"
+        elif re.match(r"^(action|type|relation|function|module|object|isolate)\s+", stripped):
+            return "body"
+    return "body"
+
+
+def _after_keyword_completions(
+    indexer,
+    filepath: str,
+    prefix: str,
+    keyword: str,
+    requirement_graph: Any = None,
+) -> List[lsp.CompletionItem]:
+    """Provide completions after a keyword like 'before', 'after', 'type', etc."""
+    items: List[lsp.CompletionItem] = []
+
+    if keyword in ("before", "after", "around"):
+        # Suggest action names from the graph
+        if requirement_graph is not None:
+            for action_id in requirement_graph.actions:
+                action = requirement_graph.actions[action_id]
+                if not prefix or action.name.lower().startswith(prefix.lower()):
+                    items.append(
+                        lsp.CompletionItem(
+                            label=action.name,
+                            kind=lsp.CompletionItemKind.Function,
+                            detail=f"action ({keyword} monitor)",
+                        )
+                    )
+    elif keyword in ("type", "relation", "function", "individual", "var"):
+        # Suggest sort names from the indexer's symbols
+        all_symbols = indexer.get_symbols_in_scope(filepath)
+        seen: set = set()
+        for sym in all_symbols:
+            if sym.kind.name in ("Class",) and sym.name not in seen:
+                if not prefix or sym.name.lower().startswith(prefix.lower()):
+                    items.append(
+                        lsp.CompletionItem(
+                            label=sym.name,
+                            kind=lsp.CompletionItemKind.Class,
+                            detail="sort",
+                        )
+                    )
+                    seen.add(sym.name)
+
+    return items
+
+
 def compute_semantic_completions(
     graph: Any,
     filepath: str,
@@ -410,4 +503,8 @@ def register(server) -> None:
             return None
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
-        return get_completions(server._indexer, filepath, params.position, lines)
+        graph = getattr(server._indexer, "_requirement_graph", None)
+        return get_completions(
+            server._indexer, filepath, params.position, lines,
+            requirement_graph=graph,
+        )
