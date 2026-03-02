@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from lsprotocol import types as lsp
 
 IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
@@ -13,69 +12,57 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _register_commands(server_mock=None):
-    """Register command handlers and return (server, registered_handlers)."""
+    """Register command handlers and return (server, features, commands)."""
     from ivy_lsp.features.commands import register
 
     server = server_mock or MagicMock()
-    registered = {}
+    features = {}
+    commands = {}
 
     def fake_feature(method, options=None):
         def decorator(fn):
-            registered[method] = fn
+            features[method] = fn
+            return fn
+        return decorator
+
+    def fake_command(name):
+        def decorator(fn):
+            commands[name] = fn
             return fn
         return decorator
 
     server.feature = fake_feature
+    server.command = fake_command
     register(server)
-    return server, registered
+    return server, features, commands
 
 
 class TestExecuteCommandDispatch:
-    """Verify workspace/executeCommand routes to correct handlers."""
+    """Verify CodeLens commands are registered via server.command()."""
 
-    def _get_dispatcher(self):
-        server, registered = _register_commands()
+    def _get_command_handler(self, cmd_name):
+        server, _, commands = _register_commands()
         server._indexer = None  # triggers early "No indexer" return
-        return server, registered.get(lsp.WORKSPACE_EXECUTE_COMMAND)
-
-    @pytest.mark.asyncio
-    async def test_unknown_command_returns_error(self):
-        server, dispatcher = self._get_dispatcher()
-        assert dispatcher is not None
-        params = lsp.ExecuteCommandParams(
-            command="ivy.nonExistentCommand",
-            arguments=[],
-        )
-        result = await dispatcher(params)
-        assert "error" in result
-        assert "Unknown command" in result["error"]
+        return server, commands.get(cmd_name)
 
     @pytest.mark.asyncio
     async def test_known_command_dispatches(self):
-        server, dispatcher = self._get_dispatcher()
-        params = lsp.ExecuteCommandParams(
-            command="ivy.showActionRequirements",
-            arguments=["quic.send"],
-        )
-        result = await dispatcher(params)
-        # Should return error dict (no indexer) -- but the dispatch worked
+        _, handler = self._get_command_handler("ivy.showActionRequirements")
+        assert handler is not None
+        result = await handler("quic.send")
         assert isinstance(result, dict)
         assert "error" in result  # "No indexer available"
 
     @pytest.mark.asyncio
     async def test_noop_command_returns_none(self):
-        server, dispatcher = self._get_dispatcher()
-        params = lsp.ExecuteCommandParams(
-            command="ivy.noop",
-            arguments=[],
-        )
-        result = await dispatcher(params)
+        _, handler = self._get_command_handler("ivy.noop")
+        assert handler is not None
+        result = await handler()
         assert result is None
 
-    def test_all_lens_commands_in_dispatch_table(self):
-        """Every CodeLens command must be registered in the dispatch table."""
-        _, registered = _register_commands()
-        assert lsp.WORKSPACE_EXECUTE_COMMAND in registered
+    def test_all_lens_commands_registered(self):
+        """Every CodeLens command must be registered via server.command()."""
+        _, _, commands = _register_commands()
 
         expected_commands = [
             "ivy.showActionRequirements",
@@ -84,6 +71,21 @@ class TestExecuteCommandDispatch:
             "ivy.showRfcDetails",
             "ivy.noop",
         ]
-        # Verify all are registered as custom features too
         for cmd in expected_commands:
-            assert cmd in registered, f"{cmd} not registered as a feature"
+            assert cmd in commands, f"{cmd} not registered via server.command()"
+
+    def test_lens_commands_not_double_registered_as_features(self):
+        """CodeLens commands must NOT also be registered as features."""
+        _, features, _ = _register_commands()
+
+        lens_commands = [
+            "ivy.showActionRequirements",
+            "ivy.showPropertyDetails",
+            "ivy.navigateToInclude",
+            "ivy.showRfcDetails",
+            "ivy.noop",
+        ]
+        for cmd in lens_commands:
+            assert cmd not in features, (
+                f"{cmd} is registered as both feature and command (duplicate)"
+            )

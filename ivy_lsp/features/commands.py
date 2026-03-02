@@ -902,13 +902,12 @@ def register(server: Any) -> None:
     # ------------------------------------------------------------------
     # Code-lens command handlers
     #
-    # These are registered both as custom protocol methods (ivy.xxx) for
-    # direct JSON-RPC calls AND via workspace/executeCommand so that
-    # CodeLens clicks work.  The dispatch table is built at the end of
-    # this block.
+    # These are plain async functions registered via server.command() in
+    # the loop at the end of this block.  That single registration path
+    # handles workspace/executeCommand (CodeLens clicks) without the
+    # duplicate-name conflict that @server.feature() would cause.
     # ------------------------------------------------------------------
 
-    @server.feature("ivy.showActionRequirements")
     async def ivy_show_action_requirements(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on monitor/state-var code lenses."""
         from ivy_lsp.features.visualization import handle_action_requirements
@@ -926,7 +925,6 @@ def register(server: Any) -> None:
         proxy = _ServerProxy(_indexer=indexer)
         return handle_action_requirements(proxy, viz_params)
 
-    @server.feature("ivy.showPropertyDetails")
     async def ivy_show_property_details(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on property/axiom/invariant code lenses."""
         prop_id = _extract_param(params, "propertyId")
@@ -951,7 +949,6 @@ def register(server: Any) -> None:
             "formulaText": prop.formula_text,
         }
 
-    @server.feature("ivy.navigateToInclude")
     async def ivy_navigate_to_include(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on include directive code lenses."""
         include_name = _extract_param(params, "includeName")
@@ -1007,7 +1004,6 @@ def register(server: Any) -> None:
 
         return {"resolved": resolved, "uri": "file://" + resolved}
 
-    @server.feature("ivy.showRfcDetails")
     async def ivy_show_rfc_details(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on RFC tag code lenses."""
         tag = _extract_param(params, "tag")
@@ -1030,7 +1026,6 @@ def register(server: Any) -> None:
             "text": getattr(node, "text", None),
         }
 
-    @server.feature("ivy.noop")
     async def ivy_noop(params: Any = None) -> None:
         """No-op command for informational code lenses."""
         return None
@@ -1047,18 +1042,22 @@ def register(server: Any) -> None:
         "ivy.noop": ivy_noop,
     }
 
-    @server.feature(
-        lsp.WORKSPACE_EXECUTE_COMMAND,
-        lsp.ExecuteCommandOptions(commands=list(_LENS_COMMANDS.keys())),
-    )
-    async def execute_command(
-        params: lsp.ExecuteCommandParams,
-    ) -> Optional[Dict[str, Any]]:
-        """Dispatch workspace/executeCommand to code-lens handlers."""
-        handler = _LENS_COMMANDS.get(params.command)
-        if handler is None:
-            return {"error": f"Unknown command: {params.command!r}"}
-        return await handler(params.arguments)
+    # Register each code-lens command via @server.command() so pygls'
+    # ServerCapabilitiesBuilder includes them in executeCommandProvider.
+    # This is the sole registration path for these commands.
+    def _make_command_adapter(feature_handler):
+        """Adapt feature handler for pygls command dispatch.
+
+        pygls' _prepare_command_arguments with *args passes each
+        params.arguments item as a positional arg. The feature handlers
+        expect a list, so we reconstruct it.
+        """
+        async def _adapter(*args):
+            return await feature_handler(list(args) if args else None)
+        return _adapter
+
+    for _cmd_name, _feature_handler in _LENS_COMMANDS.items():
+        server.command(_cmd_name)(_make_command_adapter(_feature_handler))
 
     @server.feature("ivy/recompileAll")
     async def ivy_recompile_all(params: Any = None) -> Dict[str, Any]:

@@ -58,6 +58,13 @@ class FakeServer:
 
         return decorator
 
+    def command(self, name):
+        def decorator(fn):
+            self._handlers[name] = fn
+            return fn
+
+        return decorator
+
 
 class TestCompiledModelCommand:
     def _setup_server(self):
