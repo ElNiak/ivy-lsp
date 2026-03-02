@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from ivy_lsp import __version__
+from ivy_lsp.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _get_tool_cache() -> Dict[str, bool]:
 # --- Pure handler functions (testable without LSP wiring) ---
 
 
-def handle_server_status(server: Any) -> Dict[str, Any]:
+def handle_server_status(server: IvyServerProtocol) -> Dict[str, Any]:
     mode = "full" if server._full_mode else "light"
     result = server.state_tracker.to_status_dict(
         mode=mode, version=__version__, tools=_get_tool_cache()
@@ -41,7 +42,7 @@ def handle_server_status(server: Any) -> Dict[str, Any]:
     return result
 
 
-def handle_indexer_stats(server: Any) -> Dict[str, Any]:
+def handle_indexer_stats(server: IvyServerProtocol) -> Dict[str, Any]:
     if server._indexer is None:
         return {
             "fileCount": 0,
@@ -66,7 +67,7 @@ def handle_indexer_stats(server: Any) -> Dict[str, Any]:
     }
 
 
-def handle_operation_history(server: Any) -> Dict[str, Any]:
+def handle_operation_history(server: IvyServerProtocol) -> Dict[str, Any]:
     history = server.state_tracker.operation_tracker.get_history()
     ops = []
     for rec in history:
@@ -86,7 +87,7 @@ def handle_operation_history(server: Any) -> Dict[str, Any]:
     return {"operations": ops}
 
 
-def handle_include_graph(server: Any) -> Dict[str, Any]:
+def handle_include_graph(server: IvyServerProtocol) -> Dict[str, Any]:
     if server._indexer is None:
         return {"nodes": [], "edges": []}
     graph = server._indexer._include_graph
@@ -116,7 +117,7 @@ def handle_include_graph(server: Any) -> Dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def handle_reindex(server: Any) -> Dict[str, Any]:
+def handle_reindex(server: IvyServerProtocol) -> Dict[str, Any]:
     if server._indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
@@ -131,7 +132,7 @@ def handle_reindex(server: Any) -> Dict[str, Any]:
         return {"success": False, "message": str(e)}
 
 
-def handle_clear_cache(server: Any) -> Dict[str, Any]:
+def handle_clear_cache(server: IvyServerProtocol) -> Dict[str, Any]:
     if server._indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
@@ -145,7 +146,7 @@ def handle_clear_cache(server: Any) -> Dict[str, Any]:
         return {"success": False, "message": str(e)}
 
 
-def handle_feature_status(server: Any) -> Dict[str, Any]:
+def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
     """Compute per-feature availability status."""
     from ivy_lsp.features.status import IndexingState
 
@@ -303,7 +304,7 @@ def handle_feature_status(server: Any) -> Dict[str, Any]:
     return {"features": features, "analysisPipeline": pipeline_state}
 
 
-def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[str, Any]:
+def handle_deep_index_progress(server: IvyServerProtocol, params: dict | None = None) -> Dict[str, Any]:
     """Return current deep indexing progress.
 
     By default only summary counts are returned.  Pass
@@ -377,7 +378,7 @@ def handle_deep_index_progress(server: Any, params: dict | None = None) -> Dict[
     return result
 
 
-def handle_compilation_progress(server: Any) -> Dict[str, Any]:
+def handle_compilation_progress(server: IvyServerProtocol) -> Dict[str, Any]:
     """Return current bulk compilation progress.
 
     Reads from the unified ``AnalysisPipeline.get_pipeline_state()``
@@ -401,7 +402,7 @@ def handle_compilation_progress(server: Any) -> Dict[str, Any]:
 
 
 def handle_analysis_pipeline_detail(
-    server: Any, params: dict | None = None
+    server: IvyServerProtocol, params: dict | None = None
 ) -> Dict[str, Any]:
     """Combined analysis pipeline detail: tiers, T3 per-file, compilation, bulk, semantic."""
     has_pipeline = getattr(server, "_analysis_pipeline", None) is not None
@@ -463,7 +464,7 @@ def handle_analysis_pipeline_detail(
     }
 
 
-def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
+def handle_test_feature_matrix(server: IvyServerProtocol) -> Dict[str, Any]:
     """Return per-test feature availability matrix."""
     if server._indexer is None:
         return {"tests": []}
@@ -501,7 +502,7 @@ def handle_test_feature_matrix(server: Any) -> Dict[str, Any]:
     return {"tests": tests}
 
 
-def handle_batch_status(server: Any) -> Dict[str, Any]:
+def handle_batch_status(server: IvyServerProtocol) -> Dict[str, Any]:
     """Return all monitoring data in one round-trip."""
     return {
         "serverStatus": handle_server_status(server),

@@ -20,6 +20,7 @@ from ivy_lsp.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
+from ivy_lsp.protocols import IvyServerProtocol
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def _cap_response(response: dict, list_key: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _get_requirement_graph(server: Any) -> Optional[RequirementGraph]:
+def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGraph]:
     """Safely extract the requirement graph from the indexer."""
     try:
         indexer = server._indexer
@@ -156,7 +157,7 @@ def _serialize_state_var(sv: StateVarNode) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def handle_action_requirements(server: Any, params: dict) -> dict:
+def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/actionRequirements request.
 
     Returns per-action requirement breakdown with before/after monitors,
@@ -306,7 +307,7 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def handle_model_summary_table(server: Any, params: dict) -> dict:
+def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/modelSummaryTable request.
 
     Returns a flat summary table with one row per action and aggregated
@@ -412,7 +413,7 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def handle_coverage_gaps(server: Any, params: dict) -> dict:
+def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/coverageGaps request.
 
     Identifies coverage gaps in the formal model:
@@ -547,7 +548,7 @@ def handle_coverage_gaps(server: Any, params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def handle_action_dependency_graph(server: Any, params: dict) -> dict:
+def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/actionDependencyGraph request.
 
     Builds a graph where actions are nodes and edges represent shared
@@ -681,7 +682,7 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def handle_state_machine_view(server: Any, params: dict) -> dict:
+def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/stateMachineView request.
 
     Models the Ivy specification as a state machine where:
@@ -815,7 +816,7 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def handle_layered_overview(server: Any, params: dict) -> dict:
+def handle_layered_overview(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/layeredOverview request.
 
     Groups symbols, actions, state vars, and requirements by file or module.
@@ -893,7 +894,7 @@ def _extract_module(qualified_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def handle_smart_suggestions(server: Any, params: dict) -> dict:
+def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
     """Handle ivy/smartSuggestions request.
 
     Returns context-aware suggestions based on cursor position and
