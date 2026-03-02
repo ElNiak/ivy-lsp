@@ -1555,3 +1555,100 @@ class TestBulkTier3SubmittedCount:
             assert pipeline._bulk_compile_completed == 1
         finally:
             os.unlink(test_file)
+
+
+# ---------------------------------------------------------------------------
+# Stale-generation discard tests (M9 fix coverage)
+# ---------------------------------------------------------------------------
+
+
+class TestStaleGenerationDiscard:
+    """M9: Per-file generation counter discards stale T3 results."""
+
+    def test_tier3_discards_stale_result_after_tier1_rerun(self):
+        """If run_tier1 fires between T3 submit and callback, result is discarded."""
+        model = SemanticModel()
+        mock_compiler_adapter = mock.MagicMock()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=mock_compiler_adapter,
+        )
+
+        filepath = "stale_test.ivy"
+        source_v1 = "# version 1\nrequire x > 0; # [rfc9000:4.1]"
+
+        # T1 sets generation to 1
+        pipeline.run_tier1(source_v1, filepath)
+        assert pipeline._file_generation[filepath] == 1
+
+        # Submit T3 -- capture the callback passed to compile_background
+        captured_callback = []
+
+        def capture_compile_bg(source, fpath, callback):
+            captured_callback.append(callback)
+
+        mock_compiler_adapter.compile_background.side_effect = capture_compile_bg
+
+        pipeline.run_tier3_background(source_v1, filepath)
+        assert len(captured_callback) == 1
+
+        # Simulate file change: T1 runs again (gen becomes 2)
+        source_v2 = "# version 2\nrequire y > 0; # [rfc9000:5.2]"
+        pipeline.run_tier1(source_v2, filepath)
+        assert pipeline._file_generation[filepath] == 2
+
+        # T3 callback fires with stale gen=1 result
+        from ivy_lsp.adapters.protocols import CompileResult
+
+        stale_result = CompileResult(success=True, errors=[])
+        captured_callback[0](stale_result)
+
+        # Stale result should NOT be stored
+        assert filepath not in pipeline._tier3_results
+
+    def test_bulk_tier3_discards_stale_result(self, tmp_path):
+        """Bulk T3 also respects generation counter."""
+        model = SemanticModel()
+        mock_compiler = mock.MagicMock()
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            compiler_manager=mock_compiler,
+        )
+
+        test_file = tmp_path / "bulk_stale.ivy"
+        test_file.write_text("# original content")
+
+        # T1 sets gen=1
+        pipeline.run_tier1(test_file.read_text(), str(test_file))
+
+        # Capture bulk callback
+        callbacks = []
+
+        def capture(source, fpath, cb):
+            callbacks.append((fpath, cb))
+
+        mock_compiler.compile_async.side_effect = capture
+
+        pipeline.run_bulk_tier3([str(test_file)])
+        assert len(callbacks) == 1
+
+        # File changes -> gen becomes 2
+        pipeline.run_tier1("# changed content", str(test_file))
+        assert pipeline._file_generation[str(test_file)] == 2
+
+        # Bulk callback fires with stale gen=1
+        mock_ir = mock.MagicMock()
+        mock_ir.success = True
+        callbacks[0][1](mock_ir)
+
+        # Completion counted (for progress) but model NOT enriched
+        assert pipeline._bulk_compile_completed == 1
+        # Stale result not stored
+        assert str(test_file) not in pipeline._tier3_results
