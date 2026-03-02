@@ -427,6 +427,7 @@ def compute_diagnostics(
                         ),
                         source="ivy-lsp-coverage",
                         code=hint.get("code"),
+                        tags=[lsp.DiagnosticTag.Unnecessary],
                     )
                 )
 

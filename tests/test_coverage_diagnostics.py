@@ -117,3 +117,38 @@ class TestComputeCoverageHints:
         assert not any(
             "pkt_count" in m and "written" in m.lower() for m in messages
         )
+
+
+class TestCoverageHintDiagnosticTags:
+    """M1: Coverage hint diagnostics should use DiagnosticTag.Unnecessary."""
+
+    def test_coverage_hints_carry_unnecessary_tag(self):
+        from unittest.mock import MagicMock
+
+        from lsprotocol import types as lsp
+
+        from ivy_lsp.features.diagnostics import compute_diagnostics
+
+        graph = _build_hint_graph()
+        indexer = MagicMock()
+        indexer._requirement_graph = graph
+        indexer._include_graph = None
+        indexer._resolver = MagicMock()
+
+        fake_result = MagicMock()
+        fake_result.success = True
+        fake_result.errors = []
+
+        source = "#lang ivy1.7\n\ntype cid\n\nrelation pkt_count(C:cid)\n\n"
+        # Add enough lines so line 30 (idle action) exists
+        source += "\n" * 24 + "action idle(x:cid)\n" + "action send_pkt(x:cid)\n"
+        diags = compute_diagnostics(
+            None, source, "/test/quic.ivy",
+            indexer=indexer, parse_result=fake_result,
+        )
+
+        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
+        for d in coverage_diags:
+            assert d.tags is not None, "Coverage hint should have tags"
+            assert lsp.DiagnosticTag.Unnecessary in d.tags
