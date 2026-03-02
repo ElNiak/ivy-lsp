@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -65,12 +66,14 @@ class AnalysisPipeline:
         enrichment_adapter: IAstEnrichmentAdapter,
         compiler_adapter: ICompilerAdapter,
         compiler_manager: Any = None,
+        test_file_resolver: Optional[Callable[[str], Optional[str]]] = None,
     ) -> None:
         self._model = model
         self._parser = parser_adapter
         self._enrichment = enrichment_adapter
         self._compiler = compiler_adapter
         self._compiler_manager = compiler_manager
+        self._test_file_resolver = test_file_resolver
         self._tier1_files: set[str] = set()
         self._tier2_files: set[str] = set()
         # Lock protecting _tier1_files, _tier2_files, and all _tier3_* /
@@ -273,21 +276,27 @@ class AnalysisPipeline:
             with self._state_lock:
                 self._tier3_running = True
                 self._tier3_current_file = filepath
+
+        _on_result_called = False  # Guard against double-decrement in sync path
+
         try:
             if hasattr(self._compiler, "compile_background"):
                 self._compiler.compile_background(source, filepath, _on_result)
             else:
                 # Synchronous fallback
                 result = self._compiler.compile(source, filepath)
+                _on_result_called = True
                 _on_result(result)
         except Exception:
-            if not track_state:
-                with self._state_lock:
-                    self._tier3_pending = max(0, self._tier3_pending - 1)
-            if track_state:
-                with self._state_lock:
-                    self._tier3_running = False
-                    self._tier3_current_file = None
+            if not _on_result_called:
+                # Only decrement if _on_result's finally hasn't already done it
+                if not track_state:
+                    with self._state_lock:
+                        self._tier3_pending = max(0, self._tier3_pending - 1)
+                if track_state:
+                    with self._state_lock:
+                        self._tier3_running = False
+                        self._tier3_current_file = None
             raise
 
     # -- Bulk T1+T2 analysis ---------------------------------------------------
@@ -591,5 +600,28 @@ class AnalysisPipeline:
             self.run_tier1(source, filepath)
             parse_result = self.run_tier2(source, filepath)
         if trigger in ("save", "command"):
-            self.run_tier3_background(source, filepath)
+            t3_source, t3_filepath = source, filepath
+            redirected = False
+            if self._test_file_resolver is not None:
+                test_file = self._test_file_resolver(filepath)
+                if test_file is not None:
+                    try:
+                        with open(test_file) as f:
+                            t3_source = f.read()
+                        t3_filepath = test_file
+                        redirected = True
+                        logger.debug(
+                            "T3 redirected from %s to enclosing test %s",
+                            filepath,
+                            test_file,
+                        )
+                    except OSError:
+                        logger.debug(
+                            "T3 redirect failed: cannot read %s", test_file
+                        )
+            # Non-test module files cannot compile standalone — skip T3
+            if not redirected and not re.search(r'^\s*export\s', source, re.MULTILINE):
+                logger.debug("T3 skipped for module %s: no enclosing test", filepath)
+                return parse_result
+            self.run_tier3_background(t3_source, t3_filepath)
         return parse_result

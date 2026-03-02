@@ -120,7 +120,7 @@ class TestAroundBlock:
         assert "require" in kinds
         assert "ensure" in kinds
 
-    def test_around_mixin_kind_is_before(self):
+    def test_around_mixin_kind_preserved(self):
         source = (
             "around foo.step {\n"
             "    require x > 0;\n"
@@ -128,8 +128,23 @@ class TestAroundBlock:
         )
         reqs, _ = extract_requirements_light(source, FILEPATH)
         assert len(reqs) == 1
-        assert reqs[0].mixin_kind == "before"
+        assert reqs[0].mixin_kind == "around"
         assert reqs[0].monitor_action == "foo.step"
+
+    def test_implement_mixin_kind(self):
+        source = (
+            "implement foo.bar {\n"
+            "    require z > 0;\n"
+            "    ensure result = z + 1;\n"
+            "}\n"
+        )
+        reqs, _ = extract_requirements_light(source, FILEPATH)
+        assert len(reqs) == 2
+        for r in reqs:
+            assert r.mixin_kind == "implement"
+            assert r.monitor_action == "foo.bar"
+        kinds = {r.kind for r in reqs}
+        assert kinds == {"require", "ensure"}
 
 
 # ---------------------------------------------------------------------------
@@ -508,9 +523,9 @@ class TestMixedMonitorsAndActions:
         )
         reqs, _ = extract_requirements_light(source, FILEPATH)
         assert len(reqs) == 2
-        # Both should have mixin_kind "before" (around desugars)
+        kinds = {r.mixin_kind for r in reqs}
+        assert kinds == {"before", "around"}
         for r in reqs:
-            assert r.mixin_kind == "before"
             assert r.monitor_action == "foo.step"
 
     def test_writes_from_multiple_blocks(self):
@@ -678,3 +693,59 @@ class TestLineNumberOrdering:
         assert reqs[0].formula_text == "first"
         assert reqs[1].formula_text == "second"
         assert reqs[2].formula_text == "third"
+
+
+# ---------------------------------------------------------------------------
+# H3: Native block string literal handling
+# ---------------------------------------------------------------------------
+
+
+class TestNativeBlockStringLiterals:
+    """H3: >>> inside C++ string literals should NOT end native blocks."""
+
+    def test_cpp_braces_after_string_with_triple_angle(self):
+        """C++ braces after a string containing >>> should not affect depth.
+
+        When >>> inside a string prematurely terminates the native block
+        scan, any C++ braces after that point corrupt the brace depth
+        counter — returning the wrong closing brace.
+        """
+        from ivy_lsp.analysis.light_mode_extractor import _find_matching_brace
+
+        # The C++ code has: if(1) { ... ">>>" ... }
+        # Without the fix, find(">>>") hits the string literal first,
+        # then the C++ } is treated as Ivy's closing brace.
+        source = (
+            'action foo = { <<< if(1) { std::string s = ">>>"; } >>> }'
+        )
+        open_pos = source.index("{")
+        result = _find_matching_brace(source, open_pos)
+        assert result is not None
+        # Should find the final } (the Ivy brace), not the C++ }
+        assert result == len(source) - 1  # the final } is the last character
+        assert source[result] == "}"
+        # The content between the Ivy braces should span the entire native block
+        assert "<<<" in source[open_pos:result]
+        assert ">>>" in source[open_pos:result]
+
+    def test_require_after_native_with_cpp_braces_and_string(self):
+        """Requirements after a native block with >>> in strings are extracted."""
+        source = (
+            "before foo.step {\n"
+            '    <<< if(1) { std::string s = ">>>"; } >>>\n'
+            "    require x > 0;\n"
+            "}\n"
+        )
+        reqs, _ = extract_requirements_light(source, FILEPATH)
+        assert len(reqs) == 1
+        assert reqs[0].formula_text == "x > 0"
+
+    def test_escaped_quote_inside_native_string(self):
+        """Escaped quotes inside C++ strings should not break parsing."""
+        from ivy_lsp.analysis.light_mode_extractor import _find_matching_brace
+
+        source = r'action foo = { <<< std::string s = "a\">>>b"; >>> }'
+        open_pos = source.index("{")
+        result = _find_matching_brace(source, open_pos)
+        assert result is not None
+        assert source[result] == "}"

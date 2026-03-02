@@ -35,10 +35,10 @@ class ParserSession:
     """
 
     def __enter__(self):
-        self._lock_acquired = _ivy_state_lock.acquire(timeout=60)
+        self._lock_acquired = _ivy_state_lock.acquire(timeout=15)
         if not self._lock_acquired:
             raise TimeoutError(
-                "Failed to acquire Ivy parser state lock within 60s; "
+                "Failed to acquire Ivy parser state lock within 15s; "
                 "another parse may be stuck"
             )
 

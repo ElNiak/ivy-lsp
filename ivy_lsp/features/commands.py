@@ -304,57 +304,6 @@ async def _run_tool(
                 )
 
 
-async def _compile_via_executor(
-    server: Any,
-    ivy_executor: Any,
-    base_path: str,
-    filepath: str,
-    token: Optional[Union[str, int]] = None,
-) -> Dict[str, Any]:
-    """Run ivyc through the Docker-aware IvyExecutor.
-
-    Wraps the synchronous executor.execute() in a thread to avoid
-    blocking the async event loop.
-    """
-    from pathlib import Path as P
-
-    from panther_ivy.api.compiler import generate_compile_commands
-
-    compile_result = generate_compile_commands(
-        ivy_file=P(filepath),
-        base_path=base_path,
-    )
-
-    start = time.monotonic()
-
-    # Run setup + compile in a thread to avoid blocking the event loop
-    loop = asyncio.get_running_loop()
-
-    def _do_compile():
-        ivy_executor.execute(
-            compile_result.setup_commands,
-            workspace_root=os.path.dirname(filepath),
-            timeout=30,
-        )
-        return ivy_executor.execute(
-            compile_result.compile_commands,
-            workspace_root=os.path.dirname(filepath),
-            timeout=300,
-        )
-
-    exec_result = await loop.run_in_executor(None, _do_compile)
-    duration = time.monotonic() - start
-
-    output_lines = (exec_result.stderr + "\n" + exec_result.stdout).splitlines()
-
-    return {
-        "success": exec_result.exit_code == 0,
-        "message": "OK" if exec_result.exit_code == 0 else f"Exit code {exec_result.exit_code}",
-        "output": output_lines,
-        "target": exec_result.target,
-        "duration": duration,
-    }
-
 
 def _redirect_to_enclosing_test(
     server: Any,
@@ -520,24 +469,6 @@ def register(server: Any) -> None:
 
         op_id = _track_start(server, "compile", filepath)
 
-        # Try Docker executor if available
-        ivy_executor = getattr(server, "_ivy_executor", None)
-        ivy_base_path = getattr(server, "_ivy_base_path", None)
-        if ivy_executor is not None and ivy_base_path is not None:
-            try:
-                result = await _compile_via_executor(
-                    server, ivy_executor, ivy_base_path,
-                    filepath, token,
-                )
-                _track_end(server, op_id, result)
-                return result
-            except Exception:
-                logger.warning(
-                    "Docker executor failed; falling back to native subprocess",
-                    exc_info=True,
-                )
-
-        # Native subprocess fallback
         staged_filepath = _resolve_via_staging(server, filepath)
         cmd = ["ivyc", f"target={_validate_ivy_param(target)}", os.path.basename(staged_filepath)]
         try:
@@ -766,7 +697,11 @@ def register(server: Any) -> None:
                 if isinstance(graph, ScopedRequirementModel):
                     graph._compilation_results[test_file] = result
             except AttributeError:
-                pass
+                logger.warning(
+                    "Failed to store compilation result for %s",
+                    test_file,
+                    exc_info=True,
+                )
 
             _track_end(server, op_id, result)
             return result
@@ -986,6 +921,19 @@ def register(server: Any) -> None:
         resolved = resolver.resolve(include_name)
         if not resolved:
             return {"error": f"Cannot resolve include {include_name!r}"}
+
+        # Validate resolved path is within workspace root
+        workspace_root = getattr(indexer, "_workspace_root", None)
+        if workspace_root:
+            real_resolved = os.path.realpath(resolved)
+            real_root = os.path.realpath(workspace_root)
+            if not real_resolved.startswith(real_root + os.sep) and real_resolved != real_root:
+                logger.warning(
+                    "Resolved include %r escapes workspace: %s",
+                    include_name,
+                    resolved,
+                )
+                return {"error": "Resolved path escapes workspace boundary"}
 
         return {"resolved": resolved, "uri": "file://" + resolved}
 

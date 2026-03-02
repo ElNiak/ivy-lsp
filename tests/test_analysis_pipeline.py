@@ -826,3 +826,310 @@ class TestTier2ParseResultReuse:
         )
         returned = pipeline.run_tier2("type cid\n", "test.ivy", parse_result=pre_parsed)
         assert returned is pre_parsed
+
+
+# ---------------------------------------------------------------------------
+# T3 test-file redirection tests
+# ---------------------------------------------------------------------------
+
+
+class TestT3TestFileRedirection:
+    """Verify T3 compilation redirects to the enclosing test file."""
+
+    def test_save_trigger_redirects_t3_to_test_file(self, tmp_path):
+        """When resolver returns a test file, T3 should compile that instead."""
+        # Create a fake test file on disk so the pipeline can read it
+        test_file = tmp_path / "test_quic.ivy"
+        test_file.write_text("include quic_time\ninclude quic_stack\n")
+
+        # Track what source/filepath T3 receives
+        t3_calls = []
+
+        class RecordingCompiler:
+            def compile(self, source, filename):
+                t3_calls.append((source, filename))
+                from ivy_lsp.adapters.protocols import CompileResult
+
+                return CompileResult(success=True, errors=[])
+
+        def resolver(filepath):
+            if filepath == "module.ivy":
+                return str(test_file)
+            return None
+
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=RecordingCompiler(),
+            test_file_resolver=resolver,
+        )
+
+        pipeline.analyze("action foo = {}", "module.ivy", trigger="save")
+
+        assert len(t3_calls) == 1
+        compiled_source, compiled_filepath = t3_calls[0]
+        assert compiled_filepath == str(test_file)
+        assert compiled_source == "include quic_time\ninclude quic_stack\n"
+
+    def test_save_trigger_no_redirect_when_resolver_returns_none(self):
+        """When resolver returns None, T3 compiles the original file."""
+        t3_calls = []
+
+        class RecordingCompiler:
+            def compile(self, source, filename):
+                t3_calls.append((source, filename))
+                from ivy_lsp.adapters.protocols import CompileResult
+
+                return CompileResult(success=True, errors=[])
+
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=RecordingCompiler(),
+            test_file_resolver=lambda fp: None,
+        )
+
+        pipeline.analyze("export action bar = {}", "test_file.ivy", trigger="save")
+
+        assert len(t3_calls) == 1
+        compiled_source, compiled_filepath = t3_calls[0]
+        assert compiled_filepath == "test_file.ivy"
+        assert compiled_source == "export action bar = {}"
+
+    def test_save_trigger_no_redirect_without_resolver(self):
+        """Without a resolver, T3 compiles the original file as before."""
+        t3_calls = []
+
+        class RecordingCompiler:
+            def compile(self, source, filename):
+                t3_calls.append((source, filename))
+                from ivy_lsp.adapters.protocols import CompileResult
+
+                return CompileResult(success=True, errors=[])
+
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=RecordingCompiler(),
+        )
+
+        pipeline.analyze("export action baz = {}", "module.ivy", trigger="save")
+
+        assert len(t3_calls) == 1
+        assert t3_calls[0] == ("export action baz = {}", "module.ivy")
+
+    def test_change_trigger_does_not_invoke_resolver(self):
+        """Change trigger (T1+T2 only) should not touch the resolver."""
+        resolver_calls = []
+
+        def resolver(filepath):
+            resolver_calls.append(filepath)
+            return "/some/test.ivy"
+
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+            test_file_resolver=resolver,
+        )
+
+        pipeline.analyze("action x = {}", "module.ivy", trigger="change")
+
+        assert len(resolver_calls) == 0
+
+    def test_t3_redirect_falls_back_on_unreadable_test_file(self):
+        """If the test file can't be read, T3 falls back to original."""
+        t3_calls = []
+
+        class RecordingCompiler:
+            def compile(self, source, filename):
+                t3_calls.append((source, filename))
+                from ivy_lsp.adapters.protocols import CompileResult
+
+                return CompileResult(success=True, errors=[])
+
+        model = SemanticModel()
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=RecordingCompiler(),
+            test_file_resolver=lambda fp: "/nonexistent/test.ivy",
+        )
+
+        pipeline.analyze("export action x = {}", "module.ivy", trigger="save")
+
+        assert len(t3_calls) == 1
+        assert t3_calls[0] == ("export action x = {}", "module.ivy")
+
+
+# ---------------------------------------------------------------------------
+# C1: Tier 3 double-decrement regression test
+# ---------------------------------------------------------------------------
+
+
+import threading
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# C2: Bulk compilation graph enrichment thread safety
+# ---------------------------------------------------------------------------
+
+
+class TestBulkCompilationThreadSafety:
+    """C2: Verify concurrent graph enrichment doesn't corrupt data."""
+
+    def test_concurrent_add_action(self):
+        """Multiple threads adding actions concurrently should not lose data."""
+        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
+
+        graph = RequirementGraph()
+        errors = []
+
+        def add_actions(prefix, count):
+            try:
+                for i in range(count):
+                    node = ActionNode(
+                        id=f"{prefix}_{i}",
+                        name=f"action_{prefix}_{i}",
+                        qualified_name=f"mod.action_{prefix}_{i}",
+                        file=f"/test/{prefix}.ivy",
+                        line=i,
+                    )
+                    graph.add_action(node)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=add_actions, args=(f"t{i}", 50))
+            for i in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Concurrent enrichment errors: {errors}"
+        assert len(graph.actions) == 200  # 4 threads * 50 actions
+
+    def test_concurrent_semantic_model_update(self):
+        """Multiple threads updating SemanticModel concurrently should not lose data."""
+        model = SemanticModel()
+        errors = []
+
+        def add_nodes(prefix, count):
+            try:
+                for i in range(count):
+                    from ivy_lsp.semantic.nodes import RfcAnnotation
+
+                    node = RfcAnnotation(
+                        id=f"{prefix}:{i}",
+                        file=f"/test/{prefix}.ivy",
+                        line=i,
+                        tags=[f"tag_{prefix}_{i}"],
+                    )
+                    model.add_node(node)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=add_nodes, args=(f"t{i}", 50))
+            for i in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Concurrent model update errors: {errors}"
+        assert model.node_count() == 200  # 4 threads * 50 nodes
+
+
+# ---------------------------------------------------------------------------
+# C1: Tier 3 double-decrement regression test
+# ---------------------------------------------------------------------------
+
+
+class TestTier3DoubleDecrement:
+    """C1: Verify _tier3_pending is decremented exactly once on sync error."""
+
+    def test_sync_fallback_no_double_decrement(self):
+        """When _on_result raises internally, pending counter should
+        decrement exactly once, not twice."""
+        model = SemanticModel()
+
+        class SyncOnlyCompiler:
+            """Compiler without compile_background; triggers sync fallback."""
+
+            def compile(self, source, filepath):
+                from ivy_lsp.adapters.protocols import CompileResult
+
+                return CompileResult(success=True, errors=[])
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=SyncOnlyCompiler(),
+        )
+
+        # Patch update_file to raise inside _on_result
+        def raising_update(*args, **kwargs):
+            raise RuntimeError("Simulated update_file failure")
+
+        model.update_file = raising_update
+
+        # Pre-set pending to 1 to detect double-decrement
+        # (if double-decrement happens, it goes from 2 -> 0 instead of 2 -> 1)
+        with pipeline._state_lock:
+            pipeline._tier3_pending = 1
+
+        with pytest.raises(RuntimeError, match="Simulated"):
+            pipeline.run_tier3_background("source", "/test.ivy", track_state=False)
+
+        with pipeline._state_lock:
+            assert pipeline._tier3_pending == 1, (
+                f"Expected 1 pending (pre-set=1 + increment=2 - single decrement=1), "
+                f"got {pipeline._tier3_pending} (double-decrement bug)"
+            )
+
+    def test_sync_fallback_track_state_true_no_double_cleanup(self):
+        """When track_state=True and _on_result raises, running flag should
+        be cleaned up exactly once."""
+        model = SemanticModel()
+
+        class SyncOnlyCompiler:
+            def compile(self, source, filepath):
+                from ivy_lsp.adapters.protocols import CompileResult
+
+                return CompileResult(success=True, errors=[])
+
+        pipeline = AnalysisPipeline(
+            model=model,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=SyncOnlyCompiler(),
+        )
+
+        def raising_update(*args, **kwargs):
+            raise RuntimeError("Simulated update_file failure")
+
+        model.update_file = raising_update
+
+        with pytest.raises(RuntimeError, match="Simulated"):
+            pipeline.run_tier3_background("source", "/test.ivy", track_state=True)
+
+        # After _on_result's finally, running should be False
+        with pipeline._state_lock:
+            assert pipeline._tier3_running is False
+            assert pipeline._tier3_current_file is None

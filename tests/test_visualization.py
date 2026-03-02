@@ -1241,3 +1241,52 @@ class TestVisualizationRegister:
         for name, handler in server._handlers.items():
             result = handler(None)
             assert isinstance(result, dict), f"{name} should handle None params"
+
+
+# ---------------------------------------------------------------------------
+# H4: Numeric parameter validation
+# ---------------------------------------------------------------------------
+
+
+class TestNumericParamValidation:
+    """H4: String-type numeric params should be coerced safely."""
+
+    def test_max_edges_string_coercion_no_error(self):
+        """maxEdges as '1' (string) should not raise TypeError."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        # With string "1", should coerce to int and truncate (not error out)
+        result = handle_action_dependency_graph(server, {"maxEdges": "1"})
+        assert isinstance(result, dict)
+        assert "edges" in result
+        assert len(result["edges"]) <= 1
+
+    def test_max_transitions_string_truncates_correctly(self):
+        """maxTransitions as '1' (string) should truncate to exactly 1 transition."""
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        # First verify >1 transitions with default
+        baseline = handle_state_machine_view(server, {"maxTransitions": 500})
+        baseline_count = len(baseline["transitions"])
+        assert baseline_count > 1, "Test graph needs >1 transitions"
+
+        result = handle_state_machine_view(server, {"maxTransitions": "1"})
+        assert isinstance(result, dict)
+        assert len(result["transitions"]) == 1
+        assert result["truncated"] is True
+
+    def test_max_edges_invalid_string_uses_default(self):
+        """Non-numeric string for maxEdges should fall back to default."""
+        graph = _build_graph_with_shared_state()
+        server = _FakeServer(graph)
+        result = handle_action_dependency_graph(server, {"maxEdges": "not-a-number"})
+        assert isinstance(result, dict)
+        assert "edges" in result
+
+    def test_max_transitions_invalid_string_uses_default(self):
+        """Non-numeric string for maxTransitions should fall back to default."""
+        graph = _build_graph_for_state_machine()
+        server = _FakeServer(graph)
+        result = handle_state_machine_view(server, {"maxTransitions": "not-a-number"})
+        assert isinstance(result, dict)
+        assert "transitions" in result

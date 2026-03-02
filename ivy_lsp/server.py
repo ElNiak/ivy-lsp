@@ -558,6 +558,9 @@ class IvyLanguageServer(LanguageServer):
                     current = completed[0]
                     self._bulk_compile_completed = current
 
+                # Thread-safe: RequirementGraph and SemanticModel use
+                # internal RLock on all mutation methods, so concurrent
+                # enrichment from multiple _on_compile callbacks is safe.
                 if ir.success:
                     try:
                         from ivy_lsp.compilation.graph_enrichment import (

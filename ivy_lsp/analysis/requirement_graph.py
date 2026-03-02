@@ -109,7 +109,7 @@ class RequirementNode:
     col: int  # 0-based
     file: str  # absolute filepath
     monitor_action: str  # action being monitored (mixee)
-    mixin_kind: str  # "before" | "after" | "implement" | "direct"
+    mixin_kind: str  # "before" | "after" | "around" | "implement" | "direct"
     bracket_tags: List[str] = field(default_factory=list)  # parsed from "# [4]" or "# [rfc9000:4.1, rfc9000:8.1]"
     ast_node: Any = None  # reference to original AST node
 
@@ -446,6 +446,11 @@ class RequirementGraph:
             return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
 
     def _rebuild_adjacency(self) -> None:
+        """Rebuild adjacency indices from the edge list.
+
+        IMPORTANT: Caller MUST hold ``self._lock`` before invoking.
+        This method is not thread-safe on its own.
+        """
         self._outgoing = defaultdict(list)
         self._incoming = defaultdict(list)
         for s, t, d in self.edges:

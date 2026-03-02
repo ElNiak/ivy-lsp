@@ -163,7 +163,11 @@ class SemanticModel:
             self._rebuild_adjacency()
 
     def _rebuild_adjacency(self) -> None:
-        """Rebuild adjacency indices from the edge list."""
+        """Rebuild adjacency indices from the edge list.
+
+        IMPORTANT: Caller MUST hold ``self._lock`` before invoking.
+        This method is not thread-safe on its own.
+        """
         self._outgoing = defaultdict(list)
         self._incoming = defaultdict(list)
         for src, etype, dst in self._edges:

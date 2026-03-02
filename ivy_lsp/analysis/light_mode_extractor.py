@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns
 MONITOR_RE = re.compile(
-    r"\b(before|after|around)\s+([\w.]+)\s*(?:\([^)]*\))?\s*\{",
+    r"\b(before|after|around|implement)\s+([\w.]+)\s*(?:\([^)]*\))?\s*\{",
     re.MULTILINE,
 )
 REQUIRE_RE = re.compile(
@@ -90,11 +90,7 @@ def _find_monitor_blocks(
         monitor_action = m.group(2)  # action name
         open_brace_offset = m.end() - 1  # position of the opening brace
 
-        # around desugars to before+after, but we treat it as "before" for now
-        if mixin_kind_raw == "around":
-            mixin_kind = "before"
-        else:
-            mixin_kind = mixin_kind_raw
+        mixin_kind = mixin_kind_raw  # preserve "before", "after", "around", "implement" as-is
 
         # Find the matching closing brace using depth tracking
         start_line = source[:m.start()].count("\n")
@@ -174,11 +170,26 @@ def _find_matching_brace(source: str, open_pos: int) -> Optional[int]:
             continue
 
         # Skip native code blocks: <<< ... >>>
+        # Must skip C++ string literals that might contain >>>
         if ch == "<" and source[i : i + 3] == "<<<":
-            end = source.find(">>>", i + 3)
-            if end == -1:
+            j = i + 3
+            while j < len(source):
+                if source[j] == '"':
+                    # Skip C++ string literal
+                    j += 1
+                    while j < len(source) and source[j] != '"':
+                        if source[j] == '\\':
+                            j += 1  # skip escaped char
+                        j += 1
+                    j += 1  # skip closing quote
+                elif source[j : j + 3] == ">>>":
+                    j += 3
+                    break
+                else:
+                    j += 1
+            else:
                 break  # unterminated native block
-            i = end + 3
+            i = j
             continue
 
         if ch == "{":

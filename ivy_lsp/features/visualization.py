@@ -129,6 +129,7 @@ def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
     return {
         "id": req.id,
         "kind": req.kind,
+        "mixin_kind": req.mixin_kind,
         "formulaText": formula,
         "line": req.line,
         "file": req.file,
@@ -220,9 +221,11 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
         result_actions = []
         for action_id, action_node in paginated_items:
             reqs = snap.get_requirements_for_action(action_id)
-            before = [r for r in reqs if r.mixin_kind in ("before", "direct")]
+            before = [r for r in reqs if r.mixin_kind == "before"]
             after = [r for r in reqs if r.mixin_kind == "after"]
+            around = [r for r in reqs if r.mixin_kind == "around"]
             implement = [r for r in reqs if r.mixin_kind == "implement"]
+            direct = [r for r in reqs if r.mixin_kind == "direct"]
 
             all_tags: Set[str] = set()
             counts: Dict[str, int] = defaultdict(int)
@@ -251,9 +254,9 @@ def handle_action_requirements(server: Any, params: dict) -> dict:
                     "monitors": {
                         "before": [_serialize_requirement(r, snap) for r in before],
                         "after": [_serialize_requirement(r, snap) for r in after],
-                        "direct": [
-                            _serialize_requirement(r, snap) for r in implement
-                        ],
+                        "around": [_serialize_requirement(r, snap) for r in around],
+                        "implement": [_serialize_requirement(r, snap) for r in implement],
+                        "direct": [_serialize_requirement(r, snap) for r in direct],
                     },
                     "stateVarsRead": [
                         _serialize_state_var(sv) for sv in state_vars_read
@@ -333,7 +336,7 @@ def handle_model_summary_table(server: Any, params: dict) -> dict:
 
         for action_id, action_node in snap.actions.items():
             reqs = snap.get_requirements_for_action(action_id)
-            before_reqs = [r for r in reqs if r.mixin_kind in ("before", "direct")]
+            before_reqs = [r for r in reqs if r.mixin_kind == "before"]
             after_reqs = [r for r in reqs if r.mixin_kind == "after"]
 
             before_require = sum(1 for r in before_reqs if r.kind == "require")
@@ -644,7 +647,10 @@ def handle_action_dependency_graph(server: Any, params: dict) -> dict:
                         )
 
         # Cap edges to prevent O(n^2) blowup in large models
-        max_edges = params.get("maxEdges", 500)
+        try:
+            max_edges = int(params.get("maxEdges", 500))
+        except (TypeError, ValueError):
+            max_edges = 500
         truncated = len(edges) > max_edges
         if truncated:
             edges = edges[:max_edges]
@@ -775,7 +781,10 @@ def handle_state_machine_view(server: Any, params: dict) -> dict:
                     )
 
         # Cap transitions to prevent O(n^2) blowup
-        max_transitions = params.get("maxTransitions", 500)
+        try:
+            max_transitions = int(params.get("maxTransitions", 500))
+        except (TypeError, ValueError):
+            max_transitions = 500
         truncated = len(transitions) > max_transitions
         if truncated:
             transitions = transitions[:max_transitions]
