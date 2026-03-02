@@ -503,7 +503,7 @@ async def run_deep_diagnostics(
 
 
 def register(server) -> None:
-    """Register diagnostic handlers for didOpen, didChange, didSave."""
+    """Register diagnostic handlers for didOpen, didChange, didSave, and didClose."""
     _debounce_tasks: Dict[str, asyncio.Task] = {}
 
     def _get_semantic_model():

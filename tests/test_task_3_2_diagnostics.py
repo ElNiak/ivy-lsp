@@ -246,7 +246,7 @@ class TestDidCloseHandler:
     def test_did_close_cancels_debounce_task(self):
         """didClose should cancel any pending debounce task for the closed URI."""
         import asyncio
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         from lsprotocol import types as lsp
 
@@ -266,29 +266,14 @@ class TestDidCloseHandler:
 
         register(server)
 
-        # Simulate a pending debounce task by calling did_change first
-        # We need to access the closure's _debounce_tasks dict.
-        # Instead, we inject a mock task directly via the did_change handler.
-        did_change = handlers[lsp.TEXT_DOCUMENT_DID_CHANGE]
         did_close = handlers[lsp.TEXT_DOCUMENT_DID_CLOSE]
 
         # Create a mock task and inject it into _debounce_tasks via closure
         mock_task = MagicMock(spec=asyncio.Task)
         mock_task.done.return_value = False
 
-        # We can access _debounce_tasks indirectly: the did_close handler
-        # pops from _debounce_tasks. We inject by using the fact that
-        # did_change stores tasks there. Instead, let's monkey-patch:
-        # Access the closure variables through the handler's __code__.
-        # Simpler approach: just put a task in via the closure.
-        # The did_close handler references _debounce_tasks from the enclosing
-        # register() scope. We can access it via __closure__.
-
-        # Find _debounce_tasks in the closure of did_close
+        # Access _debounce_tasks from did_close's closure
         _debounce_tasks = None
-        for cell in did_close.__code__.co_freevars:
-            pass  # just checking names
-        # The closure cells are ordered by co_freevars
         freevars = did_close.__code__.co_freevars
         for i, name in enumerate(freevars):
             if name == "_debounce_tasks":
