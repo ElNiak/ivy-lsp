@@ -310,6 +310,7 @@ def start_mcp(
 
         diagnostics = _check_structural_issues(source, abs_path)
         return json.dumps({
+            "success": True,
             "file": relative_path,
             "diagnostics": diagnostics,
             "diagnostic_count": len(diagnostics),
@@ -383,6 +384,7 @@ def start_mcp(
     async def ivy_capabilities() -> str:
         """Report which Ivy CLI tools are available on PATH."""
         return json.dumps({
+            "success": True,
             "ivy_check": shutil.which("ivy_check") is not None,
             "ivyc": shutil.which("ivyc") is not None,
             "ivy_show": shutil.which("ivy_show") is not None,
