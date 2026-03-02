@@ -432,7 +432,7 @@ def register(server: Any) -> None:
         filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
 
-        isolate, position = _detect_isolate_from_params(server, uri, params)
+        isolate, _ = _detect_isolate_from_params(server, uri, params)
 
         # Redirect module files to their enclosing test
         filepath, isolate, redirected = _redirect_to_enclosing_test(
@@ -530,7 +530,7 @@ def register(server: Any) -> None:
         filepath = uri_to_path(uri)
         token = getattr(params, "workDoneToken", None)
 
-        isolate, position = _detect_isolate_from_params(server, uri, params)
+        isolate, _ = _detect_isolate_from_params(server, uri, params)
 
         # If still no isolate, collect from file + transitive includes
         if isolate is None:
