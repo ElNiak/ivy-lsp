@@ -505,6 +505,7 @@ async def run_deep_diagnostics(
 def register(server) -> None:
     """Register diagnostic handlers for didOpen, didChange, didSave, and didClose."""
     _debounce_tasks: Dict[str, asyncio.Task] = {}
+    _deep_tasks: Dict[str, asyncio.Task] = {}
 
     def _get_semantic_model():
         return getattr(server, "_semantic_model", None)
@@ -633,8 +634,18 @@ def register(server) -> None:
             except Exception:
                 logger.warning("Deep diagnostics task failed for %s", uri, exc_info=True)
 
+        # Cancel any prior deep task for this URI
+        old_deep = _deep_tasks.pop(uri, None)
+        if old_deep and not old_deep.done():
+            old_deep.cancel()
         loop = asyncio.get_running_loop()
-        loop.create_task(_deep())
+        deep_task = loop.create_task(_deep())
+        deep_task.add_done_callback(
+            lambda t, u=uri: _deep_tasks.pop(u, None)
+            if _deep_tasks.get(u) is t
+            else None
+        )
+        _deep_tasks[uri] = deep_task
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
     def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
@@ -643,6 +654,10 @@ def register(server) -> None:
         old_task = _debounce_tasks.pop(uri, None)
         if old_task and not old_task.done():
             old_task.cancel()
+        # Cancel any pending deep diagnostics task
+        old_deep = _deep_tasks.pop(uri, None)
+        if old_deep and not old_deep.done():
+            old_deep.cancel()
         # Clear diagnostics for the closed document
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=[])
