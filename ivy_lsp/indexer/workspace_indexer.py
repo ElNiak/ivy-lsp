@@ -34,6 +34,22 @@ logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
 
 
+def _try_tokenize(source: str, filepath: str) -> Optional[Any]:
+    """Best-effort tokenization for shared token stream caching.
+
+    Returns a TokenStream or None if the lexer is unavailable.
+    Each consumer (fallback_scan, extract_requirements_light,
+    extract_exports_imports_light) falls back to its own tokenization
+    when None is passed.
+    """
+    try:
+        from ivy_lsp.parsing.token_stream import tokenize_ivy
+
+        return tokenize_ivy(source, filepath)
+    except Exception:
+        return None
+
+
 @dataclass
 class SymbolLocation:
     """A symbol together with its source file and range."""
@@ -276,11 +292,17 @@ class WorkspaceIndexer:
                 source = self._read_source(filepath)
                 if source is None:
                     continue
-                reqs, writes = extract_requirements_light(source, filepath)
+                # Tokenize once for requirement + export extraction
+                stream = _try_tokenize(source, filepath)
+                reqs, writes = extract_requirements_light(
+                    source, filepath, token_stream=stream
+                )
                 self._requirement_graph.add_file_requirements(
                     filepath, reqs, writes
                 )
-                info = extract_exports_imports_light(source, filepath)
+                info = extract_exports_imports_light(
+                    source, filepath, token_stream=stream
+                )
                 with self._exports_lock:
                     self._file_export_imports[filepath] = info
                 continue
@@ -292,7 +314,11 @@ class WorkspaceIndexer:
                 )
                 continue
 
-            symbols, _error_info = fallback_scan(source, filepath)
+            # Tokenize once for symbol scanning + requirement + export extraction
+            stream = _try_tokenize(source, filepath)
+            symbols, _error_info = fallback_scan(
+                source, filepath, token_stream=stream
+            )
             includes = self._extract_includes(source)
             self._cache.put(filepath, None, symbols, includes)
 
@@ -311,12 +337,16 @@ class WorkspaceIndexer:
                 if resolved:
                     self._include_graph.add_edge(filepath, resolved)
 
-            reqs, writes = extract_requirements_light(source, filepath)
+            reqs, writes = extract_requirements_light(
+                source, filepath, token_stream=stream
+            )
             self._requirement_graph.add_file_requirements(
                 filepath, reqs, writes
             )
 
-            info = extract_exports_imports_light(source, filepath)
+            info = extract_exports_imports_light(
+                source, filepath, token_stream=stream
+            )
             with self._exports_lock:
                 self._file_export_imports[filepath] = info
 
@@ -348,19 +378,33 @@ class WorkspaceIndexer:
                 reqs_writes = None
                 info = None
                 if source is not None:
-                    reqs, writes = extract_requirements_light(source, filepath)
+                    # Tokenize once for requirement + export extraction
+                    stream = _try_tokenize(source, filepath)
+                    reqs, writes = extract_requirements_light(
+                        source, filepath, token_stream=stream
+                    )
                     reqs_writes = (reqs, writes)
-                    info = extract_exports_imports_light(source, filepath)
+                    info = extract_exports_imports_light(
+                        source, filepath, token_stream=stream
+                    )
                 return filepath, True, cached.symbols, cached.includes, source, reqs_writes, info
 
             source = self._read_source(filepath)
             if source is None:
                 return filepath, False, None, None, None, None, None
 
-            symbols, _error_info = fallback_scan(source, filepath)
+            # Tokenize once for symbol scanning + requirement + export extraction
+            stream = _try_tokenize(source, filepath)
+            symbols, _error_info = fallback_scan(
+                source, filepath, token_stream=stream
+            )
             includes = self._extract_includes(source)
-            reqs, writes = extract_requirements_light(source, filepath)
-            info = extract_exports_imports_light(source, filepath)
+            reqs, writes = extract_requirements_light(
+                source, filepath, token_stream=stream
+            )
+            info = extract_exports_imports_light(
+                source, filepath, token_stream=stream
+            )
             return filepath, False, symbols, includes, source, (reqs, writes), info
 
         # Collect results from thread pool
@@ -471,8 +515,8 @@ class WorkspaceIndexer:
         if use_parallel:
             logger.warning(
                 "Parallel deep indexing uses light-mode extraction only "
-                "(T2/T3 semantic tiers skipped). Set IVY_LSP_PARSE_WORKERS=1 "
-                "for full semantic analysis."
+                "(T2/T3 semantic tiers skipped). Set 'ivy.lsp.parseWorkers' "
+                "to 1 in VS Code settings for full semantic analysis."
             )
             self._deep_index_parallel(test_files, num_workers)
         else:
