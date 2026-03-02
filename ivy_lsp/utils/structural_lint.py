@@ -17,7 +17,7 @@ def check_structural_issues_raw(
     """Fast structural checks without full parsing.
 
     Returns list of dicts with keys: line (1-based int), severity (str),
-    message (str), source (str).
+    message (str), source (str), code (Optional[str]).
     """
     diags: List[Dict[str, Any]] = []
     lines = source.split("\n")
@@ -30,6 +30,7 @@ def check_structural_issues_raw(
             "severity": "warning",
             "message": "Missing '#lang ivy1.7' header",
             "source": "ivy-lint",
+            "code": "missing-lang-header",
         })
 
     # 2. Unmatched braces
@@ -92,6 +93,7 @@ def check_unresolved_includes_raw(
                 "severity": "warning",
                 "message": f"Unresolved include: {inc_name}",
                 "source": "ivy-lint",
+                "code": "unresolved-include",
             })
 
     return diags

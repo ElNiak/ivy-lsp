@@ -356,6 +356,22 @@ def _redirect_to_enclosing_test(
     return enclosing_test, isolate, True
 
 
+def _extract_param(params: Any, dict_key: str) -> Optional[str]:
+    """Extract first argument from LSP command params.
+
+    Handles params as list, dict, or object with .arguments attribute.
+    """
+    if isinstance(params, list) and params:
+        return params[0]
+    if isinstance(params, dict):
+        return params.get(dict_key)
+    if params is not None:
+        args = getattr(params, "arguments", None)
+        if args:
+            return args[0]
+    return None
+
+
 def register(server: Any) -> None:
     """Register custom Ivy command handlers."""
 
@@ -848,15 +864,7 @@ def register(server: Any) -> None:
         """Handle clicks on monitor/state-var code lenses."""
         from ivy_lsp.features.visualization import handle_action_requirements
 
-        action_name = None
-        if isinstance(params, list) and params:
-            action_name = params[0]
-        elif isinstance(params, dict):
-            action_name = params.get("actionName")
-        elif params is not None:
-            args = getattr(params, "arguments", None)
-            if args:
-                action_name = args[0]
+        action_name = _extract_param(params, "actionName")
 
         viz_params: Dict[str, Any] = {}
         if action_name:
@@ -872,15 +880,7 @@ def register(server: Any) -> None:
     @server.feature("ivy.showPropertyDetails")
     async def ivy_show_property_details(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on property/axiom/invariant code lenses."""
-        prop_id = None
-        if isinstance(params, list) and params:
-            prop_id = params[0]
-        elif isinstance(params, dict):
-            prop_id = params.get("propertyId")
-        elif params is not None:
-            args = getattr(params, "arguments", None)
-            if args:
-                prop_id = args[0]
+        prop_id = _extract_param(params, "propertyId")
 
         indexer = getattr(server, "_indexer", None)
         if indexer is None:
@@ -905,15 +905,7 @@ def register(server: Any) -> None:
     @server.feature("ivy.navigateToInclude")
     async def ivy_navigate_to_include(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on include directive code lenses."""
-        include_name = None
-        if isinstance(params, list) and params:
-            include_name = params[0]
-        elif isinstance(params, dict):
-            include_name = params.get("includeName")
-        elif params is not None:
-            args = getattr(params, "arguments", None)
-            if args:
-                include_name = args[0]
+        include_name = _extract_param(params, "includeName")
 
         # Extract from_file for include resolution context
         from_file = None
@@ -961,15 +953,7 @@ def register(server: Any) -> None:
     @server.feature("ivy.showRfcDetails")
     async def ivy_show_rfc_details(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on RFC tag code lenses."""
-        tag = None
-        if isinstance(params, list) and params:
-            tag = params[0]
-        elif isinstance(params, dict):
-            tag = params.get("tag")
-        elif params is not None:
-            args = getattr(params, "arguments", None)
-            if args:
-                tag = args[0]
+        tag = _extract_param(params, "tag")
 
         if not tag:
             return {"error": "No RFC tag provided"}

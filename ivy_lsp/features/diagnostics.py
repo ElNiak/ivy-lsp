@@ -84,6 +84,7 @@ def check_structural_issues(
                 message=entry["message"],
                 severity=severity,
                 source="ivy-lsp",
+                code=entry.get("code"),
             )
         )
     return diags

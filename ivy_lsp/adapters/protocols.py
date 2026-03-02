@@ -2,8 +2,8 @@
 
 Defines runtime-checkable Protocol classes that isolate ivy internal
 imports behind clean interfaces.  Adapters implement these Protocols;
-consumers (SemanticModel, AnalysisPipeline, MCP tools) depend only on
-the Protocols, never on ivy internals directly.
+the AnalysisPipeline depends only on the Protocols, never on ivy
+internals directly.
 """
 
 from __future__ import annotations

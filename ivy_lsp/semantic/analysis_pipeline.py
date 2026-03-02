@@ -129,7 +129,7 @@ class AnalysisPipeline:
         - Parse with parser_adapter (or reuse *parse_result* if provided)
         - Extract type info with enrichment_adapter
         - Build cross-reference edges (HAS_PARAM)
-        - Re-parse RFC annotations to link with AST nodes
+        - Re-parse RFC annotations (coexist with AST nodes; no linking yet)
         - Feed into model.update_file at tier2
 
         Returns the ParseResult so callers can reuse it (avoiding double parse).

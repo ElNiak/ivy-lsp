@@ -10,7 +10,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Literal, Optional, Set, Tuple
 
 from ivy_lsp.analysis.requirement_graph import RequirementGraph, RequirementNode
 
@@ -57,7 +57,7 @@ class TestScope:
     include_closure: FrozenSet[str]
     exported_actions: FrozenSet[str]
     imported_actions: FrozenSet[str]
-    tester_role: str  # "client" | "server" | "mim" | "unknown"
+    tester_role: Literal["client", "server", "mim", "unknown"]
 
     def is_action_exported(self, action_name: str) -> bool:
         return action_name in self.exported_actions
@@ -66,7 +66,7 @@ class TestScope:
         return filepath in self.include_closure
 
 
-def detect_test_role(include_closure: FrozenSet[str]) -> str:
+def detect_test_role(include_closure: FrozenSet[str]) -> Literal["client", "server", "mim", "unknown"]:
     """Derive tester role from included behavior files.
 
     Uses Ivy role inversion: testing a server means tester is client.
