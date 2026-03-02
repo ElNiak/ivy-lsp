@@ -22,6 +22,11 @@ from typing import Any
 
 from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
+from ivy_lsp.verification import (
+    run_ivy_check as shared_ivy_check,
+    run_ivy_compile as shared_ivy_compile,
+    run_ivy_show as shared_ivy_show,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,7 @@ def start_mcp(
     requirement_graph: Any = None,
     docker_image: str | None = None,
     base_path: str | None = None,
+    staging_dir: str | None = None,
     _return_app: bool = False,
 ) -> Any:
     """Start the MCP server exposing Ivy tools.
@@ -74,6 +80,9 @@ def start_mcp(
         docker_image: Docker image for Ivy compilation (e.g. "panther_ivy:latest").
             When set, compilation tools use Docker instead of native subprocess.
         base_path: Base protocol-testing path for compile command generation.
+        staging_dir: Optional staging directory for include resolution.
+            When set, ivy_verify/ivy_compile/ivy_model_info resolve paths
+            through this directory (flat symlinks for CWD-relative includes).
         _return_app: Internal flag for testing. When True, returns the FastMCP
             instance without starting the server.
     """
@@ -138,26 +147,19 @@ def start_mcp(
         if not os.path.isfile(abs_path):
             return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
 
-        cmd = ["ivy_check"]
         if isolate:
             try:
                 _validate_ivy_param(isolate)
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
-            cmd.append(f"isolate={isolate}")
-        cmd.append(abs_path)
 
-        result = await run_ivy_subprocess(cmd, timeout=120.0, cwd=root)
-        raw_output = "\n".join(result.output_lines)
-        diagnostics = _parse_ivy_check_output(raw_output)
-
-        return json.dumps({
-            "success": result.success,
-            "diagnostics": diagnostics,
-            "diagnostic_count": len(diagnostics),
-            "raw_output": raw_output.strip(),
-            "duration_seconds": round(result.duration, 2),
-        })
+        result = await shared_ivy_check(
+            filepath=abs_path,
+            workspace_root=root,
+            isolate=isolate,
+            staging_dir=staging_dir,
+        )
+        return json.dumps(result)
 
     @mcp.tool()
     async def ivy_compile(
@@ -237,19 +239,14 @@ def start_mcp(
                 )
 
         # Direct subprocess fallback
-        cmd = ["ivyc", f"target={target}"]
-        if isolate:
-            cmd.append(f"isolate={isolate}")
-        cmd.append(abs_path)
-
-        result = await run_ivy_subprocess(cmd, timeout=300.0, cwd=root)
-
-        return json.dumps({
-            "success": result.success,
-            "output": "\n".join(result.output_lines).strip(),
-            "target": "host",
-            "duration_seconds": round(result.duration, 2),
-        })
+        result = await shared_ivy_compile(
+            filepath=abs_path,
+            workspace_root=root,
+            target=target,
+            isolate=isolate,
+            staging_dir=staging_dir,
+        )
+        return json.dumps(result)
 
     @mcp.tool()
     async def ivy_model_info(
@@ -274,20 +271,14 @@ def start_mcp(
                 _validate_ivy_param(isolate)
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
-        cmd = ["ivy_show"]
-        if isolate:
-            cmd.append(f"isolate={isolate}")
-        cmd.append(abs_path)
 
-        result = await run_ivy_subprocess(
-            cmd, timeout=30.0, cwd=root, use_semaphore=False,
+        result = await shared_ivy_show(
+            filepath=abs_path,
+            workspace_root=root,
+            isolate=isolate,
+            staging_dir=staging_dir,
         )
-
-        return json.dumps({
-            "success": result.success,
-            "output": "\n".join(result.output_lines).strip(),
-            "duration_seconds": round(result.duration, 2),
-        })
+        return json.dumps(result)
 
     @mcp.tool()
     async def ivy_lint(relative_path: str) -> str:

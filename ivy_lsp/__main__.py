@@ -56,6 +56,7 @@ def main():
             workspace = None
             docker_image = os.environ.get("IVY_DOCKER_IMAGE")
             base_path = os.environ.get("IVY_BASE_PATH")
+            staging_dir = None
 
             for i, arg in enumerate(sys.argv):
                 if arg == "--workspace" and i + 1 < len(sys.argv):
@@ -64,11 +65,14 @@ def main():
                     docker_image = sys.argv[i + 1]
                 elif arg == "--base-path" and i + 1 < len(sys.argv):
                     base_path = sys.argv[i + 1]
+                elif arg == "--staging-dir" and i + 1 < len(sys.argv):
+                    staging_dir = sys.argv[i + 1]
 
             start_mcp(
                 workspace_root=workspace,
                 docker_image=docker_image,
                 base_path=base_path,
+                staging_dir=staging_dir,
             )
         except ImportError as e:
             log.critical(
