@@ -590,6 +590,12 @@ class AnalysisPipeline:
                     completed_count[0] += 1
                     current = completed_count[0]
                     self._bulk_compile_completed = current
+                    # Throttle check under lock to prevent bursts
+                    now = time.time()
+                    is_final = current >= total
+                    should_notify = is_final or (now - last_notify_time[0]) >= 1.0
+                    if should_notify:
+                        last_notify_time[0] = now
 
                 if ir.success:
                     try:
@@ -608,12 +614,7 @@ class AnalysisPipeline:
                             exc_info=True,
                         )
 
-                # Throttle notifications to ~1/sec (always send final)
-                now = time.time()
-                is_final = current >= total
-                if is_final or (now - last_notify_time[0]) >= 1.0:
-                    last_notify_time[0] = now
-
+                if should_notify:
                     if progress_callback is not None:
                         try:
                             progress_callback(current, total, filepath)
