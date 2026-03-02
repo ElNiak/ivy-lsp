@@ -7,7 +7,6 @@ and all query methods.
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -444,10 +443,9 @@ def test_remove_file_preserves_other_file(populated_graph):
 
 
 def test_remove_file_removes_edges(populated_graph):
-    original_edge_count = len(populated_graph.edges)
     populated_graph.remove_file("/test/file_a.ivy")
     # Edges involving file_a nodes should be removed
-    for src, etype, tgt in populated_graph.edges:
+    for src, _etype, _tgt in populated_graph.edges:
         assert "/test/file_a.ivy" not in src or src not in {
             "/test/file_a.ivy:10",
             "/test/file_a.ivy:20",
@@ -653,7 +651,7 @@ def test_wire_dependency_edges_multiple_axioms_and_properties(graph):
     assert (inv1.id, ax.id) in depends_edges
     assert (inv2.id, ax.id) in depends_edges
     # Axiom itself should not depend on anything
-    axiom_as_source = [s for s, t in depends_edges if s == ax.id]
+    axiom_as_source = [s for s, _t in depends_edges if s == ax.id]
     assert len(axiom_as_source) == 0
 
 
@@ -1068,3 +1066,186 @@ class TestEdgeAccumulationOnReindex:
         g.add_file_requirements("/a.ivy", [r2], writes=[("var2", "/a.ivy", 16)])
         writes_after = [e for e in g.edges if e[1] == EdgeType.WRITES]
         assert len(writes_after) == 1
+
+
+# ---------------------------------------------------------------------------
+# Caching: get_active_requirements_for_file version-stamped cache
+# ---------------------------------------------------------------------------
+
+
+class _SpyIncludeGraph:
+    """Include graph mock that counts calls to get_transitive_includes."""
+
+    def __init__(self, result: set | None = None):
+        self._result = result if result is not None else set()
+        self.call_count = 0
+
+    def get_transitive_includes(self, filepath: str) -> set:
+        self.call_count += 1
+        return self._result
+
+
+class TestRequirementGraphCaching:
+    """Tests for the version-stamped cache on get_active_requirements_for_file."""
+
+    def test_repeated_query_uses_cache(self):
+        """Second call with unchanged graph should not re-traverse."""
+        graph = RequirementGraph()
+        graph.add_action(ActionNode(
+            id="act1", name="act1", qualified_name="act1",
+            file="/test.ivy", line=1,
+        ))
+        graph.add_requirement(RequirementNode(
+            id="/test.ivy:5", kind="require", formula_text="x>0",
+            line=5, col=0, file="/test.ivy",
+            monitor_action="act1", mixin_kind="before",
+        ))
+        graph.add_edge("/test.ivy:5", EdgeType.CONSTRAINS, "act1")
+
+        spy = _SpyIncludeGraph()
+        r1 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        r2 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert r1 == r2
+        assert len(r1) == 1
+        # The include graph should only be consulted once (cache hit on 2nd call)
+        assert spy.call_count == 1
+
+    def test_cache_invalidated_after_add_requirement(self):
+        """Adding a requirement should invalidate cached queries."""
+        graph = RequirementGraph()
+        spy = _SpyIncludeGraph()
+
+        r1 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert len(r1) == 0
+        assert spy.call_count == 1
+
+        graph.add_requirement(RequirementNode(
+            id="/test.ivy:5", kind="require", formula_text="x>0",
+            line=5, col=0, file="/test.ivy",
+            monitor_action="act1", mixin_kind="before",
+        ))
+
+        r2 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert len(r2) == 1
+        # Must have re-traversed because the graph version changed
+        assert spy.call_count == 2
+
+    def test_cache_invalidated_after_add_action(self):
+        """add_action bumps version so stale cache is not reused."""
+        graph = RequirementGraph()
+        spy = _SpyIncludeGraph()
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 1
+
+        graph.add_action(ActionNode(
+            id="act1", name="act1", qualified_name="act1",
+            file="/test.ivy", line=1,
+        ))
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 2
+
+    def test_cache_invalidated_after_add_state_var(self):
+        """add_state_var bumps version so stale cache is not reused."""
+        graph = RequirementGraph()
+        spy = _SpyIncludeGraph()
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 1
+
+        graph.add_state_var(StateVarNode(
+            id="var1", name="var1", qualified_name="var1",
+            file="/test.ivy", line=1,
+        ))
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 2
+
+    def test_cache_invalidated_after_add_property(self):
+        """add_property bumps version so stale cache is not reused."""
+        graph = RequirementGraph()
+        spy = _SpyIncludeGraph()
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 1
+
+        graph.add_property(PropertyNode(
+            id="/test.ivy:10", kind="invariant", name="inv1",
+            formula_text="true", file="/test.ivy", line=10,
+        ))
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 2
+
+    def test_cache_invalidated_after_remove_file(self):
+        """remove_file bumps version so stale cache is not reused."""
+        graph = RequirementGraph()
+        graph.add_requirement(RequirementNode(
+            id="/test.ivy:5", kind="require", formula_text="x>0",
+            line=5, col=0, file="/test.ivy",
+            monitor_action="act1", mixin_kind="before",
+        ))
+        spy = _SpyIncludeGraph()
+
+        r1 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert len(r1) == 1
+        assert spy.call_count == 1
+
+        graph.remove_file("/test.ivy")
+
+        r2 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert len(r2) == 0
+        assert spy.call_count == 2
+
+    def test_cache_invalidated_after_add_file_requirements(self):
+        """add_file_requirements bumps version so stale cache is not reused."""
+        graph = RequirementGraph()
+        spy = _SpyIncludeGraph()
+
+        r1 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert len(r1) == 0
+        assert spy.call_count == 1
+
+        req = _make_req("/test.ivy", 5, "require", "x>0", "act1")
+        graph.add_file_requirements("/test.ivy", [req])
+
+        r2 = graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert len(r2) == 1
+        assert spy.call_count == 2
+
+    def test_cache_invalidated_after_add_edge(self):
+        """add_edge bumps version so stale cache is not reused."""
+        graph = RequirementGraph()
+        spy = _SpyIncludeGraph()
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 1
+
+        graph.add_edge("src", EdgeType.READS, "dst")
+
+        graph.get_active_requirements_for_file("/test.ivy", spy)
+        assert spy.call_count == 2
+
+    def test_different_files_cached_independently(self):
+        """Queries for different files should be cached independently."""
+        graph = RequirementGraph()
+        graph.add_requirement(_make_req("/a.ivy", 1, action="act"))
+        graph.add_requirement(_make_req("/b.ivy", 2, action="act"))
+
+        spy = _SpyIncludeGraph()
+
+        ra = graph.get_active_requirements_for_file("/a.ivy", spy)
+        rb = graph.get_active_requirements_for_file("/b.ivy", spy)
+
+        assert len(ra) == 1
+        assert len(rb) == 1
+        assert ra[0].file == "/a.ivy"
+        assert rb[0].file == "/b.ivy"
+        # Both queries needed their own traversal
+        assert spy.call_count == 2
+
+        # Now both should be cached
+        graph.get_active_requirements_for_file("/a.ivy", spy)
+        graph.get_active_requirements_for_file("/b.ivy", spy)
+        assert spy.call_count == 2  # no additional calls

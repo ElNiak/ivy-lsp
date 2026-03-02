@@ -140,16 +140,15 @@ def enrich_requirement_graph(
     from ivy_lsp.analysis.requirement_graph import ActionNode
 
     for action_name in ir.actions:
-        if action_name not in graph.actions:
-            graph.add_action(
-                ActionNode(
-                    id=action_name,
-                    name=action_name.rsplit(".", 1)[-1],
-                    qualified_name=action_name,
-                    file=ir.source_file,
-                    line=0,
-                )
+        graph.add_action_if_absent(
+            ActionNode(
+                id=action_name,
+                name=action_name.rsplit(".", 1)[-1],
+                qualified_name=action_name,
+                file=ir.source_file,
+                line=0,
             )
+        )
 
     logger.debug(
         "Enriched requirement graph from %s: %d actions",

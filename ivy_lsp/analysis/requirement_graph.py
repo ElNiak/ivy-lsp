@@ -213,6 +213,13 @@ class RequirementGraph:
             self.actions[node.id] = node
             self._version += 1
 
+    def add_action_if_absent(self, node: ActionNode) -> None:
+        """Add action only if not already present (atomic check-and-write)."""
+        with self._lock:
+            if node.id not in self.actions:
+                self.actions[node.id] = node
+                self._version += 1
+
     def add_property(self, node: PropertyNode) -> None:
         with self._lock:
             self.properties[node.id] = node
