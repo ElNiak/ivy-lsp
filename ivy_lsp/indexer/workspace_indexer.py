@@ -714,7 +714,14 @@ class WorkspaceIndexer:
                 status.parse_duration = time.time() - file_start
                 if not status.deep_parse_succeeded and result is not None:
                     if hasattr(result, "errors") and result.errors:
-                        status.parse_error = str(result.errors[0])
+                        from ivy_lsp.utils.ivy_output import format_ivy_error
+
+                        err_msg = format_ivy_error(result.errors[0])
+                        status.parse_error = err_msg
+                        self._index_errors.append({
+                            "uri": test_file,
+                            "error": err_msg,
+                        })
                 self._deep_index_progress.file_statuses[test_file] = status
                 self._deep_index_progress.completed_test_files += 1
             self._notify_progress()
@@ -828,6 +835,10 @@ class WorkspaceIndexer:
                 status.last_indexed_at = time.time()
                 if not worker_result.success and worker_result.errors:
                     status.parse_error = worker_result.errors[0]
+                    self._index_errors.append({
+                        "uri": filepath,
+                        "error": status.parse_error,
+                    })
                 self._deep_index_progress.file_statuses[filepath] = status
                 self._deep_index_progress.completed_test_files += 1
             self._notify_progress()

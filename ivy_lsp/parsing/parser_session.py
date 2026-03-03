@@ -200,11 +200,13 @@ class IvyParserWrapper:
                 ast = ip.parse(source)
                 return ParseResult(ast=ast, errors=[], success=True, filename=filename)
             except iu.ErrorList as e:
+                from ivy_lsp.utils.ivy_output import format_ivy_errors
+
                 logger.debug(
                     "Parse errors for %s (%d error(s)): %s",
                     filename,
                     len(e.errors),
-                    "; ".join(str(err) for err in e.errors),
+                    format_ivy_errors(list(e.errors)),
                 )
                 return ParseResult(
                     ast=None,

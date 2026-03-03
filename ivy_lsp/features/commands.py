@@ -21,9 +21,20 @@ logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
 
 
-DEFAULT_VERIFY_TIMEOUT = 120.0
-DEFAULT_COMPILE_TIMEOUT = 300.0
-DEFAULT_SHOW_MODEL_TIMEOUT = 30.0
+def _float_env(name: str, fallback: float, floor: float = 5.0) -> float:
+    """Read a float from an environment variable with a safety floor."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    try:
+        return max(floor, float(raw))
+    except (ValueError, TypeError):
+        return fallback
+
+
+DEFAULT_VERIFY_TIMEOUT = _float_env("IVY_LSP_VERIFY_TIMEOUT", 120.0)
+DEFAULT_COMPILE_TIMEOUT = _float_env("IVY_LSP_TOOL_COMPILE_TIMEOUT", 300.0, floor=10.0)
+DEFAULT_SHOW_MODEL_TIMEOUT = _float_env("IVY_LSP_SHOW_MODEL_TIMEOUT", 30.0)
 
 
 def _find_tool(name: str) -> Optional[str]:
@@ -902,10 +913,11 @@ def register(server: Any) -> None:
     # ------------------------------------------------------------------
     # Code-lens command handlers
     #
-    # These are plain async functions registered via server.command() in
-    # the loop at the end of this block.  That single registration path
-    # handles workspace/executeCommand (CodeLens clicks) without the
-    # duplicate-name conflict that @server.feature() would cause.
+    # These are plain async functions registered via server.feature() in
+    # the loop at the end of this block.  Using server.feature() avoids
+    # executeCommandProvider.commands, which causes vscode-languageclient
+    # v9+ to auto-register VS Code commands, conflicting with the
+    # client-side handlers in extension.ts.
     # ------------------------------------------------------------------
 
     async def ivy_show_action_requirements(params: Any = None) -> Dict[str, Any]:
@@ -1031,7 +1043,7 @@ def register(server: Any) -> None:
         return None
 
     # ------------------------------------------------------------------
-    # workspace/executeCommand dispatcher for CodeLens clicks
+    # CodeLens command registration via server.feature()
     # ------------------------------------------------------------------
 
     _LENS_COMMANDS: Dict[str, Any] = {

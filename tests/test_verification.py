@@ -78,6 +78,7 @@ async def test_run_ivy_check_success():
         assert result["success"] is True
         assert isinstance(result["diagnostics"], list)
         assert "duration_seconds" in result
+        assert "error_summary" in result
         mock_run.assert_called_once()
 
 
@@ -163,7 +164,7 @@ async def test_run_ivy_check_with_isolate():
 
 @pytest.mark.asyncio
 async def test_run_ivy_compile_success():
-    """ivy_compile returns structured result."""
+    """ivy_compile returns structured result with diagnostics."""
     mock_result = SubprocessResult(
         success=True,
         message="OK",
@@ -181,6 +182,10 @@ async def test_run_ivy_compile_success():
         assert result["success"] is True
         assert result["target"] == "test"
         assert "duration_seconds" in result
+        assert isinstance(result["diagnostics"], list)
+        assert result["diagnostic_count"] == 0
+        assert "error_summary" in result
+        assert "raw_output" in result
 
 
 @pytest.mark.asyncio
@@ -214,7 +219,7 @@ async def test_run_ivy_compile_with_isolate():
 
 @pytest.mark.asyncio
 async def test_run_ivy_show_success():
-    """ivy_show returns structured result."""
+    """ivy_show returns structured result with diagnostics."""
     mock_result = SubprocessResult(
         success=True,
         message="OK",
@@ -230,8 +235,11 @@ async def test_run_ivy_show_success():
             workspace_root="/tmp",
         )
         assert result["success"] is True
-        assert result["output"] == "type foo"
+        assert result["raw_output"] == "type foo"
         assert "duration_seconds" in result
+        assert isinstance(result["diagnostics"], list)
+        assert result["diagnostic_count"] == 0
+        assert "error_summary" in result
         # ivy_show should not use the semaphore
         assert mock_run.call_args[1].get("use_semaphore") is False
 
@@ -257,3 +265,118 @@ async def test_run_ivy_check_success_false_when_errors_in_output():
         # success should be False because diagnostics contain errors
         assert result["success"] is False
         assert result["diagnostic_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_compile_with_ivy_error_traceback():
+    """ivy_compile extracts diagnostics from IvyError tracebacks."""
+    mock_result = SubprocessResult(
+        success=False,
+        message="Exit code 1",
+        output_lines=[
+            'Traceback (most recent call last):',
+            '  File "ivy_compiler.py", line 66, in other_thing',
+            '    return self.clone([a.compile() for a in self.args])',
+            "ivy.ivy_utils.IvyError: test.ivy: line 51: "
+            "error: cannot convert argument of type milliseconds to microseconds",
+        ],
+        duration=2.0,
+        returncode=1,
+    )
+    with patch(
+        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_compile(
+            filepath="/tmp/test.ivy",
+            workspace_root="/tmp",
+        )
+        assert result["success"] is False
+        assert result["diagnostic_count"] >= 1
+        assert result["diagnostics"][0]["file"] == "test.ivy"
+        assert result["diagnostics"][0]["line"] == 51
+        assert "milliseconds" in result["diagnostics"][0]["message"]
+        assert result["diagnostics"][0]["source"] == "ivy_error"
+        assert "test.ivy:51:" in result["error_summary"]
+        # raw_output preserves the full traceback
+        assert "Traceback" in result["raw_output"]
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_compile_with_cpp_error():
+    """ivy_compile extracts diagnostics from C++ compiler errors."""
+    mock_result = SubprocessResult(
+        success=False,
+        message="Exit code 1",
+        output_lines=[
+            "/tmp/gen/test.cpp:42:10: error: undeclared identifier 'conn'",
+            "/tmp/gen/test.cpp:99:5: warning: unused variable 'x'",
+        ],
+        duration=3.0,
+        returncode=1,
+    )
+    with patch(
+        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_compile(
+            filepath="/tmp/test.ivy",
+            workspace_root="/tmp",
+        )
+        assert result["success"] is False
+        assert result["diagnostic_count"] == 2
+        errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+        warnings = [d for d in result["diagnostics"] if d["severity"] == "warning"]
+        assert len(errors) == 1
+        assert len(warnings) == 1
+        assert errors[0]["source"] == "cpp_compiler"
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_compile_success_false_when_errors_in_output():
+    """Even if subprocess returns 0, compile reports failure on error diagnostics."""
+    mock_result = SubprocessResult(
+        success=True,
+        message="OK",
+        output_lines=[
+            "ivy.ivy_utils.IvyError: model.ivy: line 10: error: type mismatch",
+        ],
+        duration=1.0,
+        returncode=0,
+    )
+    with patch(
+        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_compile(
+            filepath="/tmp/model.ivy",
+            workspace_root="/tmp",
+        )
+        assert result["success"] is False
+        assert result["diagnostic_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_show_with_error():
+    """ivy_show extracts diagnostics when it fails."""
+    mock_result = SubprocessResult(
+        success=False,
+        message="Exit code 1",
+        output_lines=[
+            "ivy.ivy_utils.IvyError: model.ivy: line 3: error: unknown type",
+        ],
+        duration=0.5,
+        returncode=1,
+    )
+    with patch(
+        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_show(
+            filepath="/tmp/model.ivy",
+            workspace_root="/tmp",
+        )
+        assert result["success"] is False
+        assert result["diagnostic_count"] == 1
+        assert result["diagnostics"][0]["line"] == 3
+        assert "unknown type" in result["error_summary"]

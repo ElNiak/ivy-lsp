@@ -12,7 +12,10 @@ import os
 from typing import Any
 
 from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
-from ivy_lsp.utils.ivy_output import parse_ivy_check_lines
+from ivy_lsp.utils.ivy_output import (
+    extract_error_summary,
+    parse_ivy_output,
+)
 
 log = logging.getLogger(__name__)
 
@@ -76,13 +79,16 @@ async def run_ivy_check(
         cmd, timeout=timeout, cwd=os.path.dirname(resolved)
     )
     raw_output = "\n".join(result.output_lines)
-    diagnostics = parse_ivy_check_lines(raw_output)
+    # Use the unified parser so all three functions return diagnostics
+    # with a consistent schema (including the "source" field).
+    diagnostics = parse_ivy_output(raw_output)
 
     return {
         "success": result.success
         and not any(d["severity"] == "error" for d in diagnostics),
         "diagnostics": diagnostics,
         "diagnostic_count": len(diagnostics),
+        "error_summary": extract_error_summary(raw_output, diagnostics),
         "raw_output": raw_output.strip(),
         "duration_seconds": round(result.duration, 2),
     }
@@ -96,7 +102,7 @@ async def run_ivy_compile(
     staging_dir: str | None = None,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
-    """Run ivyc and return compilation result."""
+    """Run ivyc and return compilation result with structured diagnostics."""
     resolved = resolve_staging_path(filepath, staging_dir)
     cmd = ["ivyc", f"target={target}"]
     if isolate:
@@ -106,10 +112,16 @@ async def run_ivy_compile(
     result = await run_ivy_subprocess(
         cmd, timeout=timeout, cwd=os.path.dirname(resolved)
     )
+    raw_output = "\n".join(result.output_lines).strip()
+    diagnostics = parse_ivy_output(raw_output)
 
     return {
-        "success": result.success,
-        "output": "\n".join(result.output_lines).strip(),
+        "success": result.success
+        and not any(d["severity"] == "error" for d in diagnostics),
+        "diagnostics": diagnostics,
+        "diagnostic_count": len(diagnostics),
+        "error_summary": extract_error_summary(raw_output, diagnostics),
+        "raw_output": raw_output,
         "target": target,
         "duration_seconds": round(result.duration, 2),
     }
@@ -122,7 +134,7 @@ async def run_ivy_show(
     staging_dir: str | None = None,
     timeout: float = 30.0,
 ) -> dict[str, Any]:
-    """Run ivy_show and return model info."""
+    """Run ivy_show and return model info with structured diagnostics."""
     resolved = resolve_staging_path(filepath, staging_dir)
     cmd = ["ivy_show"]
     if isolate:
@@ -135,9 +147,15 @@ async def run_ivy_show(
         cwd=os.path.dirname(resolved),
         use_semaphore=False,
     )
+    raw_output = "\n".join(result.output_lines).strip()
+    diagnostics = parse_ivy_output(raw_output)
 
     return {
-        "success": result.success,
-        "output": "\n".join(result.output_lines).strip(),
+        "success": result.success
+        and not any(d["severity"] == "error" for d in diagnostics),
+        "diagnostics": diagnostics,
+        "diagnostic_count": len(diagnostics),
+        "error_summary": extract_error_summary(raw_output, diagnostics),
+        "raw_output": raw_output,
         "duration_seconds": round(result.duration, 2),
     }

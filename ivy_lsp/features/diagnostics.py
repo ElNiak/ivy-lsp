@@ -20,7 +20,16 @@ DEBOUNCE_DELAY = 0.5  # seconds
 
 
 def _convert_error_to_diagnostic(error: Any, source: str) -> lsp.Diagnostic:
-    """Convert a single Ivy parse error to an LSP Diagnostic."""
+    """Convert a single Ivy parse error to an LSP Diagnostic.
+
+    Handles three error representations:
+    - Error objects with ``.msg`` and ``.lineno`` attributes (IvyError)
+    - Raw parser tuples ``(symbol_name, loc1, loc2, ...)``, formatted
+      via ``format_ivy_error()`` with line extracted from first location
+    - Generic fallback: ``str(error)``
+    """
+    from ivy_lsp.utils.ivy_output import format_ivy_error
+
     line = 0
     message = str(error)
 
@@ -31,6 +40,15 @@ def _convert_error_to_diagnostic(error: Any, source: str) -> lsp.Diagnostic:
 
     if hasattr(error, "msg"):
         message = error.msg
+    elif isinstance(error, tuple) and len(error) >= 1 and isinstance(error[0], str):
+        # Raw parser tuples: (symbol_name, loc1, loc2, ...)
+        message = format_ivy_error(error)
+        # Use the first location with a valid line number
+        for loc in error[1:]:
+            if isinstance(loc, tuple) and len(loc) >= 2:
+                if isinstance(loc[1], int) and loc[1] > 0:
+                    line = loc[1] - 1
+                    break
 
     lines = source.split("\n")
     line_len = len(lines[line]) if line < len(lines) else 0

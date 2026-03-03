@@ -97,6 +97,7 @@ class TestBulkCompilationViaPipeline:
         server._indexer = FakeIndexer(graph)
         server._semantic_model = model
         server._bulk_analysis_cancel = threading.Event()
+        server._shutdown_event = threading.Event()
 
         # Mock protocol for notification tests
         server.protocol = MagicMock()

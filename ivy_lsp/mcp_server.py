@@ -20,6 +20,7 @@ import sys
 import time
 from typing import Any
 
+from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.verification import (
     run_ivy_check as shared_ivy_check,
@@ -213,11 +214,21 @@ def start_mcp(
                 )
                 duration = time.monotonic() - start
 
+                raw_output = (
+                    exec_result.stderr + "\n" + exec_result.stdout
+                ).strip()
+                diagnostics = parse_ivy_output(raw_output)
                 return json.dumps({
-                    "success": exec_result.exit_code == 0,
-                    "output": (
-                        exec_result.stderr + "\n" + exec_result.stdout
-                    ).strip(),
+                    "success": exec_result.exit_code == 0
+                    and not any(
+                        d["severity"] == "error" for d in diagnostics
+                    ),
+                    "diagnostics": diagnostics,
+                    "diagnostic_count": len(diagnostics),
+                    "error_summary": extract_error_summary(
+                        raw_output, diagnostics
+                    ),
+                    "raw_output": raw_output,
                     "target": exec_result.target,
                     "duration_seconds": round(duration, 2),
                 })

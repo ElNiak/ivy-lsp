@@ -1,4 +1,4 @@
-"""Tests for workspace/executeCommand dispatch in commands.py."""
+"""Tests for CodeLens command dispatch in commands.py."""
 
 import sys
 from pathlib import Path
@@ -37,55 +37,51 @@ def _register_commands(server_mock=None):
     return server, features, commands
 
 
-class TestExecuteCommandDispatch:
-    """Verify CodeLens commands are registered via server.command()."""
+LENS_COMMANDS = [
+    "ivy.showActionRequirements",
+    "ivy.showPropertyDetails",
+    "ivy.navigateToInclude",
+    "ivy.showRfcDetails",
+    "ivy.noop",
+]
 
-    def _get_command_handler(self, cmd_name):
-        server, _, commands = _register_commands()
+
+class TestExecuteCommandDispatch:
+    """Verify CodeLens commands are registered via server.feature()."""
+
+    def _get_feature_handler(self, cmd_name):
+        server, features, _ = _register_commands()
         server._indexer = None  # triggers early "No indexer" return
-        return server, commands.get(cmd_name)
+        return server, features.get(cmd_name)
 
     @pytest.mark.asyncio
     async def test_known_command_dispatches(self):
-        _, handler = self._get_command_handler("ivy.showActionRequirements")
+        _, handler = self._get_feature_handler("ivy.showActionRequirements")
         assert handler is not None
-        result = await handler("quic.send")
+        result = await handler(["quic.send"])
         assert isinstance(result, dict)
         assert "error" in result  # "No indexer available"
 
     @pytest.mark.asyncio
     async def test_noop_command_returns_none(self):
-        _, handler = self._get_command_handler("ivy.noop")
+        _, handler = self._get_feature_handler("ivy.noop")
         assert handler is not None
         result = await handler()
         assert result is None
 
-    def test_all_lens_commands_registered(self):
-        """Every CodeLens command must be registered via server.command()."""
-        _, _, commands = _register_commands()
-
-        expected_commands = [
-            "ivy.showActionRequirements",
-            "ivy.showPropertyDetails",
-            "ivy.navigateToInclude",
-            "ivy.showRfcDetails",
-            "ivy.noop",
-        ]
-        for cmd in expected_commands:
-            assert cmd in commands, f"{cmd} not registered via server.command()"
-
-    def test_lens_commands_not_double_registered_as_features(self):
-        """CodeLens commands must NOT also be registered as features."""
+    def test_all_lens_commands_registered_as_features(self):
+        """Every CodeLens command must be registered via server.feature()."""
         _, features, _ = _register_commands()
 
-        lens_commands = [
-            "ivy.showActionRequirements",
-            "ivy.showPropertyDetails",
-            "ivy.navigateToInclude",
-            "ivy.showRfcDetails",
-            "ivy.noop",
-        ]
-        for cmd in lens_commands:
-            assert cmd not in features, (
-                f"{cmd} is registered as both feature and command (duplicate)"
+        for cmd in LENS_COMMANDS:
+            assert cmd in features, f"{cmd} not registered via server.feature()"
+
+    def test_lens_commands_not_in_execute_command_provider(self):
+        """CodeLens commands must NOT be in server.command() (avoids duplicate registration)."""
+        _, _, commands = _register_commands()
+
+        for cmd in LENS_COMMANDS:
+            assert cmd not in commands, (
+                f"{cmd} registered via server.command() — will cause "
+                f"duplicate VS Code command registration"
             )

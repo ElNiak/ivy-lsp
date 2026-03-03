@@ -45,6 +45,13 @@ Install the `vscode-ivy` extension (see `vscode-ivy/README.md`).
 | Hover | `textDocument/hover` | Type signatures and documentation |
 | Completion | `textDocument/completion` | Context-aware suggestions |
 | Diagnostics | `textDocument/publishDiagnostics` | Parse errors, structural warnings |
+| Code Lens | `textDocument/codeLens` | Inline requirement/state annotations |
+| Folding Range | `textDocument/foldingRange` | Collapsible regions |
+| Document Highlight | `textDocument/documentHighlight` | Highlight occurrences |
+| Selection Range | `textDocument/selectionRange` | Smart selection expansion |
+| Rename | `textDocument/rename` | Symbol rename across files |
+| Signature Help | `textDocument/signatureHelp` | Action parameter hints |
+| Code Action | `textDocument/codeAction` | Quick fixes and refactorings |
 
 ## Architecture
 
@@ -75,6 +82,8 @@ LSP Feature Handlers (document symbols, definition, references, etc.)
 - **`parsing/fallback_scanner.py`**: Lexer-based fallback for broken files
 - **`indexer/include_resolver.py`**: Include resolution with 4-step search, two-layer directory filtering, and flat staging
 - **`indexer/workspace_indexer.py`**: Cross-file symbol table with include graph
+- **`utils/ivy_output.py`**: Unified parsers for Ivy tool output (ivy_check, IvyError tracebacks, C++ compiler errors), error formatting, and workspace file discovery
+- **`verification.py`**: Shared verification functions (`run_ivy_check`, `run_ivy_compile`, `run_ivy_show`) used by both LSP and MCP code paths
 - **`features/`**: LSP request handlers
 
 ## Workspace Filtering

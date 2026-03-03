@@ -5,6 +5,53 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-03-03
+
+This is a collapsed entry covering all changes from v0.7.1 through v0.11.0.
+
+### Breaking
+
+- **Verification return schema**: `run_ivy_compile()` and `run_ivy_show()` return dicts now use `"raw_output"` instead of `"output"`. New keys added: `"diagnostics"`, `"diagnostic_count"`, `"error_summary"`. The MCP server JSON responses changed accordingly.
+- **Unified diagnostic schema**: All three verification functions (`run_ivy_check`, `run_ivy_compile`, `run_ivy_show`) now return diagnostics with a `"source"` field (`"ivy_check"`, `"ivy_error"`, or `"cpp_compiler"`).
+
+### Added
+
+- **Unified error parsing** (`ivy_output.py`): `parse_ivy_output()` handles three error formats — standard ivy_check (`file:line: severity: message`), IvyError tracebacks (`ivy.ivy_utils.IvyError: ...`), and C++ compiler errors (`file:line:col: severity: message`). Deduplicates across formats.
+- **Error formatting** (`ivy_output.py`): `format_ivy_error()` and `format_ivy_errors()` for human-readable display of Ivy parser errors, including raw tuples with nested include-chain locations.
+- **Error summary extraction** (`ivy_output.py`): `extract_error_summary()` produces one-liner summaries prioritizing errors > warnings > raw output fallback.
+- **Environment-variable timeouts**: `IVY_LSP_VERIFY_TIMEOUT`, `IVY_LSP_TOOL_COMPILE_TIMEOUT`, `IVY_LSP_SHOW_MODEL_TIMEOUT` with safety floors.
+- **Shared verification module** (`verification.py`): Unified `run_ivy_check`, `run_ivy_compile`, `run_ivy_show` used by both LSP and MCP code paths.
+- **Semantic model and analysis pipeline**: `SemanticModel`, RFC annotations, bracket-tag parsing, 3-tier analysis pipeline (T1: RFC annotations, T2: requirement extraction, T3: background compilation).
+- **Scoped requirement model**: `ScopedRequirementModel` with per-test scoped queries, test scope detection, export/import extraction, and NCT classification.
+- **New LSP features**: `foldingRange`, `documentHighlight`, `selectionRange`, `rename`, `signatureHelp`, `codeAction`, `ivy/setActiveTest`, `ivy/listTests`, `ivy/compileTest`, `ivy/recompileAll`, `ivy/activeDocumentChanged`, `ivy/compiledModel`.
+- **Scope-aware code lenses and diagnostics**: Code lenses and diagnostics respect the active test scope with NCT classification counts.
+- **MCP server mode**: `--mcp` flag starts a Model Context Protocol server exposing Ivy verification, compilation, and semantic tools.
+- **Parallel workspace indexer**: Thread-pool-based parallel parsing for faster workspace indexing.
+- **`textDocument/didClose` handler**: Clears stale diagnostics and cancels pending debounce/deep tasks on file close.
+- **Per-file generation counter**: Discards stale T3 compilation results when source files change during background compilation.
+- **`IvyServerProtocol`**: Typed protocol replacing `server: Any` in feature handler signatures.
+
+### Changed
+
+- **CodeLens commands**: Registered via `server.feature()` instead of `server.command()` to avoid `vscode-languageclient v9+` duplicate command conflicts.
+- **Raw parser tuple handling**: `_convert_error_to_diagnostic` now formats raw parser tuples using `format_ivy_error()` and extracts line numbers from nested location tuples.
+- **Deep diagnostics task tracking**: Tasks tracked in a dict and cancelled on file close or new save.
+- **Document version**: `PublishDiagnosticsParams` now includes document version at all publish sites.
+- **`did_change` handler**: Converted to async for pygls 2.x consistency.
+- **Coverage hint diagnostics**: Use `DiagnosticTag.Unnecessary` and actual line length instead of magic `character=999`.
+- Replaced deprecated `asyncio.get_event_loop()` with `get_running_loop()`.
+- Replaced anonymous proxy types with named dataclasses.
+- Eagerly create progress tokens outside `state_lock` to prevent nested locking.
+
+### Fixed
+
+- **Pipe-break stability**: Clean shutdown with pipe-break callback, background thread safety nets, and silent write cascade handling to prevent crashes on client disconnect.
+- **Duplicate CodeLens command registration**: Removed `server.command()` registrations that caused VS Code startup crashes.
+- **Thread safety**: Per-loop semaphore factory, atomic `add_action_if_absent`, `last_notify_time` under `_state_lock`, nested locking elimination in `to_status_dict`.
+- **Concurrency**: `submitted_count` tracking for accurate partial-cancellation detection in bulk T3 compilation.
+- **`_build_model` caching**: ImportError is cached to prevent repeated import attempts; nonlocal write race fixed.
+- **Import/include handling**: Fixed `NameError: importer not defined` crash, parser state isolation (12 globals saved/restored), symbols attributed to original source file.
+
 ## [0.7.1] - 2026-02-26
 
 ### Added
@@ -127,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace indexer with include resolution.
 - Dual parser: full `IvyParserWrapper` (z3) and `FallbackScanner` (lexer-only error recovery).
 
+[0.11.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.11.0
 [0.7.1]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.7.1
 [0.7.0]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.7.0
 [0.5.4]: https://github.com/ElNiak/ivy-lsp/releases/tag/v0.5.4

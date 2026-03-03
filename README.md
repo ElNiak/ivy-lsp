@@ -54,14 +54,24 @@ languages:
 
 ## Configuration
 
-When running standalone (outside VS Code), configure workspace indexing via environment variables:
+When running standalone (outside VS Code), configure via environment variables:
+
+**Workspace indexing:**
 
 | Variable | Description |
 |----------|-------------|
 | `IVY_LSP_INCLUDE_PATHS` | Comma-separated directories to include (whitelist). When set, only these directories are scanned. |
 | `IVY_LSP_EXCLUDE_PATHS` | Comma-separated directories to exclude, additive to the hardcoded exclusion list. |
 
-When using the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=elniak.ivy-language), these are set automatically from the `ivy.lsp.includePaths` and `ivy.lsp.excludePaths` settings.
+**Tool timeouts:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IVY_LSP_VERIFY_TIMEOUT` | 120 | Timeout in seconds for `ivy_check` verification |
+| `IVY_LSP_TOOL_COMPILE_TIMEOUT` | 300 | Timeout in seconds for `ivyc` compilation |
+| `IVY_LSP_SHOW_MODEL_TIMEOUT` | 30 | Timeout in seconds for `ivy_show` model inspection |
+
+When using the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=elniak.ivy-language), indexing paths are set automatically from the `ivy.lsp.includePaths` and `ivy.lsp.excludePaths` settings.
 
 Standalone example:
 
