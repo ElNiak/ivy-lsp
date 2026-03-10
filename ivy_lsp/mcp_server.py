@@ -95,7 +95,7 @@ def start_mcp(
     executor = None
     if docker_image:
         try:
-            from panther_ivy.api.executor import IvyExecutor
+            from api.executor import IvyExecutor
 
             executor = IvyExecutor(docker_image=docker_image)
             logger.info(
@@ -191,7 +191,7 @@ def start_mcp(
             try:
                 from pathlib import Path as P
 
-                from panther_ivy.api.compiler import generate_compile_commands
+                from api.compiler import generate_compile_commands
 
                 compile_result = generate_compile_commands(
                     ivy_file=P(relative_path),
