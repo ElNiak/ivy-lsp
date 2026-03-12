@@ -40,7 +40,7 @@ class TestCompilerCacheInvalidation:
             indexer.reindex_file("/fake/workspace/file.ivy")
 
         mock_compiler_manager.invalidate_dependents.assert_called_once_with(
-            abs_path, indexer._include_graph
+            abs_path, indexer.include_graph
         )
 
     def test_reindex_file_skips_when_no_pipeline(self):
@@ -78,7 +78,7 @@ class TestCompilerCacheInvalidation:
         dep = os.path.abspath("/fake/workspace/dep.ivy")
 
         # Set up include graph: dep includes base, so changing base dirties dep
-        indexer._include_graph.get_included_by = MagicMock(
+        indexer.include_graph.get_included_by = MagicMock(
             side_effect=lambda f: [dep] if f == base else []
         )
 

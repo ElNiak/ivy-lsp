@@ -131,9 +131,9 @@ class TestCoverageHintDiagnosticTags:
 
         graph = _build_hint_graph()
         indexer = MagicMock()
-        indexer._requirement_graph = graph
-        indexer._include_graph = None
-        indexer._resolver = MagicMock()
+        indexer.requirement_graph = graph
+        indexer.include_graph = None
+        indexer.resolver = MagicMock()
 
         fake_result = MagicMock()
         fake_result.success = True

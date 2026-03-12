@@ -62,9 +62,9 @@ def _cap_response(response: dict, list_key: str) -> dict:
 def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGraph]:
     """Safely extract the requirement graph from the indexer."""
     try:
-        indexer = server._indexer
+        indexer = server.indexer
         if indexer is None:
-            if getattr(server, "_initializing", True):
+            if server.initializing:
                 logger.debug(
                     "_get_requirement_graph: server still initializing"
                 )
@@ -73,13 +73,13 @@ def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGra
                     "_get_requirement_graph: indexer is None (server not initialized?)"
                 )
             return None
-        graph = getattr(indexer, "_requirement_graph", None)
+        graph = indexer.requirement_graph
         if graph is None:
-            logger.warning("_get_requirement_graph: _requirement_graph is None")
+            logger.warning("_get_requirement_graph: requirement_graph is None")
         return graph
     except AttributeError:
         logger.warning(
-            "_get_requirement_graph: AttributeError accessing server._indexer"
+            "_get_requirement_graph: AttributeError accessing server.indexer"
         )
         return None
 
@@ -97,7 +97,7 @@ def _resolve_scope(graph: Any, params: dict) -> dict:
                 test_file = active.test_file
                 scope = active
         else:
-            scope = graph._test_scopes.get(test_file)
+            scope = graph.get_test_scope(test_file)
     return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
 
 
@@ -175,7 +175,7 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
     }
     graph = _get_requirement_graph(server)
     if graph is None:
-        indexer = getattr(server, '_indexer', 'MISSING')
+        indexer = server.indexer
         logger.warning("handle_action_requirements: graph is None, returning modelReady=False")
         _not_ready["_debug"] = f"graph=None, indexer={type(indexer).__name__ if indexer != 'MISSING' else 'MISSING'}"
         return _not_ready

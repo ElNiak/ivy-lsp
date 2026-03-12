@@ -152,9 +152,10 @@ class _FakeServer:
     """Minimal server stub satisfying visualization handler expectations."""
 
     def __init__(self, graph):
-        self._indexer = (
-            type("I", (), {"_requirement_graph": graph})() if graph else None
+        self.indexer = (
+            type("I", (), {"requirement_graph": graph})() if graph else None
         )
+        self.initializing = False
 
 
 # ---------------------------------------------------------------------------
@@ -313,9 +314,10 @@ class TestVisualizationIntegration:
             "S",
             (),
             {
-                "_indexer": type(
-                    "I", (), {"_requirement_graph": _build_realistic_graph()}
+                "indexer": type(
+                    "I", (), {"requirement_graph": _build_realistic_graph()}
                 )(),
+                "initializing": False,
                 "feature": lambda self, name: (
                     lambda fn: handlers.update({name: fn}) or fn
                 ),

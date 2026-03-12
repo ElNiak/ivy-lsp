@@ -251,9 +251,7 @@ def _dot_access_completions(
     indexer, filepath: str, scope_name: str, prefix: str
 ) -> List[lsp.CompletionItem]:
     """Complete children of a named scope (after '.')."""
-    symbols = indexer._symbol_table.lookup_qualified(scope_name)
-    if not symbols:
-        symbols = indexer._symbol_table.lookup(scope_name)
+    symbols = indexer.lookup_qualified_symbols(scope_name)
     if not symbols:
         return []
 
@@ -281,7 +279,7 @@ def _include_completions(
 ) -> List[lsp.CompletionItem]:
     """Complete include filenames."""
     abs_filepath = os.path.abspath(filepath)
-    all_files = indexer._resolver.find_all_ivy_files()
+    all_files = indexer.resolver.find_all_ivy_files()
     items: List[lsp.CompletionItem] = []
     seen: Set[str] = set()
     for fpath in all_files:
@@ -442,7 +440,7 @@ def compute_semantic_completions(
         reqs = graph.get_requirements_for_action(action_name)
         seen_vars: Set[str] = set()
         for req in reqs:
-            for etype, target_id in graph._outgoing.get(req.id, []):
+            for etype, target_id in graph.get_outgoing_edges(req.id):
                 if etype == EdgeType.READS:
                     seen_vars.add(target_id)
 
@@ -500,15 +498,15 @@ def register(server) -> None:
     ) -> Optional[List[lsp.CompletionItem]]:
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
-        if not hasattr(server, "_indexer") or server._indexer is None:
+        if server.indexer is None:
             return None
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
-        graph = getattr(server._indexer, "_requirement_graph", None)
+        graph = server.indexer.requirement_graph
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, lambda: get_completions(
-                server._indexer, filepath, params.position, lines,
+                server.indexer, filepath, params.position, lines,
                 requirement_graph=graph,
             ),
         )

@@ -34,16 +34,16 @@ def _get_tool_cache() -> Dict[str, bool]:
 
 
 def handle_server_status(server: IvyServerProtocol) -> Dict[str, Any]:
-    mode = "full" if server._full_mode else "light"
+    mode = "full" if server.full_mode else "light"
     result = server.state_tracker.to_status_dict(
         mode=mode, version=__version__, tools=_get_tool_cache()
     )
-    result["initializing"] = getattr(server, "_initializing", False)
+    result["initializing"] = getattr(server, "initializing", False)
     return result
 
 
 def handle_indexer_stats(server: IvyServerProtocol) -> Dict[str, Any]:
-    if server._indexer is None:
+    if server.indexer is None:
         return {
             "fileCount": 0,
             "symbolCount": 0,
@@ -54,7 +54,7 @@ def handle_indexer_stats(server: IvyServerProtocol) -> Dict[str, Any]:
             "lastIndexTime": None,
             "lastIndexDuration": None,
         }
-    stats = server._indexer.get_stats()
+    stats = server.indexer.get_stats()
     return {
         "fileCount": stats.file_count,
         "symbolCount": stats.symbol_count,
@@ -88,9 +88,9 @@ def handle_operation_history(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_include_graph(server: IvyServerProtocol) -> Dict[str, Any]:
-    if server._indexer is None:
+    if server.indexer is None:
         return {"nodes": [], "edges": []}
-    graph = server._indexer._include_graph
+    graph = server.indexer.include_graph
 
     # Snapshot dicts before iteration to avoid RuntimeError if
     # background indexing mutates _includes/_included_by concurrently.
@@ -106,7 +106,7 @@ def handle_include_graph(server: IvyServerProtocol) -> Dict[str, Any]:
     for fpath in sorted(all_paths):
         # Normalize to absolute path so get_symbols() cache lookup works
         abs_path = os.path.abspath(fpath)
-        symbol_count = len(server._indexer.get_symbols(abs_path))
+        symbol_count = len(server.indexer.get_symbols(abs_path))
         nodes.append({"uri": abs_path, "symbolCount": symbol_count, "hasErrors": False})
 
     edges = []
@@ -118,12 +118,12 @@ def handle_include_graph(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_reindex(server: IvyServerProtocol) -> Dict[str, Any]:
-    if server._indexer is None:
+    if server.indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
         server.state_tracker.set_indexing()
         start = time.time()
-        server._indexer.reindex()
+        server.indexer.reindex()
         duration = time.time() - start
         server.state_tracker.set_indexed(duration)
         return {"success": True, "message": f"Re-indexed in {duration:.1f}s"}
@@ -133,14 +133,14 @@ def handle_reindex(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_clear_cache(server: IvyServerProtocol) -> Dict[str, Any]:
-    if server._indexer is None:
+    if server.indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
-        resolver = getattr(server._indexer, "_resolver", None)
+        resolver = server.indexer.resolver
         staging = getattr(resolver, "_staging_dir", None) if resolver else None
         if staging and os.path.exists(staging):
             shutil.rmtree(staging)
-        server._indexer.reindex()
+        server.indexer.reindex()
         return {"success": True, "message": "Cache cleared and re-indexed"}
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -151,17 +151,15 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
     from ivy_lsp.features.status import IndexingState
 
     features = []
-    is_full = server._full_mode
-    has_indexer = server._indexer is not None
+    is_full = server.full_mode
+    has_indexer = server.indexer is not None
     indexing = server.state_tracker.indexing_state
     indexer_ok = has_indexer and indexing == IndexingState.IDLE
     indexer_loading = has_indexer and indexing == IndexingState.INDEXING
-    has_graph = has_indexer and getattr(
-        server._indexer, "_requirement_graph", None
-    ) is not None
-    has_pipeline = getattr(server, "_analysis_pipeline", None) is not None
-    has_model = getattr(server, "_semantic_model", None) is not None
-    has_parser = server._parser is not None
+    has_graph = has_indexer and server.indexer.requirement_graph is not None
+    has_pipeline = server.analysis_pipeline is not None
+    has_model = server.semantic_model is not None
+    has_parser = server.parser is not None
 
     # --- Code Lens ---
     if indexer_loading:
@@ -233,11 +231,11 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
             "dependsOn": ["semanticAnalysis"],
         })
     else:
-        model_ready = server._semantic_model.node_count() > 0
+        model_ready = server.semantic_model.node_count() > 0
         rfc_feature: Dict[str, Any] = {
             "id": "rfcCoverage", "name": "RFC Coverage",
             "status": "ready" if model_ready else "degraded",
-            "reason": f"Semantic model active ({server._semantic_model.node_count()} nodes)"
+            "reason": f"Semantic model active ({server.semantic_model.node_count()} nodes)"
             if model_ready else "No data in semantic model yet",
             "dependsOn": ["semanticAnalysis"],
         }
@@ -246,8 +244,8 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
                 from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
                 from ivy_lsp.semantic.rfc_annotations import compute_coverage
 
-                annotations = server._semantic_model.get_nodes_by_type(RfcAnnotation)
-                reqs_list = server._semantic_model.get_nodes_by_type(RfcRequirement)
+                annotations = server.semantic_model.get_nodes_by_type(RfcAnnotation)
+                reqs_list = server.semantic_model.get_nodes_by_type(RfcRequirement)
                 reqs = {r.id: r for r in reqs_list}
                 if reqs:
                     stats = compute_coverage(annotations, reqs)
@@ -299,7 +297,7 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
         "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
     }
     if has_pipeline:
-        pipeline_state = server._analysis_pipeline.get_pipeline_state()
+        pipeline_state = server.analysis_pipeline.get_pipeline_state()
 
     return {"features": features, "analysisPipeline": pipeline_state}
 
@@ -311,7 +309,7 @@ def handle_deep_index_progress(server: IvyServerProtocol, params: dict | None = 
     ``includeFileStatuses: true`` to include the per-file detail array
     (which can be large for workspaces with many test files).
     """
-    if server._indexer is None:
+    if server.indexer is None:
         result: Dict[str, Any] = {
             "running": False,
             "totalTests": 0,
@@ -324,21 +322,19 @@ def handle_deep_index_progress(server: IvyServerProtocol, params: dict | None = 
         if (params or {}).get("includeFileStatuses", False):
             result["fileStatuses"] = []
         return result
-    # Snapshot all progress fields under _progress_lock to avoid
-    # reading a mix of old/new values while the background indexer
-    # updates them.
-    with server._indexer._progress_lock:
-        progress = server._indexer._deep_index_progress
-        running = server._indexer._deep_index_running
-        total_tests = progress.total_test_files
-        completed_tests = progress.completed_test_files
-        current_file = progress.current_file
-        started_at = progress.started_at
-        file_status_count = len(progress.file_statuses)
-        include_files = (params or {}).get("includeFileStatuses", False)
-        file_statuses_snapshot = (
-            list(progress.file_statuses.values()) if include_files else []
-        )
+    # Thread-safe snapshot via the public accessor — all fields are
+    # captured under _progress_lock in a single call.
+    snap = server.indexer.get_deep_index_progress()
+    running = snap["running"]
+    total_tests = snap["total_test_files"]
+    completed_tests = snap["completed_test_files"]
+    current_file = snap["current_file"]
+    started_at = snap["started_at"]
+    file_status_count = snap["file_status_count"]
+    include_files = (params or {}).get("includeFileStatuses", False)
+    file_statuses_snapshot = (
+        list(snap["file_statuses"].values()) if include_files else []
+    )
 
     elapsed = None
     started_at_iso = None
@@ -384,7 +380,7 @@ def handle_compilation_progress(server: IvyServerProtocol) -> Dict[str, Any]:
     Reads from the unified ``AnalysisPipeline.get_pipeline_state()``
     which includes both bulk compile tracking and CompilerManager stats.
     """
-    pipeline = getattr(server, "_analysis_pipeline", None)
+    pipeline = server.analysis_pipeline
     if pipeline is not None:
         ps = pipeline.get_pipeline_state()
         return {
@@ -405,11 +401,11 @@ def handle_analysis_pipeline_detail(
     server: IvyServerProtocol, params: dict | None = None
 ) -> Dict[str, Any]:
     """Combined analysis pipeline detail: tiers, T3 per-file, compilation, bulk, semantic."""
-    has_pipeline = getattr(server, "_analysis_pipeline", None) is not None
+    has_pipeline = server.analysis_pipeline is not None
 
     # Tier counts
     if has_pipeline:
-        ps = server._analysis_pipeline.get_pipeline_state()
+        ps = server.analysis_pipeline.get_pipeline_state()
     else:
         ps = {
             "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
@@ -438,7 +434,7 @@ def handle_analysis_pipeline_detail(
         "pending": ps.get("tier3Pending", 0),
     }
     if include_results and has_pipeline:
-        tier3["results"] = server._analysis_pipeline.get_tier3_file_results()
+        tier3["results"] = server.analysis_pipeline.get_tier3_file_results()
 
     # Compilation status
     compilation = handle_compilation_progress(server)
@@ -466,13 +462,12 @@ def handle_analysis_pipeline_detail(
 
 def handle_test_feature_matrix(server: IvyServerProtocol) -> Dict[str, Any]:
     """Return per-test feature availability matrix."""
-    if server._indexer is None:
+    if server.indexer is None:
         return {"tests": []}
-    # Snapshot under lock to avoid RuntimeError if background indexing mutates dict.
-    with server._indexer._exports_lock:
-        export_imports = dict(server._indexer._file_export_imports)
-    with server._indexer._progress_lock:
-        file_statuses = dict(server._indexer._deep_index_progress.file_statuses)
+    # Thread-safe snapshots via public accessors.
+    export_imports = server.indexer.get_file_export_imports()
+    progress_snap = server.indexer.get_deep_index_progress()
+    file_statuses = progress_snap["file_statuses"]
 
     tests = []
     for filepath, info in export_imports.items():

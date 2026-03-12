@@ -244,7 +244,7 @@ class TestBulkAnalysisEnvVars:
             server._start_bulk_analysis()
 
         # Pipeline should not have been touched
-        assert not hasattr(server._analysis_pipeline, "_bulk_running")
+        assert not hasattr(server.analysis_pipeline, "_bulk_running")
 
     def test_env_disable_t2(self):
         """IVY_LSP_BULK_ANALYSIS_T2=0 should pass include_t2=False."""

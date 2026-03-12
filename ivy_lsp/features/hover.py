@@ -192,15 +192,15 @@ def register(server) -> None:
         try:
             uri = params.text_document.uri
             doc = server.workspace.get_text_document(uri)
-            if not hasattr(server, "_indexer") or server._indexer is None:
+            if server.indexer is None:
                 return None
             lines = doc.source.split("\n") if doc.source else []
             filepath = uri_to_path(uri)
-            model = getattr(server, "_semantic_model", None)
+            model = server.semantic_model
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, get_hover_info,
-                server._indexer, filepath, params.position, lines, model,
+                server.indexer, filepath, params.position, lines, model,
             )
         except Exception:
             logger.warning("hover handler failed", exc_info=True)

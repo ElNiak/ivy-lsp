@@ -56,7 +56,7 @@ def _resolve_via_staging(server: Any, filepath: str) -> str:
     staging directory or the file's basename is not in the staging map.
     """
     try:
-        resolver = server._indexer._resolver
+        resolver = server.indexer.resolver
     except AttributeError:
         return filepath
 
@@ -82,7 +82,7 @@ def _detect_isolate_at_position(
     from ivy_lsp.features.document_symbols import compute_document_symbols
 
     symbols = compute_document_symbols(
-        server._parser, server._indexer, source, filepath
+        server.parser, server.indexer, source, filepath
     )
 
     def _find_containing(
@@ -146,20 +146,19 @@ def _collect_all_isolates(
 
     # Check current file
     symbols = compute_document_symbols(
-        server._parser, server._indexer, source, filepath
+        server.parser, server.indexer, source, filepath
     )
     isolates = _extract_isolate_names(symbols)
 
     # If none found locally, walk transitive includes
     if not isolates:
         try:
-            include_graph = server._indexer._include_graph
-            cache = server._indexer._cache
+            include_graph = server.indexer.include_graph
         except AttributeError:
             return isolates
 
         for included_file in include_graph.get_transitive_includes(filepath):
-            cached = cache.get(included_file)
+            cached = server.indexer.get_cached_file(included_file)
             if cached is None:
                 continue
             for sym in cached.symbols:
@@ -187,7 +186,7 @@ def _find_enclosing_test(
     test scope covers the file or if *filepath* is itself a test.
     """
     try:
-        graph = server._indexer._requirement_graph
+        graph = server.indexer.requirement_graph
     except AttributeError:
         return None
 
@@ -195,7 +194,7 @@ def _find_enclosing_test(
         return None
 
     # If the file IS a test file, no redirection needed
-    if filepath in graph._test_scopes:
+    if graph.has_test_scope(filepath):
         return None
 
     # Prefer the active test scope if it covers this file
@@ -406,7 +405,8 @@ def register(server: Any) -> None:
 
     @dataclass
     class _ServerProxy:
-        _indexer: Any
+        indexer: Any
+        initializing: bool = False
 
     def _track_start(srv: Any, op_type: str, filepath: str) -> Optional[str]:
         tracker = getattr(srv, "state_tracker", None)
@@ -481,7 +481,7 @@ def register(server: Any) -> None:
 
             doc = server.workspace.get_text_document(uri)
             base_diags = compute_diagnostics(
-                server._parser, doc.source or "", filepath, server._indexer
+                server.parser, doc.source or "", filepath, server.indexer
             )
             server.text_document_publish_diagnostics(
                 lsp.PublishDiagnosticsParams(
@@ -593,11 +593,11 @@ def register(server: Any) -> None:
     @server.feature("ivy/capabilities")
     async def ivy_capabilities(params: Any = None) -> Dict[str, Any]:
         return {
-            "fullMode": getattr(server, "_full_mode", False),
+            "fullMode": getattr(server, "full_mode", False),
             "ivyCheckAvailable": _find_tool("ivy_check") is not None,
             "ivycAvailable": _find_tool("ivyc") is not None,
             "ivyShowAvailable": _find_tool("ivy_show") is not None,
-            "compiledModelAvailable": getattr(server, "_compiler_manager", None)
+            "compiledModelAvailable": getattr(server, "compiler_manager", None)
             is not None,
         }
 
@@ -621,7 +621,7 @@ def register(server: Any) -> None:
             filepath = uri_to_path(uri)
             try:
                 diags = compute_diagnostics(
-                    srv._parser, doc.source or "", filepath, srv._indexer
+                    srv.parser, doc.source or "", filepath, srv.indexer
                 )
                 srv.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
@@ -654,10 +654,10 @@ def register(server: Any) -> None:
                 diags = await loop.run_in_executor(
                     None,
                     compute_diagnostics,
-                    srv._parser,
+                    srv.parser,
                     doc.source or "",
                     filepath,
-                    srv._indexer,
+                    srv.indexer,
                 )
                 srv.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
@@ -684,14 +684,14 @@ def register(server: Any) -> None:
         test_file = getattr(params, "testFile", None)
 
         try:
-            graph = server._indexer._requirement_graph
+            graph = server.indexer.requirement_graph
         except AttributeError:
             return {"success": False, "error": "Indexer not available"}
 
         if not isinstance(graph, ScopedRequirementModel):
             return {"success": False, "error": "Scoped model not available"}
 
-        if test_file is not None and test_file not in graph._test_scopes:
+        if test_file is not None and not graph.has_test_scope(test_file):
             active = graph.get_active_scope()
             return {
                 "success": False,
@@ -713,7 +713,7 @@ def register(server: Any) -> None:
     async def ivy_list_tests(params: Any = None) -> Dict[str, Any]:
         """List all discovered test scopes with metadata."""
         try:
-            graph = server._indexer._requirement_graph
+            graph = server.indexer.requirement_graph
         except AttributeError:
             return {"tests": [], "activeTest": None}
 
@@ -721,7 +721,7 @@ def register(server: Any) -> None:
             return {"tests": [], "activeTest": None}
 
         tests = []
-        for _test_file, scope in sorted(graph._test_scopes.items()):
+        for _test_file, scope in graph.iter_test_scopes():
             tests.append({
                 "testFile": scope.test_file,
                 "testerRole": scope.tester_role,
@@ -772,9 +772,9 @@ def register(server: Any) -> None:
 
             # Store compilation result in scoped model if available
             try:
-                graph = server._indexer._requirement_graph
+                graph = server.indexer.requirement_graph
                 if isinstance(graph, ScopedRequirementModel):
-                    graph._compilation_results[test_file] = result
+                    graph.set_compilation_result(test_file, result)
             except AttributeError:
                 logger.warning(
                     "Failed to store compilation result for %s",
@@ -803,14 +803,14 @@ def register(server: Any) -> None:
         filepath = uri_to_path(uri)
 
         try:
-            graph = server._indexer._requirement_graph
+            graph = server.indexer.requirement_graph
         except AttributeError:
             return
 
         if not isinstance(graph, ScopedRequirementModel):
             return
 
-        if filepath not in graph._test_scopes:
+        if not graph.has_test_scope(filepath):
             return  # Non-test file: keep current scope (sticky)
 
         # Check if already the active test (avoid redundant refresh)
@@ -837,7 +837,7 @@ def register(server: Any) -> None:
 
         filepath = uri_to_path(uri)
 
-        manager = getattr(server, "_compiler_manager", None)
+        manager = getattr(server, "compiler_manager", None)
         if manager is None:
             return {"success": False, "error": "CompilerManager not available"}
 
@@ -930,22 +930,22 @@ def register(server: Any) -> None:
         if action_name:
             viz_params["actionName"] = action_name
 
-        indexer = getattr(server, "_indexer", None)
+        indexer = getattr(server, "indexer", None)
         if indexer is None:
             return {"error": "No indexer available"}
 
-        proxy = _ServerProxy(_indexer=indexer)
+        proxy = _ServerProxy(indexer=indexer)
         return handle_action_requirements(proxy, viz_params)
 
     async def ivy_show_property_details(params: Any = None) -> Dict[str, Any]:
         """Handle clicks on property/axiom/invariant code lenses."""
         prop_id = _extract_param(params, "propertyId")
 
-        indexer = getattr(server, "_indexer", None)
+        indexer = getattr(server, "indexer", None)
         if indexer is None:
             return {"error": "No indexer available"}
 
-        graph = getattr(indexer, "_requirement_graph", None)
+        graph = getattr(indexer, "requirement_graph", None)
         if graph is None or prop_id is None:
             return {"error": "No data available"}
 
@@ -985,11 +985,11 @@ def register(server: Any) -> None:
         if not include_name:
             return {"error": "No include name provided"}
 
-        indexer = getattr(server, "_indexer", None)
+        indexer = getattr(server, "indexer", None)
         if indexer is None:
             return {"error": "No indexer available"}
 
-        resolver = getattr(indexer, "_resolver", None)
+        resolver = getattr(indexer, "resolver", None)
         if resolver is None:
             return {"error": "No resolver available"}
 
@@ -1023,7 +1023,7 @@ def register(server: Any) -> None:
         if not tag:
             return {"error": "No RFC tag provided"}
 
-        model = getattr(server, "_semantic_model", None)
+        model = getattr(server, "semantic_model", None)
         if model is None:
             return {"error": "No semantic model available"}
 
@@ -1071,7 +1071,7 @@ def register(server: Any) -> None:
         ``AnalysisPipeline.run_bulk_tier3()`` and returns immediately
         with the test file count.
         """
-        pipeline = getattr(server, "_analysis_pipeline", None)
+        pipeline = getattr(server, "analysis_pipeline", None)
         if pipeline is None:
             return {"success": False, "error": "Analysis pipeline not initialized"}
 
@@ -1083,18 +1083,18 @@ def register(server: Any) -> None:
             return {"success": False, "error": "Bulk compilation already running"}
 
         try:
-            graph = server._indexer._requirement_graph
+            graph = server.indexer.requirement_graph
         except AttributeError:
             return {"success": False, "error": "Requirement graph not available"}
 
         if not isinstance(graph, ScopedRequirementModel):
             return {"success": False, "error": "Scoped model not available"}
 
-        test_files = list(graph._test_scopes.keys())
+        test_files = graph.list_test_files()
         if not test_files:
             return {"success": False, "error": "No test files found"}
 
-        cancel_event = getattr(server, "_bulk_analysis_cancel", None)
+        cancel_event = server.bulk_analysis_cancel
 
         def _run():
             progress_cb = None

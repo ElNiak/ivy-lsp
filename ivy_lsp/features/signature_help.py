@@ -153,7 +153,7 @@ def register(server) -> None:
                 return None
             lines = doc.source.split("\n")
             filepath = uri_to_path(uri)
-            indexer = getattr(server, "_indexer", None)
+            indexer = getattr(server, "indexer", None)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, compute_signature_help, indexer, filepath, lines, params.position,

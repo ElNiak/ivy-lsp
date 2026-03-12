@@ -146,6 +146,34 @@ class ScopedRequirementModel(RequirementGraph):
         self._scope_cache: Dict[Tuple[str, bool], list] = {}
         self._compilation_results: Dict[str, Any] = {}
 
+    # -- Public accessors for test scopes / compilation results ----------
+
+    def has_test_scope(self, test_file: str) -> bool:
+        """Check if a test scope exists for the given file."""
+        return test_file in self._test_scopes
+
+    def get_test_scope(self, test_file: str) -> Optional[TestScope]:
+        """Get the test scope for a file, or None."""
+        return self._test_scopes.get(test_file)
+
+    def list_test_files(self) -> List[str]:
+        """Return a list of all test file paths with scopes."""
+        return list(self._test_scopes.keys())
+
+    def iter_test_scopes(self):
+        """Iterate over (test_file, scope) pairs sorted by filename."""
+        return sorted(self._test_scopes.items())
+
+    def get_compilation_result(self, test_file: str) -> Any:
+        """Get the compilation result for a test file, or None."""
+        return self._compilation_results.get(test_file)
+
+    def set_compilation_result(self, test_file: str, result: Any) -> None:
+        """Store a compilation result for a test file."""
+        self._compilation_results[test_file] = result
+
+    # -- Registration / mutation -------------------------------------------
+
     def register_test_scope(self, scope: TestScope) -> None:
         with self._lock:
             self._test_scopes[scope.test_file] = scope

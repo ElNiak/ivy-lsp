@@ -427,9 +427,9 @@ class TestDiagnosticEndPosition:
             )
         )
         indexer = MagicMock()
-        indexer._requirement_graph = graph
-        indexer._include_graph = None
-        indexer._resolver = MagicMock()
+        indexer.requirement_graph = graph
+        indexer.include_graph = None
+        indexer.resolver = MagicMock()
 
         # Provide a successful parse_result so compute_diagnostics reaches
         # the coverage hint section (it returns early if both parser and
@@ -469,9 +469,9 @@ class TestDiagnosticEndPosition:
             )
         )
         indexer = MagicMock()
-        indexer._requirement_graph = graph
-        indexer._include_graph = None
-        indexer._resolver = MagicMock()
+        indexer.requirement_graph = graph
+        indexer.include_graph = None
+        indexer.resolver = MagicMock()
 
         fake_result = MagicMock()
         fake_result.success = True
@@ -558,10 +558,10 @@ class TestDiagnosticVersion:
             return decorator
 
         server.feature = fake_feature
-        server._parser = None
-        server._indexer = None
-        server._semantic_model = None
-        server._analysis_pipeline = None
+        server.parser = None
+        server.indexer = None
+        server.semantic_model = None
+        server.analysis_pipeline = None
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
@@ -642,10 +642,10 @@ class TestDiagnosticVersion:
             return decorator
 
         server.feature = fake_feature
-        server._parser = None
-        server._indexer = None
-        server._semantic_model = None
-        server._analysis_pipeline = None
+        server.parser = None
+        server.indexer = None
+        server.semantic_model = None
+        server.analysis_pipeline = None
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"

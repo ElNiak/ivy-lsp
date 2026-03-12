@@ -18,6 +18,18 @@ slog = StructuredLogAdapter(logger, {})
 
 DEBOUNCE_DELAY = 0.5  # seconds
 
+# Pre-compiled regex patterns for hot-path performance (Phase 2.1)
+_INCLUDE_RE = re.compile(r"^include\s+(\w+)", re.MULTILINE)
+_ACTION_RE = re.compile(r"^\s*action\s+([\w.]+)", re.MULTILINE)
+_STATE_VAR_RE = re.compile(
+    r"^\s*(?:relation|function|individual|var)\s+([\w.]+)", re.MULTILINE
+)
+_ASSERTION_RE = re.compile(
+    r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
+)
+_TAG_RE = re.compile(r"#\s*\[")
+_EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
+
 
 def _convert_error_to_diagnostic(error: Any, source: str) -> lsp.Diagnostic:
     """Convert a single Ivy parse error to an LSP Diagnostic.
@@ -80,7 +92,7 @@ def check_structural_issues(
     # Include resolution using proper resolver if available
     resolve_cb = None
     if indexer:
-        resolve_cb = indexer._resolver.resolve
+        resolve_cb = indexer.resolver.resolve
     raw.extend(check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb))
 
     lines = source.split("\n")
@@ -123,8 +135,8 @@ def compute_requirement_diagnostics(
     if indexer is None:
         return []
 
-    graph = getattr(indexer, "_requirement_graph", None)
-    include_graph = getattr(indexer, "_include_graph", None)
+    graph = getattr(indexer, "requirement_graph", None)
+    include_graph = getattr(indexer, "include_graph", None)
     if graph is None:
         return []
 
@@ -136,10 +148,10 @@ def compute_requirement_diagnostics(
 
     # 1. Include chain propagation (per-include deduplicated counts)
     if include_graph:
-        resolver = getattr(indexer, "_resolver", None)
+        resolver = getattr(indexer, "resolver", None)
         seen_files: set = set()
 
-        for match in re.finditer(r"^include\s+(\w+)", source, re.MULTILINE):
+        for match in _INCLUDE_RE.finditer(source):
             inc_name = match.group(1)
             line_no = source[: match.start()].count("\n")
             line_text = lines[line_no] if line_no < len(lines) else ""
@@ -205,9 +217,7 @@ def compute_requirement_diagnostics(
     if isinstance(graph, ScopedRequirementModel):
         active_scope = graph.get_active_scope()
 
-    for match in re.finditer(
-        r"^\s*action\s+([\w.]+)", source, re.MULTILINE
-    ):
+    for match in _ACTION_RE.finditer(source):
         action_name = match.group(1)
         line_no = source[: match.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
@@ -253,11 +263,7 @@ def compute_requirement_diagnostics(
 
     # 3. High-impact state variables (Info, threshold: 5+ readers)
     impact_threshold = 5
-    for match in re.finditer(
-        r"^\s*(?:relation|function|individual|var)\s+([\w.]+)",
-        source,
-        re.MULTILINE,
-    ):
+    for match in _STATE_VAR_RE.finditer(source):
         var_name = match.group(1)
         line_no = source[: match.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
@@ -336,14 +342,10 @@ def compute_semantic_diagnostics(
                     )
 
     # Missing tags on assertions (Hint)
-    req_re = re.compile(
-        r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
-    )
-    tag_re = re.compile(r"#\s*\[")
-    for m in req_re.finditer(source):
+    for m in _ASSERTION_RE.finditer(source):
         line_no = source[: m.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
-        if not tag_re.search(line_text):
+        if not _TAG_RE.search(line_text):
             diags.append(
                 lsp.Diagnostic(
                     range=lsp.Range(
@@ -421,7 +423,7 @@ def compute_diagnostics(
 
     # Coverage hint diagnostics (C1)
     if indexer is not None:
-        graph = getattr(indexer, "_requirement_graph", None)
+        graph = getattr(indexer, "requirement_graph", None)
         if graph is not None:
             from ivy_lsp.features.coverage_hints import compute_coverage_hints
 
@@ -532,11 +534,11 @@ def register(server) -> None:
     _deep_tasks: Dict[str, asyncio.Task] = {}
 
     def _get_semantic_model():
-        return getattr(server, "_semantic_model", None)
+        return getattr(server, "semantic_model", None)
 
     def _run_pipeline(source: str, filepath: str, trigger: str) -> Any:
         """Run the analysis pipeline. Returns the ParseResult (or None)."""
-        pipeline = getattr(server, "_analysis_pipeline", None)
+        pipeline = getattr(server, "analysis_pipeline", None)
         if pipeline:
             try:
                 return pipeline.analyze(source, filepath, trigger)
@@ -556,8 +558,8 @@ def register(server) -> None:
         )
         diags = await loop.run_in_executor(
             None, compute_diagnostics,
-            server._parser, source, filepath,
-            server._indexer, _get_semantic_model(),
+            server.parser, source, filepath,
+            server.indexer, _get_semantic_model(),
             pipeline_result,
         )
         server.text_document_publish_diagnostics(
@@ -583,15 +585,15 @@ def register(server) -> None:
                 )
                 diags = await loop.run_in_executor(
                     None, compute_diagnostics,
-                    server._parser, source, filepath,
-                    server._indexer, _get_semantic_model(),
+                    server.parser, source, filepath,
+                    server.indexer, _get_semantic_model(),
                     pipeline_result,
                 )
                 server.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
                 )
             except asyncio.CancelledError:
-                pass
+                logger.debug("Debounced diagnostics task cancelled for %s", uri)
             except Exception:
                 logger.warning("Debounced diagnostics failed for %s", uri, exc_info=True)
 
@@ -616,17 +618,17 @@ def register(server) -> None:
         )
         diags = await loop.run_in_executor(
             None, compute_diagnostics,
-            server._parser, source, filepath,
-            server._indexer, _get_semantic_model(),
+            server.parser, source, filepath,
+            server.indexer, _get_semantic_model(),
             pipeline_result,
         )
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
         )
 
-        if filepath.endswith(".ivy") and server._indexer is not None:
+        if filepath.endswith(".ivy") and server.indexer is not None:
             await loop.run_in_executor(
-                None, server._indexer.reindex_file_with_dependents, filepath
+                None, server.indexer.reindex_file_with_dependents, filepath
             )
 
         doc_version = doc.version
@@ -643,7 +645,7 @@ def register(server) -> None:
                 enclosing = _find_enclosing_test(server, filepath)
                 if enclosing is not None:
                     deep_filepath = _resolve_via_staging(server, enclosing)
-                elif not re.search(r'^\s*export\s', source, re.MULTILINE):
+                elif not _EXPORT_RE.search(source):
                     # Module file without test scope — can't compile standalone
                     return
                 else:
@@ -656,7 +658,7 @@ def register(server) -> None:
                     lsp.PublishDiagnosticsParams(uri=uri, version=doc_version, diagnostics=diags + deep)
                 )
             except asyncio.CancelledError:
-                pass
+                logger.debug("Deep diagnostics task cancelled for %s", uri)
             except Exception:
                 logger.warning("Deep diagnostics task failed for %s", uri, exc_info=True)
 

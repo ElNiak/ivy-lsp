@@ -149,7 +149,7 @@ class TestDiagnosticCodeField:
         # check_structural_issues requires an indexer whose
         # _resolver.resolve() returns None for unresolved includes.
         mock_indexer = MagicMock()
-        mock_indexer._resolver.resolve.return_value = None
+        mock_indexer.resolver.resolve.return_value = None
 
         source = "#lang ivy1.7\ninclude nonexistent\n"
         diags = check_structural_issues(

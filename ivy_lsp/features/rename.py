@@ -31,7 +31,7 @@ def compute_rename(
 
     Args:
         indexer: The :class:`WorkspaceIndexer` instance providing access to
-            the workspace file list via ``indexer._resolver.find_all_ivy_files()``.
+            the workspace file list via ``indexer.resolver.find_all_ivy_files()``.
         filepath: Absolute path of the document containing the cursor.
         position: The cursor position (0-based line and character).
         source_lines: The source of the current document split into lines.
@@ -52,7 +52,7 @@ def compute_rename(
     if indexer is None:
         return None
 
-    all_files = indexer._resolver.find_all_ivy_files()
+    all_files = indexer.resolver.find_all_ivy_files()
     changes: Dict[str, List[lsp.TextEdit]] = {}
 
     for fpath in all_files:
@@ -101,7 +101,7 @@ def register(server) -> None:
             return None
         lines = doc.source.split("\n")
         filepath = uri_to_path(uri)
-        indexer = getattr(server, "_indexer", None)
+        indexer = server.indexer
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, compute_rename, indexer, filepath, params.position,

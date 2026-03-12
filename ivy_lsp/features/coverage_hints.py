@@ -68,11 +68,11 @@ def compute_coverage_hints(
     # Collect vars that are READS-targets of any requirement or property.
     guarded_vars: set[str] = set()
     for req_id in graph.requirements:
-        for etype, target_id in graph._outgoing.get(req_id, []):
+        for etype, target_id in graph.get_outgoing_edges(req_id):
             if etype == EdgeType.READS:
                 guarded_vars.add(target_id)
     for prop_id in graph.properties:
-        for etype, target_id in graph._outgoing.get(prop_id, []):
+        for etype, target_id in graph.get_outgoing_edges(prop_id):
             if etype == EdgeType.READS:
                 guarded_vars.add(target_id)
 

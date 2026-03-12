@@ -48,7 +48,7 @@ class FakeIndexer:
     """Minimal indexer stub."""
 
     def __init__(self, graph):
-        self._requirement_graph = graph
+        self.requirement_graph = graph
 
 
 class _NullAdapter:
