@@ -1,0 +1,57 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-toml
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        files: ^(ivy_lsp|tests)/.*\.py$
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        files: ^(ivy_lsp|tests)/.*\.py$
+        args: ["--profile", "black"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        files: ^(ivy_lsp|tests)/.*\.py$
+        args: ["--select=D"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.2
+    hooks:
+      - id: flake8
+        files: ^(ivy_lsp|tests)/.*\.py$
+        args: ["--max-line-length=88", "--extend-ignore=E203,W503"]
+        stages: [manual]
+
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.9.4
+    hooks:
+      - id: bandit
+        files: ^ivy_lsp/.*\.py$
+        args: ["-ll", "-i"]
+        stages: [manual]
+
+  - repo: local
+    hooks:
+      - id: syntax-check
+        name: Syntax Check
+        entry: bash -c 'python -m py_compile "$@"' --
+        language: system
+        files: ^(ivy_lsp|tests)/.*\.py$
+        types: [python]

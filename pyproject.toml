@@ -34,9 +34,15 @@ mcp = ["mcp>=1.0", "panther_ms_ivy[z3]", "docker>=7.0"]
 dev = [
     "pytest",
     "pytest-asyncio",
+    "pytest-cov",
     "black",
     "isort",
     "flake8",
+    "ruff",
+    "mypy",
+    "bandit[toml]",
+    "pyright",
+    "pre-commit",
 ]
 
 [project.scripts]
@@ -60,3 +66,99 @@ profile = "black"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=ivy_lsp",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+]
+markers = [
+    "unit: Unit tests (no external dependencies)",
+    "integration: Integration tests (may require external services)",
+    "slow: Slow tests (>10 seconds)",
+]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff.lint]
+select = ["D"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+check_untyped_defs = false
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+pretty = true
+show_error_codes = true
+show_error_context = true
+show_column_numbers = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[tool.pyright]
+include = ["ivy_lsp"]
+exclude = ["**/node_modules", "**/__pycache__", "tests", "build", "dist"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportOptionalSubscript = "warning"
+reportOptionalMemberAccess = "warning"
+reportOptionalCall = "warning"
+reportDuplicateImport = "warning"
+reportUnusedImport = "warning"
+reportUnusedClass = "information"
+reportUnusedFunction = "information"
+reportUnusedVariable = "warning"
+reportIncompatibleMethodOverride = "warning"
+pythonVersion = "3.10"
+pythonPlatform = "All"
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]
+skips = ["B101"]
+severity = "medium"
+
+[tool.coverage.run]
+source = ["ivy_lsp"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__init__.py",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]
+precision = 2
+show_missing = true
