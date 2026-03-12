@@ -52,6 +52,7 @@ def main():
         # MCP server mode: expose Ivy tools via Model Context Protocol
         try:
             from ivy_lsp.mcp_server import start_mcp
+            from ivy_lsp.workspace_detection import detect_ivy_workspace
 
             workspace = None
             docker_image = os.environ.get("IVY_DOCKER_IMAGE")
@@ -68,8 +69,25 @@ def main():
                 elif arg == "--staging-dir" and i + 1 < len(sys.argv):
                     staging_dir = sys.argv[i + 1]
 
+            # Auto-detect workspace scope
+            ws_config = detect_ivy_workspace(
+                start_dir=workspace or os.getcwd(),
+                explicit_workspace=workspace,
+            )
+            log.info(
+                "Workspace detection: root=%s, detected_by=%s, type=%s",
+                ws_config.workspace_root,
+                ws_config.detected_by,
+                ws_config.project_type,
+            )
+            # Propagate detected paths via env for _setup_indexer() downstream
+            if ws_config.include_paths and not os.environ.get("IVY_LSP_INCLUDE_PATHS"):
+                os.environ["IVY_LSP_INCLUDE_PATHS"] = ",".join(ws_config.include_paths)
+            if ws_config.exclude_paths and not os.environ.get("IVY_LSP_EXCLUDE_PATHS"):
+                os.environ["IVY_LSP_EXCLUDE_PATHS"] = ",".join(ws_config.exclude_paths)
+
             start_mcp(
-                workspace_root=workspace,
+                workspace_root=ws_config.workspace_root,
                 docker_image=docker_image,
                 base_path=base_path,
                 staging_dir=staging_dir,

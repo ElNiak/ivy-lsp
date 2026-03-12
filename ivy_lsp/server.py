@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import InvalidStateError
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
@@ -15,6 +16,13 @@ from ivy_lsp import __version__
 from ivy_lsp.features.status import ServerStateTracker
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.utils import uri_to_path
+
+if TYPE_CHECKING:
+    from ivy_lsp.compilation.compiler_manager import CompilerManager
+    from ivy_lsp.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
+    from ivy_lsp.semantic.model import SemanticModel
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -81,7 +89,7 @@ class _ClosedPipeGuardWriter:
                 try:
                     self._on_pipe_break()
                 except Exception:
-                    pass
+                    logger.debug("pipe-break callback failed", exc_info=True)
             return len(data)
 
     def close(self):
@@ -106,15 +114,15 @@ def _patch_pygls_closed_pipe() -> None:
                 ev = getattr(srv, attr, None)
                 if ev is not None:
                     ev.set()
-            indexer = getattr(srv, "_indexer", None)
+            indexer = getattr(srv, "indexer", None)
             if indexer is not None:
                 indexer.request_stop()
-            compiler = getattr(srv, "_compiler_manager", None)
+            compiler = getattr(srv, "compiler_manager", None)
             if compiler is not None:
                 try:
                     compiler.shutdown()
                 except Exception:
-                    pass
+                    logger.debug("compiler shutdown failed during pipe break", exc_info=True)
 
         _original_set_writer(
             self,
@@ -133,14 +141,25 @@ try:
         _pygls_mod, "__version__", None
     ) or _meta_version("pygls")
     if _pygls_ver.startswith("2.0."):
-        _patch_pygls_cancelled_future()
-        _patch_pygls_closed_pipe()
-        logger.debug(
-            "pygls %s patches applied: cancelled_future, closed_pipe_guard",
-            _pygls_ver,
-        )
-except (ImportError, Exception):
-    pass
+        from pygls.protocol.json_rpc import JsonRPCProtocol as _JRP
+
+        _patches_applied = []
+        if hasattr(_JRP, "_handle_response"):
+            _patch_pygls_cancelled_future()
+            _patches_applied.append("cancelled_future")
+        if hasattr(_JRP, "set_writer"):
+            _patch_pygls_closed_pipe()
+            _patches_applied.append("closed_pipe_guard")
+        if _patches_applied:
+            logger.debug(
+                "pygls %s patches applied: %s",
+                _pygls_ver,
+                ", ".join(_patches_applied),
+            )
+except ImportError:
+    logger.debug("pygls not installed or version unavailable, patches skipped")
+except Exception:
+    logger.debug("Failed to apply pygls patches", exc_info=True)
 
 
 class _LspLogHandler(logging.Handler):
@@ -202,7 +221,7 @@ class _LspLogHandler(logging.Handler):
                 min_interval = self._CAT_MIN_INTERVAL.get(
                     cat, self._DEFAULT_MIN_INTERVAL
                 )
-                if getattr(self._server, "_initializing", False):
+                if getattr(self._server, "initializing", False):
                     min_interval = max(min_interval, 1.0)
                 if (now - self._last_emit) < min_interval:
                     cat_key = cat or "_untagged"
@@ -247,24 +266,69 @@ class _LspLogHandler(logging.Handler):
 class IvyLanguageServer(LanguageServer):
     """Language server for Ivy formal specification files."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             name="ivy-language-server",
             version=__version__,
         )
-        self._indexer = None
-        self._parser = None
-        self._full_mode = False
-        self._semantic_model = None
-        self._analysis_pipeline = None
-        self._bulk_analysis_cancel = threading.Event()
-        self._shutdown_event = threading.Event()
-        self.state_tracker = ServerStateTracker()
-        self._compiler_manager = None
-        self._code_lens_enabled = True
-        self._rfc_coverage_enabled = True
-        self._initializing = True
+        self._indexer: "Optional[WorkspaceIndexer]" = None
+        self._parser: "Optional[Any]" = None
+        self._full_mode: bool = False
+        self._semantic_model: "Optional[SemanticModel]" = None
+        self._analysis_pipeline: "Optional[AnalysisPipeline]" = None
+        self._bulk_analysis_cancel: threading.Event = threading.Event()
+        self._shutdown_event: threading.Event = threading.Event()
+        self.state_tracker: ServerStateTracker = ServerStateTracker()
+        self._compiler_manager: "Optional[CompilerManager]" = None
+        self._code_lens_enabled: bool = True
+        self._rfc_coverage_enabled: bool = True
+        self._initializing: bool = True
+        self.__init_features()
 
+    # -- Public property accessors ---
+
+    @property
+    def indexer(self) -> "Optional[WorkspaceIndexer]":
+        """Public accessor for the workspace indexer."""
+        return self._indexer
+
+    @property
+    def parser(self) -> "Optional[Any]":
+        """Public accessor for the Ivy parser."""
+        return self._parser
+
+    @property
+    def full_mode(self) -> bool:
+        """Whether the server is running in full (Z3) mode."""
+        return self._full_mode
+
+    @property
+    def semantic_model(self) -> "Optional[SemanticModel]":
+        """Public accessor for the semantic model."""
+        return self._semantic_model
+
+    @property
+    def analysis_pipeline(self) -> "Optional[AnalysisPipeline]":
+        """Public accessor for the analysis pipeline."""
+        return self._analysis_pipeline
+
+    @property
+    def compiler_manager(self) -> "Optional[CompilerManager]":
+        """Public accessor for the compiler manager."""
+        return self._compiler_manager
+
+    @property
+    def initializing(self) -> bool:
+        """Whether the server is currently initializing."""
+        return self._initializing
+
+    @property
+    def bulk_analysis_cancel(self) -> threading.Event:
+        """Public accessor for the bulk analysis cancel event."""
+        return self._bulk_analysis_cancel
+
+    def __init_features(self):
+        # -- Feature registration (below) ---
         from ivy_lsp.features import (
             code_action,
             code_lens,
@@ -376,9 +440,9 @@ class IvyLanguageServer(LanguageServer):
 
     def _cleanup_staging(self) -> None:
         """Clean up the staging directory on shutdown."""
-        if self._indexer and hasattr(self._indexer, "_resolver"):
+        if self._indexer:
             try:
-                self._indexer._resolver.cleanup_staging()
+                self._indexer.resolver.cleanup_staging()
                 slog.info(
                     "Staging directory cleaned up",
                     extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "staging")},
@@ -391,7 +455,7 @@ class IvyLanguageServer(LanguageServer):
         if self._shutdown_event.is_set():
             return
         try:
-            graph = getattr(self._indexer, "_requirement_graph", None)
+            graph = self._indexer.requirement_graph if self._indexer else None
             action_count = len(graph.actions) if graph else 0
             req_count = len(graph.requirements) if graph else 0
             self.protocol.notify(
@@ -651,7 +715,7 @@ class IvyLanguageServer(LanguageServer):
             return
 
         try:
-            graph = self._indexer._requirement_graph
+            graph = self._indexer.requirement_graph
         except AttributeError:
             return
 
@@ -660,7 +724,7 @@ class IvyLanguageServer(LanguageServer):
         if not isinstance(graph, ScopedRequirementModel):
             return
 
-        test_files = list(graph._test_scopes.keys())
+        test_files = graph.list_test_files()
         if not test_files:
             logger.info("No test files found for bulk compilation")
             return
@@ -700,27 +764,80 @@ class IvyLanguageServer(LanguageServer):
                 h.setLevel(logging.WARNING)
 
     def _setup_indexer(self):
-        """Create and populate the workspace indexer."""
+        """Create and populate the workspace indexer.
+
+        Thin orchestrator that delegates to focused helpers:
+        1. _configure_activity_logging — env-based log level
+        2. _create_resolver — workspace detection + include resolver + staging
+        3. _create_parser — z3 detection + parser creation
+        4. _create_indexer — indexer construction + workspace scan
+        5. _setup_analysis_pipeline — semantic model + adapters + pipeline
+        """
+        self._configure_activity_logging()
+
+        ws_folders = self.workspace.folders
+        if ws_folders:
+            ws_root = uri_to_path(list(ws_folders.values())[0].uri)
+        else:
+            ws_root = os.getcwd()
+
+        resolver, ws_root = self._create_resolver(ws_root)
+        if resolver is None:
+            return
+
+        self._create_parser(resolver)
+
+        if not self._create_indexer(ws_root, resolver):
+            return
+
+        self._setup_analysis_pipeline()
+
+    def _configure_activity_logging(self) -> None:
+        """Configure ivy_lsp log level from IVY_LSP_ACTIVITY_LEVEL env var."""
         activity_level = os.environ.get("IVY_LSP_ACTIVITY_LEVEL", "phase")
         if activity_level == "file":
             logging.getLogger("ivy_lsp").setLevel(logging.DEBUG)
         elif activity_level == "phase":
             logging.getLogger("ivy_lsp").setLevel(logging.INFO)
 
+    def _create_resolver(
+        self, ws_root: str,
+    ) -> Tuple[Optional["IncludeResolver"], str]:
+        """Create include resolver with workspace detection and staging.
+
+        Performs workspace auto-detection, reads include/exclude paths from
+        environment, constructs the IncludeResolver, and creates a flat
+        staging directory for cross-directory includes.
+
+        Returns:
+            (resolver, refined_ws_root) on success, (None, ws_root) on failure.
+        """
         from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.workspace_detection import detect_ivy_workspace
 
-        ws_folders = self.workspace.folders
-        if ws_folders:
-            root = uri_to_path(list(ws_folders.values())[0].uri)
-        else:
-            root = os.getcwd()
+        ws_config = detect_ivy_workspace(start_dir=ws_root)
+        ws_root = ws_config.workspace_root
+        slog.info(
+            "Workspace detection: root=%s, detected_by=%s, type=%s",
+            ws_root,
+            ws_config.detected_by,
+            ws_config.project_type,
+            extra={"event": LogEvent(
+                LogCategory.DIAGNOSTIC, "workspace_detection",
+                {"root": ws_root, "detected_by": ws_config.detected_by,
+                 "project_type": ws_config.project_type},
+            )},
+        )
 
-        # Read include/exclude paths from environment
+        # Read include/exclude paths from environment, merging with detected
         raw_includes = os.environ.get("IVY_LSP_INCLUDE_PATHS", "")
         include_paths = [p.strip() for p in raw_includes.split(",") if p.strip()]
+        if not include_paths and ws_config.include_paths:
+            include_paths = ws_config.include_paths
         raw_excludes = os.environ.get("IVY_LSP_EXCLUDE_PATHS", "")
         exclude_paths = [p.strip() for p in raw_excludes.split(",") if p.strip()]
+        if not exclude_paths and ws_config.exclude_paths:
+            exclude_paths = ws_config.exclude_paths
         if include_paths:
             slog.info(
                 "Include paths: %s",
@@ -742,7 +859,7 @@ class IvyLanguageServer(LanguageServer):
 
         try:
             resolver = IncludeResolver(
-                root,
+                ws_root,
                 exclude_paths=exclude_paths,
                 include_paths=include_paths,
             )
@@ -755,7 +872,7 @@ class IvyLanguageServer(LanguageServer):
                     "Features depending on cross-file resolution will not work.",
                 )
             )
-            return
+            return None, ws_root
 
         # Create flat staging directory (mirrors ivyc's include/1.7/ model)
         try:
@@ -778,9 +895,13 @@ class IvyLanguageServer(LanguageServer):
                 )
             )
 
-        # Try full parser (requires z3). Fall back to lexer-only mode.
-        # Parser is created after resolver so it can use resolver.resolve
-        # as a callback for cross-directory include resolution.
+        return resolver, ws_root
+
+    def _create_parser(self, resolver: "IncludeResolver") -> None:
+        """Create the Ivy parser, falling back to lexer-only mode without z3.
+
+        Sets self._parser and self._full_mode.
+        """
         try:
             from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
@@ -808,6 +929,13 @@ class IvyLanguageServer(LanguageServer):
                 )},
             )
 
+    def _create_indexer(self, ws_root: str, resolver: "IncludeResolver") -> bool:
+        """Create the workspace indexer and run initial indexing.
+
+        Returns True on success, False if the indexer could not be created.
+        """
+        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+
         progress_cb = self._make_progress_callback(
             "Ivy Deep Index",
             "Parsing {total} test files...",
@@ -815,7 +943,7 @@ class IvyLanguageServer(LanguageServer):
         )
         try:
             self._indexer = WorkspaceIndexer(
-                root, self._parser, resolver,
+                ws_root, self._parser, resolver,
                 progress_callback=progress_cb,
                 done_callback=self._start_bulk_analysis,
             )
@@ -828,15 +956,15 @@ class IvyLanguageServer(LanguageServer):
                     "Code intelligence features will not be available.",
                 )
             )
-            return
+            return False
         self.state_tracker.set_indexing()
         try:
             index_start = time.time()
             self._indexer.index_workspace()
             index_duration = time.time() - index_start
             self.state_tracker.set_indexed(index_duration)
-            n_files = len(self._indexer._cache._cache)
-            n_symbols = sum(1 for _ in self._indexer._symbol_table.all_symbols())
+            n_files = len(self._indexer._cache._cache) if self._indexer._cache else 0
+            n_symbols = sum(1 for _ in self._indexer.lookup_all_symbols())
             slog.info(
                 "Indexed %d files, %d symbols",
                 n_files,
@@ -866,8 +994,10 @@ class IvyLanguageServer(LanguageServer):
                     "Completion, go-to-definition, and other features may not work.",
                 )
             )
+        return True
 
-        # Set up semantic model and analysis pipeline
+    def _setup_analysis_pipeline(self) -> None:
+        """Set up semantic model, adapters, compiler manager, and analysis pipeline."""
         try:
             from ivy_lsp.adapters.null_adapter import (
                 NullAstEnrichmentAdapter,
@@ -895,9 +1025,9 @@ class IvyLanguageServer(LanguageServer):
                         # Re-read staging dir from the resolver (not the
                         # local var from create_staging_directory) because
                         # CompilerManager needs the persistent path.
-                        if self._indexer and hasattr(self._indexer, "_resolver"):
+                        if self._indexer:
                             compiler_staging_dir = getattr(
-                                self._indexer._resolver, "_staging_dir", None
+                                self._indexer.resolver, "_staging_dir", None
                             )
                         if compiler_staging_dir is None:
                             logger.warning(
@@ -905,7 +1035,7 @@ class IvyLanguageServer(LanguageServer):
                                 "Cross-directory includes will fail. "
                                 "indexer=%s, has_resolver=%s",
                                 self._indexer is not None,
-                                hasattr(self._indexer, "_resolver")
+                                self._indexer.resolver is not None if self._indexer else False
                                 if self._indexer
                                 else False,
                             )
@@ -972,7 +1102,7 @@ class IvyLanguageServer(LanguageServer):
                 return _find_enclosing_test(self, filepath)
 
             requirement_graph = getattr(
-                self._indexer, "_requirement_graph", None
+                self._indexer, "requirement_graph", None
             )
             self._analysis_pipeline = AnalysisPipeline(
                 self._semantic_model,
