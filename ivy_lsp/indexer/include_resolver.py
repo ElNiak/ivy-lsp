@@ -181,6 +181,13 @@ class IncludeResolver:
                 for fn in filenames:
                     if fn.endswith(".ivy"):
                         result.append(os.path.join(dirpath, fn))
+        if not result and self._include_paths:
+            logger.error(
+                "No .ivy files found: all include paths non-existent. "
+                "Paths: %s, workspace: %s",
+                [os.path.join(self._workspace_root, ip) for ip in self._include_paths],
+                self._workspace_root,
+            )
         return sorted(result)
 
     def find_all_ivy_files(self, root: Optional[str] = None) -> List[str]:

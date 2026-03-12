@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -21,6 +22,18 @@ class WorkerResult:
     symbols: List[dict]
     errors: List[str] = field(default_factory=list)
     includes: List[str] = field(default_factory=list)
+
+
+def _worker_init(parent_sys_path: list[str]) -> None:
+    """Initialize worker process with parent's sys.path.
+
+    ``ProcessPoolExecutor`` with the ``spawn`` start method creates fresh
+    Python interpreters that may not inherit the parent's ``sys.path``
+    (especially when running under ``uvx`` or similar tools).
+    """
+    for p in parent_sys_path:
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
 
 def worker_parse_file(
@@ -81,7 +94,10 @@ def worker_parse_file(
             "; ".join(error_strs) if error_strs else "(no error details)",
         )
     except ImportError as e:
-        logger.warning("Worker: ivy import failed for %s: %s", filepath, e)
+        logger.warning(
+            "Worker: ivy import failed for %s: %s (sys.path has %d entries)",
+            filepath, e, len(sys.path),
+        )
     except Exception as e:
         logger.warning("Worker: parse failed for %s: %s", filepath, e)
 
@@ -126,8 +142,13 @@ class ParallelDeepIndexer:
             return {f: worker_parse_file(f, cfg) for f in filepaths}
 
         results: Dict[str, WorkerResult] = {}
+        parent_path = list(sys.path)
         try:
-            with ProcessPoolExecutor(max_workers=self._num_workers) as pool:
+            with ProcessPoolExecutor(
+                max_workers=self._num_workers,
+                initializer=_worker_init,
+                initargs=(parent_path,),
+            ) as pool:
                 futures = {}
                 for f in filepaths:
                     if self._stop_event is not None and self._stop_event.is_set():
