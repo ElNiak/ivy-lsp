@@ -38,6 +38,28 @@ _RFC_REQ_PATTERN = re.compile(
     re.MULTILINE,
 )
 
+# Symbol/type extraction patterns for lightweight semantic model
+_TYPE_DECL_RE = re.compile(
+    r"^\s*type\s+([\w.]+)(?:\s*=\s*\{([^}]+)\})?", re.MULTILINE
+)
+_ACTION_DECL_RE = re.compile(
+    r"^\s*action\s+([\w.]+)\s*(?:\(([^)]*)\))?(?:\s*returns\s*\(([^)]*)\))?",
+    re.MULTILINE,
+)
+_RELATION_DECL_RE = re.compile(
+    r"^\s*relation\s+([\w.]+)\s*(?:\(([^)]*)\))?", re.MULTILINE
+)
+_FUNCTION_DECL_RE = re.compile(
+    r"^\s*function\s+([\w.]+)\s*(?:\(([^)]*)\))?(?:\s*:\s*(\w+))?",
+    re.MULTILINE,
+)
+_INDIVIDUAL_DECL_RE = re.compile(
+    r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MULTILINE
+)
+_OBJECT_DECL_RE = re.compile(
+    r"^\s*(?:object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
+)
+
 
 def _validate_path(root: str, relative_path: str) -> str:
     """Resolve *relative_path* under *root*, rejecting traversal escapes."""
@@ -55,10 +77,14 @@ from ivy_lsp.utils.structural_lint import (
 )
 
 
-def _check_structural_issues(source: str, filepath: str) -> list[dict[str, Any]]:
+def _check_structural_issues(
+    source: str,
+    filepath: str,
+    resolve_callback: Any = None,
+) -> list[dict[str, Any]]:
     """Fast structural checks without full parsing."""
     diags = check_structural_issues_raw(source, filepath)
-    diags.extend(check_unresolved_includes_raw(source, filepath))
+    diags.extend(check_unresolved_includes_raw(source, filepath, resolve_callback))
     return diags
 
 
@@ -128,6 +154,51 @@ def start_mcp(
 
     _model_lock = asyncio.Lock()
     _model_build_attempted = False
+
+    _req_graph_lock = asyncio.Lock()
+    _req_graph: Any = requirement_graph  # may be pre-populated or None
+    _req_graph_build_attempted = False
+
+    # --- Workspace-aware include resolution cache ---
+
+    # Known Ivy standard library modules that should never be flagged
+    # as unresolved by lint (they live in ivy/include/ or ivy/ivy2/).
+    _STDLIB_MODULES = frozenset({
+        "order", "collections", "ip", "ipv6", "tcp", "udp",
+        "byte_stream", "timeout", "net",
+    })
+
+    _basename_cache: dict[str, list[str]] | None = None
+
+    def _get_basename_cache() -> dict[str, list[str]]:
+        """Build (or return cached) basename→[relative_paths] map for all .ivy files."""
+        nonlocal _basename_cache
+        if _basename_cache is not None:
+            return _basename_cache
+
+        cache: dict[str, list[str]] = {}
+        for rel_path in _find_ivy_files(root):
+            basename = os.path.basename(rel_path)[:-4]  # strip .ivy
+            cache.setdefault(basename, []).append(rel_path)
+        # Also index stdlib files that _find_ivy_files may discover
+        _basename_cache = cache
+        return cache
+
+    def _make_resolve_callback():
+        """Create a resolve callback for structural lint include checking."""
+        cache = _get_basename_cache()
+
+        def _resolve(inc_name: str, from_file: str) -> str | None:
+            # Accept known stdlib modules
+            if inc_name in _STDLIB_MODULES:
+                return f"<stdlib>/{inc_name}.ivy"
+            # Check workspace file index
+            candidates = cache.get(inc_name)
+            if candidates:
+                return candidates[0]  # first match is sufficient for lint
+            return None
+
+        return _resolve
 
     @mcp.tool()
     async def ivy_verify(
@@ -311,7 +382,8 @@ def start_mcp(
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
 
-        diagnostics = _check_structural_issues(source, abs_path)
+        resolve_cb = _make_resolve_callback()
+        diagnostics = _check_structural_issues(source, abs_path, resolve_cb)
         return json.dumps({
             "success": True,
             "file": relative_path,
@@ -334,11 +406,10 @@ def start_mcp(
 
         def _build_graph():
             graph: dict[str, list[str]] = {}
-            file_by_basename: dict[str, str] = {}
+            # Use shared basename cache (list-based, no collisions)
+            cache = _get_basename_cache()
 
             for rel_path in _find_ivy_files(root):
-                basename = os.path.basename(rel_path)[:-4]
-                file_by_basename[basename] = rel_path
                 try:
                     with open(os.path.join(root, rel_path), encoding="utf-8", errors="replace") as f:
                         source = f.read()
@@ -346,20 +417,50 @@ def start_mcp(
                 except OSError:
                     continue
 
-            return graph, file_by_basename
+            return graph, cache
 
-        graph, file_by_basename = await asyncio.to_thread(_build_graph)
+        def _resolve_closest(
+            inc_name: str,
+            from_file: str,
+            cache: dict[str, list[str]],
+        ) -> str | None:
+            """Resolve include to the closest matching file by path proximity."""
+            candidates = cache.get(inc_name)
+            if not candidates:
+                return None
+            if len(candidates) == 1:
+                return candidates[0]
+            # Prefer the file sharing the longest common path prefix
+            from_dir = os.path.dirname(from_file)
+            best = candidates[0]
+            best_len = 0
+            for c in candidates:
+                prefix = os.path.commonpath([from_dir, os.path.dirname(c)]) if from_dir else ""
+                if len(prefix) > best_len:
+                    best_len = len(prefix)
+                    best = c
+            return best
+
+        graph, basename_cache = await asyncio.to_thread(_build_graph)
 
         if relative_path is not None:
             includes = graph.get(relative_path, [])
-            resolved = [{"module": inc, "resolved_path": file_by_basename.get(inc)} for inc in includes]
+            resolved = []
+            for inc in includes:
+                rp = _resolve_closest(inc, relative_path, basename_cache)
+                entry: dict[str, Any] = {"module": inc, "resolved_path": rp}
+                # Flag ambiguous resolution
+                candidates = basename_cache.get(inc, [])
+                if len(candidates) > 1:
+                    entry["candidates"] = candidates
+                resolved.append(entry)
 
             target_basename = os.path.basename(relative_path)
             if target_basename.endswith(".ivy"):
                 target_basename = target_basename[:-4]
             included_by = [fp for fp, incs in graph.items() if target_basename in incs]
 
-            # Transitive includes
+            # Transitive includes (using proximity-based resolution)
             transitive: set[str] = set()
             stack = list(includes)
             while stack:
@@ -367,7 +468,7 @@ def start_mcp(
                 if mod in transitive:
                     continue
                 transitive.add(mod)
-                mod_path = file_by_basename.get(mod)
+                mod_path = _resolve_closest(mod, relative_path, basename_cache)
                 if mod_path and mod_path in graph:
                     stack.extend(graph[mod_path])
 
@@ -435,6 +536,8 @@ def start_mcp(
                 parse_file_rfc_annotations,
             )
 
+            from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+
             model = SemanticModel()
             # Load manifests
             for manifest_path in find_manifests(root):
@@ -442,16 +545,116 @@ def start_mcp(
                 for req in reqs.values():
                     model.add_node(req)
 
-            # Scan for RFC annotations in .ivy files
+            # Scan .ivy files for annotations, types, and symbols
             for rel_path in _find_ivy_files(root):
                 abs_path = os.path.join(root, rel_path)
                 try:
                     with open(abs_path, encoding="utf-8", errors="replace") as f:
                         source = f.read()
-                    for ann in parse_file_rfc_annotations(source, abs_path):
-                        model.add_node(ann)
                 except OSError:
                     continue
+
+                # RFC annotations
+                for ann in parse_file_rfc_annotations(source, abs_path):
+                    model.add_node(ann)
+
+                # Type declarations
+                for m in _TYPE_DECL_RE.finditer(source):
+                    name = m.group(1)
+                    line = source[: m.start()].count("\n")
+                    variants_raw = m.group(2)
+                    is_enum = variants_raw is not None
+                    variants = (
+                        [v.strip() for v in variants_raw.split(",") if v.strip()]
+                        if variants_raw
+                        else []
+                    )
+                    model.add_node(TypeNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        file=abs_path,
+                        line=line,
+                        is_enum=is_enum,
+                        variants=variants,
+                    ))
+
+                # Action declarations
+                for m in _ACTION_DECL_RE.finditer(source):
+                    name = m.group(1)
+                    line = source[: m.start()].count("\n")
+                    params = (
+                        [p.strip() for p in m.group(2).split(",") if p.strip()]
+                        if m.group(2)
+                        else []
+                    )
+                    ret = m.group(3).strip() if m.group(3) else None
+                    model.add_node(SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="action",
+                        file=abs_path,
+                        line=line,
+                        params=params,
+                        return_sort=ret,
+                    ))
+
+                # Relation declarations
+                for m in _RELATION_DECL_RE.finditer(source):
+                    name = m.group(1)
+                    line = source[: m.start()].count("\n")
+                    model.add_node(SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="relation",
+                        file=abs_path,
+                        line=line,
+                    ))
+
+                # Function declarations
+                for m in _FUNCTION_DECL_RE.finditer(source):
+                    name = m.group(1)
+                    line = source[: m.start()].count("\n")
+                    ret_sort = m.group(3) if m.group(3) else None
+                    model.add_node(SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="function",
+                        file=abs_path,
+                        line=line,
+                        return_sort=ret_sort,
+                    ))
+
+                # Individual declarations
+                for m in _INDIVIDUAL_DECL_RE.finditer(source):
+                    name = m.group(1)
+                    line = source[: m.start()].count("\n")
+                    sort_name = m.group(2)
+                    model.add_node(SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="individual",
+                        file=abs_path,
+                        line=line,
+                        sort_name=sort_name,
+                    ))
+
+                # Object/module/isolate declarations
+                for m in _OBJECT_DECL_RE.finditer(source):
+                    name = m.group(1)
+                    line = source[: m.start()].count("\n")
+                    model.add_node(SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="module",
+                        file=abs_path,
+                        line=line,
+                    ))
 
             return model
         except ImportError:
@@ -460,6 +663,139 @@ def start_mcp(
                 "(ivy_lsp.semantic.model or ivy_lsp.semantic.rfc_annotations) "
                 "could not be imported. Install ivy-lsp[semantic] to enable "
                 "traceability tools.",
+                exc_info=True,
+            )
+            return None
+
+    # --- Lazy RequirementGraph construction ---
+
+    async def _get_req_graph():
+        """Return the requirement graph, lazily building one if needed."""
+        nonlocal _req_graph, _req_graph_build_attempted
+        if _req_graph is not None:
+            return _req_graph
+        if _req_graph_build_attempted:
+            return None
+
+        async with _req_graph_lock:
+            if _req_graph is not None:
+                return _req_graph
+            if _req_graph_build_attempted:
+                return None
+
+            graph = await asyncio.to_thread(_build_requirement_graph)
+            if graph is not None:
+                _req_graph = graph
+            else:
+                _req_graph_build_attempted = True
+            return graph
+
+    def _build_requirement_graph():
+        """Build a RequirementGraph from workspace .ivy files.
+
+        Uses the light-mode extractor (regex or PLY lexer) to extract
+        requirements and writes from each file, populates ActionNode
+        and RequirementNode entries, wires CONSTRAINS and WRITES edges.
+        """
+        try:
+            from ivy_lsp.analysis.light_mode_extractor import (
+                extract_requirements_light,
+            )
+            from ivy_lsp.analysis.requirement_graph import (
+                ActionNode,
+                RequirementGraph,
+                StateVarNode,
+            )
+
+            graph = RequirementGraph()
+            all_writes: list[tuple[str, str, int]] = []
+            known_vars: set[str] = set()
+
+            for rel_path in _find_ivy_files(root):
+                abs_path = os.path.join(root, rel_path)
+                try:
+                    with open(abs_path, encoding="utf-8", errors="replace") as f:
+                        source = f.read()
+                except OSError:
+                    continue
+
+                reqs, writes = extract_requirements_light(source, abs_path)
+                if not reqs and not writes:
+                    continue
+
+                # Bulk-add requirements + CONSTRAINS edges for this file
+                graph.add_file_requirements(abs_path, reqs, writes)
+
+                # Collect write targets as known state vars
+                for var_name, _fp, _line in writes:
+                    known_vars.add(var_name)
+                all_writes.extend(writes)
+
+            # Create ActionNodes from monitor_action references
+            for req in graph.requirements.values():
+                if req.monitor_action:
+                    graph.add_action_if_absent(ActionNode(
+                        id=req.monitor_action,
+                        name=req.monitor_action.rsplit(".", 1)[-1],
+                        qualified_name=req.monitor_action,
+                        file=req.file,
+                        line=req.line,
+                    ))
+
+            # Create StateVarNodes from write targets
+            for var_name, filepath_w, line_w in all_writes:
+                if var_name not in graph.state_vars:
+                    graph.add_state_var(StateVarNode(
+                        id=var_name,
+                        name=var_name.rsplit(".", 1)[-1],
+                        qualified_name=var_name,
+                        file=filepath_w,
+                        line=line_w,
+                    ))
+
+            # Wire READS edges from requirements to state vars
+            if known_vars:
+                try:
+                    graph.wire_state_var_edges(known_vars)
+                except ImportError:
+                    logger.debug(
+                        "formula_analyzer unavailable; skipping READS edge wiring"
+                    )
+
+            # Load RFC requirement manifests and wire COVERS edges
+            try:
+                from ivy_lsp.semantic.rfc_annotations import (
+                    find_manifests,
+                    load_requirement_manifest,
+                )
+
+                for manifest_path in find_manifests(root):
+                    reqs_dict = load_requirement_manifest(manifest_path)
+                    for rfc_req in reqs_dict.values():
+                        graph.add_rfc_requirement(rfc_req)
+
+                if graph.rfc_requirements:
+                    graph.wire_coverage_edges()
+            except ImportError:
+                logger.debug("rfc_annotations unavailable; skipping manifest loading")
+
+            total = (
+                len(graph.requirements)
+                + len(graph.actions)
+                + len(graph.state_vars)
+            )
+            logger.info(
+                "Built requirement graph: %d requirements, %d actions, "
+                "%d state vars, %d edges",
+                len(graph.requirements),
+                len(graph.actions),
+                len(graph.state_vars),
+                len(graph.edges),
+            )
+            return graph if total > 0 else None
+        except Exception:
+            logger.warning(
+                "Failed to build requirement graph",
                 exc_info=True,
             )
             return None
@@ -770,14 +1106,16 @@ def start_mcp(
         indexer: _IndexerProxy
         initializing: bool = False
 
-    def _make_viz_server_proxy():
+    async def _make_viz_server_proxy():
         """Create a minimal server-like object for visualization handlers.
 
         The visualization handlers in features/visualization.py expect a
         server object with ``server.indexer.requirement_graph``.  This
-        builds a lightweight proxy that satisfies that contract.
+        lazily builds the requirement graph on first use and returns a
+        lightweight proxy that satisfies that contract.
         """
-        return _ServerProxy(indexer=_IndexerProxy(requirement_graph=requirement_graph))
+        graph = await _get_req_graph()
+        return _ServerProxy(indexer=_IndexerProxy(requirement_graph=graph))
 
     @mcp.tool()
     async def ivy_action_requirements(
@@ -798,7 +1136,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_action_requirements
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if action_name:
             params["actionName"] = action_name
@@ -826,7 +1164,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_model_summary_table
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if test_file:
             try:
@@ -847,7 +1185,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_coverage_gaps
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if test_file:
             try:
@@ -874,7 +1212,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_action_dependency_graph
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if test_file:
             try:
@@ -902,7 +1240,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_state_machine_view
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if test_file:
             try:
@@ -926,7 +1264,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_layered_overview
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if test_file:
             try:
@@ -952,7 +1290,7 @@ def start_mcp(
         """
         from ivy_lsp.features.visualization import handle_smart_suggestions
 
-        server_proxy = _make_viz_server_proxy()
+        server_proxy = await _make_viz_server_proxy()
         params: dict[str, Any] = {}
         if file_path:
             try:
