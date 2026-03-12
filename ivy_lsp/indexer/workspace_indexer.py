@@ -8,6 +8,7 @@ import os
 import re
 import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -146,13 +147,78 @@ class WorkspaceIndexer:
         self._deep_index_progress = DeepIndexProgress()
         self._progress_lock = threading.Lock()
         self._stop_requested = threading.Event()
-        atexit.register(self._stop_requested.set)
+        # Use weakref to avoid preventing GC of the indexer.
+        # atexit.register(self._stop_requested.set) retains a strong
+        # reference to the bound method (and thus the Event and the
+        # WorkspaceIndexer), keeping the entire object tree alive until
+        # interpreter shutdown.
+        stop_ref = weakref.ref(self._stop_requested)
+        atexit.register(lambda: (e := stop_ref()) is not None and e.set())
         self._analysis_pipeline: Optional[Any] = None
         # Mtime-validated source cache to avoid re-reading files across
         # pipeline phases.  Maps filepath -> (content, mtime).
         # Cleared after the full pipeline completes.
         self._source_cache: Dict[str, Tuple[str, float]] = {}
         self._source_cache_lock = threading.Lock()
+
+    # -- Public accessors (Phase 3.2) ----------------------------------------
+
+    @property
+    def requirement_graph(self):
+        """Public accessor for the requirement graph."""
+        return self._requirement_graph
+
+    @property
+    def include_graph(self):
+        """Public accessor for the include graph."""
+        return self._include_graph
+
+    @property
+    def resolver(self):
+        """Public accessor for the include resolver."""
+        return self._resolver
+
+    def lookup_all_symbols(self):
+        """Return all symbols in the symbol table."""
+        with self._table_lock:
+            return self._symbol_table.all_symbols()
+
+    def lookup_qualified_symbols(self, name: str):
+        """Lookup symbols by qualified name."""
+        with self._table_lock:
+            results = self._symbol_table.lookup_qualified(name)
+            if not results:
+                results = self._symbol_table.lookup(name)
+            return results
+
+    def get_deep_index_progress(self):
+        """Thread-safe snapshot of deep indexing progress.
+
+        Returns a dict with all progress fields captured under
+        ``_progress_lock`` so callers never see a mix of old/new values.
+        """
+        with self._progress_lock:
+            p = self._deep_index_progress
+            return {
+                "running": self._deep_index_running,
+                "total_test_files": p.total_test_files,
+                "completed_test_files": p.completed_test_files,
+                "current_file": p.current_file,
+                "started_at": p.started_at,
+                "file_status_count": len(p.file_statuses),
+                "file_statuses": dict(p.file_statuses),
+            }
+
+    def get_file_export_imports(self):
+        """Thread-safe snapshot of file export/import info."""
+        with self._exports_lock:
+            return dict(self._file_export_imports)
+
+    def get_cached_file(self, filepath: str):
+        """Get cached file data by path."""
+        return self._cache.get(filepath) if self._cache else None
+
+    # -- Lifecycle ----------------------------------------------------------
 
     def request_stop(self) -> None:
         """Signal background threads to stop at the next safe point."""

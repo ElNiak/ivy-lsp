@@ -56,14 +56,14 @@ class TestIndexerStats:
 
     def test_stats_include_edges(self):
         indexer = _make_indexer()
-        indexer._include_graph.add_edge("a.ivy", "b.ivy")
-        indexer._include_graph.add_edge("b.ivy", "c.ivy")
+        indexer.include_graph.add_edge("a.ivy", "b.ivy")
+        indexer.include_graph.add_edge("b.ivy", "c.ivy")
         stats = indexer.get_stats()
         assert stats.include_edge_count == 2
 
     def test_index_workspace_records_timing(self):
         indexer = _make_indexer()
-        indexer._resolver.find_all_ivy_files.return_value = []
+        indexer.resolver.find_all_ivy_files.return_value = []
         indexer.index_workspace()
         stats = indexer.get_stats()
         assert stats.last_index_duration is not None

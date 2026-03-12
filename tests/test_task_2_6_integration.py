@@ -83,7 +83,7 @@ class TestPhase2FullPipeline:
         from ivy_lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
-        assert server._indexer is None  # not initialized yet
+        assert server.indexer is None  # not initialized yet
 
 
 class TestIndexerPackageImports:

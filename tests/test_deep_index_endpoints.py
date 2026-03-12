@@ -12,13 +12,7 @@ from ivy_lsp.features.monitoring import (
 class TestDeepIndexProgressHandler:
     def _make_server(self, running=False, total=5, completed=3, current="test3.ivy"):
         server = MagicMock()
-        progress = DeepIndexProgress(
-            total_test_files=total,
-            completed_test_files=completed,
-            current_file=current if running else None,
-            started_at=1700000000.0 if running else None,
-        )
-        progress.file_statuses = {
+        file_statuses = {
             "/ws/test1.ivy": FileIndexStatus(
                 filepath="/ws/test1.ivy",
                 shallow_indexed=True,
@@ -36,10 +30,16 @@ class TestDeepIndexProgressHandler:
                 filepath="/ws/test3.ivy", shallow_indexed=True,
             ),
         }
-        server._indexer = MagicMock()
-        server._indexer._deep_index_running = running
-        server._indexer._deep_index_progress = progress
-        server._indexer._progress_lock = threading.Lock()
+        server.indexer = MagicMock()
+        server.indexer.get_deep_index_progress.return_value = {
+            "running": running,
+            "total_test_files": total,
+            "completed_test_files": completed,
+            "current_file": current if running else None,
+            "started_at": 1700000000.0 if running else None,
+            "file_status_count": len(file_statuses),
+            "file_statuses": dict(file_statuses),
+        }
         return server
 
     def test_returns_progress_structure(self):
@@ -63,7 +63,7 @@ class TestDeepIndexProgressHandler:
 
     def test_no_indexer_returns_empty(self):
         server = MagicMock()
-        server._indexer = None
+        server.indexer = None
         result = handle_deep_index_progress(server, {"includeFileStatuses": True})
         assert result["running"] is False
         assert result["totalTests"] == 0
@@ -73,8 +73,9 @@ class TestDeepIndexProgressHandler:
 class TestTestFeatureMatrixHandler:
     def _make_server(self):
         server = MagicMock()
-        progress = DeepIndexProgress()
-        progress.file_statuses = {
+        from ivy_lsp.analysis.test_scope import ExportImportInfo
+
+        file_statuses = {
             "/ws/test1.ivy": FileIndexStatus(
                 filepath="/ws/test1.ivy",
                 shallow_indexed=True,
@@ -86,11 +87,7 @@ class TestTestFeatureMatrixHandler:
                 deep_parse_succeeded=False,
             ),
         }
-        server._indexer = MagicMock()
-        server._indexer._deep_index_progress = progress
-        from ivy_lsp.analysis.test_scope import ExportImportInfo
-
-        server._indexer._file_export_imports = {
+        export_imports = {
             "/ws/test1.ivy": ExportImportInfo(
                 file="/ws/test1.ivy", exports=["foo"],
             ),
@@ -98,7 +95,18 @@ class TestTestFeatureMatrixHandler:
                 file="/ws/test2.ivy", exports=["bar"],
             ),
         }
-        server._full_mode = True
+        server.indexer = MagicMock()
+        server.indexer.get_deep_index_progress.return_value = {
+            "running": False,
+            "total_test_files": 0,
+            "completed_test_files": 0,
+            "current_file": None,
+            "started_at": None,
+            "file_status_count": len(file_statuses),
+            "file_statuses": dict(file_statuses),
+        }
+        server.indexer.get_file_export_imports.return_value = dict(export_imports)
+        server.full_mode = True
         return server
 
     def test_returns_entries_for_test_files_only(self):
@@ -123,6 +131,6 @@ class TestTestFeatureMatrixHandler:
 
     def test_no_indexer_returns_empty(self):
         server = MagicMock()
-        server._indexer = None
+        server.indexer = None
         result = handle_test_feature_matrix(server)
         assert result["tests"] == []

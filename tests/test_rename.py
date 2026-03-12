@@ -86,7 +86,7 @@ class TestComputeRename:
 
         mock_indexer = MagicMock()
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype pkt\n")
-        mock_indexer._resolver.find_all_ivy_files.return_value = [
+        mock_indexer.resolver.find_all_ivy_files.return_value = [
             str(tmp_path / "a.ivy")
         ]
         lines = ["#lang ivy1.7", "type cid"]
@@ -127,7 +127,7 @@ class TestRenameErrorHandling:
         mock_indexer = MagicMock()
         (tmp_path / "readable.ivy").write_text("#lang ivy1.7\ntype cid\n")
         # unreadable.ivy intentionally not created — triggers FileNotFoundError
-        mock_indexer._resolver.find_all_ivy_files.return_value = [
+        mock_indexer.resolver.find_all_ivy_files.return_value = [
             str(tmp_path / "readable.ivy"),
             str(tmp_path / "unreadable.ivy"),
         ]
@@ -152,7 +152,7 @@ class TestRenameErrorHandling:
         mock_indexer = MagicMock()
         (tmp_path / "good.ivy").write_text("#lang ivy1.7\ntype cid\n")
         (tmp_path / "bad.ivy").write_bytes(b"#lang ivy1.7\ntype \xff\xfe\n")
-        mock_indexer._resolver.find_all_ivy_files.return_value = [
+        mock_indexer.resolver.find_all_ivy_files.return_value = [
             str(tmp_path / "good.ivy"),
             str(tmp_path / "bad.ivy"),
         ]

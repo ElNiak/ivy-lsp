@@ -51,7 +51,7 @@ class TestExecuteCommandDispatch:
 
     def _get_feature_handler(self, cmd_name):
         server, features, _ = _register_commands()
-        server._indexer = None  # triggers early "No indexer" return
+        server.indexer = None  # triggers early "No indexer" return
         return server, features.get(cmd_name)
 
     @pytest.mark.asyncio

@@ -468,6 +468,21 @@ class RequirementGraph:
                         covered_ids.add(tag)
             return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
 
+    def get_outgoing_edges(self, node_id: str) -> List[Tuple[EdgeType, str]]:
+        """Return outgoing edges for the given node (copy of internal list)."""
+        with self._lock:
+            return list(self._outgoing.get(node_id, []))
+
+    @property
+    def outgoing(self) -> Dict[str, List[Tuple[EdgeType, str]]]:
+        """Public accessor for the outgoing adjacency index."""
+        return self._outgoing
+
+    @property
+    def incoming(self) -> Dict[str, List[Tuple[EdgeType, str]]]:
+        """Public accessor for the incoming adjacency index."""
+        return self._incoming
+
     def _rebuild_adjacency(self) -> None:
         """Rebuild adjacency indices from the edge list.
 

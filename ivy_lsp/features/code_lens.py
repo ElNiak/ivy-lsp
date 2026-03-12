@@ -73,7 +73,9 @@ def compute_code_lenses(
     semantic_model: Any = None,
 ) -> List[lsp.CodeLens]:
     """Compute all code lenses for a file."""
-    graph = getattr(indexer, "_requirement_graph", None)
+    if indexer is None:
+        return []
+    graph = getattr(indexer, "requirement_graph", None)
     abs_path = os.path.abspath(filepath)
     lenses: List[lsp.CodeLens] = []
     lines = source.split("\n")
@@ -89,9 +91,9 @@ def compute_code_lenses(
         lenses.extend(_property_lenses(lines, abs_path, graph))
 
         # 4. Include directive lenses
-        include_graph = getattr(indexer, "_include_graph", None)
+        include_graph = indexer.include_graph
         if include_graph:
-            resolver = getattr(indexer, "_resolver", None)
+            resolver = indexer.resolver
             lenses.extend(
                 _include_lenses(lines, abs_path, graph, include_graph, resolver)
             )
@@ -426,18 +428,18 @@ def register(server) -> None:
         doc = server.workspace.get_text_document(uri)
         source = doc.source or ""
 
-        if not server._indexer:
+        if not server.indexer:
             return []
 
         rfc_coverage = getattr(server, "_rfc_coverage_enabled", True)
-        model = getattr(server, "_semantic_model", None)
+        model = server.semantic_model
         if not rfc_coverage:
             model = None
         try:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, compute_code_lenses,
-                server._indexer, filepath, source, model,
+                server.indexer, filepath, source, model,
             )
         except (IndexError, KeyError, ValueError) as exc:
             logger.warning(

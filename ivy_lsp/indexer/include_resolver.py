@@ -31,6 +31,10 @@ _EXCLUDED_DIR_BASENAMES = frozenset({
     "submodules",
     "test",
     "include",
+    "doc",
+    "examples",
+    "notebooks",
+    "patches",
 })
 
 # Glob-style patterns matched against directory basenames.

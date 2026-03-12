@@ -61,11 +61,11 @@ class TestInitializationWithScopedModel:
 
     def test_requirement_graph_is_scoped_model(self):
         indexer, _, _ = _make_indexer()
-        assert isinstance(indexer._requirement_graph, ScopedRequirementModel)
+        assert isinstance(indexer.requirement_graph, ScopedRequirementModel)
 
     def test_requirement_graph_is_still_a_requirement_graph(self):
         indexer, _, _ = _make_indexer()
-        assert isinstance(indexer._requirement_graph, RequirementGraph)
+        assert isinstance(indexer.requirement_graph, RequirementGraph)
 
     def test_file_export_imports_dict_exists(self):
         indexer, _, _ = _make_indexer()
@@ -75,10 +75,10 @@ class TestInitializationWithScopedModel:
     def test_index_workspace_resets_to_fresh_scoped_model(self):
         indexer, _, resolver = _make_indexer()
         resolver.find_all_ivy_files.return_value = []
-        indexer._requirement_graph._test_scopes["stale"] = "data"
+        indexer.requirement_graph._test_scopes["stale"] = "data"
         indexer.index_workspace()
-        assert isinstance(indexer._requirement_graph, ScopedRequirementModel)
-        assert indexer._requirement_graph._test_scopes == {}
+        assert isinstance(indexer.requirement_graph, ScopedRequirementModel)
+        assert indexer.requirement_graph.list_test_files() == []
 
     def test_index_workspace_clears_file_export_imports(self):
         indexer, _, resolver = _make_indexer()
@@ -172,7 +172,7 @@ class TestScopeComputation:
         indexer, _, _ = _make_indexer()
         indexer._file_export_imports = dict(file_infos)
         for from_file, to_file in include_edges:
-            indexer._include_graph.add_edge(from_file, to_file)
+            indexer.include_graph.add_edge(from_file, to_file)
         return indexer
 
     def test_file_with_exports_gets_scope(self):
@@ -182,7 +182,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        assert test_file in indexer._requirement_graph._test_scopes
+        assert indexer.requirement_graph.has_test_scope(test_file)
 
     def test_file_without_exports_gets_no_scope(self):
         lib_file = "/ws/lib.ivy"
@@ -191,7 +191,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        assert lib_file not in indexer._requirement_graph._test_scopes
+        assert not indexer.requirement_graph.has_test_scope(lib_file)
 
     def test_include_closure_contains_self_and_transitive(self):
         test_f = "/ws/test.ivy"
@@ -208,7 +208,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        scope = indexer._requirement_graph._test_scopes[test_f]
+        scope = indexer.requirement_graph.get_test_scope(test_f)
         assert scope.include_closure == frozenset({test_f, mid_f, base_f})
 
     def test_exports_unioned_across_closure(self):
@@ -224,7 +224,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        scope = indexer._requirement_graph._test_scopes[test_f]
+        scope = indexer.requirement_graph.get_test_scope(test_f)
         assert scope.exported_actions == frozenset({"quic.send", "quic.recv"})
 
     def test_imports_unioned_across_closure(self):
@@ -244,7 +244,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        scope = indexer._requirement_graph._test_scopes[test_f]
+        scope = indexer.requirement_graph.get_test_scope(test_f)
         assert scope.imported_actions == frozenset(
             {"tls.handshake", "quic.connection"}
         )
@@ -262,7 +262,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        assert indexer._requirement_graph._test_scopes[test_f].tester_role == "client"
+        assert indexer.requirement_graph.get_test_scope(test_f).tester_role == "client"
 
     def test_unknown_role_without_behavior_file(self):
         test_f = "/ws/test.ivy"
@@ -273,7 +273,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        assert indexer._requirement_graph._test_scopes[test_f].tester_role == "unknown"
+        assert indexer.requirement_graph.get_test_scope(test_f).tester_role == "unknown"
 
     def test_diamond_include_shape(self):
         """test -> A, test -> B, A -> shared, B -> shared."""
@@ -295,7 +295,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        scope = indexer._requirement_graph._test_scopes[test_f]
+        scope = indexer.requirement_graph.get_test_scope(test_f)
         assert scope.include_closure == frozenset({test_f, a_f, b_f, shared_f})
         assert scope.exported_actions == frozenset(
             {"quic.send", "quic.recv", "quic.close"}
@@ -305,7 +305,7 @@ class TestScopeComputation:
     def test_empty_workspace_no_scopes(self):
         indexer = self._setup_indexer_with_graph({}, [])
         indexer._compute_test_scopes()
-        assert indexer._requirement_graph._test_scopes == {}
+        assert indexer.requirement_graph.list_test_files() == []
 
     def test_file_in_closure_but_not_in_export_map(self):
         """File in include graph but missing from _file_export_imports (e.g. deleted)."""
@@ -318,7 +318,7 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        scope = indexer._requirement_graph._test_scopes[test_f]
+        scope = indexer.requirement_graph.get_test_scope(test_f)
         assert missing_f in scope.include_closure
         assert scope.exported_actions == frozenset({"quic.send"})
 
@@ -337,10 +337,10 @@ class TestScopeComputation:
 
         indexer._compute_test_scopes()
 
-        scopes = indexer._requirement_graph._test_scopes
-        assert test_a in scopes
-        assert test_b in scopes
-        assert shared not in scopes
+        test_files = indexer.requirement_graph.list_test_files()
+        assert test_a in test_files
+        assert test_b in test_files
+        assert shared not in test_files
 
     def test_called_after_wire_coverage_in_index_workspace(self):
         indexer, _, resolver = _make_indexer()
@@ -384,14 +384,14 @@ class TestReindexInvalidation:
             imported_actions=frozenset(),
             tester_role="client",
         )
-        indexer._requirement_graph.register_test_scope(scope)
-        indexer._requirement_graph.get_scoped_requirements(test_f)
-        assert (test_f, False) in indexer._requirement_graph._scope_cache
+        indexer.requirement_graph.register_test_scope(scope)
+        indexer.requirement_graph.get_scoped_requirements(test_f)
+        assert (test_f, False) in indexer.requirement_graph._scope_cache
 
         with patch.object(indexer, "_index_single_file", return_value=[]):
             indexer.reindex_file(target)
 
-        assert (test_f, False) not in indexer._requirement_graph._scope_cache
+        assert (test_f, False) not in indexer.requirement_graph._scope_cache
 
     def test_reindex_removes_old_export_import_info(self):
         indexer, _, _ = _make_indexer()

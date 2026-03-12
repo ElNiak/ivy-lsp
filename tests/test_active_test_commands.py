@@ -93,7 +93,7 @@ def scoped_server():
     model.register_test_scope(scope_client)
     model.register_test_scope(scope_server)
 
-    server._indexer._requirement_graph = model
+    server.indexer.requirement_graph = model
     return server, registered, model
 
 
@@ -163,7 +163,7 @@ class TestSetActiveTestHandler:
     def test_no_scoped_model_returns_error(self):
         server, registered = _make_registered_handlers()
         # Plain RequirementGraph, not ScopedRequirementModel
-        server._indexer._requirement_graph = RequirementGraph()
+        server.indexer.requirement_graph = RequirementGraph()
         params = _make_namedtuple_params({
             "testFile": "/workspace/test.ivy",
         })
@@ -231,13 +231,13 @@ class TestListTestsHandler:
 
     def test_list_empty_scopes(self):
         server, registered = _make_registered_handlers()
-        server._indexer._requirement_graph = ScopedRequirementModel()
+        server.indexer.requirement_graph = ScopedRequirementModel()
         result = _call(registered["ivy/listTests"],None)
         assert result["tests"] == []
 
     def test_list_no_scoped_model(self):
         server, registered = _make_registered_handlers()
-        server._indexer._requirement_graph = RequirementGraph()
+        server.indexer.requirement_graph = RequirementGraph()
         result = _call(registered["ivy/listTests"],None)
         assert result["tests"] == []
 
@@ -262,7 +262,7 @@ class TestCompileTestHandler:
     @pytest.mark.asyncio
     async def test_compile_success(self, scoped_server):
         server, registered, model = scoped_server
-        server._indexer._resolver.get_staged_path.return_value = (
+        server.indexer.resolver.get_staged_path.return_value = (
             "/tmp/staging/quic_client_test.ivy"
         )
 
@@ -285,7 +285,7 @@ class TestCompileTestHandler:
     @pytest.mark.asyncio
     async def test_compile_uses_staging(self, scoped_server):
         server, registered, model = scoped_server
-        server._indexer._resolver.get_staged_path.return_value = (
+        server.indexer.resolver.get_staged_path.return_value = (
             "/tmp/staging/quic_client_test.ivy"
         )
 
@@ -310,7 +310,7 @@ class TestCompileTestHandler:
     @pytest.mark.asyncio
     async def test_compile_cmd_has_target_test(self, scoped_server):
         server, registered, model = scoped_server
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "testFile": "/workspace/quic_client_test.ivy",
@@ -332,7 +332,7 @@ class TestCompileTestHandler:
     @pytest.mark.asyncio
     async def test_compile_stores_result(self, scoped_server):
         server, registered, model = scoped_server
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "testFile": "/workspace/quic_client_test.ivy",
@@ -347,8 +347,9 @@ class TestCompileTestHandler:
 
             await registered["ivy/compileTest"](params)
 
-        assert "/workspace/quic_client_test.ivy" in model._compilation_results
-        assert model._compilation_results["/workspace/quic_client_test.ivy"]["success"]
+        result = model.get_compilation_result("/workspace/quic_client_test.ivy")
+        assert result is not None
+        assert result["success"]
 
     @pytest.mark.asyncio
     async def test_compile_no_test_file(self, scoped_server):
@@ -364,7 +365,7 @@ class TestCompileTestHandler:
     @pytest.mark.asyncio
     async def test_compile_failure_exit_code(self, scoped_server):
         server, registered, model = scoped_server
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "testFile": "/workspace/quic_client_test.ivy",
@@ -388,8 +389,8 @@ class TestCompileTestHandler:
     async def test_compile_without_scoped_model_still_works(self):
         """Compile should work even with plain RequirementGraph."""
         server, registered = _make_registered_handlers()
-        server._indexer._requirement_graph = RequirementGraph()
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.requirement_graph = RequirementGraph()
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "testFile": "/workspace/test.ivy",
@@ -591,7 +592,7 @@ class TestActiveDocumentChanged:
     def test_no_scoped_model_no_crash(self):
         """Handler should not crash when graph is plain RequirementGraph."""
         server, registered = _make_registered_handlers()
-        server._indexer._requirement_graph = RequirementGraph()
+        server.indexer.requirement_graph = RequirementGraph()
 
         params = _make_namedtuple_params({
             "uri": "file:///workspace/test.ivy",
@@ -602,7 +603,7 @@ class TestActiveDocumentChanged:
     def test_no_indexer_no_crash(self):
         """Handler should not crash when indexer is missing."""
         server, registered = _make_registered_handlers()
-        del server._indexer
+        del server.indexer
 
         params = _make_namedtuple_params({
             "uri": "file:///workspace/test.ivy",

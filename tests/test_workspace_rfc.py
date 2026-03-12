@@ -349,7 +349,7 @@ class TestWorkspaceRfcIntegration:
         indexer = WorkspaceIndexer(str(ws), parser, resolver)
         indexer.index_workspace()
 
-        rfc_reqs = indexer._requirement_graph.rfc_requirements
+        rfc_reqs = indexer.requirement_graph.rfc_requirements
         assert len(rfc_reqs) == 3
         assert "rfc9000:4.1" in rfc_reqs
         assert "rfc9000:8.1" in rfc_reqs
@@ -366,7 +366,7 @@ class TestWorkspaceRfcIntegration:
         indexer = WorkspaceIndexer(str(ws), parser, resolver)
         indexer.index_workspace()
 
-        graph = indexer._requirement_graph
+        graph = indexer.requirement_graph
         covers_edges = [
             (s, t) for s, et, t in graph.edges if et == EdgeType.COVERS
         ]
@@ -389,7 +389,7 @@ class TestWorkspaceRfcIntegration:
         indexer = WorkspaceIndexer(str(ws), parser, resolver)
         indexer.index_workspace()
 
-        stats = indexer._requirement_graph.get_coverage_stats()
+        stats = indexer.requirement_graph.get_coverage_stats()
         assert stats["total"] == 3
         assert stats["covered"] == 2  # rfc9000:4.1 and rfc9000:8.1
         assert stats["uncovered"] == 1  # rfc9000:17.2
@@ -405,7 +405,7 @@ class TestWorkspaceRfcIntegration:
         indexer = WorkspaceIndexer(str(ws), parser, resolver)
         indexer.index_workspace()
 
-        uncovered = indexer._requirement_graph.get_uncovered_requirements()
+        uncovered = indexer.requirement_graph.get_uncovered_requirements()
         assert len(uncovered) == 1
         assert uncovered[0].id == "rfc9000:17.2"
         assert uncovered[0].section == "17.2"
@@ -423,8 +423,8 @@ class TestWorkspaceRfcIntegration:
         indexer = WorkspaceIndexer(str(tmp_path), parser, resolver)
         indexer.index_workspace()
 
-        assert len(indexer._requirement_graph.rfc_requirements) == 0
-        stats = indexer._requirement_graph.get_coverage_stats()
+        assert len(indexer.requirement_graph.rfc_requirements) == 0
+        stats = indexer.requirement_graph.get_coverage_stats()
         assert stats == {"total": 0, "covered": 0, "uncovered": 0}
 
     def test_rfc_requirement_fields_loaded_correctly(self, tmp_path):
@@ -438,7 +438,7 @@ class TestWorkspaceRfcIntegration:
         indexer = WorkspaceIndexer(str(ws), parser, resolver)
         indexer.index_workspace()
 
-        rfc_reqs = indexer._requirement_graph.rfc_requirements
+        rfc_reqs = indexer.requirement_graph.rfc_requirements
 
         req_41 = rfc_reqs["rfc9000:4.1"]
         assert req_41.rfc == "RFC9000"

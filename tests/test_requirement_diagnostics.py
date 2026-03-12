@@ -33,12 +33,12 @@ from ivy_lsp.features.diagnostics import (
 def _make_indexer(graph=None, include_graph=None, resolver=None):
     """Build a mock indexer with the required attributes."""
     indexer = MagicMock()
-    indexer._requirement_graph = graph
-    indexer._include_graph = include_graph
+    indexer.requirement_graph = graph
+    indexer.include_graph = include_graph
     if resolver is None:
         resolver = MagicMock()
         resolver.resolve.return_value = None
-    indexer._resolver = resolver
+    indexer.resolver = resolver
     return indexer
 
 
@@ -63,9 +63,9 @@ class TestRequirementDiagnosticsNoIndexer:
         assert result == []
 
     def test_indexer_without_graph_returns_empty(self):
-        """Indexer without _requirement_graph returns empty."""
+        """Indexer without requirement_graph returns empty."""
         indexer = MagicMock(spec=[])
-        del indexer._requirement_graph
+        del indexer.requirement_graph
         result = compute_requirement_diagnostics(
             "action foo\n", "test.ivy", indexer=indexer
         )

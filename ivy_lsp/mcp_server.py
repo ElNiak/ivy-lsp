@@ -30,6 +30,14 @@ from ivy_lsp.verification import (
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled regex patterns for hot-path performance
+_INCLUDE_PATTERN = re.compile(r"^include\s+(\w+)", re.MULTILINE)
+_RFC_REQ_PATTERN = re.compile(
+    r"([^.]*?\b(MUST NOT|MUST|SHALL NOT|SHALL|SHOULD NOT|SHOULD|"
+    r"MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b[^.]*\.)",
+    re.MULTILINE,
+)
+
 
 def _validate_path(root: str, relative_path: str) -> str:
     """Resolve *relative_path* under *root*, rejecting traversal escapes."""
@@ -334,7 +342,7 @@ def start_mcp(
                 try:
                     with open(os.path.join(root, rel_path), encoding="utf-8", errors="replace") as f:
                         source = f.read()
-                    graph[rel_path] = re.findall(r"^include\s+(\w+)", source, re.MULTILINE)
+                    graph[rel_path] = _INCLUDE_PATTERN.findall(source)
                 except OSError:
                     continue
 
@@ -619,14 +627,8 @@ def start_mcp(
         Args:
             rfc_text: Raw RFC text to parse for normative requirements.
         """
-        req_pattern = re.compile(
-            r"([^.]*?\b(MUST NOT|MUST|SHALL NOT|SHALL|SHOULD NOT|SHOULD|"
-            r"MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b[^.]*\.)",
-            re.MULTILINE,
-        )
-
         results = []
-        for m in req_pattern.finditer(rfc_text):
+        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
             text = m.group(1).strip()
             level = m.group(2)
             # Normalize level
@@ -761,20 +763,21 @@ def start_mcp(
 
     @dataclass
     class _IndexerProxy:
-        _requirement_graph: Any
+        requirement_graph: Any
 
     @dataclass
     class _ServerProxy:
-        _indexer: _IndexerProxy
+        indexer: _IndexerProxy
+        initializing: bool = False
 
     def _make_viz_server_proxy():
         """Create a minimal server-like object for visualization handlers.
 
         The visualization handlers in features/visualization.py expect a
-        server object with ``server._indexer._requirement_graph``.  This
+        server object with ``server.indexer.requirement_graph``.  This
         builds a lightweight proxy that satisfies that contract.
         """
-        return _ServerProxy(_indexer=_IndexerProxy(_requirement_graph=requirement_graph))
+        return _ServerProxy(indexer=_IndexerProxy(requirement_graph=requirement_graph))
 
     @mcp.tool()
     async def ivy_action_requirements(

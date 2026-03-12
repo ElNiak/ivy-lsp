@@ -27,7 +27,7 @@ def find_references(
 
     Args:
         indexer: The :class:`WorkspaceIndexer` instance providing access to
-            the workspace file list via ``indexer._resolver.find_all_ivy_files()``.
+            the workspace file list via ``indexer.resolver.find_all_ivy_files()``.
         filepath: Absolute path of the document containing the cursor.
         position: The cursor position (0-based line and character).
         source_lines: The source of the current document split into lines.
@@ -48,7 +48,7 @@ def find_references(
     name = word.rsplit(".", 1)[-1] if "." in word else word
     pattern = re.compile(r"\b" + re.escape(name) + r"\b")
 
-    all_files = indexer._resolver.find_all_ivy_files()
+    all_files = indexer.resolver.find_all_ivy_files()
 
     abs_filepath = str(Path(filepath).resolve())
     cursor_line = position.line
@@ -92,13 +92,13 @@ def register(server) -> None:
         """Handle textDocument/references requests."""
         uri = params.text_document.uri
         doc = server.workspace.get_text_document(uri)
-        if not hasattr(server, "_indexer") or server._indexer is None:
+        if server.indexer is None:
             return None
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
         include_decl = params.context.include_declaration if params.context else True
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, find_references, server._indexer,
+            None, find_references, server.indexer,
             filepath, params.position, lines, include_decl,
         )

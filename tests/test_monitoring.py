@@ -20,9 +20,9 @@ from ivy_lsp.features.monitoring import (
 def mock_server():
     server = MagicMock()
     server.state_tracker = ServerStateTracker()
-    server._full_mode = True
-    server._indexer = MagicMock()
-    server._indexer.get_stats.return_value = MagicMock(
+    server.full_mode = True
+    server.indexer = MagicMock()
+    server.indexer.get_stats.return_value = MagicMock(
         file_count=10,
         symbol_count=100,
         include_edge_count=5,
@@ -32,16 +32,16 @@ def mock_server():
         last_index_time="2026-01-01T00:00:00+00:00",
         last_index_duration=1.5,
     )
-    server._indexer._include_graph = MagicMock()
-    server._indexer._include_graph._includes = {
+    server.indexer.include_graph = MagicMock()
+    server.indexer.include_graph._includes = {
         "a.ivy": {"b.ivy"},
         "b.ivy": {"c.ivy"},
     }
-    server._indexer._include_graph._included_by = {
+    server.indexer.include_graph._included_by = {
         "b.ivy": {"a.ivy"},
         "c.ivy": {"b.ivy"},
     }
-    server._indexer.get_symbols.return_value = [MagicMock(), MagicMock()]
+    server.indexer.get_symbols.return_value = [MagicMock(), MagicMock()]
     return server
 
 
@@ -54,7 +54,7 @@ class TestServerStatus:
         assert result["indexingState"] == "idle"
 
     def test_light_mode(self, mock_server):
-        mock_server._full_mode = False
+        mock_server.full_mode = False
         result = handle_server_status(mock_server)
         assert result["mode"] == "light"
 
@@ -67,18 +67,18 @@ class TestServerStatus:
         assert result["activeOperations"][0]["type"] == "verify"
 
     def test_initializing_true_when_server_is_initializing(self, mock_server):
-        mock_server._initializing = True
+        mock_server.initializing = True
         result = handle_server_status(mock_server)
         assert result["initializing"] is True
 
     def test_initializing_false_when_server_is_ready(self, mock_server):
-        mock_server._initializing = False
+        mock_server.initializing = False
         result = handle_server_status(mock_server)
         assert result["initializing"] is False
 
     def test_initializing_false_when_attribute_missing(self, mock_server):
-        # Simulate older server without the _initializing attribute
-        del mock_server._initializing
+        # Simulate older server without the initializing attribute
+        del mock_server.initializing
         result = handle_server_status(mock_server)
         assert result["initializing"] is False
 
@@ -92,7 +92,7 @@ class TestIndexerStats:
         assert result["testScopeCount"] == 2
 
     def test_no_indexer_returns_zeros(self, mock_server):
-        mock_server._indexer = None
+        mock_server.indexer = None
         result = handle_indexer_stats(mock_server)
         assert result["fileCount"] == 0
 
@@ -119,7 +119,7 @@ class TestIncludeGraph:
         assert len(result["edges"]) > 0
 
     def test_no_indexer_returns_empty(self, mock_server):
-        mock_server._indexer = None
+        mock_server.indexer = None
         result = handle_include_graph(mock_server)
         assert result["nodes"] == []
         assert result["edges"] == []
@@ -129,23 +129,23 @@ class TestReindex:
     def test_triggers_reindex(self, mock_server):
         result = handle_reindex(mock_server)
         assert result["success"] is True
-        mock_server._indexer.reindex.assert_called_once()
+        mock_server.indexer.reindex.assert_called_once()
 
     def test_no_indexer_returns_error(self, mock_server):
-        mock_server._indexer = None
+        mock_server.indexer = None
         result = handle_reindex(mock_server)
         assert result["success"] is False
 
 
 class TestClearCache:
     def test_clears_and_reindexes(self, mock_server):
-        # handle_clear_cache resolves staging via _resolver._staging_dir
-        mock_server._indexer._resolver._staging_dir = None
+        # handle_clear_cache resolves staging via resolver._staging_dir
+        mock_server.indexer.resolver._staging_dir = None
         result = handle_clear_cache(mock_server)
         assert result["success"] is True
 
     def test_no_indexer_returns_error(self, mock_server):
-        mock_server._indexer = None
+        mock_server.indexer = None
         result = handle_clear_cache(mock_server)
         assert result["success"] is False
 
@@ -158,31 +158,31 @@ class TestFeatureStatus:
         """Build a mock server with configurable feature availability."""
         server = MagicMock()
         server.state_tracker = ServerStateTracker()
-        server._full_mode = full_mode
+        server.full_mode = full_mode
         if indexing_state == "indexing":
             server.state_tracker.set_indexing()
         elif indexing_state == "error":
             server.state_tracker.set_index_error("index failed")
-        server._parser = MagicMock() if has_parser else None
+        server.parser = MagicMock() if has_parser else None
         if has_indexer:
-            server._indexer = MagicMock()
-            server._indexer._requirement_graph = MagicMock()
+            server.indexer = MagicMock()
+            server.indexer.requirement_graph = MagicMock()
         else:
-            server._indexer = None
+            server.indexer = None
         if has_pipeline:
-            server._semantic_model = MagicMock()
-            server._semantic_model.node_count.return_value = 10
-            server._semantic_model.edge_count.return_value = 5
+            server.semantic_model = MagicMock()
+            server.semantic_model.node_count.return_value = 10
+            server.semantic_model.edge_count.return_value = 5
             pipeline = MagicMock()
             pipeline.get_pipeline_state.return_value = {
                 "tier1FileCount": 3, "tier2FileCount": 2, "tier3FileCount": 0,
                 "tier3Running": False, "semanticNodeCount": 10,
                 "semanticEdgeCount": 5, "semanticModelReady": True,
             }
-            server._analysis_pipeline = pipeline
+            server.analysis_pipeline = pipeline
         else:
-            server._semantic_model = None
-            server._analysis_pipeline = None
+            server.semantic_model = None
+            server.analysis_pipeline = None
         return server
 
     def test_returns_features_and_pipeline(self):
@@ -264,8 +264,8 @@ class TestAnalysisPipelineDetail:
             "bulkAnalysisCompleted": 0,
         }
         pipeline.get_tier3_file_results.return_value = []
-        server._analysis_pipeline = pipeline
-        server._compiler_manager = None
+        server.analysis_pipeline = pipeline
+        server.compiler_manager = None
         server._bulk_compile_running = False
         server._bulk_compile_total = 0
         server._bulk_compile_completed = 0
@@ -276,8 +276,8 @@ class TestAnalysisPipelineDetail:
     def test_tier3_pending_defaults_to_zero_without_pipeline(self):
         """When no pipeline exists, pending should default to 0."""
         server = MagicMock()
-        server._analysis_pipeline = None
-        server._compiler_manager = None
+        server.analysis_pipeline = None
+        server.compiler_manager = None
         server._bulk_compile_running = False
         server._bulk_compile_total = 0
         server._bulk_compile_completed = 0

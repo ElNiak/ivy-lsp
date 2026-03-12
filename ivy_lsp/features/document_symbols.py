@@ -136,8 +136,8 @@ def register(server) -> None:
             doc = server.workspace.get_text_document(uri)
             filepath = uri_to_path(uri)
             source = doc.source or ""
-            parser = getattr(server, "_parser", None)
-            indexer = getattr(server, "_indexer", None)
+            parser = getattr(server, "parser", None)
+            indexer = getattr(server, "indexer", None)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, compute_document_symbols, parser, indexer, source, filepath,

@@ -112,7 +112,7 @@ def compute_workspace_symbols(
     """Query the workspace indexer and return matching LSP WorkspaceSymbols."""
     if indexer is None:
         return []
-    all_syms = indexer._symbol_table.all_symbols()
+    all_syms = indexer.lookup_all_symbols()
     flat = flatten_symbols(all_syms)
     matches = search_symbols(flat, query)
     return [to_workspace_symbol(f) for f in matches]
@@ -129,9 +129,9 @@ def register(server) -> None:
     async def workspace_symbol(
         params: lsp.WorkspaceSymbolParams,
     ) -> List[lsp.WorkspaceSymbol]:
-        if not hasattr(server, "_indexer") or server._indexer is None:
+        if server.indexer is None:
             return []
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, compute_workspace_symbols, server._indexer, params.query or "",
+            None, compute_workspace_symbols, server.indexer, params.query or "",
         )

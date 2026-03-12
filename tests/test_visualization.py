@@ -101,9 +101,10 @@ def _build_graph() -> ScopedRequirementModel:
 
 class _FakeServer:
     def __init__(self, graph=None):
-        self._indexer = (
-            type("I", (), {"_requirement_graph": graph})() if graph else None
+        self.indexer = (
+            type("I", (), {"requirement_graph": graph})() if graph else None
         )
+        self.initializing = False
 
 
 # ---------------------------------------------------------------------------
@@ -1159,7 +1160,8 @@ class _FakeFeatureServer:
 
     def __init__(self):
         self._handlers = {}
-        self._indexer = type("I", (), {"_requirement_graph": _build_graph()})()
+        self.indexer = type("I", (), {"requirement_graph": _build_graph()})()
+        self.initializing = False
 
     def feature(self, method_name):
         def decorator(fn):

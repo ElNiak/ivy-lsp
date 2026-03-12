@@ -80,14 +80,14 @@ def register(server) -> None:
         try:
             uri = params.text_document.uri
             doc = server.workspace.get_text_document(uri)
-            if not hasattr(server, "_indexer") or server._indexer is None:
+            if server.indexer is None:
                 return None
             lines = doc.source.split("\n") if doc.source else []
             filepath = uri_to_path(uri)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, goto_definition,
-                server._indexer, filepath, params.position, lines,
+                server.indexer, filepath, params.position, lines,
             )
         except Exception:
             logger.warning("definition handler failed", exc_info=True)

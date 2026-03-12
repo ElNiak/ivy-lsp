@@ -279,14 +279,14 @@ def test_add_edge_stores_triple(graph):
 
 def test_add_edge_outgoing_adjacency(graph):
     graph.add_edge("src", EdgeType.READS, "dst")
-    outgoing = graph._outgoing["src"]
+    outgoing = graph.outgoing["src"]
     assert len(outgoing) == 1
     assert outgoing[0] == (EdgeType.READS, "dst")
 
 
 def test_add_edge_incoming_adjacency(graph):
     graph.add_edge("src", EdgeType.READS, "dst")
-    incoming = graph._incoming["dst"]
+    incoming = graph.incoming["dst"]
     assert len(incoming) == 1
     assert incoming[0] == (EdgeType.READS, "src")
 
@@ -295,16 +295,16 @@ def test_add_multiple_edges_same_source(graph):
     graph.add_edge("src", EdgeType.READS, "var1")
     graph.add_edge("src", EdgeType.READS, "var2")
     graph.add_edge("src", EdgeType.CONSTRAINS, "act1")
-    assert len(graph._outgoing["src"]) == 3
-    targets = {t for _, t in graph._outgoing["src"]}
+    assert len(graph.outgoing["src"]) == 3
+    targets = {t for _, t in graph.outgoing["src"]}
     assert targets == {"var1", "var2", "act1"}
 
 
 def test_add_multiple_edges_same_target(graph):
     graph.add_edge("req1", EdgeType.CONSTRAINS, "act")
     graph.add_edge("req2", EdgeType.CONSTRAINS, "act")
-    assert len(graph._incoming["act"]) == 2
-    sources = {s for _, s in graph._incoming["act"]}
+    assert len(graph.incoming["act"]) == 2
+    sources = {s for _, s in graph.incoming["act"]}
     assert sources == {"req1", "req2"}
 
 
@@ -455,7 +455,7 @@ def test_remove_file_removes_edges(populated_graph):
 def test_remove_file_rebuilds_adjacency(populated_graph):
     populated_graph.remove_file("/test/file_a.ivy")
     # quic.send was from file_a, so no more CONSTRAINS incoming to it
-    assert "quic.send" not in populated_graph._incoming
+    assert "quic.send" not in populated_graph.incoming
     # quic.recv should still have its CONSTRAINS edge
     reqs = populated_graph.get_requirements_for_action("quic.recv")
     assert len(reqs) == 1
@@ -531,7 +531,7 @@ def test_wire_state_var_edges_links_formula_refs(graph):
     graph.wire_state_var_edges(known_vars)
 
     reads_targets = {
-        t for et, t in graph._outgoing.get(req.id, []) if et == EdgeType.READS
+        t for et, t in graph.outgoing.get(req.id, []) if et == EdgeType.READS
     }
     assert "sent_pkt" in reads_targets
     assert "recv_pkt" in reads_targets
@@ -546,7 +546,7 @@ def test_wire_state_var_edges_with_properties(graph):
     graph.wire_state_var_edges({"my_var"})
 
     reads_targets = {
-        t for et, t in graph._outgoing.get(prop.id, []) if et == EdgeType.READS
+        t for et, t in graph.outgoing.get(prop.id, []) if et == EdgeType.READS
     }
     assert "my_var" in reads_targets
 
@@ -567,7 +567,7 @@ def test_wire_state_var_edges_dotted_name(graph):
     graph.wire_state_var_edges({"sent_pkt"})
 
     reads_targets = {
-        t for et, t in graph._outgoing.get(req.id, []) if et == EdgeType.READS
+        t for et, t in graph.outgoing.get(req.id, []) if et == EdgeType.READS
     }
     assert "sent_pkt" in reads_targets
 

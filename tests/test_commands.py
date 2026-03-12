@@ -92,8 +92,8 @@ class TestDetectIsolateAtPosition:
         doc.source = "#lang ivy1.7\nisolate test_iso = {\n  type t\n}\n"
         doc.version = 1
         server.workspace.get_text_document.return_value = doc
-        server._parser = MagicMock()
-        server._indexer = MagicMock()
+        server.parser = MagicMock()
+        server.indexer = MagicMock()
         return server
 
     def test_none_position_returns_none(self):
@@ -330,7 +330,7 @@ class TestShowModelHandlerParams:
     async def test_show_model_with_namedtuple_params(self):
         """Reproduce the exact bug: pygls sends namedtuple, not dict."""
         _server, registered = _make_registered_handlers()
-        _server._indexer._resolver.get_staged_path.return_value = None
+        _server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params(
             {"textDocument": {"uri": "file:///test.ivy"}, "workDoneToken": None}
@@ -351,7 +351,7 @@ class TestCompileHandlerParams:
     @pytest.mark.asyncio
     async def test_compile_with_namedtuple_params(self):
         _server, registered = _make_registered_handlers()
-        _server._indexer._resolver.get_staged_path.return_value = None
+        _server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params(
             {
@@ -382,9 +382,9 @@ class TestVerifyHandlerParams:
         doc.source = "#lang ivy1.7\n"
         doc.version = 1
         server.workspace.get_text_document.return_value = doc
-        server._parser = MagicMock()
-        server._indexer = MagicMock()
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.parser = MagicMock()
+        server.indexer = MagicMock()
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params(
             {"textDocument": {"uri": "file:///test.ivy"}, "workDoneToken": None}
@@ -412,14 +412,14 @@ class TestResolveViaStaging:
         from ivy_lsp.features.commands import _resolve_via_staging
 
         server = MagicMock()
-        server._indexer._resolver.get_staged_path.return_value = "/tmp/staging/foo.ivy"
+        server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/foo.ivy"
         assert _resolve_via_staging(server, "/project/sub/foo.ivy") == "/tmp/staging/foo.ivy"
 
     def test_staging_returns_none(self):
         from ivy_lsp.features.commands import _resolve_via_staging
 
         server = MagicMock()
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.resolver.get_staged_path.return_value = None
         assert _resolve_via_staging(server, "/project/sub/foo.ivy") == "/project/sub/foo.ivy"
 
     def test_no_indexer(self):
@@ -432,7 +432,7 @@ class TestResolveViaStaging:
         from ivy_lsp.features.commands import _resolve_via_staging
 
         server = MagicMock()
-        server._indexer = None
+        server.indexer = None
         assert _resolve_via_staging(server, "/project/foo.ivy") == "/project/foo.ivy"
 
 
@@ -440,8 +440,8 @@ class TestShowModelUsesStaging:
     @pytest.mark.asyncio
     async def test_show_model_passes_staged_path(self):
         server, registered = _make_registered_handlers()
-        server._indexer = MagicMock()
-        server._indexer._resolver.get_staged_path.return_value = "/tmp/staging/test.ivy"
+        server.indexer = MagicMock()
+        server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/test.ivy"
 
         params = _make_namedtuple_params(
             {"textDocument": {"uri": "file:///project/sub/test.ivy"}, "workDoneToken": None}
@@ -468,9 +468,9 @@ class TestVerifyUsesStaging:
         doc.source = "#lang ivy1.7\n"
         doc.version = 1
         server.workspace.get_text_document.return_value = doc
-        server._parser = MagicMock()
-        server._indexer = MagicMock()
-        server._indexer._resolver.get_staged_path.return_value = (
+        server.parser = MagicMock()
+        server.indexer = MagicMock()
+        server.indexer.resolver.get_staged_path.return_value = (
             "/tmp/staging/test.ivy"
         )
 
@@ -498,8 +498,8 @@ class TestCompileUsesStaging:
     @pytest.mark.asyncio
     async def test_compile_passes_staged_path(self):
         server, registered = _make_registered_handlers()
-        server._indexer = MagicMock()
-        server._indexer._resolver.get_staged_path.return_value = (
+        server.indexer = MagicMock()
+        server.indexer.resolver.get_staged_path.return_value = (
             "/tmp/staging/test.ivy"
         )
 
@@ -584,7 +584,7 @@ def _make_scoped_server(
         graph.set_active_test(active_test)
 
     server = MagicMock()
-    server._indexer._requirement_graph = graph
+    server.indexer.requirement_graph = graph
     return server
 
 
@@ -630,7 +630,7 @@ class TestFindEnclosingTest:
 
     def test_returns_none_when_no_scoped_model(self):
         server = MagicMock()
-        server._indexer._requirement_graph = "not a ScopedRequirementModel"
+        server.indexer.requirement_graph = "not a ScopedRequirementModel"
         result = _find_enclosing_test(server, "/modules/mod.ivy")
         assert result is None
 
@@ -684,10 +684,10 @@ class TestShowModelRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
-        server._indexer._include_graph.get_transitive_includes.return_value = []
-        server._indexer._cache = {}
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
+        server.indexer.include_graph.get_transitive_includes.return_value = []
+        server.indexer._cache = {}
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
@@ -721,8 +721,8 @@ class TestShowModelRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///tests/test_quic.ivy"},
@@ -758,10 +758,10 @@ class TestShowModelRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
-        server._indexer._include_graph.get_transitive_includes.return_value = []
-        server._indexer._cache = {}
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
+        server.indexer.include_graph.get_transitive_includes.return_value = []
+        server.indexer._cache = {}
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
@@ -796,10 +796,10 @@ class TestShowModelRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
-        server._indexer._include_graph.get_transitive_includes.return_value = []
-        server._indexer._cache = {}
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
+        server.indexer.include_graph.get_transitive_includes.return_value = []
+        server.indexer._cache = {}
 
         # Return a single isolate "quic_packet" from document symbols.
         # The pre-redirect block finds exactly 1 isolate and auto-selects it.
@@ -850,8 +850,8 @@ class TestShowModelRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///tests/test_quic.ivy"},
@@ -887,16 +887,16 @@ class TestVerifyRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
-        server._indexer._include_graph.get_transitive_includes.return_value = []
-        server._indexer._cache = {}
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
+        server.indexer.include_graph.get_transitive_includes.return_value = []
+        server.indexer._cache = {}
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
         doc.version = 1
         server.workspace.get_text_document.return_value = doc
-        server._parser = MagicMock()
+        server.parser = MagicMock()
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
@@ -932,16 +932,16 @@ class TestVerifyRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
-        server._indexer._include_graph.get_transitive_includes.return_value = []
-        server._indexer._cache = {}
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
+        server.indexer.include_graph.get_transitive_includes.return_value = []
+        server.indexer._cache = {}
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
         doc.version = 1
         server.workspace.get_text_document.return_value = doc
-        server._parser = MagicMock()
+        server.parser = MagicMock()
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
@@ -973,14 +973,14 @@ class TestVerifyRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
 
         doc = MagicMock()
         doc.source = "#lang ivy1.7\n"
         doc.version = 1
         server.workspace.get_text_document.return_value = doc
-        server._parser = MagicMock()
+        server.parser = MagicMock()
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///tests/test_quic.ivy"},
@@ -1016,8 +1016,8 @@ class TestCompileRedirection:
             tester_role="client",
         )
         graph.register_test_scope(scope)
-        server._indexer._requirement_graph = graph
-        server._indexer._resolver.get_staged_path.return_value = None
+        server.indexer.requirement_graph = graph
+        server.indexer.resolver.get_staged_path.return_value = None
 
         params = _make_namedtuple_params({
             "textDocument": {"uri": "file:///modules/quic_packet.ivy"},

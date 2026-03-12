@@ -69,6 +69,6 @@ def register(server) -> None:
             return None
         lines = doc.source.split("\n")
         filepath = uri_to_path(uri)
-        indexer = getattr(server, "_indexer", None)
+        indexer = getattr(server, "indexer", None)
         symbols = indexer.get_symbols(filepath) if indexer else None
         return compute_document_highlights(lines, params.position, symbols=symbols)

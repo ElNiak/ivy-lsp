@@ -11,8 +11,8 @@ from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
 def _make_indexer(graph=None):
     indexer = MagicMock()
-    indexer._requirement_graph = graph
-    indexer._include_graph = None
+    indexer.requirement_graph = graph
+    indexer.include_graph = None
     return indexer
 
 

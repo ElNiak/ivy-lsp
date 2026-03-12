@@ -30,9 +30,9 @@ from ivy_lsp.features.code_lens import compute_code_lenses
 def _make_indexer(graph=None, include_graph=None, resolver=None):
     """Build a mock indexer with the required attributes."""
     indexer = MagicMock()
-    indexer._requirement_graph = graph
-    indexer._include_graph = include_graph
-    indexer._resolver = resolver
+    indexer.requirement_graph = graph
+    indexer.include_graph = include_graph
+    indexer.resolver = resolver
     return indexer
 
 
@@ -55,9 +55,9 @@ class TestComputeCodeLensesBasic:
         assert result == []
 
     def test_indexer_without_graph_returns_empty(self):
-        """When indexer has no _requirement_graph attribute, no lenses."""
+        """When indexer has no requirement_graph attribute, no lenses."""
         indexer = MagicMock(spec=[])  # no attributes at all
-        del indexer._requirement_graph  # ensure getattr returns None
+        del indexer.requirement_graph  # ensure getattr returns None
         result = compute_code_lenses(indexer, "test.ivy", "before foo.step {\n}")
         assert result == []
 
@@ -868,7 +868,7 @@ class TestRegisterHandler:
     async def test_no_indexer_returns_empty(self):
         server, handler = self._make_server_and_handler()
         server._code_lens_enabled = True
-        server._indexer = None
+        server.indexer = None
         params = MagicMock()
         params.text_document.uri = "file:///test.ivy"
         doc = MagicMock()
@@ -889,12 +889,12 @@ class TestComputeCodeLensesErrorPaths:
     def test_attribute_error_propagates(self):
         """AttributeError from graph propagates (handler will catch it)."""
         indexer = MagicMock()
-        indexer._requirement_graph = MagicMock()
-        indexer._requirement_graph.get_requirements_for_action.side_effect = (
+        indexer.requirement_graph = MagicMock()
+        indexer.requirement_graph.get_requirements_for_action.side_effect = (
             AttributeError("bad attr")
         )
-        indexer._include_graph = None
-        indexer._resolver = None
+        indexer.include_graph = None
+        indexer.resolver = None
 
         with pytest.raises(AttributeError, match="bad attr"):
             compute_code_lenses(indexer, "test.ivy", "before foo {\n}\n")

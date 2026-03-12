@@ -323,8 +323,8 @@ class TestCodeLensIntegration:
         model.add_node(req)
 
         indexer = MagicMock()
-        indexer._requirement_graph = None
-        indexer._include_graph = None
+        indexer.requirement_graph = None
+        indexer.include_graph = None
 
         lenses = compute_code_lenses(
             indexer, "test.ivy", "#lang ivy1.7\n", model

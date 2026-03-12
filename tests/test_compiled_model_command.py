@@ -41,8 +41,8 @@ class FakeServer:
     """Minimal server stub for testing commands.register."""
 
     def __init__(self):
-        self._full_mode = False
-        self._compiler_manager: object = None
+        self.full_mode = False
+        self.compiler_manager: object = None
         self._handlers = {}
 
     def feature(self, name, _options=None):
@@ -97,7 +97,7 @@ class TestCompiledModelCommand:
 
     def test_no_cached_ir_returns_error(self):
         server, handler = self._setup_server()
-        server._compiler_manager = FakeCompilerManager()
+        server.compiler_manager = FakeCompilerManager()
         result = handler(FakeParams(uri="file:///test.ivy"))
         assert result["success"] is False
         assert "No cached compilation" in result["error"]
@@ -150,7 +150,7 @@ class TestCompiledModelCommand:
             compile_duration=2.5,
         )
         mgr._cache["/test.ivy"] = ir
-        server._compiler_manager = mgr
+        server.compiler_manager = mgr
         result = handler(FakeParams(uri="file:///test.ivy"))
         assert result["success"] is True
         assert result["filepath"] == "/test.ivy"
@@ -186,7 +186,7 @@ class TestCompiledModelCommand:
             source_file="/test.ivy",
         )
         mgr._cache["/test.ivy"] = ir
-        server._compiler_manager = mgr
+        server.compiler_manager = mgr
         # Test textDocument.uri extraction
         result = handler(
             FakeParams(text_document=FakeTextDocument("file:///test.ivy"))
@@ -198,7 +198,7 @@ class TestCompiledModelCommand:
         mgr = FakeCompilerManager()
         ir = CompiledModuleIR(success=True, source_file="/test.ivy")
         mgr._cache["/test.ivy"] = ir
-        server._compiler_manager = mgr
+        server.compiler_manager = mgr
         result = handler(FakeParams(uri="file:///test.ivy"))
         assert result["success"] is True
         assert result["axiomCount"] == 0
@@ -227,7 +227,7 @@ class TestCompiledModelCommand:
             source_file="/test.ivy",
         )
         mgr._cache["/test.ivy"] = ir
-        server._compiler_manager = mgr
+        server.compiler_manager = mgr
         result = handler(FakeParams(uri="file:///test.ivy"))
         assert result["success"] is True
         assert len(result["mixins"]) == 3
@@ -247,7 +247,7 @@ class TestCapabilitiesCompiledModel:
 
     def test_compiled_model_available_true_with_manager(self):
         server = FakeServer()
-        server._compiler_manager = FakeCompilerManager()
+        server.compiler_manager = FakeCompilerManager()
         from ivy_lsp.features.commands import register
 
         register(server)
