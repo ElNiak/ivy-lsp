@@ -1,0 +1,449 @@
+"""Traceability tools: ivy_traceability_matrix, ivy_requirement_coverage,
+ivy_impact_analysis, ivy_extract_requirements, ivy_generate_manifest,
+ivy_cross_references, ivy_query_symbol.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+_RFC_REQ_PATTERN = re.compile(
+    r"([^.]*?\b(MUST NOT|MUST|SHALL NOT|SHALL|SHOULD NOT|SHOULD|"
+    r"MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b[^.]*\.)",
+    re.MULTILINE,
+)
+
+
+def register_traceability_tools(mcp: Any, ctx: Any) -> None:
+    """Register traceability-related MCP tools."""
+
+    @mcp.tool()
+    async def ivy_traceability_matrix(relative_path: str | None = None) -> str:
+        """RFC requirement-to-annotation traceability matrix.
+
+        Shows which RFC requirements are covered by bracket-tag annotations in the codebase.
+
+        Args:
+            relative_path: Optional file to scope the matrix to.
+        """
+        model = await ctx.get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+        requirements = model.get_nodes_by_type(RfcRequirement)
+        annotations = model.get_nodes_by_type(RfcAnnotation)
+
+        if relative_path:
+            try:
+                abs_path = ctx.validate_path(relative_path)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+            annotations = [a for a in annotations if a.file == abs_path]
+
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
+        req_ids = {r.id for r in requirements}
+        covered_tags: dict[str, list[dict]] = {}
+        for ann in annotations:
+            for tag in ann.tags:
+                for rfc_id in normalize_tag_to_manifest_ids(tag, req_ids):
+                    if rfc_id not in covered_tags:
+                        covered_tags[rfc_id] = []
+                    covered_tags[rfc_id].append({
+                        "file": ann.file,
+                        "line": ann.line,
+                    })
+
+        matrix = []
+        for req in requirements:
+            matrix.append({
+                "id": req.id,
+                "rfc": req.rfc,
+                "section": req.section,
+                "level": req.level,
+                "text": req.text[:120],
+                "covered": req.id in covered_tags,
+                "assertions": covered_tags.get(req.id, []),
+            })
+
+        return json.dumps({
+            "total_requirements": len(requirements),
+            "covered": sum(1 for m in matrix if m["covered"]),
+            "uncovered": sum(1 for m in matrix if not m["covered"]),
+            "matrix": matrix,
+        })
+
+    @mcp.tool()
+    async def ivy_requirement_coverage(relative_path: str | None = None) -> str:
+        """RFC requirement coverage statistics by level (MUST/SHOULD/MAY) and layer.
+
+        Args:
+            relative_path: Optional file to scope the analysis to.
+        """
+        model = await ctx.get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+        requirements = model.get_nodes_by_type(RfcRequirement)
+        annotations = model.get_nodes_by_type(RfcAnnotation)
+
+        if relative_path:
+            try:
+                abs_path = ctx.validate_path(relative_path)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+            annotations = [a for a in annotations if a.file == abs_path]
+
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
+        req_ids = {r.id for r in requirements}
+        covered_tags: set[str] = set()
+        for ann in annotations:
+            for tag in ann.tags:
+                covered_tags.update(normalize_tag_to_manifest_ids(tag, req_ids))
+
+        by_level: dict[str, dict] = {}
+        by_layer: dict[str, dict] = {}
+        for req in requirements:
+            level = req.level or "UNKNOWN"
+            layer = getattr(req, "layer", None) or "unspecified"
+
+            if level not in by_level:
+                by_level[level] = {"total": 0, "covered": 0}
+            by_level[level]["total"] += 1
+            if req.id in covered_tags:
+                by_level[level]["covered"] += 1
+
+            if layer not in by_layer:
+                by_layer[layer] = {"total": 0, "covered": 0}
+            by_layer[layer]["total"] += 1
+            if req.id in covered_tags:
+                by_layer[layer]["covered"] += 1
+
+        total = len(requirements)
+        covered = sum(1 for r in requirements if r.id in covered_tags)
+
+        # P1: Include top uncovered requirement IDs for AI consumption
+        uncovered_ids = [r.id for r in requirements if r.id not in covered_tags]
+
+        # P2: Add coverage_percent and uncovered count per by_level/by_layer
+        for group in (by_level, by_layer):
+            for entry in group.values():
+                entry["uncovered"] = entry["total"] - entry["covered"]
+                entry["coverage_percent"] = (
+                    round(100 * entry["covered"] / entry["total"], 1)
+                    if entry["total"]
+                    else 0
+                )
+
+        return json.dumps({
+            "total": total,
+            "covered": covered,
+            "uncovered": total - covered,
+            "coverage_percent": round(100 * covered / total, 1) if total else 0,
+            "by_level": by_level,
+            "by_layer": by_layer,
+            "uncovered_ids": uncovered_ids[:50],
+        })
+
+    @mcp.tool()
+    async def ivy_impact_analysis(symbol_name: str) -> str:
+        """Analyze incoming and outgoing edges for a symbol in the semantic model.
+
+        Args:
+            symbol_name: The name of the symbol to analyze.
+        """
+        model = await ctx.get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import SymbolNode
+
+        # H10: Find matching symbol nodes with dotted name resolution
+        all_symbols = model.get_nodes_by_type(SymbolNode)
+        matches = [
+            sn for sn in all_symbols
+            if sn.name == symbol_name or sn.qualified_name == symbol_name
+        ]
+
+        # Fallback: dotted suffix match
+        if not matches and "." in symbol_name:
+            last = symbol_name.rsplit(".", 1)[-1]
+            by_last = [sn for sn in all_symbols if sn.name == last]
+            suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
+            matches = suffix if suffix else by_last
+
+        if not matches:
+            return json.dumps({
+                "symbol": symbol_name,
+                "found": False,
+                "message": f"Symbol '{symbol_name}' not found in semantic model",
+            })
+
+        sn = matches[0]
+        incoming = model.get_incoming(sn.id)
+        outgoing = model.get_outgoing(sn.id)
+
+        return json.dumps({
+            "symbol": symbol_name,
+            "found": True,
+            "qualified_name": sn.qualified_name,
+            "kind": sn.kind,
+            "file": sn.file,
+            "line": sn.line,
+            "incoming_edges": [
+                {"type": etype.value, "source": src} for etype, src in incoming
+            ],
+            "outgoing_edges": [
+                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+            ],
+            "total_references": len(incoming) + len(outgoing),
+        })
+
+    @mcp.tool()
+    async def ivy_extract_requirements(rfc_text: str) -> str:
+        """Parse RFC text to extract MUST/SHOULD/MAY structured requirements.
+
+        Args:
+            rfc_text: Raw RFC text to parse for normative requirements.
+        """
+        results = []
+        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
+            text = m.group(1).strip()
+            level = m.group(2)
+            # Normalize level
+            if level in ("SHALL", "REQUIRED"):
+                level = "MUST"
+            elif level in ("SHALL NOT",):
+                level = "MUST NOT"
+            elif level in ("RECOMMENDED",):
+                level = "SHOULD"
+            elif level in ("OPTIONAL",):
+                level = "MAY"
+
+            results.append({
+                "text": text,
+                "level": level,
+                "offset": m.start(),
+            })
+
+        return json.dumps({
+            "requirements": results,
+            "total": len(results),
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        })
+
+    @mcp.tool()
+    async def ivy_generate_manifest(
+        rfc_name: str,
+        rfc_text: str,
+        protocol: str = "",
+        base_section: str = "",
+    ) -> str:
+        """Generate a YAML requirements manifest from RFC text.
+
+        Extracts MUST/SHOULD/MAY requirements from the text and formats
+        them as a structured YAML manifest ready for traceability tools.
+
+        The output is a YAML string that can be saved as
+        ``protocol-testing/<protocol>/<rfc>_requirements.yaml``.
+
+        Args:
+            rfc_name: RFC identifier (e.g., "RFC9000").
+            rfc_text: Raw RFC text to parse.
+            protocol: Protocol name for layer inference (e.g., "quic").
+            base_section: Default section prefix (e.g., "4" for all
+                requirements in section 4).
+        """
+        results = []
+        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
+            text = m.group(1).strip()
+            level = m.group(2)
+            if level in ("SHALL", "REQUIRED"):
+                level = "MUST"
+            elif level in ("SHALL NOT",):
+                level = "MUST NOT"
+            elif level in ("RECOMMENDED",):
+                level = "SHOULD"
+            elif level in ("OPTIONAL",):
+                level = "MAY"
+            results.append({"text": text, "level": level, "offset": m.start()})
+
+        rfc_lower = rfc_name.lower().replace(" ", "")
+        manifest_lines = [
+            f"rfc: {rfc_name}",
+            f"title: '{protocol.upper()} protocol requirements'",
+            "requirements:",
+        ]
+        for i, req in enumerate(results, start=1):
+            section = f"{base_section}.{i}" if base_section else str(i)
+            tag = f"{rfc_lower}:{section}"
+            escaped_text = req["text"].replace("'", "''")
+            manifest_lines.append(f"  {tag}:")
+            manifest_lines.append(f"    text: '{escaped_text}'")
+            manifest_lines.append(f"    section: '{section}'")
+            manifest_lines.append(f"    level: {req['level']}")
+            manifest_lines.append(f"    layer: ''")
+            manifest_lines.append(f"    testable: true")
+
+        yaml_content = "\n".join(manifest_lines) + "\n"
+        suggested_path = ""
+        if protocol:
+            suggested_path = (
+                f"protocol-testing/{protocol}/"
+                f"{rfc_lower}_requirements.yaml"
+            )
+
+        return json.dumps({
+            "yaml": yaml_content,
+            "total_requirements": len(results),
+            "suggested_path": suggested_path,
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        })
+
+    @mcp.tool()
+    async def ivy_cross_references(node_id: str) -> str:
+        """Query cross-reference graph neighborhood of a node.
+
+        Args:
+            node_id: The node ID to query (e.g., "test.ivy:5:send").
+        """
+        model = await ctx.get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        node = model.get_node(node_id)
+        # H7: Fuzzy node_id matching
+        if node is None:
+            from ivy_lsp.semantic.nodes import SymbolNode
+
+            parts = node_id.split(":")
+            symbol_name = parts[-1] if parts else node_id
+            all_symbols = model.get_nodes_by_type(SymbolNode)
+            sym_matches = [
+                sn for sn in all_symbols
+                if sn.name == symbol_name or sn.qualified_name == symbol_name
+            ]
+            if not sym_matches and "." in symbol_name:
+                last = symbol_name.rsplit(".", 1)[-1]
+                sym_matches = [sn for sn in all_symbols if sn.name == last]
+            if len(sym_matches) == 1:
+                node = sym_matches[0]
+                node_id = node.id
+            elif len(sym_matches) > 1 and len(parts) >= 2:
+                file_hint = parts[0]
+                narrowed = [sn for sn in sym_matches if file_hint in (sn.file or "")]
+                if narrowed:
+                    node = narrowed[0]
+                    node_id = node.id
+
+        if node is None:
+            sample_ids = [n.id for n in model.all_nodes()[:5]] if hasattr(model, "all_nodes") else []
+            return json.dumps({
+                "node_id": node_id,
+                "found": False,
+                "message": f"Node '{node_id}' not found",
+                "hint": "Try using symbol name directly or qualified_name",
+                "sample_node_ids": sample_ids,
+            })
+
+        incoming = model.get_incoming(node_id)
+        outgoing = model.get_outgoing(node_id)
+
+        return json.dumps({
+            "node_id": node_id,
+            "found": True,
+            "node_type": type(node).__name__,
+            "incoming": [
+                {"type": etype.value, "source": src} for etype, src in incoming
+            ],
+            "outgoing": [
+                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+            ],
+        })
+
+    @mcp.tool()
+    async def ivy_query_symbol(symbol_name: str) -> str:
+        """Query rich semantic info about a symbol: type, references, requirements.
+
+        Args:
+            symbol_name: The symbol name to query.
+        """
+        model = await ctx.get_model()
+        if model is None:
+            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+
+        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+
+        # H10: Search SymbolNode with dotted name resolution
+        all_sym_nodes = model.get_nodes_by_type(SymbolNode)
+        symbol_matches = [
+            sn for sn in all_sym_nodes
+            if sn.name == symbol_name or sn.qualified_name == symbol_name
+        ]
+        if not symbol_matches and "." in symbol_name:
+            last = symbol_name.rsplit(".", 1)[-1]
+            by_last = [sn for sn in all_sym_nodes if sn.name == last]
+            suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
+            symbol_matches = suffix if suffix else by_last
+
+        # Search TypeNode
+        type_matches = [
+            tn for tn in model.get_nodes_by_type(TypeNode)
+            if tn.name == symbol_name or tn.qualified_name == symbol_name
+        ]
+
+        if not symbol_matches and not type_matches:
+            return json.dumps({
+                "symbol": symbol_name,
+                "found": False,
+                "message": f"Symbol '{symbol_name}' not found",
+            })
+
+        result: dict[str, Any] = {
+            "symbol": symbol_name,
+            "found": True,
+        }
+
+        if symbol_matches:
+            sn = symbol_matches[0]
+            result["symbol_info"] = {
+                "qualified_name": sn.qualified_name,
+                "kind": sn.kind,
+                "file": sn.file,
+                "line": sn.line,
+                "params": sn.params,
+                "return_sort": sn.return_sort,
+                "sort_name": sn.sort_name,
+            }
+            incoming = model.get_incoming(sn.id)
+            outgoing = model.get_outgoing(sn.id)
+            result["references"] = {
+                "incoming": len(incoming),
+                "outgoing": len(outgoing),
+            }
+
+        if type_matches:
+            tn = type_matches[0]
+            result["type_info"] = {
+                "qualified_name": tn.qualified_name,
+                "file": tn.file,
+                "line": tn.line,
+                "sort_name": tn.sort_name,
+                "is_enum": tn.is_enum,
+                "variants": tn.variants,
+            }
+
+        return json.dumps(result)
