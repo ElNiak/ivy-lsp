@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Per-isolate verification cache: (abs_path, isolate|None) -> result_dict
 _verify_cache: dict[tuple[str, str | None], dict] = {}
+_verify_cache_lock = asyncio.Lock()
 
 # Assertion/tag detection for ivy_diagnostics semantic layer
 _ASSERTION_RE = re.compile(
@@ -98,39 +99,41 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
 
-        # Check cache if requested
-        cache_key = (abs_path, isolate)
-        if use_cache and cache_key in _verify_cache:
-            cached_result = dict(_verify_cache[cache_key])
-            cached_result["cached"] = True
-            return json.dumps(cached_result)
+        # Serialize cache check-and-write to prevent TOCTOU race
+        async with _verify_cache_lock:
+            # Check cache if requested
+            cache_key = (abs_path, isolate)
+            if use_cache and cache_key in _verify_cache:
+                cached_result = dict(_verify_cache[cache_key])
+                cached_result["cached"] = True
+                return json.dumps(cached_result)
 
-        result = await shared_ivy_check(
-            filepath=abs_path,
-            workspace_root=ctx.root,
-            isolate=isolate,
-            staging_dir=ctx.staging_dir,
-        )
+            result = await shared_ivy_check(
+                filepath=abs_path,
+                workspace_root=ctx.root,
+                isolate=isolate,
+                staging_dir=ctx.staging_dir,
+            )
 
-        # Parse counterexample if verification failed
-        if not result.get("success", True):
-            from ivy_lsp.utils.counterexample_parser import parse_counterexample
+            # Parse counterexample if verification failed
+            if not result.get("success", True):
+                from ivy_lsp.utils.counterexample_parser import parse_counterexample
 
-            raw = result.get("raw_output", "")
-            cex = parse_counterexample(raw)
-            if cex is not None:
-                result["counterexample"] = cex
+                raw = result.get("raw_output", "")
+                cex = parse_counterexample(raw)
+                if cex is not None:
+                    result["counterexample"] = cex
 
-        result["cached"] = False
+            result["cached"] = False
 
-        # Cache the result for this (file, isolate) pair
-        _verify_cache[cache_key] = dict(result)
+            # Cache the result for this (file, isolate) pair
+            _verify_cache[cache_key] = dict(result)
 
-        # When full verification (no isolate), also cache individual isolate
-        # results if the output contains per-isolate status lines
-        if isolate is None:
-            raw_output = result.get("raw_output", "")
-            _cache_per_isolate_results(abs_path, raw_output, result)
+            # When full verification (no isolate), also cache individual isolate
+            # results if the output contains per-isolate status lines
+            if isolate is None:
+                raw_output = result.get("raw_output", "")
+                _cache_per_isolate_results(abs_path, raw_output, result)
 
         return json.dumps(result)
 
