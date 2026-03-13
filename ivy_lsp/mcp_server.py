@@ -1160,15 +1160,19 @@ def start_mcp(
                 return json.dumps({"success": False, "message": str(exc)})
             annotations = [a for a in annotations if a.file == abs_path]
 
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
+        req_ids = {r.id for r in requirements}
         covered_tags: dict[str, list[dict]] = {}
         for ann in annotations:
             for tag in ann.tags:
-                if tag not in covered_tags:
-                    covered_tags[tag] = []
-                covered_tags[tag].append({
-                    "file": ann.file,
-                    "line": ann.line,
-                })
+                for rfc_id in normalize_tag_to_manifest_ids(tag, req_ids):
+                    if rfc_id not in covered_tags:
+                        covered_tags[rfc_id] = []
+                    covered_tags[rfc_id].append({
+                        "file": ann.file,
+                        "line": ann.line,
+                    })
 
         matrix = []
         for req in requirements:
@@ -1212,9 +1216,13 @@ def start_mcp(
                 return json.dumps({"success": False, "message": str(exc)})
             annotations = [a for a in annotations if a.file == abs_path]
 
-        covered_tags = set()
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
+        req_ids = {r.id for r in requirements}
+        covered_tags: set[str] = set()
         for ann in annotations:
-            covered_tags.update(ann.tags)
+            for tag in ann.tags:
+                covered_tags.update(normalize_tag_to_manifest_ids(tag, req_ids))
 
         by_level: dict[str, dict] = {}
         by_layer: dict[str, dict] = {}

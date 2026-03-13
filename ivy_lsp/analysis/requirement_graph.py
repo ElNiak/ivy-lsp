@@ -64,19 +64,25 @@ class GraphSnapshot:
         return [self.state_vars[v] for v in written if v in self.state_vars]
 
     def get_uncovered_requirements(self) -> List["RfcRequirement"]:
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
+        rfc_keys = set(self.rfc_requirements.keys())
         covered_ids: Set[str] = set()
         for req in self.requirements.values():
             for tag in req.bracket_tags:
-                if tag in self.rfc_requirements:
-                    covered_ids.add(tag)
+                covered_ids.update(normalize_tag_to_manifest_ids(tag, rfc_keys))
+        covered_ids &= rfc_keys
         return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
 
     def get_coverage_stats(self) -> Dict[str, int]:
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
+        rfc_keys = set(self.rfc_requirements.keys())
         covered_ids: Set[str] = set()
         for req in self.requirements.values():
             for tag in req.bracket_tags:
-                if tag in self.rfc_requirements:
-                    covered_ids.add(tag)
+                covered_ids.update(normalize_tag_to_manifest_ids(tag, rfc_keys))
+        covered_ids &= rfc_keys
         return {
             "total": len(self.rfc_requirements),
             "covered": len(covered_ids),
@@ -394,13 +400,20 @@ class RequirementGraph:
                                 self.add_edge(pid_a, EdgeType.DEPENDS_ON, pid_b)
 
     def wire_coverage_edges(self) -> None:
-        """Match bracket_tags on RequirementNodes to rfc_requirements keys, add COVERS edges."""
+        """Match bracket_tags on RequirementNodes to rfc_requirements keys, add COVERS edges.
+
+        Uses tag normalization so bare tags like '4' match 'rfc9000:4.1' etc.
+        """
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
         with self._lock:
             existing = {(s, t) for s, et, t in self.edges if et == EdgeType.COVERS}
+            rfc_keys = set(self.rfc_requirements.keys())
             for req in self.requirements.values():
                 for tag in req.bracket_tags:
-                    if tag in self.rfc_requirements and (req.id, tag) not in existing:
-                        self.add_edge(req.id, EdgeType.COVERS, tag)
+                    for rfc_id in normalize_tag_to_manifest_ids(tag, rfc_keys):
+                        if (req.id, rfc_id) not in existing:
+                            self.add_edge(req.id, EdgeType.COVERS, rfc_id)
 
     def clear_wiring_edges(self) -> None:
         """Remove all READS, DEPENDS_ON, and PROPAGATED_FROM edges.
@@ -484,12 +497,15 @@ class RequirementGraph:
 
     def get_coverage_stats(self) -> Dict[str, int]:
         """Compute covered/uncovered/total by level."""
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
         with self._lock:
+            rfc_keys = set(self.rfc_requirements.keys())
             covered_ids: Set[str] = set()
             for req in self.requirements.values():
                 for tag in req.bracket_tags:
-                    if tag in self.rfc_requirements:
-                        covered_ids.add(tag)
+                    covered_ids.update(normalize_tag_to_manifest_ids(tag, rfc_keys))
+            covered_ids &= rfc_keys
             return {
                 "total": len(self.rfc_requirements),
                 "covered": len(covered_ids),
@@ -498,12 +514,15 @@ class RequirementGraph:
 
     def get_uncovered_requirements(self) -> List[RfcRequirement]:
         """Return RfcRequirement nodes with no COVERS edge."""
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
         with self._lock:
+            rfc_keys = set(self.rfc_requirements.keys())
             covered_ids: Set[str] = set()
             for req in self.requirements.values():
                 for tag in req.bracket_tags:
-                    if tag in self.rfc_requirements:
-                        covered_ids.add(tag)
+                    covered_ids.update(normalize_tag_to_manifest_ids(tag, rfc_keys))
+            covered_ids &= rfc_keys
             return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
 
     def get_outgoing_edges(self, node_id: str) -> List[Tuple[EdgeType, str]]:

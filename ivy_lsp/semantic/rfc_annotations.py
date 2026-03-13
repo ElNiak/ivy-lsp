@@ -25,6 +25,48 @@ _BRACKET_RE = re.compile(r"#\s*\[([\w:.,\s]+)\]\s*$")  # e.g. "# [rfc9000:4.1, r
 # ---------------------------------------------------------------------------
 
 
+def normalize_tag_to_manifest_ids(
+    tag: str,
+    manifest_keys: set[str],
+) -> set[str]:
+    """Expand a bracket tag to matching manifest IDs.
+
+    Supports:
+    - Exact: 'rfc9000:4.1' -> {'rfc9000:4.1'}
+    - Qualified prefix: 'rfc9000:4' -> {'rfc9000:4.1', 'rfc9000:4.6'}
+    - Bare numeric: '4' -> {'rfc9000:4.1', 'rfc9000:4.6'} (all rfc:4.*)
+    - Bare section: '4.1' -> {'rfc9000:4.1'}
+    """
+    if tag in manifest_keys:
+        return {tag}
+
+    matches: set[str] = set()
+
+    # Extract RFC prefixes from manifest keys
+    rfc_prefixes: set[str] = set()
+    for key in manifest_keys:
+        if ":" in key:
+            rfc_prefixes.add(key.split(":")[0])
+
+    # Qualified with prefix: "rfc9000:4" -> match "rfc9000:4.*"
+    if ":" in tag:
+        for key in manifest_keys:
+            if key == tag or key.startswith(tag + "."):
+                matches.add(key)
+        return matches
+
+    # Bare numeric/section: "4" or "4.1" -> try all RFC prefixes
+    for prefix in rfc_prefixes:
+        exact = f"{prefix}:{tag}"
+        if exact in manifest_keys:
+            matches.add(exact)
+        for key in manifest_keys:
+            if key.startswith(f"{prefix}:{tag}."):
+                matches.add(key)
+
+    return matches
+
+
 def parse_rfc_tags(line_text: str) -> List[str]:
     """Parse RFC bracket tags from a single line of source.
 
@@ -151,11 +193,12 @@ def compute_coverage(
     requirements: Dict[str, RfcRequirement],
 ) -> CoverageStats:
     """Compute coverage of requirements by source annotations."""
-    all_tags: set[str] = set()
+    manifest_keys = set(requirements.keys())
+    covered_ids: set[str] = set()
     for ann in annotations:
-        all_tags.update(ann.tags)
-
-    covered_ids = all_tags & set(requirements.keys())
+        for tag in ann.tags:
+            covered_ids.update(normalize_tag_to_manifest_ids(tag, manifest_keys))
+    covered_ids &= manifest_keys
     total = len(requirements)
     covered = len(covered_ids)
 
