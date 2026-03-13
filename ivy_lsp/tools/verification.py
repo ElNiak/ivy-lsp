@@ -168,6 +168,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         except ValueError as exc:
             return json.dumps({"success": False, "message": str(exc)})
 
+        t0 = time.monotonic()
+        _docker_fallback_reason: str | None = None
+
         # Try API executor path (Docker-aware compilation)
         if ctx.executor is not None and ctx.base_path is not None:
             try:
@@ -176,18 +179,25 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 from api.compiler import generate_compile_commands
 
                 compile_result = generate_compile_commands(
-                    ivy_file=P(relative_path),
+                    ivy_file=P(abs_path),
                     base_path=ctx.base_path,
                 )
 
                 start = time.monotonic()
                 # Run setup + compilation via thread pool (executor.execute is blocking)
-                await asyncio.to_thread(
+                setup_result = await asyncio.to_thread(
                     ctx.executor.execute,
                     compile_result.setup_commands,
                     workspace_root=ctx.root,
                     timeout=30,
                 )
+                if hasattr(setup_result, 'exit_code') and setup_result.exit_code != 0:
+                    return json.dumps({
+                        "success": False,
+                        "message": f"Docker setup failed (exit {setup_result.exit_code})",
+                        "raw_output": getattr(setup_result, 'stderr', ''),
+                        "duration_seconds": round(time.monotonic() - t0, 2),
+                    })
                 exec_result = await asyncio.to_thread(
                     ctx.executor.execute,
                     compile_result.compile_commands,
@@ -223,6 +233,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     "API executor failed: %s; falling back to direct subprocess",
                     exc,
                 )
+                _docker_fallback_reason = str(exc)
 
         # Direct subprocess fallback
         result = await shared_ivy_compile(
@@ -232,6 +243,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             isolate=isolate,
             staging_dir=ctx.staging_dir,
         )
+
+        if _docker_fallback_reason:
+            result["fallback"] = "subprocess"
+            result["fallback_reason"] = _docker_fallback_reason
+
         return json.dumps(result)
 
     @mcp.tool()
