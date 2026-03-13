@@ -27,10 +27,11 @@ _CPP_ERROR_LINE = re.compile(
 )
 
 # Unified exclusion set — superset of mcp_server.py and include_resolver.py
-_DEFAULT_EXCLUDE_DIRS = frozenset({
+DEFAULT_EXCLUDE_DIRS = frozenset({
     ".git", ".hg", ".svn", ".venv", "venv", "node_modules", "__pycache__",
     "build", "dist", "submodules", ".tox", ".mypy_cache", ".pytest_cache",
 })
+_DEFAULT_EXCLUDE_DIRS = DEFAULT_EXCLUDE_DIRS  # back-compat alias
 
 
 def parse_ivy_check_lines(output: str) -> List[Dict[str, Any]]:

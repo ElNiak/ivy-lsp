@@ -90,6 +90,44 @@ class GraphSnapshot:
                 result.append(self.requirements[source_id])
         return result
 
+    def get_state_vars_written_by_action(self, action_id: str) -> List["StateVarNode"]:
+        """Return state vars written within the same files as an action's monitors.
+
+        Correlates WRITES edge source IDs (``filepath:line:write:var``) with
+        the files containing requirements that CONSTRAIN this action.
+        """
+        # Collect files that have requirements for this action
+        action_files: Set[str] = set()
+        for etype, source_id in self.incoming.get(action_id, []):
+            if etype == EdgeType.CONSTRAINS and source_id in self.requirements:
+                action_files.add(self.requirements[source_id].file)
+
+        if not action_files:
+            return []
+
+        # Find WRITES edges whose source ID starts with one of those files
+        written_vars: Set[str] = set()
+        for src, etype, dst in self.edges:
+            if etype != EdgeType.WRITES:
+                continue
+            # Source format: "filepath:line:write:var_name"
+            write_marker = ":write:"
+            marker_idx = src.find(write_marker)
+            if marker_idx < 0:
+                continue
+            # Everything before ":line:write:" is the filepath
+            prefix = src[:marker_idx]
+            # Remove the trailing ":line" to get the filepath
+            last_colon = prefix.rfind(":")
+            if last_colon > 0:
+                filepath = prefix[:last_colon]
+            else:
+                filepath = prefix
+            if filepath in action_files:
+                written_vars.add(dst)
+
+        return [self.state_vars[v] for v in written_vars if v in self.state_vars]
+
 
 # ---------------------------------------------------------------------------
 # Node types

@@ -292,6 +292,70 @@ class TestHandleModelSummaryTable:
         assert expected_fields.issubset(set(row.keys()))
 
 
+class TestStateVarsWrittenPerAction:
+    """Verify stateVarsWritten is per-action, not global."""
+
+    def test_different_actions_have_different_writes(self):
+        """Two actions in different files should have different stateVarsWritten."""
+        graph = ScopedRequirementModel()
+
+        # Requirements for two different actions in different files
+        r1 = RequirementNode(
+            id="/test/file_a.ivy:10", kind="require",
+            formula_text="x > 0", line=10, col=0,
+            file="/test/file_a.ivy", monitor_action="action_a",
+            mixin_kind="before",
+        )
+        r2 = RequirementNode(
+            id="/test/file_b.ivy:20", kind="require",
+            formula_text="y > 0", line=20, col=0,
+            file="/test/file_b.ivy", monitor_action="action_b",
+            mixin_kind="before",
+        )
+
+        # Writes in file_a (belongs to action_a)
+        writes_a = [("var_x", "/test/file_a.ivy", 15)]
+        # Writes in file_b (belongs to action_b)
+        writes_b = [("var_y", "/test/file_b.ivy", 25), ("var_z", "/test/file_b.ivy", 26)]
+
+        graph.add_file_requirements("/test/file_a.ivy", [r1], writes_a)
+        graph.add_file_requirements("/test/file_b.ivy", [r2], writes_b)
+
+        graph.add_action_if_absent(ActionNode(
+            id="action_a", name="action_a",
+            qualified_name="action_a", file="/test/file_a.ivy", line=5,
+        ))
+        graph.add_action_if_absent(ActionNode(
+            id="action_b", name="action_b",
+            qualified_name="action_b", file="/test/file_b.ivy", line=15,
+        ))
+
+        for var_name, fp, line in writes_a + writes_b:
+            if var_name not in graph.state_vars:
+                graph.add_state_var(StateVarNode(
+                    id=var_name, name=var_name,
+                    qualified_name=var_name, file=fp, line=line,
+                ))
+
+        snap = graph.snapshot()
+
+        writes_for_a = snap.get_state_vars_written_by_action("action_a")
+        writes_for_b = snap.get_state_vars_written_by_action("action_b")
+
+        # action_a has 1 write (var_x), action_b has 2 writes (var_y, var_z)
+        assert len(writes_for_a) == 1
+        assert writes_for_a[0].id == "var_x"
+        assert len(writes_for_b) == 2
+        written_ids = {sv.id for sv in writes_for_b}
+        assert written_ids == {"var_y", "var_z"}
+
+        # This should NOT be the global count (3)
+        all_written = snap.get_all_state_vars_written()
+        assert len(all_written) == 3  # global: all 3 vars
+        assert len(writes_for_a) < len(all_written)
+        assert len(writes_for_b) < len(all_written)
+
+
 # ---------------------------------------------------------------------------
 # Helpers for coverage gaps tests
 # ---------------------------------------------------------------------------
@@ -1148,6 +1212,56 @@ class TestHandleSmartSuggestions:
         )
         # Should return a list of suggestions (may be empty if no gaps)
         assert isinstance(result["suggestions"], list)
+
+    def test_workspace_level_returns_uncovered_actions(self):
+        """Without actionName, should report actions with no requirements."""
+        graph = _build_graph()
+        server = _FakeServer(graph)
+        # recv_pkt has no CONSTRAINS edges in _build_graph
+        result = handle_smart_suggestions(server, {})
+        assert isinstance(result["suggestions"], list)
+        uncovered = [
+            s for s in result["suggestions"]
+            if s["type"] == "uncovered_action"
+        ]
+        names = [s["name"] for s in uncovered]
+        assert "recv_pkt" in names
+
+    def test_workspace_level_returns_unguarded_state(self):
+        """Without actionName, should report state vars never read."""
+        graph = ScopedRequirementModel()
+        # Add a state var that is written but never read
+        graph.add_state_var(
+            StateVarNode(
+                id="orphan_var", name="orphan_var",
+                qualified_name="q.orphan_var",
+                file="/test/q.ivy", line=1, is_relation=True,
+            )
+        )
+        graph.add_action(
+            ActionNode(
+                id="act1", name="act1", qualified_name="q.act1",
+                file="/test/q.ivy", line=5,
+            )
+        )
+        server = _FakeServer(graph)
+        result = handle_smart_suggestions(server, {})
+        unguarded = [
+            s for s in result["suggestions"]
+            if s["type"] == "unguarded_state"
+        ]
+        assert any(s["name"] == "orphan_var" for s in unguarded)
+
+    def test_pattern_hint_for_frame_file(self):
+        """Pattern hints are added for frame/message files."""
+        graph = _build_graph()
+        server = _FakeServer(graph)
+        result = handle_smart_suggestions(
+            server, {"filePath": "/test/quic_frame.ivy"}
+        )
+        hints = [s for s in result["suggestions"] if s["type"] == "pattern_hint"]
+        assert len(hints) >= 1
+        assert "variant" in hints[0]["message"].lower()
 
 
 # ---------------------------------------------------------------------------
