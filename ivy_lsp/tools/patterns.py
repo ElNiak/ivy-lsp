@@ -8,8 +8,11 @@ Consolidated from the original three tools:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def register_pattern_tools(mcp: Any, ctx: Any) -> None:
@@ -186,9 +189,11 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         if mode == "check":
             return await _ivy_scaffold_check(protocol)
         else:
-            # "analyze", "validate", "compare" all go through pattern_analysis
-            # with the mode parameter passed through
-            effective_mode = mode if mode in ("detect", "validate", "compare") else "detect"
+            # Validate mode and alias "analyze" -> "detect"
+            _VALID_MODES = {"analyze", "detect", "validate", "compare", "check"}
+            if mode not in _VALID_MODES:
+                return json.dumps({"success": False, "message": f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"})
+            effective_mode = "detect" if mode == "analyze" else mode
             return await _ivy_pattern_analysis(
                 protocol, effective_mode, pattern, reference_protocol
             )
