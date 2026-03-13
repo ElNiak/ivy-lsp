@@ -449,7 +449,11 @@ def start_mcp(
         })
 
     @mcp.tool()
-    async def ivy_diagnostics(relative_path: str) -> str:
+    async def ivy_diagnostics(
+        relative_path: str,
+        layers: list[str] | None = None,
+        min_severity: str | None = None,
+    ) -> str:
         """Full diagnostic analysis of an Ivy file.
 
         Runs 5 diagnostic layers (structural, lexer, semantic, coverage,
@@ -462,6 +466,9 @@ def start_mcp(
 
         Args:
             relative_path: Relative path to the .ivy file to diagnose.
+            layers: Optional list of layers to run. Valid values: structural,
+                lexer, semantic, coverage, pattern. Defaults to all.
+            min_severity: Minimum severity to include: error, warning, info, hint.
         """
         try:
             abs_path = _validate_path(root, relative_path)
@@ -476,135 +483,149 @@ def start_mcp(
         all_diags: list[dict[str, Any]] = []
 
         # 1. Structural checks (same as ivy_lint)
-        resolve_cb = _make_resolve_callback()
-        all_diags.extend(_check_structural_issues(source, abs_path, resolve_cb))
+        if layers is None or "structural" in layers:
+            resolve_cb = _make_resolve_callback()
+            all_diags.extend(_check_structural_issues(source, abs_path, resolve_cb))
 
         # 2. Lexer errors via fallback scanner (no Z3 needed)
-        try:
-            from ivy_lsp.parsing.fallback_scanner import fallback_scan
+        if layers is None or "lexer" in layers:
+            try:
+                from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-            _symbols, error_info = await asyncio.to_thread(
-                fallback_scan, source, abs_path,
-            )
-            if error_info is not None:
-                all_diags.append({
-                    "line": error_info.get("line", 1),
-                    "severity": "error",
-                    "message": f"Lexer error: {error_info.get('message', 'unknown')}",
-                    "source": "ivy-lsp-lexer",
-                })
-        except Exception:
-            logger.debug("Fallback scan failed for %s", relative_path, exc_info=True)
+                _symbols, error_info = await asyncio.to_thread(
+                    fallback_scan, source, abs_path,
+                )
+                if error_info is not None:
+                    all_diags.append({
+                        "line": error_info.get("line", 1),
+                        "severity": "error",
+                        "message": f"Lexer error: {error_info.get('message', 'unknown')}",
+                        "source": "ivy-lsp-lexer",
+                    })
+            except Exception:
+                logger.debug("Fallback scan failed for %s", relative_path, exc_info=True)
 
         # 3. Semantic diagnostics (orphaned RFC tags, untagged assertions)
-        try:
-            model = await _get_model()
-            if model is not None:
-                from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        if layers is None or "semantic" in layers:
+            try:
+                model = await _get_model()
+                if model is not None:
+                    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
-                rfc_reqs = model.get_nodes_by_type(RfcRequirement)
-                annotations = [
-                    n for n in model.get_nodes_by_type(RfcAnnotation)
-                    if n.file == abs_path
-                ]
-                if rfc_reqs:
-                    req_ids = {r.id for r in rfc_reqs}
-                    for ann in annotations:
-                        for tag in ann.tags:
-                            if tag not in req_ids:
-                                all_diags.append({
-                                    "line": ann.line + 1,
-                                    "severity": "warning",
-                                    "message": (
-                                        f"Orphaned RFC tag: [{tag}] does not "
-                                        "match any loaded requirement manifest"
-                                    ),
-                                    "source": "ivy-lsp-semantic",
-                                })
+                    rfc_reqs = model.get_nodes_by_type(RfcRequirement)
+                    annotations = [
+                        n for n in model.get_nodes_by_type(RfcAnnotation)
+                        if n.file == abs_path
+                    ]
+                    if rfc_reqs:
+                        req_ids = {r.id for r in rfc_reqs}
+                        for ann in annotations:
+                            for tag in ann.tags:
+                                if tag not in req_ids:
+                                    all_diags.append({
+                                        "line": ann.line + 1,
+                                        "severity": "warning",
+                                        "message": (
+                                            f"Orphaned RFC tag: [{tag}] does not "
+                                            "match any loaded requirement manifest"
+                                        ),
+                                        "source": "ivy-lsp-semantic",
+                                    })
 
-                # Missing tags on assertions
-                lines = source.split("\n")
-                for m in _ASSERTION_RE.finditer(source):
-                    line_no = source[:m.start()].count("\n")
-                    line_text = lines[line_no] if line_no < len(lines) else ""
-                    if not _BRACKET_TAG_RE.search(line_text):
-                        all_diags.append({
-                            "line": line_no + 1,
-                            "severity": "hint",
-                            "message": "Assertion without RFC bracket tag annotation",
-                            "source": "ivy-lsp-semantic",
-                        })
-        except Exception:
-            logger.debug("Semantic diagnostics failed for %s", relative_path, exc_info=True)
+                    # Missing tags on assertions
+                    lines = source.split("\n")
+                    for m in _ASSERTION_RE.finditer(source):
+                        line_no = source[:m.start()].count("\n")
+                        line_text = lines[line_no] if line_no < len(lines) else ""
+                        if not _BRACKET_TAG_RE.search(line_text):
+                            all_diags.append({
+                                "line": line_no + 1,
+                                "severity": "hint",
+                                "message": "Assertion without RFC bracket tag annotation",
+                                "source": "ivy-lsp-semantic",
+                            })
+            except Exception:
+                logger.debug("Semantic diagnostics failed for %s", relative_path, exc_info=True)
 
         # 4. Coverage hints
-        try:
-            graph = await _get_req_graph()
-            if graph is not None:
-                from ivy_lsp.features.coverage_hints import compute_coverage_hints
+        if layers is None or "coverage" in layers:
+            try:
+                graph = await _get_req_graph()
+                if graph is not None:
+                    from ivy_lsp.features.coverage_hints import compute_coverage_hints
 
-                for hint in compute_coverage_hints(graph, abs_path):
-                    all_diags.append({
-                        "line": hint.get("line", 0),
-                        "severity": hint.get("severity", "hint"),
-                        "message": hint["message"],
-                        "source": "ivy-lsp-coverage",
-                        "code": hint.get("code"),
-                    })
-        except Exception:
-            logger.debug("Coverage hints failed for %s", relative_path, exc_info=True)
+                    for hint in compute_coverage_hints(graph, abs_path):
+                        all_diags.append({
+                            "line": hint.get("line", 0),
+                            "severity": hint.get("severity", "hint"),
+                            "message": hint["message"],
+                            "source": "ivy-lsp-coverage",
+                            "code": hint.get("code"),
+                        })
+            except Exception:
+                logger.debug("Coverage hints failed for %s", relative_path, exc_info=True)
 
         # 5. Pattern diagnostics (regex-based)
-        try:
-            basename = os.path.basename(abs_path)
+        if layers is None or "pattern" in layers:
+            try:
+                basename = os.path.basename(abs_path)
 
-            # Missing _finalize in test files
-            if "test" in basename.lower() and "_finalize" not in source:
-                has_export = bool(
-                    re.search(r"^\s*export\s+action", source, re.MULTILINE)
-                )
-                if has_export:
-                    all_diags.append({
-                        "line": 1,
-                        "severity": "warning",
-                        "message": (
-                            "Test file has exports but no _finalize action. "
-                            "Consider adding 'export action _finalize' for "
-                            "end-of-test assertions."
-                        ),
-                        "source": "ivy-pattern",
-                    })
-
-            # Exported actions without monitors
-            exports = set(re.findall(
-                r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE,
-            ))
-            monitored = set(re.findall(
-                r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE,
-            ))
-            for exp_action in exports:
-                if exp_action not in monitored and exp_action != "_finalize":
-                    action_defined = bool(re.search(
-                        rf"^\s*action\s+{re.escape(exp_action)}\s*",
-                        source, re.MULTILINE,
-                    ))
-                    if action_defined:
-                        match = re.search(
-                            rf"^\s*export\s+action\s+{re.escape(exp_action)}",
-                            source, re.MULTILINE,
-                        )
-                        line_num = source[:match.start()].count("\n") + 1 if match else 1
+                # Missing _finalize in test files
+                if "test" in basename.lower() and "_finalize" not in source:
+                    has_export = bool(
+                        re.search(r"^\s*export\s+action", source, re.MULTILINE)
+                    )
+                    if has_export:
                         all_diags.append({
-                            "line": line_num,
-                            "severity": "hint",
+                            "line": 1,
+                            "severity": "warning",
                             "message": (
-                                f"Exported action '{exp_action}' has no "
-                                "before/after monitor in this file."
+                                "Test file has exports but no _finalize action. "
+                                "Consider adding 'export action _finalize' for "
+                                "end-of-test assertions."
                             ),
                             "source": "ivy-pattern",
                         })
-        except Exception:
-            logger.debug("Pattern diagnostics failed for %s", relative_path, exc_info=True)
+
+                # Exported actions without monitors
+                exports = set(re.findall(
+                    r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE,
+                ))
+                monitored = set(re.findall(
+                    r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE,
+                ))
+                for exp_action in exports:
+                    if exp_action not in monitored and exp_action != "_finalize":
+                        action_defined = bool(re.search(
+                            rf"^\s*action\s+{re.escape(exp_action)}\s*",
+                            source, re.MULTILINE,
+                        ))
+                        if action_defined:
+                            match = re.search(
+                                rf"^\s*export\s+action\s+{re.escape(exp_action)}",
+                                source, re.MULTILINE,
+                            )
+                            line_num = source[:match.start()].count("\n") + 1 if match else 1
+                            all_diags.append({
+                                "line": line_num,
+                                "severity": "hint",
+                                "message": (
+                                    f"Exported action '{exp_action}' has no "
+                                    "before/after monitor in this file."
+                                ),
+                                "source": "ivy-pattern",
+                            })
+            except Exception:
+                logger.debug("Pattern diagnostics failed for %s", relative_path, exc_info=True)
+
+        # Apply severity filter
+        if min_severity:
+            _sev_order = {"error": 4, "warning": 3, "info": 2, "hint": 1}
+            min_rank = _sev_order.get(min_severity, 0)
+            all_diags = [
+                d for d in all_diags
+                if _sev_order.get(d.get("severity", "hint"), 0) >= min_rank
+            ]
 
         # Build source-breakdown summary
         by_source: dict[str, int] = {}
@@ -1266,11 +1287,19 @@ def start_mcp(
 
         from ivy_lsp.semantic.nodes import SymbolNode
 
-        # Find matching symbol nodes
+        # H10: Find matching symbol nodes with dotted name resolution
+        all_symbols = model.get_nodes_by_type(SymbolNode)
         matches = [
-            sn for sn in model.get_nodes_by_type(SymbolNode)
+            sn for sn in all_symbols
             if sn.name == symbol_name or sn.qualified_name == symbol_name
         ]
+
+        # Fallback: dotted suffix match
+        if not matches and "." in symbol_name:
+            last = symbol_name.rsplit(".", 1)[-1]
+            by_last = [sn for sn in all_symbols if sn.name == last]
+            suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
+            matches = suffix if suffix else by_last
 
         if not matches:
             return json.dumps({
@@ -1418,11 +1447,38 @@ def start_mcp(
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
 
         node = model.get_node(node_id)
+        # H7: Fuzzy node_id matching
         if node is None:
+            from ivy_lsp.semantic.nodes import SymbolNode
+
+            parts = node_id.split(":")
+            symbol_name = parts[-1] if parts else node_id
+            all_symbols = model.get_nodes_by_type(SymbolNode)
+            sym_matches = [
+                sn for sn in all_symbols
+                if sn.name == symbol_name or sn.qualified_name == symbol_name
+            ]
+            if not sym_matches and "." in symbol_name:
+                last = symbol_name.rsplit(".", 1)[-1]
+                sym_matches = [sn for sn in all_symbols if sn.name == last]
+            if len(sym_matches) == 1:
+                node = sym_matches[0]
+                node_id = node.id
+            elif len(sym_matches) > 1 and len(parts) >= 2:
+                file_hint = parts[0]
+                narrowed = [sn for sn in sym_matches if file_hint in (sn.file or "")]
+                if narrowed:
+                    node = narrowed[0]
+                    node_id = node.id
+
+        if node is None:
+            sample_ids = [n.id for n in model.all_nodes()[:5]] if hasattr(model, "all_nodes") else []
             return json.dumps({
                 "node_id": node_id,
                 "found": False,
                 "message": f"Node '{node_id}' not found",
+                "hint": "Try using symbol name directly or qualified_name",
+                "sample_node_ids": sample_ids,
             })
 
         incoming = model.get_incoming(node_id)
@@ -1453,11 +1509,18 @@ def start_mcp(
 
         from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
 
-        # Search SymbolNode
+        # H10: Search SymbolNode with dotted name resolution
+        all_sym_nodes = model.get_nodes_by_type(SymbolNode)
         symbol_matches = [
-            sn for sn in model.get_nodes_by_type(SymbolNode)
+            sn for sn in all_sym_nodes
             if sn.name == symbol_name or sn.qualified_name == symbol_name
         ]
+        if not symbol_matches and "." in symbol_name:
+            last = symbol_name.rsplit(".", 1)[-1]
+            by_last = [sn for sn in all_sym_nodes if sn.name == last]
+            suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
+            symbol_matches = suffix if suffix else by_last
+
         # Search TypeNode
         type_matches = [
             tn for tn in model.get_nodes_by_type(TypeNode)
