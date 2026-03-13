@@ -68,11 +68,23 @@ _BRACKET_TAG_RE = re.compile(r"#\s*\[")
 
 
 def _validate_path(root: str, relative_path: str) -> str:
-    """Resolve *relative_path* under *root*, rejecting traversal escapes."""
+    """Resolve *relative_path* under *root*, rejecting traversal escapes.
+
+    Falls back to protocol-testing/ prefix if direct path doesn't exist.
+    """
     abs_path = os.path.realpath(os.path.join(root, relative_path))
     real_root = os.path.realpath(root)
     if not abs_path.startswith(real_root + os.sep) and abs_path != real_root:
         raise ValueError(f"Path escapes workspace root: {relative_path}")
+
+    # C1: If file doesn't exist, try with protocol-testing/ prefix
+    if not os.path.exists(abs_path):
+        alt = os.path.realpath(
+            os.path.join(root, "protocol-testing", relative_path)
+        )
+        if alt.startswith(real_root + os.sep) and os.path.exists(alt):
+            return alt
+
     return abs_path
 
 
@@ -670,10 +682,27 @@ def start_mcp(
         graph, basename_cache = await asyncio.to_thread(_build_graph)
 
         if relative_path is not None:
-            includes = graph.get(relative_path, [])
+            # C5: Try key variants (with/without protocol-testing/ prefix)
+            includes = graph.get(relative_path)
+            resolved_key = relative_path
+            if includes is None:
+                alt_key = "protocol-testing/" + relative_path
+                includes = graph.get(alt_key)
+                if includes is not None:
+                    resolved_key = alt_key
+            if includes is None:
+                for pfx in ["protocol-testing/", "protocol-testing" + os.sep]:
+                    if relative_path.startswith(pfx):
+                        stripped = relative_path[len(pfx):]
+                        includes = graph.get(stripped)
+                        if includes is not None:
+                            resolved_key = stripped
+                            break
+            if includes is None:
+                includes = []
             resolved = []
             for inc in includes:
-                rp = _resolve_closest(inc, relative_path, basename_cache)
+                rp = _resolve_closest(inc, resolved_key, basename_cache)
                 entry: dict[str, Any] = {"module": inc, "resolved_path": rp}
                 # Flag ambiguous resolution
                 candidates = basename_cache.get(inc, [])
@@ -681,7 +710,7 @@ def start_mcp(
                     entry["candidates"] = candidates
                 resolved.append(entry)
 
-            target_basename = os.path.basename(relative_path)
+            target_basename = os.path.basename(resolved_key)
             if target_basename.endswith(".ivy"):
                 target_basename = target_basename[:-4]
             included_by = [fp for fp, incs in graph.items() if target_basename in incs]
@@ -1936,7 +1965,7 @@ def start_mcp(
             try:
                 with open(abs_f, encoding="utf-8", errors="replace") as fh:
                     for inc in _inc_re.findall(fh.read()):
-                        if inc not in basenames:
+                        if inc not in basenames and inc not in _STDLIB_MODULES:
                             unresolved.append({"file": f, "include": inc})
             except OSError:
                 continue
