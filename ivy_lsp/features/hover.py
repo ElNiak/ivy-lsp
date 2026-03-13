@@ -147,6 +147,31 @@ def _enrich_with_semantic_model(
     return content
 
 
+def _sort_by_proximity(results: list, current_filepath: str) -> list:
+    """Sort symbol lookup results by proximity to current file.
+
+    Same-file matches first, then same-directory, then by common path length.
+    """
+    if len(results) <= 1:
+        return results
+
+    current_dir = os.path.dirname(current_filepath)
+
+    def _score(r):
+        rpath = getattr(r, "filepath", "") or ""
+        if rpath == current_filepath:
+            return (0, 0)
+        if os.path.dirname(rpath) == current_dir:
+            return (1, 0)
+        try:
+            common = os.path.commonpath([current_filepath, rpath])
+            return (2, -len(common))
+        except (ValueError, TypeError):
+            return (3, 0)
+
+    return sorted(results, key=_score)
+
+
 def get_hover_info(
     indexer,
     filepath: str,
@@ -167,6 +192,7 @@ def get_hover_info(
     if not results:
         return None
 
+    results = _sort_by_proximity(results, filepath)
     sym = results[0].symbol
     content = format_hover_content(sym)
     if content is None:

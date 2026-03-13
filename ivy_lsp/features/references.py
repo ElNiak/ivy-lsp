@@ -51,6 +51,10 @@ def find_references(
     all_files = indexer.resolver.find_all_ivy_files()
 
     abs_filepath = str(Path(filepath).resolve())
+    # H4: Ensure the queried file is always in the scan list
+    resolved_set = {str(Path(f).resolve()) for f in all_files}
+    if abs_filepath not in resolved_set:
+        all_files = list(all_files) + [abs_filepath]
     cursor_line = position.line
 
     locations: List[lsp.Location] = []
