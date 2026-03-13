@@ -154,6 +154,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             "by_level": by_level,
             "by_layer": by_layer,
             "uncovered_ids": uncovered_ids[:50],
+            "_uncovered_ids_full": uncovered_ids,
             "_covered_ids": covered_ids,
         }
 
@@ -205,7 +206,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         baseline_covered = set(baseline.get("_covered_ids", []))
         current_covered = set(current.get("_covered_ids", []))
 
-        all_ids = baseline_covered | current_covered | set(baseline.get("uncovered_ids", [])) | set(current.get("uncovered_ids", []))
+        all_ids = baseline_covered | current_covered | set(baseline.get("_uncovered_ids_full", baseline.get("uncovered_ids", []))) | set(current.get("_uncovered_ids_full", current.get("uncovered_ids", [])))
 
         new_gaps = sorted(baseline_covered - current_covered)
         recovered = sorted(current_covered - baseline_covered)
