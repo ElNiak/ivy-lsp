@@ -64,6 +64,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         ]
 
         checks: list[dict[str, Any]] = []
+        skipped_files: list[str] = []
         all_passed = True
 
         # --- MINIMAL checks ---
@@ -76,7 +77,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                     first_line = fh.readline()
                 if not first_line.startswith("#lang"):
                     files_without_header.append(f)
-            except OSError:
+            except OSError as exc:
+                logger.warning("Skipping unreadable file %s: %s", f, exc)
+                skipped_files.append(f)
                 continue
         passed = len(files_without_header) == 0
         if not passed:
@@ -104,7 +107,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                     for inc in _inc_re.findall(fh.read()):
                         if inc not in basenames and inc not in ctx.stdlib_modules:
                             unresolved.append({"file": f, "include": inc})
-            except OSError:
+            except OSError as exc:
+                logger.warning("Skipping unreadable file %s: %s", f, exc)
+                skipped_files.append(f)
                 continue
         passed = len(unresolved) == 0
         if not passed:
@@ -160,7 +165,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                 try:
                     with open(abs_f, encoding="utf-8", errors="replace") as fh:
                         monitor_count += len(_monitor_re.findall(fh.read()))
-                except OSError:
+                except OSError as exc:
+                    logger.warning("Skipping unreadable file %s: %s", f, exc)
+                    skipped_files.append(f)
                     continue
             passed = monitor_count > 0
             if not passed:
@@ -185,7 +192,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                 try:
                     with open(abs_f, encoding="utf-8", errors="replace") as fh:
                         export_count += len(_export_re.findall(fh.read()))
-                except OSError:
+                except OSError as exc:
+                    logger.warning("Skipping unreadable file %s: %s", f, exc)
+                    skipped_files.append(f)
                     continue
             passed = export_count > 0
             if not passed:
@@ -223,7 +232,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                 try:
                     with open(abs_f, encoding="utf-8", errors="replace") as fh:
                         tag_count += len(_tag_re.findall(fh.read()))
-                except OSError:
+                except OSError as exc:
+                    logger.warning("Skipping unreadable file %s: %s", f, exc)
+                    skipped_files.append(f)
                     continue
             passed = tag_count > 0
             if not passed:
@@ -236,14 +247,20 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             })
 
         passed_count = sum(1 for c in checks if c["passed"])
-        return json.dumps({
+        result: dict[str, Any] = {
             "protocol": protocol,
             "gate_level": gate_level,
             "passed": all_passed,
             "checks_passed": passed_count,
             "checks_total": len(checks),
             "checks": checks,
-        })
+        }
+        if skipped_files:
+            # Deduplicate (a file may be skipped in multiple checks)
+            unique_skipped = sorted(set(skipped_files))
+            result["skipped_files"] = unique_skipped
+            result["skipped_file_count"] = len(unique_skipped)
+        return json.dumps(result)
 
     # ------------------------------------------------------------------
     # Public MCP tool
