@@ -1,4 +1,8 @@
-"""Quality tools: ivy_smart_suggestions, ivy_quality_gate."""
+"""Quality tools: ivy_quality.
+
+Consolidated from the original two tools:
+- ivy_smart_suggestions + ivy_quality_gate -> ivy_quality
+"""
 
 from __future__ import annotations
 
@@ -11,20 +15,17 @@ from typing import Any
 def register_quality_tools(mcp: Any, ctx: Any) -> None:
     """Register quality-related MCP tools."""
 
-    @mcp.tool()
-    async def ivy_smart_suggestions(
+    # ------------------------------------------------------------------
+    # Private helpers (former standalone tool bodies)
+    # ------------------------------------------------------------------
+
+    async def _ivy_smart_suggestions(
         file_path: str | None = None,
         line: int | None = None,
         context: str | None = None,
         protocol: str | None = None,
     ) -> str:
-        """Get context-aware suggestions for improving the Ivy specification.
-
-        Args:
-            file_path: File to analyze (relative path).
-            line: Optional line number for cursor-local suggestions.
-            context: Optional context hint (e.g., "monitor", "property").
-        """
+        """Get context-aware suggestions for improving the Ivy specification."""
         from ivy_lsp.features.visualization import handle_smart_suggestions
 
         server_proxy = await ctx.make_viz_server_proxy()
@@ -42,22 +43,11 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_smart_suggestions(server_proxy, params))
 
-    @mcp.tool()
-    async def ivy_quality_gate(
+    async def _ivy_quality_gate(
         protocol: str,
         gate_level: str = "minimal",
     ) -> str:
-        """Validate a protocol model against quality gates.
-
-        Checks the model at one of three levels:
-        - minimal: lang header, balanced braces, includes resolve
-        - standard: + test specs exist, behavior files exist, actions have monitors
-        - comprehensive: + manifest exists, coverage > 0, no unguarded state vars
-
-        Args:
-            protocol: Protocol name (e.g., "quic", "bgp").
-            gate_level: Gate level: "minimal", "standard", or "comprehensive".
-        """
+        """Validate a protocol model against quality gates."""
         prot_dir = os.path.join(ctx.root, "protocol-testing", protocol)
         if not os.path.isdir(prot_dir):
             return json.dumps({
@@ -251,3 +241,54 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             "checks_total": len(checks),
             "checks": checks,
         })
+
+    # ------------------------------------------------------------------
+    # Public MCP tool
+    # ------------------------------------------------------------------
+
+    @mcp.tool()
+    async def ivy_quality(
+        mode: str = "suggestions",
+        file_path: str | None = None,
+        line: int | None = None,
+        context: str | None = None,
+        protocol: str | None = None,
+        gate_level: str = "minimal",
+    ) -> str:
+        """Unified quality analysis tool for Ivy specifications.
+
+        Combines context-aware suggestions with quality gate validation
+        into a single tool with mode-based dispatch.
+
+        Args:
+            mode: Quality analysis mode.
+                - "suggestions": Get context-aware suggestions for improving
+                  the Ivy specification (default). Analyzes the file at
+                  file_path (optionally at a specific line) and returns
+                  improvement suggestions.
+                - "gate": Validate a protocol model against quality gates.
+                  Checks at one of three levels: minimal (lang header,
+                  balanced braces, includes resolve), standard (+ test
+                  specs, behavior files, monitors), or comprehensive
+                  (+ manifest, coverage, no unguarded state vars).
+                  Requires protocol.
+            file_path: File to analyze (relative path). Used by
+                mode="suggestions".
+            line: Optional line number for cursor-local suggestions.
+                Used by mode="suggestions".
+            context: Optional context hint (e.g., "monitor", "property").
+                Used by mode="suggestions".
+            protocol: Protocol name (e.g., "quic", "bgp"). Required for
+                mode="gate", optional for mode="suggestions".
+            gate_level: Gate level: "minimal", "standard", or
+                "comprehensive". Used by mode="gate".
+        """
+        if mode == "gate":
+            if not protocol:
+                return json.dumps({
+                    "success": False,
+                    "message": "protocol is required for mode='gate'",
+                })
+            return await _ivy_quality_gate(protocol, gate_level)
+        else:  # default: suggestions
+            return await _ivy_smart_suggestions(file_path, line, context, protocol)

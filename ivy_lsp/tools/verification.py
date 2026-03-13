@@ -20,11 +20,51 @@ from ivy_lsp.verification import (
 
 logger = logging.getLogger(__name__)
 
+# Per-isolate verification cache: (abs_path, isolate|None) -> result_dict
+_verify_cache: dict[tuple[str, str | None], dict] = {}
+
 # Assertion/tag detection for ivy_diagnostics semantic layer
 _ASSERTION_RE = re.compile(
     r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
 )
 _BRACKET_TAG_RE = re.compile(r"#\s*\[")
+
+
+# Pattern for per-isolate status in ivy_check output, e.g.:
+# "  isolate quic_server_test_stream: PASS" or "FAIL"
+_ISOLATE_STATUS_RE = re.compile(
+    r"^\s*isolate\s+([\w.]+)\s*:\s*(PASS|FAIL|OK)\s*$", re.MULTILINE
+)
+
+
+def _cache_per_isolate_results(
+    abs_path: str,
+    raw_output: str,
+    full_result: dict[str, Any],
+) -> None:
+    """Extract per-isolate status from full verification output and cache each."""
+    for m in _ISOLATE_STATUS_RE.finditer(raw_output):
+        iso_name = m.group(1)
+        status = m.group(2)
+        iso_key = (abs_path, iso_name)
+        if iso_key not in _verify_cache:
+            iso_success = status in ("PASS", "OK")
+            # Filter diagnostics to those mentioning this isolate (best effort)
+            iso_diags = [
+                d for d in full_result.get("diagnostics", [])
+                if iso_name in d.get("message", "")
+                or iso_name in d.get("file", "")
+            ]
+            _verify_cache[iso_key] = {
+                "success": iso_success,
+                "diagnostics": iso_diags,
+                "diagnostic_count": len(iso_diags),
+                "error_summary": full_result.get("error_summary", "") if not iso_success else "",
+                "raw_output": raw_output,
+                "duration_seconds": full_result.get("duration_seconds", 0),
+                "cached": False,
+                "isolate": iso_name,
+            }
 
 
 def register_verification_tools(mcp: Any, ctx: Any) -> None:
@@ -34,6 +74,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
     async def ivy_verify(
         relative_path: str,
         isolate: str | None = None,
+        use_cache: bool = False,
     ) -> str:
         """Run ivy_check on an Ivy file to verify formal properties.
 
@@ -42,6 +83,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         Args:
             relative_path: Relative path to the .ivy file to check.
             isolate: Optional isolate name to check in isolation.
+            use_cache: When True, return cached result if available.
         """
         try:
             abs_path = ctx.validate_path(relative_path)
@@ -56,12 +98,40 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
 
+        # Check cache if requested
+        cache_key = (abs_path, isolate)
+        if use_cache and cache_key in _verify_cache:
+            cached_result = dict(_verify_cache[cache_key])
+            cached_result["cached"] = True
+            return json.dumps(cached_result)
+
         result = await shared_ivy_check(
             filepath=abs_path,
             workspace_root=ctx.root,
             isolate=isolate,
             staging_dir=ctx.staging_dir,
         )
+
+        # Parse counterexample if verification failed
+        if not result.get("success", True):
+            from ivy_lsp.utils.counterexample_parser import parse_counterexample
+
+            raw = result.get("raw_output", "")
+            cex = parse_counterexample(raw)
+            if cex is not None:
+                result["counterexample"] = cex
+
+        result["cached"] = False
+
+        # Cache the result for this (file, isolate) pair
+        _verify_cache[cache_key] = dict(result)
+
+        # When full verification (no isolate), also cache individual isolate
+        # results if the output contains per-isolate status lines
+        if isolate is None:
+            raw_output = result.get("raw_output", "")
+            _cache_per_isolate_results(abs_path, raw_output, result)
+
         return json.dumps(result)
 
     @mcp.tool()

@@ -1,4 +1,9 @@
-"""Pattern tools: ivy_pattern_analysis, ivy_pattern_scaffold, ivy_scaffold_check."""
+"""Pattern tools: ivy_patterns, ivy_pattern_scaffold.
+
+Consolidated from the original three tools:
+- ivy_pattern_analysis + ivy_scaffold_check -> ivy_patterns
+- ivy_pattern_scaffold (kept as-is, it's a generator not an analyzer)
+"""
 
 from __future__ import annotations
 
@@ -10,25 +15,17 @@ from typing import Any
 def register_pattern_tools(mcp: Any, ctx: Any) -> None:
     """Register pattern-related MCP tools."""
 
-    @mcp.tool()
-    async def ivy_pattern_analysis(
+    # ------------------------------------------------------------------
+    # Private helpers (former standalone tool bodies)
+    # ------------------------------------------------------------------
+
+    async def _ivy_pattern_analysis(
         protocol: str,
         mode: str = "detect",
         pattern: str | None = None,
         reference_protocol: str | None = None,
     ) -> str:
-        """Analyze formal model patterns in a protocol specification.
-
-        Detects recurring patterns (serdes, variants, monitors, shims, modules,
-        entities) and validates cross-references between them.
-
-        Args:
-            protocol: Protocol name (e.g., "quic", "bgp", "minip").
-            mode: Analysis mode: "detect" (find patterns), "validate" (check
-                cross-references), or "compare" (diff two protocols).
-            pattern: Optional specific pattern to analyze (e.g., "serdes", "variants").
-            reference_protocol: Required for "compare" mode — protocol to compare against.
-        """
+        """Analyze formal model patterns in a protocol specification."""
         from ivy_lsp.features.patterns import handle_pattern_analysis
 
         params: dict[str, Any] = {"protocol": protocol, "mode": mode}
@@ -38,55 +35,8 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             params["reference_protocol"] = reference_protocol
         return json.dumps(handle_pattern_analysis(ctx.root, params))
 
-    @mcp.tool()
-    async def ivy_pattern_scaffold(
-        protocol: str,
-        pattern: str,
-        wire_format: str = "binary",
-        role_type: str = "asymmetric",
-        variant_names: list[str] | None = None,
-        roles: list[str] | None = None,
-    ) -> str:
-        """Generate Ivy source from a pattern template.
-
-        Loads a pattern template, performs placeholder substitution with the
-        given protocol name and options, and returns the generated source code.
-
-        Args:
-            protocol: Protocol name for placeholder substitution.
-            pattern: Pattern to scaffold: "serdes", "variants", "monitors",
-                "shim", "module", or "entity".
-            wire_format: Wire format for serdes: "binary" (default) or "json".
-                For shim pattern, use "udp" or "tcp".
-            role_type: Role type for entity: "asymmetric" (default) or "symmetric".
-            variant_names: Optional list of variant/message type names.
-            roles: Optional list of role names (e.g., ["client", "server"]).
-        """
-        from ivy_lsp.features.patterns import handle_pattern_scaffold
-
-        params: dict[str, Any] = {
-            "protocol": protocol,
-            "pattern": pattern,
-            "wire_format": wire_format,
-            "role_type": role_type,
-        }
-        if variant_names:
-            params["variant_names"] = variant_names
-        if roles:
-            params["roles"] = roles
-        return json.dumps(handle_pattern_scaffold(ctx.root, params))
-
-    @mcp.tool()
-    async def ivy_scaffold_check(protocol: str) -> str:
-        """Check which layers/patterns are present or missing in a protocol model.
-
-        Compares the protocol's directory structure and file contents against
-        the canonical 14-layer decomposition used by QUIC (the gold standard).
-        Returns a completeness score with present/missing layers and suggestions.
-
-        Args:
-            protocol: Protocol name (e.g., "quic", "bgp", "minip", "coap").
-        """
+    async def _ivy_scaffold_check(protocol: str) -> str:
+        """Check which layers/patterns are present or missing in a protocol model."""
         # Canonical layers with detection heuristics
         _LAYERS = [
             ("types", "{p}_types.ivy", "type "),
@@ -181,7 +131,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                 "priority": "medium",
                 "suggestion": (
                     "No requirements manifest found. Use "
-                    "ivy_generate_manifest to create one from RFC text."
+                    "ivy_extract_requirements(output='manifest') to create one from RFC text."
                 ),
             })
 
@@ -197,3 +147,86 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             "layers_missing": layers_missing,
             "suggestions": suggestions,
         })
+
+    # ------------------------------------------------------------------
+    # Public MCP tools
+    # ------------------------------------------------------------------
+
+    @mcp.tool()
+    async def ivy_patterns(
+        protocol: str,
+        mode: str = "analyze",
+        pattern: str | None = None,
+        reference_protocol: str | None = None,
+    ) -> str:
+        """Unified pattern analysis and scaffold completeness checking tool.
+
+        Combines pattern detection/validation with layer completeness
+        checking into a single tool with mode-based dispatch.
+
+        Args:
+            protocol: Protocol name (e.g., "quic", "bgp", "minip").
+            mode: Analysis mode.
+                - "analyze": Detect recurring patterns (serdes, variants,
+                  monitors, shims, modules, entities) and validate
+                  cross-references between them (default). Supports
+                  sub-modes via the pattern parameter.
+                - "validate": Check cross-references between patterns.
+                  Same as "analyze" with mode="validate" passed through.
+                - "compare": Diff two protocols. Requires
+                  reference_protocol.
+                - "check": Check which layers/patterns are present or
+                  missing against the canonical 14-layer decomposition.
+                  Returns a completeness score with suggestions.
+            pattern: Optional specific pattern to analyze (e.g., "serdes",
+                "variants"). Used by mode="analyze" and mode="validate".
+            reference_protocol: Protocol to compare against. Required for
+                mode="compare".
+        """
+        if mode == "check":
+            return await _ivy_scaffold_check(protocol)
+        else:
+            # "analyze", "validate", "compare" all go through pattern_analysis
+            # with the mode parameter passed through
+            effective_mode = mode if mode in ("detect", "validate", "compare") else "detect"
+            return await _ivy_pattern_analysis(
+                protocol, effective_mode, pattern, reference_protocol
+            )
+
+    @mcp.tool()
+    async def ivy_pattern_scaffold(
+        protocol: str,
+        pattern: str,
+        wire_format: str = "binary",
+        role_type: str = "asymmetric",
+        variant_names: list[str] | None = None,
+        roles: list[str] | None = None,
+    ) -> str:
+        """Generate Ivy source from a pattern template.
+
+        Loads a pattern template, performs placeholder substitution with the
+        given protocol name and options, and returns the generated source code.
+
+        Args:
+            protocol: Protocol name for placeholder substitution.
+            pattern: Pattern to scaffold: "serdes", "variants", "monitors",
+                "shim", "module", or "entity".
+            wire_format: Wire format for serdes: "binary" (default) or "json".
+                For shim pattern, use "udp" or "tcp".
+            role_type: Role type for entity: "asymmetric" (default) or "symmetric".
+            variant_names: Optional list of variant/message type names.
+            roles: Optional list of role names (e.g., ["client", "server"]).
+        """
+        from ivy_lsp.features.patterns import handle_pattern_scaffold
+
+        params: dict[str, Any] = {
+            "protocol": protocol,
+            "pattern": pattern,
+            "wire_format": wire_format,
+            "role_type": role_type,
+        }
+        if variant_names:
+            params["variant_names"] = variant_names
+        if roles:
+            params["roles"] = roles
+        return json.dumps(handle_pattern_scaffold(ctx.root, params))

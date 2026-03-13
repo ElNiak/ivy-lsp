@@ -226,11 +226,17 @@ def start_mcp(
         "ivy-lsp",
         instructions=(
             "Ivy Language Server MCP tools for formal verification. "
-            "Provides verification (ivy_check), compilation (ivyc), "
-            "model inspection (ivy_show), fast linting, include graph analysis, "
-            "semantic traceability (RFC coverage, impact analysis, cross-references), "
-            "and model visualization (action requirements, summary table, coverage gaps, "
-            "action dependency graph, state machine view)."
+            "Tools: ivy_verify (check), ivy_compile (ivyc), ivy_model_info (show), "
+            "ivy_lint (fast linting), ivy_diagnostics, ivy_include_graph, "
+            "ivy_capabilities; "
+            "ivy_coverage (mode: matrix|stats|gaps), "
+            "ivy_query (mode: impact|xrefs|info), "
+            "ivy_extract_requirements (output: structured|manifest); "
+            "ivy_visualize (view: dependencies|state_machine|layers), "
+            "ivy_model_summary (detail: summary|requirements); "
+            "ivy_patterns (mode: analyze|validate|compare|check), "
+            "ivy_pattern_scaffold; "
+            "ivy_quality (mode: suggestions|gate)."
         ),
     )
 

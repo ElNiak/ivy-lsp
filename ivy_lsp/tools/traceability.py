@@ -1,6 +1,9 @@
-"""Traceability tools: ivy_traceability_matrix, ivy_requirement_coverage,
-ivy_impact_analysis, ivy_extract_requirements, ivy_generate_manifest,
-ivy_cross_references, ivy_query_symbol.
+"""Traceability tools: ivy_coverage, ivy_query, ivy_extract_requirements.
+
+Consolidated from the original seven tools:
+- ivy_traceability_matrix, ivy_requirement_coverage, ivy_coverage_gaps -> ivy_coverage
+- ivy_impact_analysis, ivy_cross_references, ivy_query_symbol -> ivy_query
+- ivy_extract_requirements + ivy_generate_manifest -> ivy_extract_requirements
 """
 
 from __future__ import annotations
@@ -19,15 +22,16 @@ _RFC_REQ_PATTERN = re.compile(
 def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     """Register traceability-related MCP tools."""
 
-    @mcp.tool()
-    async def ivy_traceability_matrix(relative_path: str | None = None) -> str:
-        """RFC requirement-to-annotation traceability matrix.
+    # Coverage baseline cache: stores last coverage stats result per scope.
+    # Key is the relative_path (or "__global__" when None).
+    _coverage_baselines: dict[str, dict] = {}
 
-        Shows which RFC requirements are covered by bracket-tag annotations in the codebase.
+    # ------------------------------------------------------------------
+    # Private helpers (former standalone tool bodies)
+    # ------------------------------------------------------------------
 
-        Args:
-            relative_path: Optional file to scope the matrix to.
-        """
+    async def _ivy_traceability_matrix(relative_path: str | None = None) -> str:
+        """RFC requirement-to-annotation traceability matrix."""
         model = await ctx.get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
@@ -77,13 +81,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             "matrix": matrix,
         })
 
-    @mcp.tool()
-    async def ivy_requirement_coverage(relative_path: str | None = None) -> str:
-        """RFC requirement coverage statistics by level (MUST/SHOULD/MAY) and layer.
-
-        Args:
-            relative_path: Optional file to scope the analysis to.
-        """
+    async def _ivy_requirement_coverage(relative_path: str | None = None) -> str:
+        """RFC requirement coverage statistics by level and layer."""
         model = await ctx.get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
@@ -142,7 +141,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     else 0
                 )
 
-        return json.dumps({
+        covered_ids = sorted(r.id for r in requirements if r.id in covered_tags)
+
+        result = {
             "total": total,
             "covered": covered,
             "uncovered": total - covered,
@@ -150,15 +151,101 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             "by_level": by_level,
             "by_layer": by_layer,
             "uncovered_ids": uncovered_ids[:50],
+            "_covered_ids": covered_ids,
+        }
+
+        # Save as baseline for diff mode
+        scope_key = relative_path or "__global__"
+        _coverage_baselines[scope_key] = result
+
+        return json.dumps(result)
+
+    async def _ivy_coverage_gaps(
+        test_file: str | None = None,
+        protocol: str | None = None,
+    ) -> str:
+        """Identify coverage gaps: unguarded state vars, uncovered RFC requirements."""
+        from ivy_lsp.features.visualization import handle_coverage_gaps
+
+        server_proxy = await ctx.make_viz_server_proxy()
+        params: dict[str, Any] = {}
+        if test_file:
+            try:
+                params["testFile"] = ctx.validate_path(test_file)
+            except ValueError as exc:
+                return json.dumps({"success": False, "message": str(exc)})
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
+        return json.dumps(handle_coverage_gaps(server_proxy, params))
+
+    async def _ivy_coverage_diff(relative_path: str | None = None) -> str:
+        """Compare current coverage against the cached baseline."""
+        scope_key = relative_path or "__global__"
+        baseline = _coverage_baselines.get(scope_key)
+        if baseline is None:
+            return json.dumps({
+                "success": False,
+                "message": (
+                    "No coverage baseline cached"
+                    + (f" for scope '{relative_path}'" if relative_path else "")
+                    + ". Run ivy_coverage(mode='stats') first."
+                ),
+            })
+
+        # Get current stats (this also updates the baseline)
+        current_raw = await _ivy_requirement_coverage(relative_path)
+        current = json.loads(current_raw)
+
+        if not current.get("total"):
+            return json.dumps({"success": False, "message": "No requirements found"})
+
+        baseline_covered = set(baseline.get("_covered_ids", []))
+        current_covered = set(current.get("_covered_ids", []))
+
+        all_ids = baseline_covered | current_covered | set(baseline.get("uncovered_ids", [])) | set(current.get("uncovered_ids", []))
+
+        new_gaps = sorted(baseline_covered - current_covered)
+        recovered = sorted(current_covered - baseline_covered)
+        unchanged_covered = len(baseline_covered & current_covered)
+        unchanged_uncovered = len(all_ids) - len(current_covered) - len(new_gaps)
+        # Clamp to zero in case of data inconsistency
+        if unchanged_uncovered < 0:
+            unchanged_uncovered = 0
+
+        baseline_pct = baseline.get("coverage_percent", 0)
+        current_pct = current.get("coverage_percent", 0)
+        delta = round(current_pct - baseline_pct, 1)
+
+        if delta > 0:
+            direction = "improved"
+        elif delta < 0:
+            direction = "regressed"
+        else:
+            direction = "unchanged"
+
+        parts = []
+        if recovered:
+            parts.append(f"{len(recovered)} recovered")
+        if new_gaps:
+            parts.append(f"{len(new_gaps)} new gaps")
+        if not parts:
+            parts.append("no changes")
+        summary = f"Coverage {direction} by {abs(delta)}% ({', '.join(parts)})"
+
+        return json.dumps({
+            "baseline_coverage_percent": baseline_pct,
+            "current_coverage_percent": current_pct,
+            "delta_percent": delta,
+            "delta_direction": direction,
+            "new_gaps": new_gaps,
+            "recovered": recovered,
+            "unchanged_covered": unchanged_covered,
+            "unchanged_uncovered": unchanged_uncovered,
+            "summary": summary,
         })
 
-    @mcp.tool()
-    async def ivy_impact_analysis(symbol_name: str) -> str:
-        """Analyze incoming and outgoing edges for a symbol in the semantic model.
-
-        Args:
-            symbol_name: The name of the symbol to analyze.
-        """
+    async def _ivy_impact_analysis(symbol_name: str) -> str:
+        """Analyze incoming and outgoing edges for a symbol."""
         model = await ctx.get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
@@ -206,120 +293,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             "total_references": len(incoming) + len(outgoing),
         })
 
-    @mcp.tool()
-    async def ivy_extract_requirements(rfc_text: str) -> str:
-        """Parse RFC text to extract MUST/SHOULD/MAY structured requirements.
-
-        Args:
-            rfc_text: Raw RFC text to parse for normative requirements.
-        """
-        results = []
-        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
-            text = m.group(1).strip()
-            level = m.group(2)
-            # Normalize level
-            if level in ("SHALL", "REQUIRED"):
-                level = "MUST"
-            elif level in ("SHALL NOT",):
-                level = "MUST NOT"
-            elif level in ("RECOMMENDED",):
-                level = "SHOULD"
-            elif level in ("OPTIONAL",):
-                level = "MAY"
-
-            results.append({
-                "text": text,
-                "level": level,
-                "offset": m.start(),
-            })
-
-        return json.dumps({
-            "requirements": results,
-            "total": len(results),
-            "by_level": {
-                level: sum(1 for r in results if r["level"] == level)
-                for level in sorted({r["level"] for r in results})
-            },
-        })
-
-    @mcp.tool()
-    async def ivy_generate_manifest(
-        rfc_name: str,
-        rfc_text: str,
-        protocol: str = "",
-        base_section: str = "",
-    ) -> str:
-        """Generate a YAML requirements manifest from RFC text.
-
-        Extracts MUST/SHOULD/MAY requirements from the text and formats
-        them as a structured YAML manifest ready for traceability tools.
-
-        The output is a YAML string that can be saved as
-        ``protocol-testing/<protocol>/<rfc>_requirements.yaml``.
-
-        Args:
-            rfc_name: RFC identifier (e.g., "RFC9000").
-            rfc_text: Raw RFC text to parse.
-            protocol: Protocol name for layer inference (e.g., "quic").
-            base_section: Default section prefix (e.g., "4" for all
-                requirements in section 4).
-        """
-        results = []
-        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
-            text = m.group(1).strip()
-            level = m.group(2)
-            if level in ("SHALL", "REQUIRED"):
-                level = "MUST"
-            elif level in ("SHALL NOT",):
-                level = "MUST NOT"
-            elif level in ("RECOMMENDED",):
-                level = "SHOULD"
-            elif level in ("OPTIONAL",):
-                level = "MAY"
-            results.append({"text": text, "level": level, "offset": m.start()})
-
-        rfc_lower = rfc_name.lower().replace(" ", "")
-        manifest_lines = [
-            f"rfc: {rfc_name}",
-            f"title: '{protocol.upper()} protocol requirements'",
-            "requirements:",
-        ]
-        for i, req in enumerate(results, start=1):
-            section = f"{base_section}.{i}" if base_section else str(i)
-            tag = f"{rfc_lower}:{section}"
-            escaped_text = req["text"].replace("'", "''")
-            manifest_lines.append(f"  {tag}:")
-            manifest_lines.append(f"    text: '{escaped_text}'")
-            manifest_lines.append(f"    section: '{section}'")
-            manifest_lines.append(f"    level: {req['level']}")
-            manifest_lines.append(f"    layer: ''")
-            manifest_lines.append(f"    testable: true")
-
-        yaml_content = "\n".join(manifest_lines) + "\n"
-        suggested_path = ""
-        if protocol:
-            suggested_path = (
-                f"protocol-testing/{protocol}/"
-                f"{rfc_lower}_requirements.yaml"
-            )
-
-        return json.dumps({
-            "yaml": yaml_content,
-            "total_requirements": len(results),
-            "suggested_path": suggested_path,
-            "by_level": {
-                level: sum(1 for r in results if r["level"] == level)
-                for level in sorted({r["level"] for r in results})
-            },
-        })
-
-    @mcp.tool()
-    async def ivy_cross_references(node_id: str) -> str:
-        """Query cross-reference graph neighborhood of a node.
-
-        Args:
-            node_id: The node ID to query (e.g., "test.ivy:5:send").
-        """
+    async def _ivy_cross_references(node_id: str) -> str:
+        """Query cross-reference graph neighborhood of a node."""
         model = await ctx.get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
@@ -374,13 +349,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             ],
         })
 
-    @mcp.tool()
-    async def ivy_query_symbol(symbol_name: str) -> str:
-        """Query rich semantic info about a symbol: type, references, requirements.
-
-        Args:
-            symbol_name: The symbol name to query.
-        """
+    async def _ivy_query_symbol(symbol_name: str) -> str:
+        """Query rich semantic info about a symbol: type, references, requirements."""
         model = await ctx.get_model()
         if model is None:
             return json.dumps({"success": False, "message": "Semantic model unavailable"})
@@ -447,3 +417,220 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             }
 
         return json.dumps(result)
+
+    async def _ivy_extract_requirements_logic(rfc_text: str) -> str:
+        """Parse RFC text to extract MUST/SHOULD/MAY structured requirements."""
+        results = []
+        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
+            text = m.group(1).strip()
+            level = m.group(2)
+            # Normalize level
+            if level in ("SHALL", "REQUIRED"):
+                level = "MUST"
+            elif level in ("SHALL NOT",):
+                level = "MUST NOT"
+            elif level in ("RECOMMENDED",):
+                level = "SHOULD"
+            elif level in ("OPTIONAL",):
+                level = "MAY"
+
+            results.append({
+                "text": text,
+                "level": level,
+                "offset": m.start(),
+            })
+
+        return json.dumps({
+            "requirements": results,
+            "total": len(results),
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        })
+
+    async def _ivy_generate_manifest(
+        rfc_name: str,
+        rfc_text: str,
+        protocol: str = "",
+        base_section: str = "",
+    ) -> str:
+        """Generate a YAML requirements manifest from RFC text."""
+        results = []
+        for m in _RFC_REQ_PATTERN.finditer(rfc_text):
+            text = m.group(1).strip()
+            level = m.group(2)
+            if level in ("SHALL", "REQUIRED"):
+                level = "MUST"
+            elif level in ("SHALL NOT",):
+                level = "MUST NOT"
+            elif level in ("RECOMMENDED",):
+                level = "SHOULD"
+            elif level in ("OPTIONAL",):
+                level = "MAY"
+            results.append({"text": text, "level": level, "offset": m.start()})
+
+        rfc_lower = rfc_name.lower().replace(" ", "")
+        manifest_lines = [
+            f"rfc: {rfc_name}",
+            f"title: '{protocol.upper()} protocol requirements'",
+            "requirements:",
+        ]
+        for i, req in enumerate(results, start=1):
+            section = f"{base_section}.{i}" if base_section else str(i)
+            tag = f"{rfc_lower}:{section}"
+            escaped_text = req["text"].replace("'", "''")
+            manifest_lines.append(f"  {tag}:")
+            manifest_lines.append(f"    text: '{escaped_text}'")
+            manifest_lines.append(f"    section: '{section}'")
+            manifest_lines.append(f"    level: {req['level']}")
+            manifest_lines.append(f"    layer: ''")
+            manifest_lines.append(f"    testable: true")
+
+        yaml_content = "\n".join(manifest_lines) + "\n"
+        suggested_path = ""
+        if protocol:
+            suggested_path = (
+                f"protocol-testing/{protocol}/"
+                f"{rfc_lower}_requirements.yaml"
+            )
+
+        return json.dumps({
+            "yaml": yaml_content,
+            "total_requirements": len(results),
+            "suggested_path": suggested_path,
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        })
+
+    # ------------------------------------------------------------------
+    # Public MCP tools
+    # ------------------------------------------------------------------
+
+    @mcp.tool()
+    async def ivy_coverage(
+        mode: str = "stats",
+        relative_path: str | None = None,
+        test_file: str | None = None,
+        protocol: str | None = None,
+    ) -> str:
+        """Unified RFC coverage analysis tool.
+
+        Combines traceability matrix, coverage statistics, gap detection,
+        and regression diff into a single tool with mode-based dispatch.
+
+        Args:
+            mode: Analysis mode.
+                - "matrix": Requirement-to-annotation traceability mapping.
+                  Shows which RFC requirements are covered by bracket-tag
+                  annotations in the codebase.
+                - "stats": Coverage statistics by requirement level
+                  (MUST/SHOULD/MAY) and layer (default). Also saves a
+                  baseline snapshot for later diff comparison.
+                - "gaps": Identify unguarded state variables, uncovered RFC
+                  requirements, and orphan requirements.
+                - "diff": Compare current coverage against the last baseline
+                  saved by "stats" mode. Reports new gaps, recovered
+                  coverage, and overall delta.
+            relative_path: Optional file to scope the analysis to
+                (used by "matrix", "stats", and "diff" modes).
+            test_file: Optional test file to scope the analysis to
+                (used by "gaps" mode).
+            protocol: Protocol name to scope results (used by "gaps" mode).
+        """
+        if mode == "matrix":
+            return await _ivy_traceability_matrix(relative_path)
+        elif mode == "gaps":
+            return await _ivy_coverage_gaps(test_file, protocol)
+        elif mode == "diff":
+            return await _ivy_coverage_diff(relative_path)
+        else:  # default: stats
+            return await _ivy_requirement_coverage(relative_path)
+
+    @mcp.tool()
+    async def ivy_query(
+        mode: str = "info",
+        symbol_name: str | None = None,
+        node_id: str | None = None,
+    ) -> str:
+        """Unified semantic query tool for symbols and cross-references.
+
+        Combines impact analysis, cross-reference queries, and rich symbol
+        info into a single tool with mode-based dispatch.
+
+        Args:
+            mode: Query mode.
+                - "impact": Analyze incoming and outgoing edges for a symbol
+                  in the semantic model. Requires symbol_name.
+                - "xrefs": Query cross-reference graph neighborhood of a node.
+                  Requires node_id (or symbol_name as fallback).
+                - "info": Query rich semantic info about a symbol: type,
+                  references, requirements (default). Requires symbol_name.
+            symbol_name: The symbol name to query (required for "impact"
+                and "info" modes; optional fallback for "xrefs" mode).
+            node_id: The node ID to query for "xrefs" mode
+                (e.g., "test.ivy:5:send").
+        """
+        if mode == "impact":
+            if not symbol_name:
+                return json.dumps({
+                    "success": False,
+                    "message": "symbol_name is required for mode='impact'",
+                })
+            return await _ivy_impact_analysis(symbol_name)
+        elif mode == "xrefs":
+            effective_id = node_id or symbol_name
+            if not effective_id:
+                return json.dumps({
+                    "success": False,
+                    "message": "node_id or symbol_name is required for mode='xrefs'",
+                })
+            return await _ivy_cross_references(effective_id)
+        else:  # default: info
+            if not symbol_name:
+                return json.dumps({
+                    "success": False,
+                    "message": "symbol_name is required for mode='info'",
+                })
+            return await _ivy_query_symbol(symbol_name)
+
+    @mcp.tool()
+    async def ivy_extract_requirements(
+        rfc_text: str,
+        output: str = "structured",
+        rfc_name: str = "",
+        protocol: str = "",
+        base_section: str = "",
+    ) -> str:
+        """Parse RFC text to extract MUST/SHOULD/MAY requirements.
+
+        Can output either structured requirement data or a YAML manifest
+        ready for traceability tools.
+
+        Args:
+            rfc_text: Raw RFC text to parse for normative requirements.
+            output: Output format.
+                - "structured": Extracted requirements as JSON with text,
+                  level, offset, and by_level counts (default).
+                - "manifest": YAML requirements manifest ready for
+                  traceability tools. Requires rfc_name.
+            rfc_name: RFC identifier (e.g., "RFC9000"). Required for
+                output="manifest".
+            protocol: Protocol name for layer inference (e.g., "quic").
+                Used by output="manifest" for suggested path.
+            base_section: Default section prefix (e.g., "4"). Used by
+                output="manifest" for requirement IDs.
+        """
+        if output == "manifest":
+            if not rfc_name:
+                return json.dumps({
+                    "success": False,
+                    "message": "rfc_name is required for output='manifest'",
+                })
+            return await _ivy_generate_manifest(
+                rfc_name, rfc_text, protocol, base_section
+            )
+        else:  # default: structured
+            return await _ivy_extract_requirements_logic(rfc_text)
