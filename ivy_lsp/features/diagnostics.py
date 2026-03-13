@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -453,6 +454,55 @@ def compute_diagnostics(
                         tags=[lsp.DiagnosticTag.Unnecessary],
                     )
                 )
+
+    # --- Pattern diagnostics (cheap regex checks) ---
+    try:
+        basename = os.path.basename(filepath)
+
+        # Check for missing _finalize in test files
+        if "test" in basename.lower() and "_finalize" not in source:
+            # Look for export action declarations
+            has_export = bool(re.search(r"^\s*export\s+action", source, re.MULTILINE))
+            if has_export:
+                diags.append(lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line=0, character=0),
+                        end=lsp.Position(line=0, character=1),
+                    ),
+                    message="Test file has exports but no _finalize action. "
+                            "Consider adding 'export action _finalize' for end-of-test assertions.",
+                    severity=lsp.DiagnosticSeverity.Warning,
+                    source="ivy-pattern",
+                ))
+
+        # Check for exported actions without monitors
+        exports = set(re.findall(r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE))
+        monitored = set(re.findall(
+            r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE
+        ))
+        for exp_action in exports:
+            if exp_action not in monitored and exp_action != "_finalize":
+                # Only warn if this file also defines the action
+                action_defined = bool(re.search(
+                    rf"^\s*action\s+{re.escape(exp_action)}\s*", source, re.MULTILINE
+                ))
+                if action_defined:
+                    match = re.search(
+                        rf"^\s*export\s+action\s+{re.escape(exp_action)}",
+                        source, re.MULTILINE,
+                    )
+                    line_num = source[:match.start()].count("\n") if match else 0
+                    diags.append(lsp.Diagnostic(
+                        range=lsp.Range(
+                            start=lsp.Position(line=line_num, character=0),
+                            end=lsp.Position(line=line_num, character=80),
+                        ),
+                        message=f"Exported action '{exp_action}' has no before/after monitor in this file.",
+                        severity=lsp.DiagnosticSeverity.Hint,
+                        source="ivy-pattern",
+                    ))
+    except Exception:
+        pass  # Don't let pattern checks break diagnostics
 
     return diags
 

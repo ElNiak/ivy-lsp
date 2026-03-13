@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
@@ -249,7 +250,7 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
                     if sv.id not in seen_read_ids:
                         seen_read_ids.add(sv.id)
                         state_vars_read.append(sv)
-            state_vars_written = snap.get_all_state_vars_written()
+            state_vars_written = snap.get_state_vars_written_by_action(action_id)
 
             result_actions.append(
                 {
@@ -361,7 +362,7 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
             for r in reqs:
                 for sv in snap.get_state_vars_read_by(r.id):
                     vars_read_ids.add(sv.id)
-            vars_written = snap.get_all_state_vars_written()
+            vars_written = snap.get_state_vars_written_by_action(action_id)
 
             direction = _classify_direction(action_id, scope_info)
 
@@ -541,6 +542,41 @@ def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
         result = _cap_response(result, "unguardedStateVars")
         result = _cap_response(result, "uncoveredRfcRequirements")
         result = _cap_response(result, "orphanRequirements")
+
+        # --- Pattern coverage gaps (lightweight) ---
+        pattern_gaps: dict = {"serdesGaps": [], "monitorGaps": [], "shimGaps": []}
+        try:
+            from ivy_lsp.analysis.pattern_library import (
+                PatternCrossReferencer,
+                PatternKind,
+                analyze_protocol,
+            )
+            # Only run if we can find a protocol directory
+            if scope_info.get("_scope"):
+                scope_path = scope_info["_scope"]
+                if os.path.isdir(scope_path):
+                    prot_result = analyze_protocol(scope_path)
+                    xref = PatternCrossReferencer(prot_result)
+                    for issue in xref.validate_serdes_coverage():
+                        pattern_gaps["serdesGaps"].append({
+                            "message": issue.message,
+                            "file": issue.file,
+                            "related": issue.related,
+                        })
+                    for issue in xref.validate_monitor_coverage():
+                        pattern_gaps["monitorGaps"].append({
+                            "message": issue.message,
+                            "related": issue.related,
+                        })
+                    for issue in xref.validate_shim_completeness():
+                        pattern_gaps["shimGaps"].append({
+                            "message": issue.message,
+                        })
+        except ImportError:
+            pass  # pattern_library not available
+
+        result["patternCoverage"] = pattern_gaps
+
         return result
     except Exception as exc:
         logger.exception("handle_coverage_gaps failed")
@@ -971,6 +1007,42 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                             "template": f"require {sv.name}(...) ",
                         }
                     )
+
+        # --- Pattern-based suggestions ---
+        try:
+            file_path = params.get("filePath", "")
+            if file_path:
+                basename = os.path.basename(file_path)
+                if "_frame" in basename or "_message" in basename:
+                    suggestions.append({
+                        "type": "pattern_hint",
+                        "message": "This looks like a variant/message definition file. "
+                                   "Consider using /nct-add-pattern to scaffold monitors and serdes.",
+                        "priority": "low",
+                    })
+                elif "_ser" in basename or "_deser" in basename:
+                    suggestions.append({
+                        "type": "pattern_hint",
+                        "message": "This is a serialization file. Ensure enum states match "
+                                   "variant tags 1:1 (use ivy_pattern_analysis to validate).",
+                        "priority": "low",
+                    })
+                elif "_behavior" in basename:
+                    suggestions.append({
+                        "type": "pattern_hint",
+                        "message": "This is a behavior specification. Verify all exported actions "
+                                   "have before/after monitors (use ivy_pattern_analysis mode=validate).",
+                        "priority": "low",
+                    })
+                elif "_shim" in basename:
+                    suggestions.append({
+                        "type": "pattern_hint",
+                        "message": "This is a shim file. Ensure all entity roles have dispatch "
+                                   "branches (use ivy_pattern_analysis mode=validate).",
+                        "priority": "low",
+                    })
+        except Exception:
+            pass  # Don't let pattern hints break suggestions
 
         return {
             "suggestions": suggestions,

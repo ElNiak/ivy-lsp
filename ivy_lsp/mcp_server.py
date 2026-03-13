@@ -70,7 +70,10 @@ def _validate_path(root: str, relative_path: str) -> str:
     return abs_path
 
 
-from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_files
+from ivy_lsp.utils.ivy_output import (
+    DEFAULT_EXCLUDE_DIRS,
+    find_ivy_files as _find_ivy_files_raw,
+)
 from ivy_lsp.utils.structural_lint import (
     check_structural_issues_raw,
     check_unresolved_includes_raw,
@@ -124,6 +127,37 @@ def start_mcp(
         sys.exit(1)
 
     root = workspace_root or os.getcwd()
+
+    # --- Workspace scoping: respect include/exclude paths from detection ---
+    _include_paths = [
+        p.strip()
+        for p in os.environ.get("IVY_LSP_INCLUDE_PATHS", "").split(",")
+        if p.strip()
+    ]
+    _extra_exclude_dirs = frozenset(
+        p.strip()
+        for p in os.environ.get("IVY_LSP_EXCLUDE_PATHS", "").split(",")
+        if p.strip()
+    )
+    _effective_exclude_dirs = DEFAULT_EXCLUDE_DIRS | _extra_exclude_dirs
+
+    def _find_ivy_files(search_root: str) -> list[str]:
+        """Find .ivy files respecting workspace include/exclude paths."""
+        all_files = _find_ivy_files_raw(search_root, _effective_exclude_dirs)
+        if not _include_paths:
+            return all_files
+        return [
+            f for f in all_files
+            if any(
+                f == ip or f.startswith(ip + "/") or f.startswith(ip + os.sep)
+                for ip in _include_paths
+            )
+        ]
+
+    if _include_paths:
+        logger.info("Workspace include paths: %s", _include_paths)
+    if _extra_exclude_dirs:
+        logger.info("Workspace extra exclude dirs: %s", _extra_exclude_dirs)
 
     # Create executor for Docker-aware compilation
     executor = None
@@ -536,7 +570,12 @@ def start_mcp(
                 parse_file_rfc_annotations,
             )
 
-            from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+            from ivy_lsp.semantic.nodes import (
+                RfcAnnotation,
+                RfcRequirement,
+                SymbolNode,
+                TypeNode,
+            )
 
             model = SemanticModel()
             # Load manifests
@@ -655,6 +694,81 @@ def start_mcp(
                         file=abs_path,
                         line=line,
                     ))
+
+            # ── Wire semantic edges ───────────────────────────────
+            from ivy_lsp.semantic.edges import SemanticEdgeType
+
+            # 1. COVERS: RfcAnnotation → RfcRequirement
+            req_by_id: dict[str, object] = {
+                n.id: n for n in model.get_nodes_by_type(RfcRequirement)
+            }
+            for ann in model.get_nodes_by_type(RfcAnnotation):
+                for tag in ann.tags:
+                    if tag in req_by_id:
+                        model.add_edge(
+                            ann.id, SemanticEdgeType.COVERS, tag
+                        )
+
+            # 2. HAS_PARAM / RETURNS_TYPE: SymbolNode → TypeNode
+            type_by_name: dict[str, str] = {}
+            for tn in model.get_nodes_by_type(TypeNode):
+                if tn.name not in type_by_name:
+                    type_by_name[tn.name] = tn.id
+
+            for sn in model.get_nodes_by_type(SymbolNode):
+                # HAS_PARAM: parse "var : type" from params
+                if sn.params:
+                    for param in sn.params:
+                        parts = param.split(":")
+                        if len(parts) < 2:
+                            continue
+                        type_ref = parts[-1].strip()
+                        base = type_ref.split(".")[-1]
+                        target = type_by_name.get(base) or type_by_name.get(
+                            type_ref
+                        )
+                        if target:
+                            model.add_edge(
+                                sn.id, SemanticEdgeType.HAS_PARAM, target
+                            )
+
+                # RETURNS_TYPE
+                ret = getattr(sn, "return_sort", None)
+                if ret:
+                    base = ret.split(".")[-1]
+                    target = type_by_name.get(base) or type_by_name.get(ret)
+                    if target:
+                        model.add_edge(
+                            sn.id, SemanticEdgeType.RETURNS_TYPE, target
+                        )
+
+            # 3. INCLUDES: file → file (via include directives)
+            # Build basename → abs_path map for resolution
+            basename_to_path: dict[str, str] = {}
+            for rel_path in _find_ivy_files(root):
+                stem = os.path.splitext(os.path.basename(rel_path))[0]
+                basename_to_path[stem] = os.path.join(root, rel_path)
+
+            for rel_path in _find_ivy_files(root):
+                abs_path = os.path.join(root, rel_path)
+                nodes_in_src = model.get_nodes_in_file(abs_path)
+                if not nodes_in_src:
+                    continue
+                src_id = nodes_in_src[0].id
+                try:
+                    with open(abs_path, encoding="utf-8", errors="replace") as f:
+                        src_text = f.read()
+                except OSError:
+                    continue
+                for inc_match in _INCLUDE_PATTERN.findall(src_text):
+                    target_path = basename_to_path.get(inc_match)
+                    if not target_path or target_path == abs_path:
+                        continue
+                    nodes_in_tgt = model.get_nodes_in_file(target_path)
+                    if nodes_in_tgt:
+                        model.add_edge(
+                            src_id, SemanticEdgeType.INCLUDES, nodes_in_tgt[0].id
+                        )
 
             return model
         except ImportError:
@@ -1302,6 +1416,72 @@ def start_mcp(
         if context:
             params["context"] = context
         return json.dumps(handle_smart_suggestions(server_proxy, params))
+
+    @mcp.tool()
+    async def ivy_pattern_analysis(
+        protocol: str,
+        mode: str = "detect",
+        pattern: str | None = None,
+        reference_protocol: str | None = None,
+    ) -> str:
+        """Analyze formal model patterns in a protocol specification.
+
+        Detects recurring patterns (serdes, variants, monitors, shims, modules,
+        entities) and validates cross-references between them.
+
+        Args:
+            protocol: Protocol name (e.g., "quic", "bgp", "minip").
+            mode: Analysis mode: "detect" (find patterns), "validate" (check
+                cross-references), or "compare" (diff two protocols).
+            pattern: Optional specific pattern to analyze (e.g., "serdes", "variants").
+            reference_protocol: Required for "compare" mode — protocol to compare against.
+        """
+        from ivy_lsp.features.patterns import handle_pattern_analysis
+
+        params: dict[str, Any] = {"protocol": protocol, "mode": mode}
+        if pattern:
+            params["pattern"] = pattern
+        if reference_protocol:
+            params["reference_protocol"] = reference_protocol
+        return json.dumps(handle_pattern_analysis(root, params))
+
+    @mcp.tool()
+    async def ivy_pattern_scaffold(
+        protocol: str,
+        pattern: str,
+        wire_format: str = "binary",
+        role_type: str = "asymmetric",
+        variant_names: list[str] | None = None,
+        roles: list[str] | None = None,
+    ) -> str:
+        """Generate Ivy source from a pattern template.
+
+        Loads a pattern template, performs placeholder substitution with the
+        given protocol name and options, and returns the generated source code.
+
+        Args:
+            protocol: Protocol name for placeholder substitution.
+            pattern: Pattern to scaffold: "serdes", "variants", "monitors",
+                "shim", "module", or "entity".
+            wire_format: Wire format for serdes: "binary" (default) or "json".
+                For shim pattern, use "udp" or "tcp".
+            role_type: Role type for entity: "asymmetric" (default) or "symmetric".
+            variant_names: Optional list of variant/message type names.
+            roles: Optional list of role names (e.g., ["client", "server"]).
+        """
+        from ivy_lsp.features.patterns import handle_pattern_scaffold
+
+        params: dict[str, Any] = {
+            "protocol": protocol,
+            "pattern": pattern,
+            "wire_format": wire_format,
+            "role_type": role_type,
+        }
+        if variant_names:
+            params["variant_names"] = variant_names
+        if roles:
+            params["roles"] = roles
+        return json.dumps(handle_pattern_scaffold(root, params))
 
     if _return_app:
         return mcp
