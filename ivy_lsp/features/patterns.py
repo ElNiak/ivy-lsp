@@ -33,8 +33,9 @@ def _cap_list(response: dict, list_key: str) -> dict:
         else:
             hi = mid - 1
     response[list_key] = items[:lo]
-    response["truncated"] = True
-    response["totalCount"] = len(items)
+    if lo < len(items):
+        response["truncated"] = True
+        response["totalCount"] = len(items)
     return response
 
 

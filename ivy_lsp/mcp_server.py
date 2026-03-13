@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 from typing import Any
 
@@ -208,6 +209,7 @@ def start_mcp(
     })
 
     _basename_cache: dict[str, list[str]] | None = None
+    _basename_cache_lock = threading.Lock()
 
     def _get_basename_cache() -> dict[str, list[str]]:
         """Build (or return cached) basename→[relative_paths] map for all .ivy files."""
@@ -215,13 +217,15 @@ def start_mcp(
         if _basename_cache is not None:
             return _basename_cache
 
-        cache: dict[str, list[str]] = {}
-        for rel_path in _find_ivy_files(root):
-            basename = os.path.basename(rel_path)[:-4]  # strip .ivy
-            cache.setdefault(basename, []).append(rel_path)
-        # Also index stdlib files that _find_ivy_files may discover
-        _basename_cache = cache
-        return cache
+        with _basename_cache_lock:
+            if _basename_cache is not None:
+                return _basename_cache
+            cache: dict[str, list[str]] = {}
+            for rel_path in _find_ivy_files(root):
+                basename = os.path.basename(rel_path)[:-4]  # strip .ivy
+                cache.setdefault(basename, []).append(rel_path)
+            _basename_cache = cache
+            return cache
 
     def _make_resolve_callback():
         """Create a resolve callback for structural lint include checking."""
@@ -650,7 +654,14 @@ def start_mcp(
             best = candidates[0]
             best_len = 0
             for c in candidates:
-                prefix = os.path.commonpath([from_dir, os.path.dirname(c)]) if from_dir else ""
+                c_dir = os.path.dirname(c)
+                if from_dir and c_dir:
+                    try:
+                        prefix = os.path.commonpath([from_dir, c_dir])
+                    except ValueError:
+                        prefix = ""
+                else:
+                    prefix = ""
                 if len(prefix) > best_len:
                     best_len = len(prefix)
                     best = c

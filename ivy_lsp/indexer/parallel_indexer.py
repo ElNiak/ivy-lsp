@@ -31,9 +31,8 @@ def _worker_init(parent_sys_path: list[str]) -> None:
     Python interpreters that may not inherit the parent's ``sys.path``
     (especially when running under ``uvx`` or similar tools).
     """
-    for p in parent_sys_path:
-        if p not in sys.path:
-            sys.path.insert(0, p)
+    new_paths = [p for p in parent_sys_path if p not in sys.path]
+    sys.path[0:0] = new_paths
 
 
 def worker_parse_file(
