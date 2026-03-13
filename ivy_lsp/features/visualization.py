@@ -102,6 +102,38 @@ def _resolve_scope(graph: Any, params: dict) -> dict:
     return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
 
 
+def _filter_by_scope(items: dict, scope_info: dict) -> dict:
+    """Filter a dict of ActionNode/StateVarNode by scope's include_closure.
+
+    Returns unmodified dict if no scope is active.
+    """
+    scope = scope_info.get("_scope")
+    if scope is None:
+        return items
+    closure = getattr(scope, "include_closure", None)
+    if not closure:
+        return items
+    return {k: v for k, v in items.items() if v.file in closure}
+
+
+def _filter_by_protocol(items: dict, protocol_filter: Optional[str]) -> dict:
+    """Filter items by protocol directory path substring."""
+    if not protocol_filter:
+        return items
+    return {k: v for k, v in items.items() if protocol_filter in v.file}
+
+
+def _rel(path: str, server: Any) -> str:
+    """Relativize a path against server's workspace root."""
+    ws_root = getattr(server, "workspace_root", "")
+    if not path or not ws_root:
+        return path
+    if path.startswith(ws_root):
+        rel = path[len(ws_root):]
+        return rel.lstrip(os.sep)
+    return path
+
+
 def _classify_direction(action_id: str, scope_info: dict) -> Optional[str]:
     """Classify an action's direction (send/receive) within a test scope."""
     scope = scope_info.get("_scope")
@@ -204,6 +236,12 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
         file_filter = params.get("filePath")
 
         actions_to_process = dict(snap.actions)
+        # C2: Apply scope filtering from test_file
+        actions_to_process = _filter_by_scope(actions_to_process, scope_info)
+        # H1: Apply protocol filtering
+        actions_to_process = _filter_by_protocol(
+            actions_to_process, params.get("protocolFilter")
+        )
         if action_filter:
             actions_to_process = {
                 k: v
@@ -213,9 +251,17 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
                 or k == action_filter
             }
         if file_filter:
-            actions_to_process = {
-                k: v for k, v in actions_to_process.items() if v.file == file_filter
-            }
+            # C8: Match by exact, basename, or suffix
+            exact = {k: v for k, v in actions_to_process.items() if v.file == file_filter}
+            if exact:
+                actions_to_process = exact
+            else:
+                filter_base = os.path.basename(file_filter)
+                actions_to_process = {
+                    k: v for k, v in actions_to_process.items()
+                    if os.path.basename(v.file) == filter_base
+                    or v.file.endswith("/" + file_filter)
+                }
 
         # Pagination: limit/offset to cap response size.
         # Default to returning all actions when no limit is specified,
@@ -342,7 +388,14 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
         rows: List[dict] = []
         total_reqs = 0
 
-        for action_id, action_node in snap.actions.items():
+        # C2/H1: Apply scope and protocol filtering
+        actions_to_iter = dict(snap.actions)
+        actions_to_iter = _filter_by_scope(actions_to_iter, scope_info)
+        actions_to_iter = _filter_by_protocol(
+            actions_to_iter, params.get("protocolFilter")
+        )
+
+        for action_id, action_node in actions_to_iter.items():
             reqs = snap.get_requirements_for_action(action_id)
             before_reqs = [r for r in reqs if r.mixin_kind == "before"]
             after_reqs = [r for r in reqs if r.mixin_kind == "after"]
@@ -611,10 +664,17 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
         scope_info = _resolve_scope(graph, params)
         include_state_vars = params.get("includeStateVars", False)
 
+        # C2/H1: Apply scope and protocol filtering
+        actions_filtered = dict(snap.actions)
+        actions_filtered = _filter_by_scope(actions_filtered, scope_info)
+        actions_filtered = _filter_by_protocol(
+            actions_filtered, params.get("protocolFilter")
+        )
+
         nodes: List[Dict[str, Any]] = []
         edges: List[Dict[str, Any]] = []
 
-        for action_id, action_node in snap.actions.items():
+        for action_id, action_node in actions_filtered.items():
             reqs = snap.get_requirements_for_action(action_id)
             nodes.append(
                 {
@@ -630,7 +690,7 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
         writers: Dict[str, Set[str]] = defaultdict(set)
         readers: Dict[str, Set[str]] = defaultdict(set)
 
-        for action_id in snap.actions:
+        for action_id in actions_filtered:
             reqs = snap.get_requirements_for_action(action_id)
             for req in reqs:
                 for etype, target_id in snap.outgoing.get(req.id, []):
@@ -748,11 +808,18 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
         scope_info = _resolve_scope(graph, params)
         state_var_filter = params.get("stateVarFilter")
 
+        # C2/H1: Apply scope and protocol filtering
+        actions_filtered = dict(snap.actions)
+        actions_filtered = _filter_by_scope(actions_filtered, scope_info)
+        actions_filtered = _filter_by_protocol(
+            actions_filtered, params.get("protocolFilter")
+        )
+
         nodes: List[Dict[str, Any]] = []
         transitions: List[Dict[str, Any]] = []
 
         active_vars: Set[str] = set()
-        for action_id in snap.actions:
+        for action_id in actions_filtered:
             reqs = snap.get_requirements_for_action(action_id)
             for req in reqs:
                 for etype, target_id in snap.outgoing.get(req.id, []):
@@ -872,9 +939,16 @@ def handle_layered_overview(server: IvyServerProtocol, params: dict) -> dict:
         scope_info = _resolve_scope(graph, params)
         group_by = params.get("groupBy", "file")
 
+        # C2/H1: Apply scope and protocol filtering
+        actions_filtered = dict(snap.actions)
+        actions_filtered = _filter_by_scope(actions_filtered, scope_info)
+        actions_filtered = _filter_by_protocol(
+            actions_filtered, params.get("protocolFilter")
+        )
+
         by_group: Dict[str, Dict[str, Any]] = {}
 
-        for action_id, action_node in snap.actions.items():
+        for action_id, action_node in actions_filtered.items():
             key = (
                 action_node.file
                 if group_by == "file"
@@ -1011,8 +1085,14 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                     )
         else:
             # --- Workspace/file-level suggestions (no specific action) ---
+            # C2/H1: Apply scope and protocol filtering
+            scoped_actions = dict(snap.actions)
+            scoped_actions = _filter_by_scope(scoped_actions, _resolve_scope(graph, params))
+            scoped_actions = _filter_by_protocol(
+                scoped_actions, params.get("protocolFilter")
+            )
             # Uncovered actions: actions with no CONSTRAINS edges
-            for action_id, action_node in snap.actions.items():
+            for action_id, action_node in scoped_actions.items():
                 incoming = snap.incoming.get(action_id, [])
                 has_reqs = any(
                     etype == EdgeType.CONSTRAINS for etype, _ in incoming
@@ -1047,29 +1127,45 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                         "priority": "medium",
                     })
 
-            # File-scoped: filter suggestions to current file if provided
+            # C3: File-scoped filtering with fuzzy path matching
             if file_path:
+                file_base = os.path.basename(file_path)
+                def _file_matches(f: str) -> bool:
+                    return (
+                        f == file_path
+                        or os.path.basename(f) == file_base
+                        or f.endswith("/" + file_path)
+                    )
                 file_actions = {
                     aid for aid, a in snap.actions.items()
-                    if a.file == file_path
+                    if _file_matches(a.file)
                 }
                 file_vars = {
                     vid for vid, v in snap.state_vars.items()
-                    if v.file == file_path
+                    if _file_matches(v.file)
                 }
                 if file_actions or file_vars:
+                    file_action_names = {
+                        a.name for a in snap.actions.values()
+                        if a.id in file_actions
+                    }
+                    file_var_names = {
+                        v.name for v in snap.state_vars.values()
+                        if v.id in file_vars
+                    }
                     suggestions = [
                         s for s in suggestions
-                        if s.get("file") == file_path
-                        or s.get("name") in {
-                            a.name for a in snap.actions.values()
-                            if a.id in file_actions
-                        }
-                        or s.get("name") in {
-                            v.name for v in snap.state_vars.values()
-                            if v.id in file_vars
-                        }
+                        if _file_matches(s.get("file", ""))
+                        or s.get("name") in file_action_names
+                        or s.get("name") in file_var_names
                     ]
+
+            # C3: Sort by line proximity when both file_path and line given
+            if file_path and line:
+                def _proximity(s: dict) -> int:
+                    s_line = s.get("line", 0)
+                    return abs(s_line - line) if s_line else 9999
+                suggestions.sort(key=_proximity)
 
         # --- Pattern-based suggestions ---
         try:

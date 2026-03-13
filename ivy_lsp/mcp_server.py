@@ -1511,6 +1511,7 @@ def start_mcp(
     class _ServerProxy:
         indexer: _IndexerProxy
         initializing: bool = False
+        workspace_root: str = ""  # H3: for relative path output
 
     async def _make_viz_server_proxy():
         """Create a minimal server-like object for visualization handlers.
@@ -1521,13 +1522,19 @@ def start_mcp(
         lightweight proxy that satisfies that contract.
         """
         graph = await _get_req_graph()
-        return _ServerProxy(indexer=_IndexerProxy(requirement_graph=graph))
+        return _ServerProxy(
+            indexer=_IndexerProxy(requirement_graph=graph),
+            workspace_root=root,
+        )
 
     @mcp.tool()
     async def ivy_action_requirements(
         action_name: str | None = None,
         file_path: str | None = None,
         test_file: str | None = None,
+        protocol: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> str:
         """Get requirements organized by action boundaries (before/after monitors).
 
@@ -1539,6 +1546,9 @@ def start_mcp(
             action_name: Specific action to query. If omitted, returns all actions.
             file_path: Scope to actions defined in this file (relative path).
             test_file: Optional test file to scope the analysis to (relative path).
+            protocol: Protocol name (e.g., "quic") to scope results.
+            offset: Number of actions to skip (default: 0).
+            limit: Maximum number of actions to return. If omitted, returns all.
         """
         from ivy_lsp.features.visualization import handle_action_requirements
 
@@ -1556,10 +1566,19 @@ def start_mcp(
                 params["testFile"] = _validate_path(root, test_file)
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
+        if offset:
+            params["offset"] = offset
+        if limit is not None:
+            params["limit"] = limit
         return json.dumps(handle_action_requirements(server_proxy, params))
 
     @mcp.tool()
-    async def ivy_model_summary(test_file: str | None = None) -> str:
+    async def ivy_model_summary(
+        test_file: str | None = None,
+        protocol: str | None = None,
+    ) -> str:
         """Get per-action requirement counts, state variable usage, and RFC coverage.
 
         Returns one row per action with counts of before/after requirements by kind,
@@ -1567,6 +1586,7 @@ def start_mcp(
 
         Args:
             test_file: Optional test file to scope the summary to (relative path).
+            protocol: Protocol name (e.g., "quic") to scope results.
         """
         from ivy_lsp.features.visualization import handle_model_summary_table
 
@@ -1577,10 +1597,15 @@ def start_mcp(
                 params["testFile"] = _validate_path(root, test_file)
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_model_summary_table(server_proxy, params))
 
     @mcp.tool()
-    async def ivy_coverage_gaps(test_file: str | None = None) -> str:
+    async def ivy_coverage_gaps(
+        test_file: str | None = None,
+        protocol: str | None = None,
+    ) -> str:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements.
 
         Finds state variables written but never guarded, RFC sections with no
@@ -1598,12 +1623,15 @@ def start_mcp(
                 params["testFile"] = _validate_path(root, test_file)
             except ValueError as exc:
                 return json.dumps({"success": False, "message": str(exc)})
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_coverage_gaps(server_proxy, params))
 
     @mcp.tool()
     async def ivy_action_dependency_graph(
         test_file: str | None = None,
         include_state_vars: bool = False,
+        protocol: str | None = None,
     ) -> str:
         """Return the action dependency graph showing shared-state relationships.
 
@@ -1627,12 +1655,15 @@ def start_mcp(
                 return json.dumps({"success": False, "message": str(exc)})
         if include_state_vars:
             params["includeStateVars"] = True
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_action_dependency_graph(server_proxy, params))
 
     @mcp.tool()
     async def ivy_state_machine_view(
         test_file: str | None = None,
         state_var_filter: str | None = None,
+        protocol: str | None = None,
     ) -> str:
         """Return a state-machine view of the Ivy specification.
 
@@ -1655,12 +1686,15 @@ def start_mcp(
                 return json.dumps({"success": False, "message": str(exc)})
         if state_var_filter:
             params["stateVarFilter"] = state_var_filter
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_state_machine_view(server_proxy, params))
 
     @mcp.tool()
     async def ivy_layered_overview(
         test_file: str | None = None,
         group_by: str = "file",
+        protocol: str | None = None,
     ) -> str:
         """Get a layered overview of the Ivy model organized by file or module.
 
@@ -1679,6 +1713,8 @@ def start_mcp(
                 return json.dumps({"success": False, "message": str(exc)})
         if group_by:
             params["groupBy"] = group_by
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_layered_overview(server_proxy, params))
 
     @mcp.tool()
@@ -1686,6 +1722,7 @@ def start_mcp(
         file_path: str | None = None,
         line: int | None = None,
         context: str | None = None,
+        protocol: str | None = None,
     ) -> str:
         """Get context-aware suggestions for improving the Ivy specification.
 
@@ -1707,6 +1744,8 @@ def start_mcp(
             params["line"] = line
         if context:
             params["context"] = context
+        if protocol:
+            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_smart_suggestions(server_proxy, params))
 
     @mcp.tool()
