@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -241,7 +242,9 @@ def start_mcp(
     )
 
     _model_lock = asyncio.Lock()
-    _model_build_attempted = False
+    _model_build_attempted: float = 0.0  # timestamp of last failed attempt
+    _model_build_error: str | None = None
+    _MODEL_RETRY_COOLDOWN = 30.0  # seconds before retry after failure
 
     _req_graph_lock = asyncio.Lock()
     _req_graph: Any = requirement_graph  # may be pre-populated or None
@@ -295,26 +298,33 @@ def start_mcp(
 
     async def _get_model():
         """Return the semantic model, building one if needed."""
-        nonlocal semantic_model, _model_build_attempted
+        nonlocal semantic_model, _model_build_attempted, _model_build_error
         # Fast path: model already built
         if semantic_model is not None:
             return semantic_model
-        # Fast path: previous build failed (cached failure)
-        if _model_build_attempted:
+        # Fast path: previous build failed and cooldown has not elapsed
+        if _model_build_attempted and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN:
             return None
 
         async with _model_lock:
             # Double-check after acquiring lock
             if semantic_model is not None:
                 return semantic_model
-            if _model_build_attempted:
+            if _model_build_attempted and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN:
                 return None
 
-            model = await asyncio.to_thread(_build_model)
+            try:
+                model = await asyncio.to_thread(_build_model)
+            except Exception as exc:
+                logger.error("Model build failed: %s", exc, exc_info=True)
+                _model_build_attempted = time.monotonic()
+                _model_build_error = str(exc)
+                return None
             if model is not None:
                 semantic_model = model
             else:
-                _model_build_attempted = True
+                _model_build_attempted = time.monotonic()
+                _model_build_error = "Build returned empty model (missing dependencies?)"
             return model
 
     def _build_model():
@@ -325,6 +335,7 @@ def start_mcp(
         (``_get_model``) is responsible for caching the result and
         assigning the ``semantic_model`` nonlocal under the lock.
         """
+        # Import required modules — narrow ImportError to just these imports
         try:
             from ivy_lsp.semantic.model import SemanticModel
             from ivy_lsp.semantic.rfc_annotations import (
@@ -339,201 +350,6 @@ def start_mcp(
                 SymbolNode,
                 TypeNode,
             )
-
-            model = SemanticModel()
-            # Load manifests
-            for manifest_path in find_manifests(root):
-                reqs = load_requirement_manifest(manifest_path)
-                for req in reqs.values():
-                    model.add_node(req)
-
-            # Scan .ivy files for annotations, types, and symbols
-            for rel_path in _find_ivy_files(root):
-                abs_path = os.path.join(root, rel_path)
-                try:
-                    with open(abs_path, encoding="utf-8", errors="replace") as f:
-                        source = f.read()
-                except OSError:
-                    continue
-
-                # RFC annotations
-                for ann in parse_file_rfc_annotations(source, abs_path):
-                    model.add_node(ann)
-
-                # Type declarations
-                for m in _TYPE_DECL_RE.finditer(source):
-                    name = m.group(1)
-                    line = source[: m.start()].count("\n")
-                    variants_raw = m.group(2)
-                    is_enum = variants_raw is not None
-                    variants = (
-                        [v.strip() for v in variants_raw.split(",") if v.strip()]
-                        if variants_raw
-                        else []
-                    )
-                    model.add_node(TypeNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        file=abs_path,
-                        line=line,
-                        is_enum=is_enum,
-                        variants=variants,
-                    ))
-
-                # Action declarations
-                for m in _ACTION_DECL_RE.finditer(source):
-                    name = m.group(1)
-                    line = source[: m.start()].count("\n")
-                    params = (
-                        [p.strip() for p in m.group(2).split(",") if p.strip()]
-                        if m.group(2)
-                        else []
-                    )
-                    ret = m.group(3).strip() if m.group(3) else None
-                    model.add_node(SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="action",
-                        file=abs_path,
-                        line=line,
-                        params=params,
-                        return_sort=ret,
-                    ))
-
-                # Relation declarations
-                for m in _RELATION_DECL_RE.finditer(source):
-                    name = m.group(1)
-                    line = source[: m.start()].count("\n")
-                    model.add_node(SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="relation",
-                        file=abs_path,
-                        line=line,
-                    ))
-
-                # Function declarations
-                for m in _FUNCTION_DECL_RE.finditer(source):
-                    name = m.group(1)
-                    line = source[: m.start()].count("\n")
-                    ret_sort = m.group(3) if m.group(3) else None
-                    model.add_node(SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="function",
-                        file=abs_path,
-                        line=line,
-                        return_sort=ret_sort,
-                    ))
-
-                # Individual declarations
-                for m in _INDIVIDUAL_DECL_RE.finditer(source):
-                    name = m.group(1)
-                    line = source[: m.start()].count("\n")
-                    sort_name = m.group(2)
-                    model.add_node(SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="individual",
-                        file=abs_path,
-                        line=line,
-                        sort_name=sort_name,
-                    ))
-
-                # Object/module/isolate declarations
-                for m in _OBJECT_DECL_RE.finditer(source):
-                    name = m.group(1)
-                    line = source[: m.start()].count("\n")
-                    model.add_node(SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="module",
-                        file=abs_path,
-                        line=line,
-                    ))
-
-            # -- Wire semantic edges --
-            from ivy_lsp.semantic.edges import SemanticEdgeType
-
-            # 1. COVERS: RfcAnnotation -> RfcRequirement
-            req_by_id: dict[str, object] = {
-                n.id: n for n in model.get_nodes_by_type(RfcRequirement)
-            }
-            for ann in model.get_nodes_by_type(RfcAnnotation):
-                for tag in ann.tags:
-                    if tag in req_by_id:
-                        model.add_edge(
-                            ann.id, SemanticEdgeType.COVERS, tag
-                        )
-
-            # 2. HAS_PARAM / RETURNS_TYPE: SymbolNode -> TypeNode
-            type_by_name: dict[str, str] = {}
-            for tn in model.get_nodes_by_type(TypeNode):
-                if tn.name not in type_by_name:
-                    type_by_name[tn.name] = tn.id
-
-            for sn in model.get_nodes_by_type(SymbolNode):
-                # HAS_PARAM: parse "var : type" from params
-                if sn.params:
-                    for param in sn.params:
-                        parts = param.split(":")
-                        if len(parts) < 2:
-                            continue
-                        type_ref = parts[-1].strip()
-                        base = type_ref.split(".")[-1]
-                        target = type_by_name.get(base) or type_by_name.get(
-                            type_ref
-                        )
-                        if target:
-                            model.add_edge(
-                                sn.id, SemanticEdgeType.HAS_PARAM, target
-                            )
-
-                # RETURNS_TYPE
-                ret = getattr(sn, "return_sort", None)
-                if ret:
-                    base = ret.split(".")[-1]
-                    target = type_by_name.get(base) or type_by_name.get(ret)
-                    if target:
-                        model.add_edge(
-                            sn.id, SemanticEdgeType.RETURNS_TYPE, target
-                        )
-
-            # 3. INCLUDES: file -> file (via include directives)
-            # Build basename -> abs_path map for resolution
-            basename_to_path: dict[str, str] = {}
-            for rel_path in _find_ivy_files(root):
-                stem = os.path.splitext(os.path.basename(rel_path))[0]
-                basename_to_path[stem] = os.path.join(root, rel_path)
-
-            for rel_path in _find_ivy_files(root):
-                abs_path = os.path.join(root, rel_path)
-                nodes_in_src = model.get_nodes_in_file(abs_path)
-                if not nodes_in_src:
-                    continue
-                src_id = nodes_in_src[0].id
-                try:
-                    with open(abs_path, encoding="utf-8", errors="replace") as f:
-                        src_text = f.read()
-                except OSError:
-                    continue
-                for inc_match in _INCLUDE_PATTERN.findall(src_text):
-                    target_path = basename_to_path.get(inc_match)
-                    if not target_path or target_path == abs_path:
-                        continue
-                    nodes_in_tgt = model.get_nodes_in_file(target_path)
-                    if nodes_in_tgt:
-                        model.add_edge(
-                            src_id, SemanticEdgeType.INCLUDES, nodes_in_tgt[0].id
-                        )
-
-            return model
         except ImportError:
             logger.warning(
                 "Semantic model unavailable: required modules "
@@ -543,6 +359,201 @@ def start_mcp(
                 exc_info=True,
             )
             return None
+
+        model = SemanticModel()
+        # Load manifests
+        for manifest_path in find_manifests(root):
+            reqs = load_requirement_manifest(manifest_path)
+            for req in reqs.values():
+                model.add_node(req)
+
+        # Scan .ivy files for annotations, types, and symbols
+        for rel_path in _find_ivy_files(root):
+            abs_path = os.path.join(root, rel_path)
+            try:
+                with open(abs_path, encoding="utf-8", errors="replace") as f:
+                    source = f.read()
+            except OSError:
+                continue
+
+            # RFC annotations
+            for ann in parse_file_rfc_annotations(source, abs_path):
+                model.add_node(ann)
+
+            # Type declarations
+            for m in _TYPE_DECL_RE.finditer(source):
+                name = m.group(1)
+                line = source[: m.start()].count("\n")
+                variants_raw = m.group(2)
+                is_enum = variants_raw is not None
+                variants = (
+                    [v.strip() for v in variants_raw.split(",") if v.strip()]
+                    if variants_raw
+                    else []
+                )
+                model.add_node(TypeNode(
+                    id=f"{abs_path}:{line}:{name}",
+                    name=name,
+                    qualified_name=name,
+                    file=abs_path,
+                    line=line,
+                    is_enum=is_enum,
+                    variants=variants,
+                ))
+
+            # Action declarations
+            for m in _ACTION_DECL_RE.finditer(source):
+                name = m.group(1)
+                line = source[: m.start()].count("\n")
+                params = (
+                    [p.strip() for p in m.group(2).split(",") if p.strip()]
+                    if m.group(2)
+                    else []
+                )
+                ret = m.group(3).strip() if m.group(3) else None
+                model.add_node(SymbolNode(
+                    id=f"{abs_path}:{line}:{name}",
+                    name=name,
+                    qualified_name=name,
+                    kind="action",
+                    file=abs_path,
+                    line=line,
+                    params=params,
+                    return_sort=ret,
+                ))
+
+            # Relation declarations
+            for m in _RELATION_DECL_RE.finditer(source):
+                name = m.group(1)
+                line = source[: m.start()].count("\n")
+                model.add_node(SymbolNode(
+                    id=f"{abs_path}:{line}:{name}",
+                    name=name,
+                    qualified_name=name,
+                    kind="relation",
+                    file=abs_path,
+                    line=line,
+                ))
+
+            # Function declarations
+            for m in _FUNCTION_DECL_RE.finditer(source):
+                name = m.group(1)
+                line = source[: m.start()].count("\n")
+                ret_sort = m.group(3) if m.group(3) else None
+                model.add_node(SymbolNode(
+                    id=f"{abs_path}:{line}:{name}",
+                    name=name,
+                    qualified_name=name,
+                    kind="function",
+                    file=abs_path,
+                    line=line,
+                    return_sort=ret_sort,
+                ))
+
+            # Individual declarations
+            for m in _INDIVIDUAL_DECL_RE.finditer(source):
+                name = m.group(1)
+                line = source[: m.start()].count("\n")
+                sort_name = m.group(2)
+                model.add_node(SymbolNode(
+                    id=f"{abs_path}:{line}:{name}",
+                    name=name,
+                    qualified_name=name,
+                    kind="individual",
+                    file=abs_path,
+                    line=line,
+                    sort_name=sort_name,
+                ))
+
+            # Object/module/isolate declarations
+            for m in _OBJECT_DECL_RE.finditer(source):
+                name = m.group(1)
+                line = source[: m.start()].count("\n")
+                model.add_node(SymbolNode(
+                    id=f"{abs_path}:{line}:{name}",
+                    name=name,
+                    qualified_name=name,
+                    kind="module",
+                    file=abs_path,
+                    line=line,
+                ))
+
+        # -- Wire semantic edges --
+        from ivy_lsp.semantic.edges import SemanticEdgeType
+
+        # 1. COVERS: RfcAnnotation -> RfcRequirement
+        req_by_id: dict[str, object] = {
+            n.id: n for n in model.get_nodes_by_type(RfcRequirement)
+        }
+        for ann in model.get_nodes_by_type(RfcAnnotation):
+            for tag in ann.tags:
+                if tag in req_by_id:
+                    model.add_edge(
+                        ann.id, SemanticEdgeType.COVERS, tag
+                    )
+
+        # 2. HAS_PARAM / RETURNS_TYPE: SymbolNode -> TypeNode
+        type_by_name: dict[str, str] = {}
+        for tn in model.get_nodes_by_type(TypeNode):
+            if tn.name not in type_by_name:
+                type_by_name[tn.name] = tn.id
+
+        for sn in model.get_nodes_by_type(SymbolNode):
+            # HAS_PARAM: parse "var : type" from params
+            if sn.params:
+                for param in sn.params:
+                    parts = param.split(":")
+                    if len(parts) < 2:
+                        continue
+                    type_ref = parts[-1].strip()
+                    base = type_ref.split(".")[-1]
+                    target = type_by_name.get(base) or type_by_name.get(
+                        type_ref
+                    )
+                    if target:
+                        model.add_edge(
+                            sn.id, SemanticEdgeType.HAS_PARAM, target
+                        )
+
+            # RETURNS_TYPE
+            ret = getattr(sn, "return_sort", None)
+            if ret:
+                base = ret.split(".")[-1]
+                target = type_by_name.get(base) or type_by_name.get(ret)
+                if target:
+                    model.add_edge(
+                        sn.id, SemanticEdgeType.RETURNS_TYPE, target
+                    )
+
+        # 3. INCLUDES: file -> file (via include directives)
+        # Build basename -> abs_path map for resolution
+        basename_to_path: dict[str, str] = {}
+        for rel_path in _find_ivy_files(root):
+            stem = os.path.splitext(os.path.basename(rel_path))[0]
+            basename_to_path[stem] = os.path.join(root, rel_path)
+
+        for rel_path in _find_ivy_files(root):
+            abs_path = os.path.join(root, rel_path)
+            nodes_in_src = model.get_nodes_in_file(abs_path)
+            if not nodes_in_src:
+                continue
+            src_id = nodes_in_src[0].id
+            try:
+                with open(abs_path, encoding="utf-8", errors="replace") as f:
+                    src_text = f.read()
+            except OSError:
+                continue
+            for inc_match in _INCLUDE_PATTERN.findall(src_text):
+                target_path = basename_to_path.get(inc_match)
+                if not target_path or target_path == abs_path:
+                    continue
+                nodes_in_tgt = model.get_nodes_in_file(target_path)
+                if nodes_in_tgt:
+                    model.add_edge(
+                        src_id, SemanticEdgeType.INCLUDES, nodes_in_tgt[0].id
+                    )
+
+        return model
 
     # --- Lazy RequirementGraph construction ---
 
