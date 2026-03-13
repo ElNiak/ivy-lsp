@@ -197,7 +197,7 @@ class TestDidCloseHandler:
         # Collect registered features
         registered = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 registered[method] = fn
                 return fn
@@ -222,7 +222,7 @@ class TestDidCloseHandler:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -255,7 +255,7 @@ class TestDidCloseHandler:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -314,7 +314,7 @@ class TestDeepTaskTracking:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -364,7 +364,7 @@ class TestDeepTaskTracking:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -550,7 +550,7 @@ class TestDiagnosticVersion:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -601,7 +601,7 @@ class TestDiagnosticVersion:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -634,7 +634,7 @@ class TestDiagnosticVersion:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -690,7 +690,7 @@ class TestHandlerConsistency:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn

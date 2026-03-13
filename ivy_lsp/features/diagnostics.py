@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from threading import Lock
+from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol import types as lsp
 
@@ -30,6 +33,95 @@ _ASSERTION_RE = re.compile(
 )
 _TAG_RE = re.compile(r"#\s*\[")
 _EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
+
+
+@dataclass
+class _CachedDiagnosticEntry:
+    """Per-URI cached diagnostic result for pull diagnostics."""
+
+    result_id: str
+    source_hash: str
+    diagnostics: List[lsp.Diagnostic]
+    deep_diagnostics: Optional[List[lsp.Diagnostic]] = None
+
+
+class DiagnosticCache:
+    """Thread-safe per-URI diagnostic cache for LSP 3.17 pull diagnostics.
+
+    Stores fast diagnostics and deep diagnostics (ivy_check) separately.
+    ``result_id`` is derived from the source hash + a suffix indicating
+    whether deep diagnostics are present, so pull clients will re-request
+    when deep results arrive.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._entries: Dict[str, _CachedDiagnosticEntry] = {}
+
+    @staticmethod
+    def _hash(source: str) -> str:
+        return hashlib.sha256(source.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _result_id(source_hash: str, has_deep: bool) -> str:
+        return source_hash + ("-deep" if has_deep else "-fast")
+
+    def update_fast(
+        self, uri: str, source: str, diags: List[lsp.Diagnostic]
+    ) -> str:
+        """Update fast diagnostics for *uri*.  Returns the new ``result_id``."""
+        h = self._hash(source)
+        with self._lock:
+            existing = self._entries.get(uri)
+            # Preserve deep diagnostics if source hasn't changed
+            deep = (
+                existing.deep_diagnostics
+                if existing and existing.source_hash == h
+                else None
+            )
+            rid = self._result_id(h, deep is not None)
+            self._entries[uri] = _CachedDiagnosticEntry(rid, h, diags, deep)
+            return rid
+
+    def update_deep(
+        self, uri: str, deep: List[lsp.Diagnostic]
+    ) -> Optional[str]:
+        """Update deep diagnostics overlay.  Returns new ``result_id`` or ``None``."""
+        with self._lock:
+            e = self._entries.get(uri)
+            if e is None:
+                return None
+            e.deep_diagnostics = deep
+            e.result_id = self._result_id(e.source_hash, True)
+            return e.result_id
+
+    def get(self, uri: str) -> Optional[_CachedDiagnosticEntry]:
+        """Return the cached entry for *uri*, or ``None``."""
+        with self._lock:
+            return self._entries.get(uri)
+
+    def get_merged(
+        self, uri: str
+    ) -> Optional[Tuple[str, List[lsp.Diagnostic]]]:
+        """Return ``(result_id, fast + deep diagnostics)`` or ``None``."""
+        with self._lock:
+            e = self._entries.get(uri)
+            if e is None:
+                return None
+            merged = list(e.diagnostics)
+            if e.deep_diagnostics:
+                merged.extend(e.deep_diagnostics)
+            return (e.result_id, merged)
+
+    def invalidate(self, uri: str) -> None:
+        """Remove cached entry for *uri*."""
+        with self._lock:
+            self._entries.pop(uri, None)
+
+    def all_uris(self) -> List[str]:
+        """Return all cached URIs."""
+        with self._lock:
+            return list(self._entries.keys())
 
 
 def _convert_error_to_diagnostic(error: Any, source: str) -> lsp.Diagnostic:
@@ -612,6 +704,7 @@ def register(server) -> None:
             server.indexer, _get_semantic_model(),
             pipeline_result,
         )
+        server.diagnostic_cache.update_fast(uri, source, diags)
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
         )
@@ -639,6 +732,7 @@ def register(server) -> None:
                     server.indexer, _get_semantic_model(),
                     pipeline_result,
                 )
+                server.diagnostic_cache.update_fast(uri, source, diags)
                 server.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
                 )
@@ -672,6 +766,7 @@ def register(server) -> None:
             server.indexer, _get_semantic_model(),
             pipeline_result,
         )
+        server.diagnostic_cache.update_fast(uri, source, diags)
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
         )
@@ -704,9 +799,15 @@ def register(server) -> None:
                     deep_filepath,
                     cwd=os.path.dirname(deep_filepath),
                 )
+                server.diagnostic_cache.update_deep(uri, deep)
                 server.text_document_publish_diagnostics(
                     lsp.PublishDiagnosticsParams(uri=uri, version=doc_version, diagnostics=diags + deep)
                 )
+                # Notify pull-mode clients to re-request diagnostics
+                try:
+                    server.workspace_diagnostic_refresh(None)
+                except Exception:
+                    logger.debug("workspace/diagnostic/refresh not supported by client")
             except asyncio.CancelledError:
                 logger.debug("Deep diagnostics task cancelled for %s", uri)
             except Exception:
@@ -737,6 +838,136 @@ def register(server) -> None:
         if old_deep and not old_deep.done():
             old_deep.cancel()
         # Clear diagnostics for the closed document
+        server.diagnostic_cache.invalidate(uri)
         server.text_document_publish_diagnostics(
             lsp.PublishDiagnosticsParams(uri=uri, diagnostics=[])
         )
+
+    # -- LSP 3.17 Pull Diagnostics -----------------------------------------
+
+    @server.feature(
+        lsp.TEXT_DOCUMENT_DIAGNOSTIC,
+        lsp.DiagnosticOptions(
+            identifier="ivy",
+            inter_file_dependencies=True,
+            workspace_diagnostics=True,
+        ),
+    )
+    async def text_document_diagnostic(
+        params: lsp.DocumentDiagnosticParams,
+    ) -> lsp.RelatedFullDocumentDiagnosticReport | lsp.RelatedUnchangedDocumentDiagnosticReport:
+        uri = params.text_document.uri
+        cache = server.diagnostic_cache
+
+        # Fast path: unchanged
+        if params.previous_result_id is not None:
+            entry = cache.get(uri)
+            if entry is not None and entry.result_id == params.previous_result_id:
+                return lsp.RelatedUnchangedDocumentDiagnosticReport(
+                    result_id=entry.result_id,
+                )
+
+        # Get source (open doc or disk)
+        try:
+            doc = server.workspace.get_text_document(uri)
+            source = doc.source or ""
+        except KeyError:
+            filepath = uri_to_path(uri)
+            try:
+                with open(filepath, "r") as f:
+                    source = f.read()
+            except OSError:
+                return lsp.RelatedFullDocumentDiagnosticReport(
+                    items=[], result_id="empty",
+                )
+
+        filepath = uri_to_path(uri)
+        loop = asyncio.get_running_loop()
+        pipeline_result = await loop.run_in_executor(
+            None, _run_pipeline, source, filepath, "pull",
+        )
+        diags = await loop.run_in_executor(
+            None, compute_diagnostics,
+            server.parser, source, filepath,
+            server.indexer, _get_semantic_model(),
+            pipeline_result,
+        )
+
+        result_id = cache.update_fast(uri, source, diags)
+        # Merge cached deep diagnostics if available
+        entry = cache.get(uri)
+        if entry and entry.deep_diagnostics:
+            diags = diags + entry.deep_diagnostics
+            result_id = entry.result_id
+
+        return lsp.RelatedFullDocumentDiagnosticReport(
+            items=diags,
+            result_id=result_id,
+        )
+
+    @server.feature(lsp.WORKSPACE_DIAGNOSTIC)
+    async def workspace_diagnostic(
+        params: lsp.WorkspaceDiagnosticParams,
+    ) -> lsp.WorkspaceDiagnosticReport:
+        cache = server.diagnostic_cache
+        items: list = []
+
+        # Build lookup of previous result IDs
+        prev_ids: Dict[str, str] = {}
+        for prev in params.previous_result_ids:
+            prev_ids[prev.uri] = prev.value
+
+        # Collect URIs: open docs + indexed workspace files
+        uris: set = set()
+        for doc_uri in server.workspace.text_documents:
+            uris.add(doc_uri)
+        if server.indexer is not None:
+            for fp in server.indexer.get_all_ivy_file_paths():
+                uris.add(f"file://{fp}")
+
+        for uri in sorted(uris):
+            prev_rid = prev_ids.get(uri)
+
+            # Unchanged check
+            if prev_rid is not None:
+                entry = cache.get(uri)
+                if entry is not None and entry.result_id == prev_rid:
+                    items.append(lsp.WorkspaceUnchangedDocumentDiagnosticReport(
+                        uri=uri, version=None, result_id=entry.result_id,
+                    ))
+                    continue
+
+            # Return cached if available
+            cached = cache.get_merged(uri)
+            if cached is not None:
+                rid, merged = cached
+                items.append(lsp.WorkspaceFullDocumentDiagnosticReport(
+                    uri=uri, items=merged, version=None, result_id=rid,
+                ))
+                continue
+
+            # Compute fresh (fallback for uncached files)
+            filepath = uri_to_path(uri)
+            try:
+                doc = server.workspace.get_text_document(uri)
+                source = doc.source or ""
+            except KeyError:
+                try:
+                    with open(filepath, "r") as f:
+                        source = f.read()
+                except OSError:
+                    continue
+
+            loop = asyncio.get_running_loop()
+            diags = await loop.run_in_executor(
+                None, compute_diagnostics,
+                server.parser, source, filepath,
+                server.indexer, _get_semantic_model(),
+                None,
+            )
+            rid = cache.update_fast(uri, source, diags)
+            items.append(lsp.WorkspaceFullDocumentDiagnosticReport(
+                uri=uri, items=diags, version=None, result_id=rid,
+            ))
+
+        return lsp.WorkspaceDiagnosticReport(items=items)
