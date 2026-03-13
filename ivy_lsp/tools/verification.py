@@ -299,6 +299,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             source = f.read()
 
         all_diags: list[dict[str, Any]] = []
+        layer_errors: list[dict[str, str]] = []
 
         # 1. Structural checks (same as ivy_lint)
         if layers is None or "structural" in layers:
@@ -320,8 +321,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         "message": f"Lexer error: {error_info.get('message', 'unknown')}",
                         "source": "ivy-lsp-lexer",
                     })
-            except Exception:
-                logger.debug("Fallback scan failed for %s", relative_path, exc_info=True)
+            except Exception as exc:
+                logger.warning("Fallback scan failed for %s: %s", relative_path, exc)
+                layer_errors.append({"layer": "lexer", "error": str(exc)})
 
         # 3. Semantic diagnostics (orphaned RFC tags, untagged assertions)
         if layers is None or "semantic" in layers:
@@ -362,8 +364,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                                 "message": "Assertion without RFC bracket tag annotation",
                                 "source": "ivy-lsp-semantic",
                             })
-            except Exception:
-                logger.debug("Semantic diagnostics failed for %s", relative_path, exc_info=True)
+            except Exception as exc:
+                logger.warning("Semantic diagnostics failed for %s: %s", relative_path, exc)
+                layer_errors.append({"layer": "semantic", "error": str(exc)})
 
         # 4. Coverage hints
         if layers is None or "coverage" in layers:
@@ -380,8 +383,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                             "source": "ivy-lsp-coverage",
                             "code": hint.get("code"),
                         })
-            except Exception:
-                logger.debug("Coverage hints failed for %s", relative_path, exc_info=True)
+            except Exception as exc:
+                logger.warning("Coverage hints failed for %s: %s", relative_path, exc)
+                layer_errors.append({"layer": "coverage", "error": str(exc)})
 
         # 5. Pattern diagnostics (regex-based)
         if layers is None or "pattern" in layers:
@@ -433,8 +437,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                                 ),
                                 "source": "ivy-pattern",
                             })
-            except Exception:
-                logger.debug("Pattern diagnostics failed for %s", relative_path, exc_info=True)
+            except Exception as exc:
+                logger.warning("Pattern diagnostics failed for %s: %s", relative_path, exc)
+                layer_errors.append({"layer": "pattern", "error": str(exc)})
 
         # P1: Ensure each diagnostic has the file field for multi-file processing
         for d in all_diags:
@@ -466,4 +471,6 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             "warning_count": sum(1 for d in all_diags if d.get("severity") == "warning"),
             "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
             "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
+            "layer_errors": layer_errors,
+            "partial": bool(layer_errors),
         })
