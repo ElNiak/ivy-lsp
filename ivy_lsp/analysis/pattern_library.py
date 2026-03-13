@@ -297,7 +297,7 @@ def detect_monitors(source: str, filepath: str) -> List[PatternInstance]:
                 brace_depth -= 1
             pos += 1
         if pos <= len(source):
-            block_content = source[block_start:pos]
+            block_content = source[block_start:pos - 1]
 
         has_generating = "_generating" in block_content
 
