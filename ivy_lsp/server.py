@@ -355,20 +355,23 @@ class IvyLanguageServer(LanguageServer):
 
         def _tracked_publish(params):
             server_ref._diagnostics_published_count += 1
-            diag_count = len(params.diagnostics) if params.diagnostics else 0
-            if diag_count > 0:
-                error_count = sum(
-                    1 for d in params.diagnostics
-                    if d.severity == lsp.DiagnosticSeverity.Error
-                )
-                slog.info(
-                    "Diagnostics published",
-                    extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "publish", {
-                        "uri": params.uri,
-                        "count": diag_count,
-                        "errors": error_count,
-                    })},
-                )
+            try:
+                diag_count = len(params.diagnostics) if params.diagnostics else 0
+                if diag_count > 0:
+                    error_count = sum(
+                        1 for d in params.diagnostics
+                        if d.severity == lsp.DiagnosticSeverity.Error
+                    )
+                    slog.info(
+                        "Diagnostics published",
+                        extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "publish", {
+                            "uri": params.uri,
+                            "count": diag_count,
+                            "errors": error_count,
+                        })},
+                    )
+            except Exception:
+                logger.debug("Audit logging failed in _tracked_publish", exc_info=True)
             return _original_publish(params)
 
         self.text_document_publish_diagnostics = _tracked_publish  # type: ignore[assignment]

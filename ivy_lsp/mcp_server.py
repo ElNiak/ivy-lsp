@@ -59,6 +59,11 @@ _INDIVIDUAL_DECL_RE = re.compile(
 _OBJECT_DECL_RE = re.compile(
     r"^\s*(?:object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
 )
+# Assertion/tag detection for ivy_diagnostics semantic layer
+_ASSERTION_RE = re.compile(
+    r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
+)
+_BRACKET_TAG_RE = re.compile(r"#\s*\[")
 
 
 def _validate_path(root: str, relative_path: str) -> str:
@@ -425,6 +430,182 @@ def start_mcp(
             "diagnostic_count": len(diagnostics),
             "error_count": sum(1 for d in diagnostics if d["severity"] == "error"),
             "warning_count": sum(1 for d in diagnostics if d["severity"] == "warning"),
+        })
+
+    @mcp.tool()
+    async def ivy_diagnostics(relative_path: str) -> str:
+        """Full diagnostic analysis of an Ivy file.
+
+        Runs 5 diagnostic layers (structural, lexer, semantic, coverage,
+        pattern) — comparable to what an IDE shows via
+        textDocument/publishDiagnostics. More thorough than ivy_lint but
+        may take longer on first call (lazy model/graph building).
+
+        Use ivy_lint for quick structural checks (milliseconds).
+        Use ivy_diagnostics for thorough analysis after editing.
+
+        Args:
+            relative_path: Relative path to the .ivy file to diagnose.
+        """
+        try:
+            abs_path = _validate_path(root, relative_path)
+        except ValueError as exc:
+            return json.dumps({"success": False, "message": str(exc)})
+        if not os.path.isfile(abs_path):
+            return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
+
+        with open(abs_path, encoding="utf-8", errors="replace") as f:
+            source = f.read()
+
+        all_diags: list[dict[str, Any]] = []
+
+        # 1. Structural checks (same as ivy_lint)
+        resolve_cb = _make_resolve_callback()
+        all_diags.extend(_check_structural_issues(source, abs_path, resolve_cb))
+
+        # 2. Lexer errors via fallback scanner (no Z3 needed)
+        try:
+            from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
+            _symbols, error_info = await asyncio.to_thread(
+                fallback_scan, source, abs_path,
+            )
+            if error_info is not None:
+                all_diags.append({
+                    "line": error_info.get("line", 1),
+                    "severity": "error",
+                    "message": f"Lexer error: {error_info.get('message', 'unknown')}",
+                    "source": "ivy-lsp-lexer",
+                })
+        except Exception:
+            logger.debug("Fallback scan failed for %s", relative_path, exc_info=True)
+
+        # 3. Semantic diagnostics (orphaned RFC tags, untagged assertions)
+        try:
+            model = await _get_model()
+            if model is not None:
+                from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+                rfc_reqs = model.get_nodes_by_type(RfcRequirement)
+                annotations = [
+                    n for n in model.get_nodes_by_type(RfcAnnotation)
+                    if n.file == abs_path
+                ]
+                if rfc_reqs:
+                    req_ids = {r.id for r in rfc_reqs}
+                    for ann in annotations:
+                        for tag in ann.tags:
+                            if tag not in req_ids:
+                                all_diags.append({
+                                    "line": ann.line + 1,
+                                    "severity": "warning",
+                                    "message": (
+                                        f"Orphaned RFC tag: [{tag}] does not "
+                                        "match any loaded requirement manifest"
+                                    ),
+                                    "source": "ivy-lsp-semantic",
+                                })
+
+                # Missing tags on assertions
+                lines = source.split("\n")
+                for m in _ASSERTION_RE.finditer(source):
+                    line_no = source[:m.start()].count("\n")
+                    line_text = lines[line_no] if line_no < len(lines) else ""
+                    if not _BRACKET_TAG_RE.search(line_text):
+                        all_diags.append({
+                            "line": line_no + 1,
+                            "severity": "hint",
+                            "message": "Assertion without RFC bracket tag annotation",
+                            "source": "ivy-lsp-semantic",
+                        })
+        except Exception:
+            logger.debug("Semantic diagnostics failed for %s", relative_path, exc_info=True)
+
+        # 4. Coverage hints
+        try:
+            graph = await _get_req_graph()
+            if graph is not None:
+                from ivy_lsp.features.coverage_hints import compute_coverage_hints
+
+                for hint in compute_coverage_hints(graph, abs_path):
+                    all_diags.append({
+                        "line": hint.get("line", 0),
+                        "severity": hint.get("severity", "hint"),
+                        "message": hint["message"],
+                        "source": "ivy-lsp-coverage",
+                        "code": hint.get("code"),
+                    })
+        except Exception:
+            logger.debug("Coverage hints failed for %s", relative_path, exc_info=True)
+
+        # 5. Pattern diagnostics (regex-based)
+        try:
+            basename = os.path.basename(abs_path)
+
+            # Missing _finalize in test files
+            if "test" in basename.lower() and "_finalize" not in source:
+                has_export = bool(
+                    re.search(r"^\s*export\s+action", source, re.MULTILINE)
+                )
+                if has_export:
+                    all_diags.append({
+                        "line": 1,
+                        "severity": "warning",
+                        "message": (
+                            "Test file has exports but no _finalize action. "
+                            "Consider adding 'export action _finalize' for "
+                            "end-of-test assertions."
+                        ),
+                        "source": "ivy-pattern",
+                    })
+
+            # Exported actions without monitors
+            exports = set(re.findall(
+                r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE,
+            ))
+            monitored = set(re.findall(
+                r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE,
+            ))
+            for exp_action in exports:
+                if exp_action not in monitored and exp_action != "_finalize":
+                    action_defined = bool(re.search(
+                        rf"^\s*action\s+{re.escape(exp_action)}\s*",
+                        source, re.MULTILINE,
+                    ))
+                    if action_defined:
+                        match = re.search(
+                            rf"^\s*export\s+action\s+{re.escape(exp_action)}",
+                            source, re.MULTILINE,
+                        )
+                        line_num = source[:match.start()].count("\n") + 1 if match else 1
+                        all_diags.append({
+                            "line": line_num,
+                            "severity": "hint",
+                            "message": (
+                                f"Exported action '{exp_action}' has no "
+                                "before/after monitor in this file."
+                            ),
+                            "source": "ivy-pattern",
+                        })
+        except Exception:
+            logger.debug("Pattern diagnostics failed for %s", relative_path, exc_info=True)
+
+        # Build source-breakdown summary
+        by_source: dict[str, int] = {}
+        for d in all_diags:
+            src = d.get("source", "unknown")
+            by_source[src] = by_source.get(src, 0) + 1
+
+        return json.dumps({
+            "success": True,
+            "file": relative_path,
+            "diagnostics": all_diags,
+            "diagnostic_count": len(all_diags),
+            "by_source": by_source,
+            "error_count": sum(1 for d in all_diags if d.get("severity") == "error"),
+            "warning_count": sum(1 for d in all_diags if d.get("severity") == "warning"),
+            "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
+            "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
         })
 
     @mcp.tool()
