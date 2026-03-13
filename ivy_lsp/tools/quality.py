@@ -7,9 +7,12 @@ Consolidated from the original two tools:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def register_quality_tools(mcp: Any, ctx: Any) -> None:

@@ -9,8 +9,11 @@ Consolidated from the original seven tools:
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _RFC_REQ_PATTERN = re.compile(
     r"([^.]*?\b(MUST NOT|MUST|SHALL NOT|SHALL|SHOULD NOT|SHOULD|"
