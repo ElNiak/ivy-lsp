@@ -12,6 +12,8 @@ import logging
 import os
 from typing import Any
 
+from ivy_lsp.tools._helpers import error_response
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,10 +62,9 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
 
         prot_dir = os.path.join(ctx.root, "protocol-testing", protocol)
         if not os.path.isdir(prot_dir):
-            return json.dumps({
-                "success": False,
-                "message": f"Protocol directory not found: protocol-testing/{protocol}",
-            })
+            return error_response(
+                f"Protocol directory not found: protocol-testing/{protocol}"
+            )
 
         # Collect all .ivy files under this protocol
         prot_files = ctx.find_ivy_files(ctx.root)
@@ -98,7 +99,8 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                                 found = True
                                 matched_files.append(f)
                                 break
-                    except OSError:
+                    except OSError as exc:
+                        logger.warning("Skipping unreadable file %s: %s", f, exc)
                         continue
 
             if found:
@@ -192,7 +194,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             # Validate mode and alias "analyze" -> "detect"
             _VALID_MODES = {"analyze", "detect", "validate", "compare", "check"}
             if mode not in _VALID_MODES:
-                return json.dumps({"success": False, "message": f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"})
+                return error_response(f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}")
             effective_mode = "detect" if mode == "analyze" else mode
             return await _ivy_pattern_analysis(
                 protocol, effective_mode, pattern, reference_protocol

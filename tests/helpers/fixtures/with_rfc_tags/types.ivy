@@ -1,0 +1,4 @@
+#lang ivy1.7
+
+type cid
+type error_code = {no_error, internal_error, protocol_error}

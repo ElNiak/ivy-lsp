@@ -1,0 +1,6 @@
+#lang ivy1.7
+
+action foo = {
+    require true;
+
+type bar

@@ -3,7 +3,23 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, TypedDict
+
+
+class CounterexampleStep(TypedDict):
+    """A single step in a counterexample trace."""
+
+    step_number: int
+    action: str | None
+    assignments: dict[str, str]
+
+
+class Counterexample(TypedDict):
+    """Structured counterexample data from ivy_check output."""
+
+    assertion: str | None
+    assertion_line: int | None
+    steps: list[CounterexampleStep]
 
 
 # Matches "The following assertion at line <N> is not always true:"
@@ -27,7 +43,7 @@ _ACTION_RE = re.compile(r"^\s*Action:\s*(.+)$", re.MULTILINE)
 _ASSIGNMENT_RE = re.compile(r"^\s{2,}(\w[\w.]*)\s*=\s*(.+)$")
 
 
-def parse_counterexample(raw_output: str) -> dict[str, Any] | None:
+def parse_counterexample(raw_output: str) -> Counterexample | None:
     """Parse counterexample trace from ivy_check output.
 
     Returns structured counterexample data or None if no counterexample found.

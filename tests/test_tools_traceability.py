@@ -145,6 +145,49 @@ class TestCoverageDiff:
         assert data["success"] is False
         assert "baseline" in data["message"].lower()
 
+    @pytest.mark.asyncio
+    async def test_diff_after_stats_returns_delta(self, annotated_workspace):
+        """ivy_coverage(mode='diff') after stats returns delta with direction."""
+        mcp = _get_mcp_app(workspace_root=str(annotated_workspace))
+        # First call: build stats baseline
+        result1 = await mcp.call_tool(
+            "ivy_coverage", {"mode": "stats"}
+        )
+        data1 = json.loads(_extract_text(result1))
+        # The workspace may or may not have coverage, but stats should succeed
+        if data1.get("total", 0) == 0:
+            pytest.skip("No requirements found in annotated_workspace")
+
+        # Second call: diff should work now
+        result2 = await mcp.call_tool(
+            "ivy_coverage", {"mode": "diff"}
+        )
+        data2 = json.loads(_extract_text(result2))
+        # Should have diff fields, not an error
+        assert "delta_percent" in data2
+        assert "delta_direction" in data2
+        assert data2["delta_direction"] in ("improved", "regressed", "unchanged")
+
+
+# ---------------------------------------------------------------------------
+# ivy_coverage mode validation
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageModeValidation:
+    @pytest.mark.asyncio
+    async def test_unknown_mode_rejected_by_schema(self):
+        """ivy_coverage with unknown mode is rejected by Literal type validation."""
+        from mcp.shared.exceptions import McpError
+
+        mcp = _get_mcp_app()
+        with pytest.raises((McpError, Exception)) as exc_info:
+            await mcp.call_tool(
+                "ivy_coverage", {"mode": "bogus"}
+            )
+        # The error message should mention valid modes
+        assert "matrix" in str(exc_info.value) or "literal" in str(exc_info.value).lower()
+
 
 # ---------------------------------------------------------------------------
 # ivy_query error paths

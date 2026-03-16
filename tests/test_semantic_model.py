@@ -269,3 +269,62 @@ class TestSemanticModelThreadSafety:
         for j in range(4):
             nodes = model.get_nodes_in_file(f"file_{j}.ivy")
             assert len(nodes) == 1
+
+
+class TestSemanticModelDomainQueries:
+    """Tests for RequirementGraph-compatible domain query methods."""
+
+    def test_get_requirements_for_action(self):
+        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementNode
+
+        model = SemanticModel()
+        action = ActionNode(
+            id="act:open", name="open", qualified_name="conn.open",
+            file="/t.ivy", line=10,
+        )
+        req = RequirementNode(
+            id="/t.ivy:15", kind="require", formula_text="conn_seen(C)",
+            line=15, col=0, file="/t.ivy", monitor_action="conn.open",
+            mixin_kind="before", bracket_tags=[],
+        )
+        model.add_node(action)
+        model.add_node(req)
+        model.add_edge(req.id, SemanticEdgeType.CONSTRAINS, action.id)
+
+        result = model.get_requirements_for_action("act:open")
+        assert len(result) == 1
+        assert result[0].id == "/t.ivy:15"
+
+    def test_get_requirements_for_action_empty(self):
+        model = SemanticModel()
+        s = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="f", line=1)
+        model.add_node(s)
+        assert model.get_requirements_for_action("s1") == []
+
+    def test_get_state_vars_read_by(self):
+        from ivy_lsp.analysis.requirement_graph import RequirementNode, StateVarNode
+
+        model = SemanticModel()
+        req = RequirementNode(
+            id="/t.ivy:15", kind="require", formula_text="conn_seen(C)",
+            line=15, col=0, file="/t.ivy", monitor_action="conn.open",
+            mixin_kind="before", bracket_tags=[],
+        )
+        sv = StateVarNode(
+            id="conn_seen", name="conn_seen", qualified_name="conn_seen",
+            file="/t.ivy", line=5, is_relation=True,
+        )
+        model.add_node(req)
+        model.add_node(sv)
+        model.add_edge(req.id, SemanticEdgeType.READS, sv.id)
+
+        result = model.get_state_vars_read_by("/t.ivy:15")
+        assert len(result) == 1
+        assert result[0].id == "conn_seen"
+
+    def test_get_coverage_stats_empty(self):
+        model = SemanticModel()
+        stats = model.get_coverage_stats()
+        assert stats["total_requirements"] == 0
+        assert stats["covered"] == 0
+        assert stats["uncovered"] == 0

@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
+
+from ivy_lsp.tools._helpers import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """RFC requirement-to-annotation traceability matrix."""
         model = await ctx.get_model()
         if model is None:
-            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+            return error_response("Semantic model unavailable")
 
         from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
@@ -48,7 +50,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             try:
                 abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
             annotations = [a for a in annotations if a.file == abs_path]
 
         from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
@@ -88,7 +90,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """RFC requirement coverage statistics by level and layer."""
         model = await ctx.get_model()
         if model is None:
-            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+            return error_response("Semantic model unavailable")
 
         from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
@@ -99,7 +101,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             try:
                 abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
             annotations = [a for a in annotations if a.file == abs_path]
 
         from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
@@ -177,7 +179,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["testFile"] = ctx.validate_path(test_file)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return json.dumps(handle_coverage_gaps(server_proxy, params))
@@ -187,21 +189,18 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         scope_key = relative_path or "__global__"
         baseline = _coverage_baselines.get(scope_key)
         if baseline is None:
-            return json.dumps({
-                "success": False,
-                "message": (
-                    "No coverage baseline cached"
-                    + (f" for scope '{relative_path}'" if relative_path else "")
-                    + ". Run ivy_coverage(mode='stats') first."
-                ),
-            })
+            return error_response(
+                "No coverage baseline cached"
+                + (f" for scope '{relative_path}'" if relative_path else "")
+                + ". Run ivy_coverage(mode='stats') first."
+            )
 
         # Get current stats (this also updates the baseline)
         current_raw = await _ivy_requirement_coverage(relative_path)
         current = json.loads(current_raw)
 
         if not current.get("total"):
-            return json.dumps({"success": False, "message": "No requirements found"})
+            return error_response("No requirements found")
 
         baseline_covered = set(baseline.get("_covered_ids", []))
         current_covered = set(current.get("_covered_ids", []))
@@ -252,7 +251,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Analyze incoming and outgoing edges for a symbol."""
         model = await ctx.get_model()
         if model is None:
-            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+            return error_response("Semantic model unavailable")
 
         from ivy_lsp.semantic.nodes import SymbolNode
 
@@ -301,7 +300,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Query cross-reference graph neighborhood of a node."""
         model = await ctx.get_model()
         if model is None:
-            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+            return error_response("Semantic model unavailable")
 
         node = model.get_node(node_id)
         # H7: Fuzzy node_id matching
@@ -357,7 +356,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Query rich semantic info about a symbol: type, references, requirements."""
         model = await ctx.get_model()
         if model is None:
-            return json.dumps({"success": False, "message": "Semantic model unavailable"})
+            return error_response("Semantic model unavailable")
 
         from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
 
@@ -515,7 +514,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     async def ivy_coverage(
-        mode: str = "stats",
+        mode: Literal["matrix", "stats", "gaps", "diff"] = "stats",
         relative_path: str | None = None,
         test_file: str | None = None,
         protocol: str | None = None,
@@ -544,6 +543,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 (used by "gaps" mode).
             protocol: Protocol name to scope results (used by "gaps" mode).
         """
+        _valid_modes = {"matrix", "stats", "gaps", "diff"}
+        if mode not in _valid_modes:
+            return error_response(
+                f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+            )
         if mode == "matrix":
             return await _ivy_traceability_matrix(relative_path)
         elif mode == "gaps":
@@ -555,7 +559,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     async def ivy_query(
-        mode: str = "info",
+        mode: Literal["impact", "xrefs", "info"] = "info",
         symbol_name: str | None = None,
         node_id: str | None = None,
     ) -> str:
@@ -577,27 +581,29 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             node_id: The node ID to query for "xrefs" mode
                 (e.g., "test.ivy:5:send").
         """
+        _valid_modes = {"impact", "xrefs", "info"}
+        if mode not in _valid_modes:
+            return error_response(
+                f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+            )
         if mode == "impact":
             if not symbol_name:
-                return json.dumps({
-                    "success": False,
-                    "message": "symbol_name is required for mode='impact'",
-                })
+                return error_response(
+                    "symbol_name is required for mode='impact'"
+                )
             return await _ivy_impact_analysis(symbol_name)
         elif mode == "xrefs":
             effective_id = node_id or symbol_name
             if not effective_id:
-                return json.dumps({
-                    "success": False,
-                    "message": "node_id or symbol_name is required for mode='xrefs'",
-                })
+                return error_response(
+                    "node_id or symbol_name is required for mode='xrefs'"
+                )
             return await _ivy_cross_references(effective_id)
         else:  # default: info
             if not symbol_name:
-                return json.dumps({
-                    "success": False,
-                    "message": "symbol_name is required for mode='info'",
-                })
+                return error_response(
+                    "symbol_name is required for mode='info'"
+                )
             return await _ivy_query_symbol(symbol_name)
 
     @mcp.tool()
@@ -629,10 +635,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """
         if output == "manifest":
             if not rfc_name:
-                return json.dumps({
-                    "success": False,
-                    "message": "rfc_name is required for output='manifest'",
-                })
+                return error_response(
+                    "rfc_name is required for output='manifest'"
+                )
             return await _ivy_generate_manifest(
                 rfc_name, rfc_text, protocol, base_section
             )

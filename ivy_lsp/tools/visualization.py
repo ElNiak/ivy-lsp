@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Literal
+
+from ivy_lsp.tools._helpers import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +44,12 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["filePath"] = ctx.validate_path(file_path)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if test_file:
             try:
                 params["testFile"] = ctx.validate_path(test_file)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
         if offset:
@@ -71,7 +73,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["testFile"] = ctx.validate_path(test_file)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
         result = handle_model_summary_table(server_proxy, params)
@@ -108,7 +110,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["testFile"] = ctx.validate_path(test_file)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if include_state_vars:
             params["includeStateVars"] = True
         if protocol:
@@ -129,7 +131,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["testFile"] = ctx.validate_path(test_file)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if state_var_filter:
             params["stateVarFilter"] = state_var_filter
         if protocol:
@@ -150,7 +152,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["testFile"] = ctx.validate_path(test_file)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if group_by:
             params["groupBy"] = group_by
         if protocol:
@@ -163,7 +165,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     async def ivy_visualize(
-        view: str = "dependencies",
+        view: Literal["dependencies", "state_machine", "layers"] = "dependencies",
         test_file: str | None = None,
         protocol: str | None = None,
         include_state_vars: bool = False,
@@ -196,6 +198,11 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             group_by: Grouping strategy: "file" (default) or "module".
                 Used by view="layers".
         """
+        _valid_views = {"dependencies", "state_machine", "layers"}
+        if view not in _valid_views:
+            return error_response(
+                f"Unknown view '{view}'. Valid views: {sorted(_valid_views)}"
+            )
         if view == "state_machine":
             return await _ivy_state_machine_view(
                 test_file, state_var_filter, protocol
@@ -209,7 +216,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     async def ivy_model_summary(
-        detail: str = "summary",
+        detail: Literal["summary", "requirements"] = "summary",
         test_file: str | None = None,
         protocol: str | None = None,
         sort_by: str | None = None,
@@ -246,6 +253,11 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             offset: Number of actions to skip (default: 0). Used by
                 detail="requirements".
         """
+        _valid_details = {"summary", "requirements"}
+        if detail not in _valid_details:
+            return error_response(
+                f"Unknown detail '{detail}'. Valid details: {sorted(_valid_details)}"
+            )
         if detail == "requirements":
             return await _ivy_action_requirements(
                 action_name, file_path, test_file, protocol, offset, limit

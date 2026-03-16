@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import shutil
 from typing import Any
+
+from ivy_lsp.tools._helpers import error_response
+
+logger = logging.getLogger(__name__)
 
 _INCLUDE_PATTERN = re.compile(r"^include\s+(\w+)", re.MULTILINE)
 
@@ -27,9 +32,9 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return json.dumps({"success": False, "message": str(exc)})
+            return error_response(str(exc))
         if not os.path.isfile(abs_path):
-            return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
+            return error_response(f"File not found: {relative_path}")
 
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
@@ -58,6 +63,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         def _build_graph():
             graph: dict[str, list[str]] = {}
+            skipped_count = 0
             # Use shared basename cache (list-based, no collisions)
             cache = ctx.get_basename_cache()
 
@@ -66,10 +72,12 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     with open(os.path.join(ctx.root, rel_path), encoding="utf-8", errors="replace") as f:
                         source = f.read()
                     graph[rel_path] = _INCLUDE_PATTERN.findall(source)
-                except OSError:
+                except OSError as exc:
+                    logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
+                    skipped_count += 1
                     continue
 
-            return graph, cache
+            return graph, cache, skipped_count
 
         def _resolve_closest(
             inc_name: str,
@@ -100,7 +108,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     best = c
             return best
 
-        graph, basename_cache = await asyncio.to_thread(_build_graph)
+        graph, basename_cache, _skipped = await asyncio.to_thread(_build_graph)
 
         if relative_path is not None:
             # C5: Try key variants (with/without protocol-testing/ prefix)

@@ -444,6 +444,7 @@ class IvyLanguageServer(LanguageServer):
             visualization,
             workspace_symbols,
         )
+        from ivy_lsp.features import call_hierarchy, implementation
 
         document_symbols.register(self)
         workspace_symbols.register(self)
@@ -462,6 +463,8 @@ class IvyLanguageServer(LanguageServer):
         folding_range.register(self)
         monitoring.register(self)
         visualization.register(self)
+        implementation.register(self)
+        call_hierarchy.register(self)
 
         @self.feature(lsp.INITIALIZE)
         def on_initialize(params: lsp.InitializeParams) -> None:

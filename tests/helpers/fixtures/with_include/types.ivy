@@ -1,0 +1,4 @@
+#lang ivy1.7
+
+type cid
+type stream_kind = {unidir, bidir}

@@ -1,0 +1,2 @@
+type cid
+relation foo(C:cid)

@@ -10,6 +10,7 @@ import re
 import time
 from typing import Any
 
+from ivy_lsp.tools._helpers import error_response
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.verification import (
@@ -20,9 +21,8 @@ from ivy_lsp.verification import (
 
 logger = logging.getLogger(__name__)
 
-# Per-isolate verification cache: (abs_path, isolate|None) -> result_dict
-_verify_cache: dict[tuple[str, str | None], dict] = {}
-_verify_cache_lock = asyncio.Lock()
+# Maximum number of entries in the verification cache (LRU eviction)
+_CACHE_MAX_SIZE = 100
 
 # Assertion/tag detection for ivy_diagnostics semantic layer
 _ASSERTION_RE = re.compile(
@@ -38,38 +38,48 @@ _ISOLATE_STATUS_RE = re.compile(
 )
 
 
-def _cache_per_isolate_results(
-    abs_path: str,
-    raw_output: str,
-    full_result: dict[str, Any],
-) -> None:
-    """Extract per-isolate status from full verification output and cache each."""
-    for m in _ISOLATE_STATUS_RE.finditer(raw_output):
-        iso_name = m.group(1)
-        status = m.group(2)
-        iso_key = (abs_path, iso_name)
-        if iso_key not in _verify_cache:
-            iso_success = status in ("PASS", "OK")
-            # Filter diagnostics to those mentioning this isolate (best effort)
-            iso_diags = [
-                d for d in full_result.get("diagnostics", [])
-                if iso_name in d.get("message", "")
-                or iso_name in d.get("file", "")
-            ]
-            _verify_cache[iso_key] = {
-                "success": iso_success,
-                "diagnostics": iso_diags,
-                "diagnostic_count": len(iso_diags),
-                "error_summary": full_result.get("error_summary", "") if not iso_success else "",
-                "raw_output": raw_output,
-                "duration_seconds": full_result.get("duration_seconds", 0),
-                "cached": False,
-                "isolate": iso_name,
-            }
-
-
 def register_verification_tools(mcp: Any, ctx: Any) -> None:
     """Register verification-related MCP tools."""
+
+    # Per-isolate verification cache: (abs_path, isolate|None) -> result_dict
+    # Moved into closure scope so each MCP server instance has its own cache.
+    _verify_cache: dict[tuple[str, str | None], dict] = {}
+    _verify_cache_lock = asyncio.Lock()
+    _verify_in_flight: set[tuple[str, str | None]] = set()
+
+    def _evict_oldest_if_needed() -> None:
+        """Evict oldest cache entries when cache exceeds _CACHE_MAX_SIZE."""
+        while len(_verify_cache) > _CACHE_MAX_SIZE:
+            oldest_key = next(iter(_verify_cache))
+            _verify_cache.pop(oldest_key)
+
+    def _cache_per_isolate_results(
+        abs_path: str,
+        raw_output: str,
+        full_result: dict[str, Any],
+    ) -> None:
+        """Extract per-isolate status from full verification output and cache each."""
+        for m in _ISOLATE_STATUS_RE.finditer(raw_output):
+            iso_name = m.group(1)
+            status = m.group(2)
+            iso_key = (abs_path, iso_name)
+            if iso_key not in _verify_cache:
+                iso_success = status in ("PASS", "OK")
+                iso_diags = [
+                    d for d in full_result.get("diagnostics", [])
+                    if iso_name in d.get("message", "")
+                    or iso_name in d.get("file", "")
+                ]
+                _verify_cache[iso_key] = {
+                    "success": iso_success,
+                    "diagnostics": iso_diags,
+                    "diagnostic_count": len(iso_diags),
+                    "error_summary": full_result.get("error_summary", "") if not iso_success else "",
+                    "duration_seconds": full_result.get("duration_seconds", 0),
+                    "cached": False,
+                    "isolate": iso_name,
+                }
+                _evict_oldest_if_needed()
 
     @mcp.tool()
     async def ivy_verify(
@@ -89,25 +99,50 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return json.dumps({"success": False, "message": str(exc)})
+            return error_response(str(exc))
         if not os.path.isfile(abs_path):
-            return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
+            return error_response(f"File not found: {relative_path}")
 
         if isolate:
             try:
                 _validate_ivy_param(isolate)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
 
-        # Serialize cache check-and-write to prevent TOCTOU race
+        cache_key = (abs_path, isolate)
+
+        # Phase 1: Acquire lock, check cache / in-flight
         async with _verify_cache_lock:
-            # Check cache if requested
-            cache_key = (abs_path, isolate)
             if use_cache and cache_key in _verify_cache:
                 cached_result = dict(_verify_cache[cache_key])
                 cached_result["cached"] = True
                 return json.dumps(cached_result)
 
+            if cache_key in _verify_in_flight:
+                # Another coroutine is already verifying; wait outside lock
+                need_wait = True
+            else:
+                _verify_in_flight.add(cache_key)
+                need_wait = False
+
+        # If another coroutine owns this key, poll for its result
+        if need_wait:
+            for _ in range(600):  # up to ~60s
+                await asyncio.sleep(0.1)
+                async with _verify_cache_lock:
+                    if cache_key in _verify_cache:
+                        cached_result = dict(_verify_cache[cache_key])
+                        cached_result["cached"] = True
+                        return json.dumps(cached_result)
+                    if cache_key not in _verify_in_flight:
+                        _verify_in_flight.add(cache_key)
+                        break
+            else:
+                async with _verify_cache_lock:
+                    _verify_in_flight.add(cache_key)
+
+        # Phase 2: Run subprocess WITHOUT holding lock
+        try:
             result = await shared_ivy_check(
                 filepath=abs_path,
                 workspace_root=ctx.root,
@@ -123,17 +158,25 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 cex = parse_counterexample(raw)
                 if cex is not None:
                     result["counterexample"] = cex
+                    from ivy_lsp.utils.counterexample_formatter import format_counterexample
+                    result["counterexample_trace"] = format_counterexample(cex)
 
             result["cached"] = False
 
-            # Cache the result for this (file, isolate) pair
-            _verify_cache[cache_key] = dict(result)
+            # Phase 3: Write to cache under lock
+            async with _verify_cache_lock:
+                _verify_cache[cache_key] = dict(result)
+                _evict_oldest_if_needed()
 
-            # When full verification (no isolate), also cache individual isolate
-            # results if the output contains per-isolate status lines
-            if isolate is None:
-                raw_output = result.get("raw_output", "")
-                _cache_per_isolate_results(abs_path, raw_output, result)
+                if isolate is None:
+                    raw_output = result.get("raw_output", "")
+                    _cache_per_isolate_results(abs_path, raw_output, result)
+
+                _verify_in_flight.discard(cache_key)
+        except Exception:
+            async with _verify_cache_lock:
+                _verify_in_flight.discard(cache_key)
+            raise
 
         return json.dumps(result)
 
@@ -157,16 +200,16 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return json.dumps({"success": False, "message": str(exc)})
+            return error_response(str(exc))
         if not os.path.isfile(abs_path):
-            return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
+            return error_response(f"File not found: {relative_path}")
 
         try:
             _validate_ivy_param(target)
             if isolate:
                 _validate_ivy_param(isolate)
         except ValueError as exc:
-            return json.dumps({"success": False, "message": str(exc)})
+            return error_response(str(exc))
 
         t0 = time.monotonic()
         _docker_fallback_reason: str | None = None
@@ -176,7 +219,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             try:
                 from pathlib import Path as P
 
-                from api.compiler import generate_compile_commands
+                from panther_ivy.api.compiler import generate_compile_commands
 
                 compile_result = generate_compile_commands(
                     ivy_file=P(abs_path),
@@ -228,10 +271,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 logger.debug(
                     "panther_ivy.api not available; falling back to direct subprocess"
                 )
-            except Exception as exc:
-                logger.warning(
-                    "API executor failed: %s; falling back to direct subprocess",
+            except (ConnectionError, OSError, RuntimeError) as exc:
+                logger.error(
+                    "Docker compile failed unexpectedly: %s",
                     exc,
+                    exc_info=True,
                 )
                 _docker_fallback_reason = str(exc)
 
@@ -264,15 +308,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return json.dumps({"success": False, "message": str(exc)})
+            return error_response(str(exc))
         if not os.path.isfile(abs_path):
-            return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
+            return error_response(f"File not found: {relative_path}")
 
         if isolate:
             try:
                 _validate_ivy_param(isolate)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
 
         result = await shared_ivy_show(
             filepath=abs_path,
@@ -307,9 +351,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return json.dumps({"success": False, "message": str(exc)})
+            return error_response(str(exc))
         if not os.path.isfile(abs_path):
-            return json.dumps({"success": False, "message": f"File not found: {relative_path}"})
+            return error_response(f"File not found: {relative_path}")
 
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
@@ -490,3 +534,54 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             "layer_errors": layer_errors,
             "partial": bool(layer_errors),
         })
+
+    # -- Verification dashboard ------------------------------------------------
+
+    def _get_cache_summary() -> dict[str, Any]:
+        """Return verification cache summary. Closure-scoped accessor."""
+        verified: list[str] = []
+        failed: list[str] = []
+        seen: set[str] = set()
+        for key, result in _verify_cache.items():
+            path = key[0] if isinstance(key, tuple) else str(key)
+            if path in seen:
+                continue
+            seen.add(path)
+            if result.get("success"):
+                verified.append(path)
+            else:
+                failed.append(path)
+        return {
+            "verified_files": verified,
+            "failed_files": failed,
+            "cache_size": len(_verify_cache),
+            "cache_max": _CACHE_MAX_SIZE,
+        }
+
+    # Expose cache summary via ctx for monitoring/dashboard use
+    ctx.get_verify_cache_summary = _get_cache_summary
+
+    @mcp.tool()
+    async def ivy_verification_dashboard() -> str:
+        """Workspace-level verification status: files verified, failed, pending.
+
+        Returns verification cache state showing which files have been
+        verified, which failed, and which are pending.
+        """
+        ivy_files = ctx.find_ivy_files()
+        cache = _get_cache_summary()
+        verified_set = set(cache["verified_files"])
+        failed_set = set(cache["failed_files"])
+        pending = [f for f in ivy_files if f not in verified_set and f not in failed_set]
+
+        return json.dumps({
+            "success": True,
+            "total_files": len(ivy_files),
+            "verified": len(verified_set),
+            "failed": len(failed_set),
+            "pending": len(pending),
+            "cache_size": cache["cache_size"],
+            "cache_max": cache["cache_max"],
+            "verified_files": sorted(verified_set),
+            "failed_files": sorted(failed_set),
+        }, indent=2)

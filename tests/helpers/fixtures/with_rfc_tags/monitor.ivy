@@ -1,0 +1,15 @@
+#lang ivy1.7
+
+include types
+
+relation seen_error(C:cid)
+
+before handle_error(c:cid, e:error_code) {
+    require e ~= no_error;                       # [rfc9999:5.1]
+}
+
+after handle_error(c:cid, e:error_code) {
+    seen_error(c) := true;                       # [rfc9999:5.2]
+}
+
+action handle_error(c:cid, e:error_code)

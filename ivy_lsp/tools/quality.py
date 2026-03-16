@@ -10,7 +10,9 @@ import json
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, Literal
+
+from ivy_lsp.tools._helpers import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             try:
                 params["filePath"] = ctx.validate_path(file_path)
             except ValueError as exc:
-                return json.dumps({"success": False, "message": str(exc)})
+                return error_response(str(exc))
         if line is not None:
             params["line"] = line
         if context:
@@ -53,10 +55,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         """Validate a protocol model against quality gates."""
         prot_dir = os.path.join(ctx.root, "protocol-testing", protocol)
         if not os.path.isdir(prot_dir):
-            return json.dumps({
-                "success": False,
-                "message": f"Protocol directory not found: protocol-testing/{protocol}",
-            })
+            return error_response(
+                f"Protocol directory not found: protocol-testing/{protocol}"
+            )
 
         prot_files = [
             f for f in ctx.find_ivy_files(ctx.root)
@@ -268,7 +269,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     async def ivy_quality(
-        mode: str = "suggestions",
+        mode: Literal["suggestions", "gate"] = "suggestions",
         file_path: str | None = None,
         line: int | None = None,
         context: str | None = None,
@@ -303,12 +304,14 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             gate_level: Gate level: "minimal", "standard", or
                 "comprehensive". Used by mode="gate".
         """
+        _valid_modes = {"suggestions", "gate"}
+        if mode not in _valid_modes:
+            return error_response(
+                f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+            )
         if mode == "gate":
             if not protocol:
-                return json.dumps({
-                    "success": False,
-                    "message": "protocol is required for mode='gate'",
-                })
+                return error_response("protocol is required for mode='gate'")
             return await _ivy_quality_gate(protocol, gate_level)
         else:  # default: suggestions
             return await _ivy_smart_suggestions(file_path, line, context, protocol)

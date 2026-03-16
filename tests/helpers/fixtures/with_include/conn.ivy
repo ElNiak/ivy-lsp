@@ -1,0 +1,15 @@
+#lang ivy1.7
+
+include types
+
+relation conn_seen(C:cid)
+function connected_to(C:cid) : cid
+
+action connect(src:cid, dst:cid) = {
+    conn_seen(src) := true;
+    connected_to(src) := dst;
+}
+
+action disconnect(c:cid) = {
+    conn_seen(c) := false;
+}

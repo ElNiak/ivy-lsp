@@ -405,8 +405,8 @@ class TestTier3:
         )
 
         pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=False)
-        assert pipeline._tier3_running is False
-        assert pipeline._tier3_current_file is None
+        assert pipeline._tier3.running is False
+        assert pipeline._tier3.current_file is None
 
     def test_tier3_track_state_false_still_records_result(self):
         """When track_state=False, _record_tier3_result() should still be called."""
@@ -437,7 +437,7 @@ class TestTier3:
 
         # After synchronous completion, running should be False again
         pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=True)
-        assert pipeline._tier3_running is False
+        assert pipeline._tier3.running is False
 
     def test_tier3_track_state_false_failure_does_not_touch_flags(self):
         """When track_state=False and compilation fails, flags stay untouched."""
@@ -451,8 +451,8 @@ class TestTier3:
         )
 
         pipeline.run_tier3_background("bad\n", "test.ivy", track_state=False)
-        assert pipeline._tier3_running is False
-        assert pipeline._tier3_current_file is None
+        assert pipeline._tier3.running is False
+        assert pipeline._tier3.current_file is None
         # But failure is still recorded
         state = pipeline.get_pipeline_state()
         assert state["tier3Failed"] == 1
@@ -1094,15 +1094,15 @@ class TestTier3DoubleDecrement:
         # Pre-set pending to 1 to detect double-decrement
         # (if double-decrement happens, it goes from 2 -> 0 instead of 2 -> 1)
         with pipeline._state_lock:
-            pipeline._tier3_pending = 1
+            pipeline._tier3.pending = 1
 
         with pytest.raises(RuntimeError, match="Simulated"):
             pipeline.run_tier3_background("source", "/test.ivy", track_state=False)
 
         with pipeline._state_lock:
-            assert pipeline._tier3_pending == 1, (
+            assert pipeline._tier3.pending == 1, (
                 f"Expected 1 pending (pre-set=1 + increment=2 - single decrement=1), "
-                f"got {pipeline._tier3_pending} (double-decrement bug)"
+                f"got {pipeline._tier3.pending} (double-decrement bug)"
             )
 
     def test_sync_fallback_track_state_true_no_double_cleanup(self):
@@ -1133,8 +1133,8 @@ class TestTier3DoubleDecrement:
 
         # After _on_result's finally, running should be False
         with pipeline._state_lock:
-            assert pipeline._tier3_running is False
-            assert pipeline._tier3_current_file is None
+            assert pipeline._tier3.running is False
+            assert pipeline._tier3.current_file is None
 
 
 # ---------------------------------------------------------------------------
@@ -1325,7 +1325,7 @@ class TestBulkTier3:
 
         # Manually set running flag
         with pipeline._state_lock:
-            pipeline._bulk_compile_running = True
+            pipeline._bulk_compile.running = True
 
         f1 = tmp_path / "test.ivy"
         f1.write_text("type cid\n")
@@ -1339,7 +1339,7 @@ class TestBulkTier3:
 
         # Cleanup
         with pipeline._state_lock:
-            pipeline._bulk_compile_running = False
+            pipeline._bulk_compile.running = False
 
     def test_bulk_tier3_calls_notification_callback(self, tmp_path):
         """Notification callback should be invoked at least once."""
@@ -1507,13 +1507,13 @@ class TestBulkTier3SubmittedCount:
         )
 
         assert len(callbacks) == 1, "Only the readable file should be submitted"
-        assert pipeline._bulk_compile_running is True, "Should still be running"
+        assert pipeline._bulk_compile.running is True, "Should still be running"
 
         mock_ir = mock.MagicMock()
         mock_ir.success = True
         callbacks[0](mock_ir)
 
-        assert pipeline._bulk_compile_running is False, (
+        assert pipeline._bulk_compile.running is False, (
             "Should be done after all submitted files complete"
         )
 
@@ -1551,8 +1551,8 @@ class TestBulkTier3SubmittedCount:
                 [test_file],
                 progress_callback=None,
             )
-            assert pipeline._bulk_compile_running is False
-            assert pipeline._bulk_compile_completed == 1
+            assert pipeline._bulk_compile.running is False
+            assert pipeline._bulk_compile.completed == 1
         finally:
             os.unlink(test_file)
 
@@ -1649,6 +1649,6 @@ class TestStaleGenerationDiscard:
         callbacks[0][1](mock_ir)
 
         # Completion counted (for progress) but model NOT enriched
-        assert pipeline._bulk_compile_completed == 1
+        assert pipeline._bulk_compile.completed == 1
         # Stale result not stored
         assert str(test_file) not in pipeline._tier3_results

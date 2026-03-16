@@ -115,6 +115,7 @@ class ToolContext:
     # Callable helpers — assigned after construction inside start_mcp()
     find_ivy_files: Callable[..., list[str]] = field(default=lambda: [])
     get_model: Callable[..., Any] = field(default=lambda: None)
+    get_model_status: Callable[..., dict] = field(default=lambda: {"state": "not_built"})
     get_req_graph: Callable[..., Any] = field(default=lambda: None)
     make_viz_server_proxy: Callable[..., Any] = field(default=lambda: None)
     get_basename_cache: Callable[..., dict[str, list[str]]] = field(default=lambda: {})
@@ -212,7 +213,7 @@ def start_mcp(
     executor = None
     if docker_image:
         try:
-            from api.executor import IvyExecutor
+            from panther_ivy.api.executor import IvyExecutor
 
             executor = IvyExecutor(docker_image=docker_image)
             logger.info(
@@ -248,7 +249,9 @@ def start_mcp(
 
     _req_graph_lock = asyncio.Lock()
     _req_graph: Any = requirement_graph  # may be pre-populated or None
-    _req_graph_build_attempted = False
+    _req_graph_import_failed = False  # permanent flag for ImportError
+    _req_graph_last_failure: float = 0.0  # timestamp of last non-import failure
+    _REQ_GRAPH_COOLDOWN = 30.0  # seconds before retry after transient failure
 
     # --- Workspace-aware include resolution cache ---
 
@@ -327,6 +330,20 @@ def start_mcp(
                 _model_build_error = "Build returned empty model (missing dependencies?)"
             return model
 
+    def _get_model_status() -> dict:
+        """Return the current model build status for error surfacing."""
+        if semantic_model is not None:
+            return {"state": "ready"}
+        if _model_build_error:
+            elapsed = time.monotonic() - _model_build_attempted
+            remaining = max(0, _MODEL_RETRY_COOLDOWN - elapsed)
+            return {
+                "state": "failed",
+                "error": _model_build_error,
+                "retry_in_seconds": round(remaining),
+            }
+        return {"state": "not_built"}
+
     def _build_model():
         """Build a lightweight semantic model from workspace files.
 
@@ -373,7 +390,8 @@ def start_mcp(
             try:
                 with open(abs_path, encoding="utf-8", errors="replace") as f:
                     source = f.read()
-            except OSError:
+            except OSError as exc:
+                logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
                 continue
 
             # RFC annotations
@@ -541,7 +559,8 @@ def start_mcp(
             try:
                 with open(abs_path, encoding="utf-8", errors="replace") as f:
                     src_text = f.read()
-            except OSError:
+            except OSError as exc:
+                logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
                 continue
             for inc_match in _INCLUDE_PATTERN.findall(src_text):
                 target_path = basename_to_path.get(inc_match)
@@ -559,24 +578,122 @@ def start_mcp(
 
     async def _get_req_graph():
         """Return the requirement graph, lazily building one if needed."""
-        nonlocal _req_graph, _req_graph_build_attempted
+        nonlocal _req_graph, _req_graph_import_failed, _req_graph_last_failure
         if _req_graph is not None:
             return _req_graph
-        if _req_graph_build_attempted:
+        # Permanent failure: missing dependency
+        if _req_graph_import_failed:
+            return None
+        # Transient failure: respect cooldown
+        if _req_graph_last_failure and (
+            time.monotonic() - _req_graph_last_failure < _REQ_GRAPH_COOLDOWN
+        ):
             return None
 
         async with _req_graph_lock:
             if _req_graph is not None:
                 return _req_graph
-            if _req_graph_build_attempted:
+            if _req_graph_import_failed:
+                return None
+            if _req_graph_last_failure and (
+                time.monotonic() - _req_graph_last_failure < _REQ_GRAPH_COOLDOWN
+            ):
                 return None
 
-            graph = await asyncio.to_thread(_build_requirement_graph)
+            try:
+                graph = await asyncio.to_thread(_build_requirement_graph)
+            except ImportError as exc:
+                logger.warning(
+                    "Requirement graph unavailable (missing dependency): %s",
+                    exc,
+                )
+                _req_graph_import_failed = True
+                return None
+            except Exception as exc:
+                logger.warning(
+                    "Requirement graph build failed (will retry in %ds): %s",
+                    _REQ_GRAPH_COOLDOWN,
+                    exc,
+                )
+                _req_graph_last_failure = time.monotonic()
+                return None
+
             if graph is not None:
                 _req_graph = graph
             else:
-                _req_graph_build_attempted = True
+                _req_graph_last_failure = time.monotonic()
             return graph
+
+    def _populate_semantic_model_from_graph(graph: Any) -> None:
+        """Mirror RequirementGraph nodes and edges into the SemanticModel.
+
+        This bridges the domain-specific RequirementGraph data into the
+        unified SemanticModel so that both models stay consistent.
+        The RequirementGraph is kept as a compatibility layer — this
+        function only *adds* to the SemanticModel, never replaces it.
+
+        If the SemanticModel has not been built yet, this is a no-op.
+        """
+        if semantic_model is None:
+            logger.debug(
+                "SemanticModel not yet built; skipping requirement "
+                "graph bridge (data will be available via "
+                "RequirementGraph only)"
+            )
+            return
+
+        try:
+            from ivy_lsp.analysis.requirement_graph import (
+                EdgeType,
+            )
+            from ivy_lsp.semantic.edges import SemanticEdgeType
+
+            # Map RequirementGraph EdgeType -> SemanticEdgeType
+            _edge_type_map = {
+                EdgeType.READS: SemanticEdgeType.READS,
+                EdgeType.WRITES: SemanticEdgeType.WRITES,
+                EdgeType.CONSTRAINS: SemanticEdgeType.CONSTRAINS,
+                EdgeType.DEPENDS_ON: SemanticEdgeType.DEPENDS_ON,
+                EdgeType.PROPAGATED_FROM: SemanticEdgeType.PROPAGATED_FROM,
+                EdgeType.COVERS: SemanticEdgeType.COVERS,
+            }
+
+            model = semantic_model
+
+            # Add nodes: requirements, actions, state vars, properties
+            for req in graph.requirements.values():
+                model.add_node(req)
+            for action in graph.actions.values():
+                model.add_node(action)
+            for sv in graph.state_vars.values():
+                model.add_node(sv)
+            for prop in graph.properties.values():
+                model.add_node(prop)
+
+            # Add edges, translating EdgeType -> SemanticEdgeType
+            for src, etype, dst in graph.edges:
+                sem_etype = _edge_type_map.get(etype)
+                if sem_etype is not None:
+                    model.add_edge(src, sem_etype, dst)
+                else:
+                    logger.debug(
+                        "Unmapped edge type %s in requirement graph; skipping",
+                        etype,
+                    )
+
+            logger.info(
+                "Bridged requirement graph into SemanticModel: "
+                "%d requirements, %d actions, %d state vars, %d edges",
+                len(graph.requirements),
+                len(graph.actions),
+                len(graph.state_vars),
+                len(graph.edges),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to bridge requirement graph into SemanticModel",
+                exc_info=True,
+            )
 
     def _build_requirement_graph():
         """Build a RequirementGraph from workspace .ivy files.
@@ -604,7 +721,8 @@ def start_mcp(
                 try:
                     with open(abs_path, encoding="utf-8", errors="replace") as f:
                         source = f.read()
-                except OSError:
+                except OSError as exc:
+                    logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
                     continue
 
                 reqs, writes = extract_requirements_light(source, abs_path)
@@ -680,6 +798,14 @@ def start_mcp(
                 len(graph.state_vars),
                 len(graph.edges),
             )
+
+            # --- Populate SemanticModel with the same data (compatibility bridge) ---
+            # The SemanticModel may already be built (via _get_model); if so, mirror
+            # the RequirementGraph nodes and edges into it.  If the model hasn't been
+            # built yet, we skip — the requirement graph remains the source of truth
+            # until the model is constructed.
+            _populate_semantic_model_from_graph(graph)
+
             return graph if total > 0 else None
         except Exception:
             logger.warning(
@@ -727,6 +853,7 @@ def start_mcp(
     # Wire up callables that close over start_mcp's local state
     ctx.find_ivy_files = _find_ivy_files
     ctx.get_model = _get_model
+    ctx.get_model_status = _get_model_status
     ctx.get_req_graph = _get_req_graph
     ctx.make_viz_server_proxy = _make_viz_server_proxy
     ctx.get_basename_cache = _get_basename_cache

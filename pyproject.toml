@@ -78,6 +78,10 @@ markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (may require external services)",
     "slow: Slow tests (>10 seconds)",
+    "lsp: LSP feature tests (goToDefinition, hover, call hierarchy, etc.)",
+    "mcp: MCP tool tests (ivy_verify, ivy_lint, etc.)",
+    "plugin: Claude Code plugin tests (hooks, commands, agents)",
+    "real_spec: Tests using real protocol specs (QUIC/BGP/CoAP)",
 ]
 filterwarnings = [
     "error",

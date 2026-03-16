@@ -1,0 +1,16 @@
+#lang ivy1.7
+
+include conn
+
+before connect(src:cid, dst:cid) {
+    require ~conn_seen(src);                    # [rfc9999:4.1]
+}
+
+after connect(src:cid, dst:cid) {
+    require conn_seen(src);                     # [rfc9999:4.1]
+    require connected_to(src) = dst;            # [rfc9999:4.2]
+}
+
+action _finalize = {
+    # End-state checks
+}

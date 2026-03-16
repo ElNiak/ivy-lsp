@@ -1,0 +1,9 @@
+#lang ivy1.7
+
+include behavior
+
+export connect
+export disconnect
+export action _finalize = {
+    # Verify at least one connection was made
+}

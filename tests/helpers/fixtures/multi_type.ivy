@@ -1,0 +1,15 @@
+#lang ivy1.7
+
+type cid
+type pkt_num
+type stream_kind = {unidir, bidir}
+
+relation connected(X:cid, Y:cid)
+function last_pkt(C:cid) : pkt_num
+individual the_cid : cid
+
+action send(src:cid, dst:cid, pkt:pkt_num) = {
+    require src ~= dst;
+}
+
+action recv(dst:cid, pkt:pkt_num)

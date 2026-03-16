@@ -219,7 +219,7 @@ class TestBulkPipelineState:
             f1 = _write_ivy_file(tmpdir, "a.ivy", "type cid\n")
             pipeline.run_bulk_t1_t2([f1])
 
-        assert pipeline._bulk_running is False
+        assert pipeline._bulk.running is False
 
 
 # ---------------------------------------------------------------------------
