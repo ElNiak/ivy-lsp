@@ -55,8 +55,8 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             ("test_specs", "{p}_*_test_*.ivy", "export "),
             ("entities", None, "instance "),
             ("behavior", "{p}_*_behavior.ivy", "before "),
-            ("recovery", "{p}_recovery*.ivy", None),
-            ("extensions", "{p}_extension*.ivy", None),
+            ("recovery", "*recovery*.ivy", None),
+            ("extensions", "*ext*.ivy", None),
         ]
 
         prot_dir = os.path.join(ctx.root, "protocol-testing", protocol)
@@ -137,8 +137,12 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         present = len(layers_present)
         score = round(present / total * 100) if total else 0
 
-        # Check for manifest
-        has_manifest = any(f.endswith("_requirements.yaml") for f in prot_files)
+        # Check for manifest (prot_files only has .ivy files, scan directory)
+        has_manifest = any(
+            f.endswith("_requirements.yaml") or f.endswith("_requirements.yml")
+            for f in os.listdir(prot_dir)
+            if os.path.isfile(os.path.join(prot_dir, f))
+        )
         if not has_manifest:
             suggestions.append(
                 {
@@ -201,6 +205,16 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             reference_protocol: Protocol to compare against. Required for
                 mode="compare".
         """
+        logger.debug(
+            "[ivy_patterns] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "protocol": protocol,
+                "mode": mode,
+                "pattern": pattern,
+                "reference_protocol": reference_protocol,
+            },
+        )
         if mode == "check":
             return await _ivy_scaffold_check(protocol)
         else:
@@ -239,6 +253,16 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             variant_names: Optional list of variant/message type names.
             roles: Optional list of role names (e.g., ["client", "server"]).
         """
+        logger.debug(
+            "[ivy_pattern_scaffold] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "protocol": protocol,
+                "pattern": pattern,
+                "wire_format": wire_format,
+                "role_type": role_type,
+            },
+        )
         from ivy_lsp.features.patterns import handle_pattern_scaffold
 
         params: dict[str, Any] = {
@@ -263,9 +287,19 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         reference_protocol: str | None = None,
     ) -> str:
         """Analyze formal model patterns in a protocol specification."""
+        logger.debug(
+            "[ivy_pattern_analysis] workspace=%s, args=%r",
+            ctx.root,
+            {"protocol": protocol, "mode": mode, "pattern": pattern},
+        )
         return await _ivy_pattern_analysis(protocol, mode, pattern, reference_protocol)
 
     @mcp.tool()
     async def ivy_scaffold_check(protocol: str) -> str:
         """Check which layers/patterns are present or missing."""
+        logger.debug(
+            "[ivy_scaffold_check] workspace=%s, args=%r",
+            ctx.root,
+            {"protocol": protocol},
+        )
         return await _ivy_scaffold_check(protocol)

@@ -95,6 +95,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             isolate: Optional isolate name to check in isolation.
             use_cache: When True, return cached result if available.
         """
+        logger.debug(
+            "[ivy_verify] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "relative_path": relative_path,
+                "isolate": isolate,
+                "use_cache": use_cache,
+            },
+        )
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
@@ -199,6 +208,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             target: Compilation target (default: "test").
             isolate: Optional isolate name to compile in isolation.
         """
+        logger.debug(
+            "[ivy_compile] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path, "target": target, "isolate": isolate},
+        )
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
@@ -305,6 +319,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             relative_path: Relative path to the .ivy file to inspect.
             isolate: Optional isolate name for a specific isolate.
         """
+        logger.debug(
+            "[ivy_model_info] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path, "isolate": isolate},
+        )
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
@@ -348,6 +367,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 lexer, semantic, coverage, pattern. Defaults to all.
             min_severity: Minimum severity to include: error, warning, info, hint.
         """
+        logger.debug(
+            "[ivy_diagnostics] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "relative_path": relative_path,
+                "layers": layers,
+                "min_severity": min_severity,
+            },
+        )
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
@@ -608,7 +636,8 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         Returns verification cache state showing which files have been
         verified, which failed, and which are pending.
         """
-        ivy_files = ctx.find_ivy_files()
+        logger.debug("[ivy_verification_dashboard] workspace=%s", ctx.root)
+        ivy_files = ctx.find_ivy_files(ctx.root)
         cache = _get_cache_summary()
         verified_set = set(cache["verified_files"])
         failed_set = set(cache["failed_files"])

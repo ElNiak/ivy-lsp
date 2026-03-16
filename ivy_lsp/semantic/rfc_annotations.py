@@ -75,7 +75,19 @@ def parse_rfc_tags(line_text: str) -> List[str]:
     Supports comma-separated tags: ``# [rfc9000:4.1, rfc9000:8.1]``
 
     Returns list of validated tag strings.
+
+    Lines that are commented-out code (e.g. ``#require foo # [8]``) are
+    skipped to avoid false-positive tag matches.  Pure tag-only comments
+    like ``# [8]`` are still parsed.
     """
+    stripped = line_text.strip()
+    # Filter out commented-out code lines that happen to contain a tag.
+    # If the line starts with '#', it must be a pure tag comment (the entire
+    # line is just "# [tags]") to be parsed.  Commented-out code like
+    # "#require foo # [8]" is rejected because _BRACKET_RE won't match
+    # from the start of such a line.
+    if stripped.startswith("#") and not _BRACKET_RE.match(stripped):
+        return []
     m = _BRACKET_RE.search(line_text)
     if not m:
         return []

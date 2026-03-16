@@ -46,7 +46,7 @@ _FUNCTION_DECL_RE = re.compile(
 )
 _INDIVIDUAL_DECL_RE = re.compile(r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MULTILINE)
 _OBJECT_DECL_RE = re.compile(
-    r"^\s*(?:object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
+    r"^\s*(object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
 )
 
 
@@ -415,7 +415,7 @@ def start_mcp(
             # Type declarations
             for m in _TYPE_DECL_RE.finditer(source):
                 name = m.group(1)
-                line = source[: m.start()].count("\n")
+                line = source[: m.start()].count("\n") + 1
                 variants_raw = m.group(2)
                 is_enum = variants_raw is not None
                 variants = (
@@ -438,7 +438,7 @@ def start_mcp(
             # Action declarations
             for m in _ACTION_DECL_RE.finditer(source):
                 name = m.group(1)
-                line = source[: m.start()].count("\n")
+                line = source[: m.start()].count("\n") + 1
                 params = (
                     [p.strip() for p in m.group(2).split(",") if p.strip()]
                     if m.group(2)
@@ -461,7 +461,7 @@ def start_mcp(
             # Relation declarations
             for m in _RELATION_DECL_RE.finditer(source):
                 name = m.group(1)
-                line = source[: m.start()].count("\n")
+                line = source[: m.start()].count("\n") + 1
                 model.add_node(
                     SymbolNode(
                         id=f"{abs_path}:{line}:{name}",
@@ -476,7 +476,7 @@ def start_mcp(
             # Function declarations
             for m in _FUNCTION_DECL_RE.finditer(source):
                 name = m.group(1)
-                line = source[: m.start()].count("\n")
+                line = source[: m.start()].count("\n") + 1
                 ret_sort = m.group(3) if m.group(3) else None
                 model.add_node(
                     SymbolNode(
@@ -493,7 +493,7 @@ def start_mcp(
             # Individual declarations
             for m in _INDIVIDUAL_DECL_RE.finditer(source):
                 name = m.group(1)
-                line = source[: m.start()].count("\n")
+                line = source[: m.start()].count("\n") + 1
                 sort_name = m.group(2)
                 model.add_node(
                     SymbolNode(
@@ -509,14 +509,15 @@ def start_mcp(
 
             # Object/module/isolate declarations
             for m in _OBJECT_DECL_RE.finditer(source):
-                name = m.group(1)
-                line = source[: m.start()].count("\n")
+                keyword = m.group(1)  # "object", "module", or "isolate"
+                name = m.group(2)
+                line = source[: m.start()].count("\n") + 1
                 model.add_node(
                     SymbolNode(
                         id=f"{abs_path}:{line}:{name}",
                         name=name,
                         qualified_name=name,
-                        kind="module",
+                        kind=keyword,  # type: ignore[arg-type]
                         file=abs_path,
                         line=line,
                     )

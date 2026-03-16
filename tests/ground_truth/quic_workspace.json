@@ -1,0 +1,65 @@
+{
+  "description": "Ground truth for QUIC protocol workspace validation",
+  "generated": "2026-03-16",
+  "workspace": {
+    "total_ivy_files": 680,
+    "quic_ivy_files": 202
+  },
+  "manifest": {
+    "file": "quic/rfc9000_requirements.yaml",
+    "total_requirements": 101,
+    "by_level": {
+      "MUST": 45,
+      "MUST NOT": 12,
+      "SHOULD": 17,
+      "SHOULD NOT": 3,
+      "MAY": 24
+    }
+  },
+  "quic_types": {
+    "file": "quic/quic_stack/quic_types.ivy",
+    "has_lang_header": true,
+    "include_count": 0,
+    "type_names": ["cid", "itoken", "version", "pkt_num", "microsecs", "error_code", "stream_kind", "type_bits", "cid_length", "cid_seq", "microseconds", "seconds", "milliseconds", "reset_token", "port", "ipv4", "ipv6"],
+    "type_count": 17,
+    "alias_count": 1,
+    "object_names": ["bit", "role", "quic_packet_type"],
+    "object_count": 3,
+    "action_count": 1,
+    "individual_count": 2,
+    "enum_types": ["stream_kind", "role.this", "quic_packet_type.this"],
+    "known_error": {
+      "line": 134,
+      "symbol": "zero_rtt_allowed",
+      "message": "unknown symbol"
+    }
+  },
+  "quic_connection": {
+    "file": "quic/quic_stack/quic_connection.ivy",
+    "has_lang_header": true,
+    "include_modules": [
+      "quic_types", "quic_transport_error_code", "quic_time",
+      "quic_application", "quic_security", "quic_frame",
+      "quic_packet", "quic_packet_retry", "quic_packet_vn",
+      "quic_packet_0rtt", "quic_packet_coal_0rtt"
+    ],
+    "include_count": 11,
+    "commented_includes": ["quic_fsm_sending", "quic_fsm_receiving"],
+    "type_count": 0,
+    "action_count": 0
+  },
+  "quic_frame": {
+    "file": "quic/quic_stack/quic_frame.ivy",
+    "has_lang_header": true,
+    "include_modules": ["collections", "order", "quic_stream", "quic_transport_error_code", "quic_h3_error_code"],
+    "include_count": 5
+  },
+  "quality_gate": {
+    "files_missing_lang": 4,
+    "unresolved_includes_count": 24,
+    "unresolved_include_modules": ["tls_msg", "serdes"],
+    "test_spec_count_min": 100,
+    "monitor_count_min": 700,
+    "export_count_min": 900
+  }
+}

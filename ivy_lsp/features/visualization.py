@@ -914,7 +914,9 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
 
         # Cap transitions to prevent O(n^2) blowup
         try:
-            max_transitions = int(params.get("maxTransitions", 500))
+            max_transitions = int(
+                params.get("maxItems", params.get("maxTransitions", 500))
+            )
         except (TypeError, ValueError):
             max_transitions = 500
         truncated = len(transitions) > max_transitions
@@ -1171,19 +1173,25 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                 file_vars = {
                     vid for vid, v in snap.state_vars.items() if _file_matches(v.file)
                 }
+                file_action_names = {
+                    a.name for a in snap.actions.values() if a.id in file_actions
+                }
+                file_var_names = {
+                    v.name for v in snap.state_vars.values() if v.id in file_vars
+                }
                 if file_actions or file_vars:
-                    file_action_names = {
-                        a.name for a in snap.actions.values() if a.id in file_actions
-                    }
-                    file_var_names = {
-                        v.name for v in snap.state_vars.values() if v.id in file_vars
-                    }
                     suggestions = [
                         s
                         for s in suggestions
                         if _file_matches(s.get("file", ""))
                         or s.get("name") in file_action_names
                         or s.get("name") in file_var_names
+                    ]
+                else:
+                    # File has no actions/state vars — return only
+                    # file-matching suggestions, not the entire workspace
+                    suggestions = [
+                        s for s in suggestions if _file_matches(s.get("file", ""))
                     ]
 
             # C3: Sort by line proximity when both file_path and line given

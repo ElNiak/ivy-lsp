@@ -187,7 +187,35 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 return error_response(str(exc))
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
-        return json.dumps(handle_coverage_gaps(server_proxy, params))
+        result = handle_coverage_gaps(server_proxy, params)
+
+        # C4 fix: override RFC uncovered requirements using the same
+        # logic as _ivy_requirement_coverage() so stats and gaps agree.
+        stats_raw = await _ivy_requirement_coverage(relative_path=None)
+        try:
+            stats = json.loads(stats_raw)
+            uncovered_ids = set(stats.get("_uncovered_ids_full", []))
+            model = await ctx.get_model()
+            if model is not None:
+                from ivy_lsp.semantic.nodes import RfcRequirement
+
+                requirements = model.get_nodes_by_type(RfcRequirement)
+                req_map = {r.id: r for r in requirements}
+                result["uncoveredRfcRequirements"] = [
+                    {
+                        "id": rid,
+                        "rfc": getattr(req_map.get(rid), "rfc", ""),
+                        "section": getattr(req_map.get(rid), "section", ""),
+                        "level": getattr(req_map.get(rid), "level", ""),
+                        "text": getattr(req_map.get(rid), "text", ""),
+                    }
+                    for rid in sorted(uncovered_ids)
+                    if rid in req_map
+                ]
+        except (json.JSONDecodeError, KeyError):
+            pass  # Fall back to visualization handler result
+
+        return json.dumps(result)
 
     async def _ivy_coverage_diff(relative_path: str | None = None) -> str:
         """Compare current coverage against the cached baseline."""
@@ -655,6 +683,16 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 (used by "gaps" mode).
             protocol: Protocol name to scope results (used by "gaps" mode).
         """
+        logger.debug(
+            "[ivy_coverage] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "mode": mode,
+                "relative_path": relative_path,
+                "test_file": test_file,
+                "protocol": protocol,
+            },
+        )
         _valid_modes = {"matrix", "stats", "gaps", "diff"}
         if mode not in _valid_modes:
             return error_response(
@@ -698,6 +736,16 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 ``protocol-testing/{protocol}/`` directory over
                 ``apt/`` variants.
         """
+        logger.debug(
+            "[ivy_query] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "mode": mode,
+                "symbol_name": symbol_name,
+                "node_id": node_id,
+                "protocol": protocol,
+            },
+        )
         _valid_modes = {"impact", "xrefs", "info"}
         if mode not in _valid_modes:
             return error_response(
@@ -746,6 +794,16 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             base_section: Default section prefix (e.g., "4"). Used by
                 output="manifest" for requirement IDs.
         """
+        logger.debug(
+            "[ivy_extract_requirements] workspace=%s, args=%r",
+            ctx.root,
+            {
+                "output": output,
+                "rfc_name": rfc_name,
+                "protocol": protocol,
+                "rfc_text_len": len(rfc_text),
+            },
+        )
         if output == "manifest":
             if not rfc_name:
                 return error_response("rfc_name is required for output='manifest'")
@@ -760,6 +818,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     @mcp.tool()
     async def ivy_requirement_coverage(relative_path: str | None = None) -> str:
         """RFC requirement coverage statistics by level and layer."""
+        logger.debug(
+            "[ivy_requirement_coverage] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path},
+        )
         return await _ivy_requirement_coverage(relative_path)
 
     @mcp.tool()
@@ -767,11 +830,21 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         test_file: str | None = None, protocol: str | None = None
     ) -> str:
         """Identify unguarded state variables, uncovered RFC requirements, and orphan requirements."""
+        logger.debug(
+            "[ivy_coverage_gaps] workspace=%s, args=%r",
+            ctx.root,
+            {"test_file": test_file, "protocol": protocol},
+        )
         return await _ivy_coverage_gaps(test_file, protocol)
 
     @mcp.tool()
     async def ivy_traceability_matrix(relative_path: str | None = None) -> str:
         """RFC requirement-to-annotation traceability matrix."""
+        logger.debug(
+            "[ivy_traceability_matrix] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path},
+        )
         return await _ivy_traceability_matrix(relative_path)
 
     @mcp.tool()

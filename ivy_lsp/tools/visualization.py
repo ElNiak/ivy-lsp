@@ -230,6 +230,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             raw = await _ivy_state_machine_view(test_file, state_var_filter, protocol)
             result = json.loads(raw)
             result = _apply_max_items(result, "states", max_items)
+            result = _apply_max_items(result, "transitions", max_items)
             return json.dumps(result)
         elif view == "layers":
             raw = await _ivy_layered_overview(test_file, group_by, protocol)

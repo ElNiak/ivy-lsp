@@ -20,6 +20,12 @@ _IVY_ERROR_LINE = re.compile(
     r"ivy\.ivy_utils\.IvyError:\s*(.*?):\s*line\s+(\d+):\s*(?:(error|warning):\s*)?(.*)"
 )
 
+# Verbose ivy_check format: file.ivy: line 42: error: message
+# Produced by ivy_check when run with absolute paths in MCP staging mode.
+_IVY_CHECK_LINE_VERBOSE = re.compile(
+    r"(.*?):\s*line\s+(\d+):\s*(error|warning):\s*(.*)"
+)
+
 # C++ compiler format: file.cpp:42:10: error: undeclared identifier
 # Requires the column number (line:col:) to distinguish from ivy_check format.
 # Handles gcc/clang output and "fatal error" severity.
@@ -113,16 +119,27 @@ def parse_ivy_output(output: str) -> List[Dict[str, Any]]:
                     "source": "cpp_compiler",
                 }
             else:
-                # Fall back to standard ivy_check format (file:line: severity:)
-                m = _IVY_CHECK_LINE.match(raw_line)
+                # Try verbose ivy_check format: "file: line N: error: msg"
+                m = _IVY_CHECK_LINE_VERBOSE.match(raw_line)
                 if m:
                     diag = {
-                        "file": m.group(1),
+                        "file": m.group(1).strip(),
                         "line": int(m.group(2)),
                         "severity": m.group(3),
-                        "message": m.group(4),
+                        "message": m.group(4).strip(),
                         "source": "ivy_check",
                     }
+                else:
+                    # Fall back to standard ivy_check format (file:line: severity:)
+                    m = _IVY_CHECK_LINE.match(raw_line)
+                    if m:
+                        diag = {
+                            "file": m.group(1),
+                            "line": int(m.group(2)),
+                            "severity": m.group(3),
+                            "message": m.group(4),
+                            "source": "ivy_check",
+                        }
 
         if diag is not None:
             key = (diag["file"], diag["line"], diag["message"])

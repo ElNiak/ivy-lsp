@@ -55,6 +55,32 @@ class TestParseRfcTags:
         result = parse_rfc_tags("    require x; # [a, b, c]")
         assert result == ["a", "b", "c"]
 
+    # -- C2: commented-out code filtering --
+
+    def test_commented_out_code_skipped(self):
+        """C2: Tags on commented-out code lines must not be extracted."""
+        assert parse_rfc_tags("#require foo # [11]") == []
+
+    def test_commented_out_code_with_leading_space(self):
+        assert parse_rfc_tags("    #require foo # [8]") == []
+
+    def test_pure_tag_comment_parsed(self):
+        """C2: A standalone tag comment like '# [8]' should still be parsed."""
+        assert parse_rfc_tags("# [8]") == ["8"]
+
+    def test_pure_tag_comment_with_leading_space(self):
+        assert parse_rfc_tags("    # [rfc9000:4.1]") == ["rfc9000:4.1"]
+
+    def test_pure_tag_comment_multi(self):
+        assert parse_rfc_tags("  # [a, b]") == ["a", "b"]
+
+    def test_struct_field_tag_still_parsed(self):
+        """C2: Tags on struct fields are parsed (filtering happens elsewhere)."""
+        assert parse_rfc_tags("payload : frame.arr # [8]") == ["8"]
+
+    def test_live_code_tag_still_parsed(self):
+        assert parse_rfc_tags("require foo # [8]") == ["8"]
+
 
 class TestParseFileRfcAnnotations:
     def test_single_annotation(self):

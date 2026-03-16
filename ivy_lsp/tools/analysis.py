@@ -29,6 +29,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         Args:
             relative_path: Relative path to the .ivy file to lint.
         """
+        logger.debug(
+            "[ivy_lint] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path},
+        )
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
@@ -64,6 +69,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         Args:
             relative_path: Optional .ivy file to focus on.
         """
+        logger.debug(
+            "[ivy_include_graph] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path},
+        )
 
         def _build_graph():
             graph: dict[str, list[str]] = {}

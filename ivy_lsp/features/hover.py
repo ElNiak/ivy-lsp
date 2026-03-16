@@ -32,11 +32,13 @@ _KIND_TO_KEYWORD = {
 # Detail prefixes that override the kind-based keyword.
 _DETAIL_KEYWORDS = frozenset(
     {
+        "type",
         "action",
         "relation",
         "function",
         "object",
         "module",
+        "isolate",
         "alias",
         "property",
         "axiom",
@@ -45,6 +47,8 @@ _DETAIL_KEYWORDS = frozenset(
         "destructor",
         "constructor",
         "instance",
+        "individual",
+        "interpret",
     }
 )
 

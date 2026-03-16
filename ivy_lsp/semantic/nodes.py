@@ -51,6 +51,8 @@ class SymbolNode:
         "function",
         "individual",
         "module",
+        "object",
+        "isolate",
         "destructor",
         "constructor",
         "instance",
