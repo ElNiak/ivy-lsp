@@ -671,7 +671,7 @@ class IvyLanguageServer(LanguageServer):
         server = self
 
         # Skip progress entirely if the client doesn't support it
-        if not self._client_supports_work_done_progress:
+        if not getattr(self, "_client_supports_work_done_progress", False):
             state["disabled"] = True
             logger.debug(
                 "Skipping work-done progress: client does not advertise support"
