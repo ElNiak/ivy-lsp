@@ -89,8 +89,12 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             rows.sort(key=lambda r: r.get("actionName", ""))
 
         if limit is not None and limit > 0:
+            total_rows = len(rows)
             result["rows"] = rows[:limit]
-            result["hasMore"] = len(rows) > limit
+            if total_rows > limit:
+                result["truncated"] = True
+                result["total"] = total_rows
+            result["hasMore"] = total_rows > limit
         else:
             result["rows"] = rows
 
@@ -163,6 +167,17 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
     # Public MCP tools
     # ------------------------------------------------------------------
 
+    def _apply_max_items(result: dict, list_key: str, max_items: int) -> dict:
+        """Apply max_items limit to a result dict's main list field."""
+        if max_items <= 0:
+            return result
+        items = result.get(list_key, [])
+        if len(items) > max_items:
+            result["total"] = len(items)
+            result[list_key] = items[:max_items]
+            result["truncated"] = True
+        return result
+
     @mcp.tool()
     async def ivy_visualize(
         view: Literal["dependencies", "state_machine", "layers"] = "dependencies",
@@ -171,6 +186,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         include_state_vars: bool = False,
         state_var_filter: str | None = None,
         group_by: str = "file",
+        max_items: int = 50,
     ) -> str:
         """Unified model visualization tool.
 
@@ -197,6 +213,10 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 view to. Used by view="state_machine".
             group_by: Grouping strategy: "file" (default) or "module".
                 Used by view="layers".
+            max_items: Maximum number of items to return in the response
+                (default: 50). When the result is truncated, the response
+                includes ``"truncated": true`` and ``"total": N``.
+                Set to 0 for unlimited.
         """
         _valid_views = {"dependencies", "state_machine", "layers"}
         if view not in _valid_views:
@@ -204,15 +224,24 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 f"Unknown view '{view}'. Valid views: {sorted(_valid_views)}"
             )
         if view == "state_machine":
-            return await _ivy_state_machine_view(
+            raw = await _ivy_state_machine_view(
                 test_file, state_var_filter, protocol
             )
+            result = json.loads(raw)
+            result = _apply_max_items(result, "states", max_items)
+            return json.dumps(result)
         elif view == "layers":
-            return await _ivy_layered_overview(test_file, group_by, protocol)
+            raw = await _ivy_layered_overview(test_file, group_by, protocol)
+            result = json.loads(raw)
+            result = _apply_max_items(result, "layers", max_items)
+            return json.dumps(result)
         else:  # default: dependencies
-            return await _ivy_action_dependency_graph(
+            raw = await _ivy_action_dependency_graph(
                 test_file, include_state_vars, protocol
             )
+            result = json.loads(raw)
+            result = _apply_max_items(result, "nodes", max_items)
+            return json.dumps(result)
 
     @mcp.tool()
     async def ivy_model_summary(
@@ -224,6 +253,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         action_name: str | None = None,
         file_path: str | None = None,
         offset: int = 0,
+        max_items: int = 50,
     ) -> str:
         """Unified model summary and action requirements tool.
 
@@ -245,14 +275,21 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             sort_by: Sort rows by field (e.g., "requirement_count", "name").
                 Used by detail="summary".
             limit: Maximum number of rows/actions to return. Used by both
-                detail levels.
+                detail levels. Takes priority over max_items when set.
             action_name: Specific action to query. Used by
                 detail="requirements". If omitted, returns all actions.
             file_path: Scope to actions defined in this file (relative path).
                 Used by detail="requirements".
             offset: Number of actions to skip (default: 0). Used by
                 detail="requirements".
+            max_items: Maximum number of items to return when limit is not
+                set (default: 50). Set to 0 for unlimited. When the result
+                is truncated, the response includes ``"truncated": true``
+                and ``"total": N``.
         """
+        # Use limit if explicitly set, otherwise fall back to max_items
+        effective_limit = limit if limit is not None else (max_items if max_items > 0 else None)
+
         _valid_details = {"summary", "requirements"}
         if detail not in _valid_details:
             return error_response(
@@ -260,9 +297,52 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             )
         if detail == "requirements":
             return await _ivy_action_requirements(
-                action_name, file_path, test_file, protocol, offset, limit
+                action_name, file_path, test_file, protocol, offset, effective_limit
             )
         else:  # default: summary
             return await _ivy_model_summary_logic(
-                test_file, protocol, sort_by, limit
+                test_file, protocol, sort_by, effective_limit
             )
+
+    # --- Individual tool aliases (backward compatibility) ---
+
+    @mcp.tool()
+    async def ivy_action_dependency_graph(
+        test_file: str | None = None,
+        include_state_vars: bool = False,
+        protocol: str | None = None,
+    ) -> str:
+        """Action dependency graph showing shared-state relationships."""
+        return await _ivy_action_dependency_graph(test_file, include_state_vars, protocol)
+
+    @mcp.tool()
+    async def ivy_state_machine_view(
+        test_file: str | None = None,
+        state_var_filter: str | None = None,
+        protocol: str | None = None,
+    ) -> str:
+        """State-machine view of the Ivy model."""
+        return await _ivy_state_machine_view(test_file, state_var_filter, protocol)
+
+    @mcp.tool()
+    async def ivy_layered_overview(
+        test_file: str | None = None,
+        group_by: str = "file",
+        protocol: str | None = None,
+    ) -> str:
+        """Layered overview of the Ivy model organized by file or module."""
+        return await _ivy_layered_overview(test_file, group_by, protocol)
+
+    @mcp.tool()
+    async def ivy_action_requirements(
+        action_name: str | None = None,
+        file_path: str | None = None,
+        test_file: str | None = None,
+        protocol: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> str:
+        """Requirements organized by action boundaries."""
+        return await _ivy_action_requirements(
+            action_name, file_path, test_file, protocol, offset, limit
+        )

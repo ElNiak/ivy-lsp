@@ -264,19 +264,26 @@ async def _run_tool(
     notifications.
     """
     if token is not None:
-        try:
-            await server.work_done_progress.create_async(token)
-            server.work_done_progress.begin(
-                token,
-                lsp.WorkDoneProgressBegin(
-                    title="Ivy",
-                    message=f"Running {cmd[0]}...",
-                    cancellable=True,
-                ),
-            )
-        except Exception:
-            logger.debug("Could not create progress token", exc_info=True)
-            token = None  # fall back to no progress
+        # Skip progress if the client doesn't support work-done progress
+        client_supports = getattr(
+            server, "_client_supports_work_done_progress", False
+        )
+        if not client_supports:
+            token = None
+        else:
+            try:
+                await server.work_done_progress.create_async(token)
+                server.work_done_progress.begin(
+                    token,
+                    lsp.WorkDoneProgressBegin(
+                        title="Ivy",
+                        message=f"Running {cmd[0]}...",
+                        cancellable=True,
+                    ),
+                )
+            except Exception:
+                logger.debug("Could not create progress token", exc_info=True)
+                token = None  # fall back to no progress
 
     try:
         result = await run_ivy_subprocess(

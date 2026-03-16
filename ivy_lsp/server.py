@@ -284,6 +284,7 @@ class IvyLanguageServer(LanguageServer):
         self._compiler_manager: "Optional[CompilerManager]" = None
         self._code_lens_enabled: bool = True
         self._rfc_coverage_enabled: bool = True
+        self._client_supports_work_done_progress: bool = False
         self._initializing: bool = True
         from ivy_lsp.features.diagnostics import DiagnosticCache
         self._diagnostic_cache: DiagnosticCache = DiagnosticCache()
@@ -478,11 +479,40 @@ class IvyLanguageServer(LanguageServer):
                     self._rfc_coverage_enabled = code_lens_opts.get(
                         "rfcCoverage", True
                     )
+
+            # Check if the client supports work-done progress tokens.
+            # If not, the server won't attempt to create progress tokens
+            # (avoids JsonRpcMethodNotFound errors from clients like
+            # Claude Code / MCP that don't handle
+            # window/workDoneProgress/create).
+            try:
+                general = getattr(params.capabilities, "general", None)
+                if general is not None:
+                    # LSP 3.16+ client capabilities
+                    wdp = getattr(general, "work_done_progress", None)
+                    # Explicit check: if client has no work_done_progress
+                    # capability, we need to also check window capability
+                    if wdp is True:
+                        self._client_supports_work_done_progress = True
+                if not self._client_supports_work_done_progress:
+                    window = getattr(params.capabilities, "window", None)
+                    if window is not None:
+                        wdp = getattr(window, "work_done_progress", None)
+                        if wdp is True:
+                            self._client_supports_work_done_progress = True
+            except Exception:
+                logger.debug(
+                    "Failed to check client work-done progress capability",
+                    exc_info=True,
+                )
+
             logger.info(
                 "initializationOptions: codeLens.enabled=%s, "
-                "codeLens.rfcCoverage=%s",
+                "codeLens.rfcCoverage=%s, "
+                "client.workDoneProgress=%s",
                 self._code_lens_enabled,
                 self._rfc_coverage_enabled,
+                self._client_supports_work_done_progress,
             )
 
         @self.feature(lsp.INITIALIZED)
@@ -640,14 +670,21 @@ class IvyLanguageServer(LanguageServer):
         state_lock = threading.Lock()
         server = self
 
-        # Eagerly create the progress token (outside any callback)
-        try:
-            server.work_done_progress.create(token)
-        except Exception:
+        # Skip progress entirely if the client doesn't support it
+        if not self._client_supports_work_done_progress:
             state["disabled"] = True
             logger.debug(
-                "Client does not support work-done progress", exc_info=True
+                "Skipping work-done progress: client does not advertise support"
             )
+        else:
+            # Eagerly create the progress token (outside any callback)
+            try:
+                server.work_done_progress.create(token)
+            except Exception:
+                state["disabled"] = True
+                logger.debug(
+                    "Client does not support work-done progress", exc_info=True
+                )
 
         def _callback(completed: int, total: int, current_file):
             if server._shutdown_event.is_set():

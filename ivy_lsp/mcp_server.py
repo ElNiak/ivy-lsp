@@ -500,14 +500,21 @@ def start_mcp(
         from ivy_lsp.semantic.edges import SemanticEdgeType
 
         # 1. COVERS: RfcAnnotation -> RfcRequirement
+        # Use normalize_tag_to_manifest_ids for proper tag resolution:
+        # bare numbers like "4" match "rfc9000:4.*", section refs like
+        # "4.1" match "rfc9000:4.1", and qualified tags match exactly.
+        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+
         req_by_id: dict[str, object] = {
             n.id: n for n in model.get_nodes_by_type(RfcRequirement)
         }
+        req_id_set = set(req_by_id.keys())
         for ann in model.get_nodes_by_type(RfcAnnotation):
             for tag in ann.tags:
-                if tag in req_by_id:
+                matched_ids = normalize_tag_to_manifest_ids(tag, req_id_set)
+                for req_id in matched_ids:
                     model.add_edge(
-                        ann.id, SemanticEdgeType.COVERS, tag
+                        ann.id, SemanticEdgeType.COVERS, req_id
                     )
 
         # 2. HAS_PARAM / RETURNS_TYPE: SymbolNode -> TypeNode

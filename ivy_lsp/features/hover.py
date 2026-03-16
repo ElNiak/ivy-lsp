@@ -172,6 +172,90 @@ def _sort_by_proximity(results: list, current_filepath: str) -> list:
     return sorted(results, key=_score)
 
 
+def _hover_from_semantic_model(
+    word: str,
+    filepath: str,
+    position: lsp.Position,
+    source_lines: List[str],
+    semantic_model,
+) -> Optional[lsp.Hover]:
+    """Build hover info from the SemanticModel when the indexer has no cache hit.
+
+    Queries SymbolNode entries by name and synthesizes a hover response
+    with type details, RFC annotations, and cross-reference counts.
+    """
+    if semantic_model is None:
+        return None
+
+    from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+
+    # Search SymbolNode entries matching the word
+    symbol_nodes = semantic_model.get_nodes_by_type(SymbolNode)
+    matches = [
+        sn for sn in symbol_nodes
+        if sn.name == word or sn.qualified_name == word
+    ]
+    if not matches and "." in word:
+        last = word.rsplit(".", 1)[-1]
+        by_last = [sn for sn in symbol_nodes if sn.name == last]
+        suffix = [sn for sn in by_last if sn.qualified_name.endswith(word)]
+        matches = suffix if suffix else by_last
+
+    # Also check TypeNode
+    type_matches = [
+        tn for tn in semantic_model.get_nodes_by_type(TypeNode)
+        if tn.name == word or tn.qualified_name == word
+    ]
+
+    if not matches and not type_matches:
+        return None
+
+    # Build hover content from the semantic model data
+    parts: List[str] = []
+
+    if matches:
+        sn = matches[0]
+        keyword = sn.kind or "symbol"
+        param_str = ""
+        if sn.params:
+            param_str = "(" + ", ".join(sn.params) + ")"
+        ret_str = ""
+        if sn.return_sort:
+            ret_str = f" : {sn.return_sort}"
+        sig = f"{keyword} {sn.qualified_name}{param_str}{ret_str}"
+        parts.append(f"```ivy\n{sig}\n```")
+        if sn.file:
+            basename = os.path.basename(sn.file)
+            parts.append(f"\n*Defined in: {basename}:{sn.line}*")
+    elif type_matches:
+        tn = type_matches[0]
+        if tn.is_enum and tn.variants:
+            sig = f"type {tn.qualified_name} = {{{', '.join(tn.variants)}}}"
+        else:
+            sig = f"type {tn.qualified_name}"
+        parts.append(f"```ivy\n{sig}\n```")
+        if tn.file:
+            basename = os.path.basename(tn.file)
+            parts.append(f"\n*Defined in: {basename}:{tn.line}*")
+
+    if not parts:
+        return None
+
+    content = "\n".join(parts)
+
+    # Enrich with full semantic model details (xrefs, RFC annotations, etc.)
+    content = _enrich_with_semantic_model(
+        content, word, filepath, position, source_lines, semantic_model
+    )
+
+    return lsp.Hover(
+        contents=lsp.MarkupContent(
+            kind=lsp.MarkupKind.Markdown,
+            value=content,
+        ),
+    )
+
+
 def get_hover_info(
     indexer,
     filepath: str,
@@ -190,7 +274,12 @@ def get_hover_info(
         results = indexer.lookup_symbol(last)
 
     if not results:
-        return None
+        # Fallback: query the SemanticModel directly when the indexer
+        # hasn't cached this symbol (e.g., symbols from included files
+        # that were indexed but not yet cached by the indexer).
+        return _hover_from_semantic_model(
+            word, filepath, position, source_lines, semantic_model
+        )
 
     results = _sort_by_proximity(results, filepath)
     sym = results[0].symbol

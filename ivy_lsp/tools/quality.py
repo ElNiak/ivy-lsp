@@ -29,6 +29,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         line: int | None = None,
         context: str | None = None,
         protocol: str | None = None,
+        max_items: int = 50,
     ) -> str:
         """Get context-aware suggestions for improving the Ivy specification."""
         from ivy_lsp.features.visualization import handle_smart_suggestions
@@ -46,7 +47,15 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             params["context"] = context
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
-        return json.dumps(handle_smart_suggestions(server_proxy, params))
+        result = handle_smart_suggestions(server_proxy, params)
+
+        # Apply output size limit
+        suggestions = result.get("suggestions", [])
+        if max_items > 0 and len(suggestions) > max_items:
+            result["total"] = len(suggestions)
+            result["suggestions"] = suggestions[:max_items]
+            result["truncated"] = True
+        return json.dumps(result)
 
     async def _ivy_quality_gate(
         protocol: str,
@@ -275,6 +284,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         context: str | None = None,
         protocol: str | None = None,
         gate_level: str = "minimal",
+        max_items: int = 50,
     ) -> str:
         """Unified quality analysis tool for Ivy specifications.
 
@@ -303,6 +313,10 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                 mode="gate", optional for mode="suggestions".
             gate_level: Gate level: "minimal", "standard", or
                 "comprehensive". Used by mode="gate".
+            max_items: Maximum number of items to return in the response
+                (default: 50). When the result is truncated, the response
+                includes ``"truncated": true`` and ``"total": N``.
+                Set to 0 for unlimited.
         """
         _valid_modes = {"suggestions", "gate"}
         if mode not in _valid_modes:
@@ -314,4 +328,23 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                 return error_response("protocol is required for mode='gate'")
             return await _ivy_quality_gate(protocol, gate_level)
         else:  # default: suggestions
-            return await _ivy_smart_suggestions(file_path, line, context, protocol)
+            return await _ivy_smart_suggestions(
+                file_path, line, context, protocol, max_items
+            )
+
+    # --- Individual tool aliases (backward compatibility) ---
+
+    @mcp.tool()
+    async def ivy_smart_suggestions(
+        file_path: str | None = None,
+        line: int | None = None,
+        context: str | None = None,
+        protocol: str | None = None,
+    ) -> str:
+        """Get context-aware suggestions for improving the Ivy specification."""
+        return await _ivy_smart_suggestions(file_path, line, context, protocol)
+
+    @mcp.tool()
+    async def ivy_quality_gate(protocol: str, gate_level: str = "minimal") -> str:
+        """Validate a protocol model against quality gates."""
+        return await _ivy_quality_gate(protocol, gate_level)

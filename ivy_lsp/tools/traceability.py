@@ -303,32 +303,55 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             return error_response("Semantic model unavailable")
 
         node = model.get_node(node_id)
-        # H7: Fuzzy node_id matching
+        # H7: Fuzzy node_id matching — handle path format mismatches
+        # (absolute vs relative paths, different separators, etc.)
         if node is None:
             from ivy_lsp.semantic.nodes import SymbolNode
 
+            # Extract symbol name: last segment after ":" separator
             parts = node_id.split(":")
             symbol_name = parts[-1] if parts else node_id
             all_symbols = model.get_nodes_by_type(SymbolNode)
+
+            # 1. Try exact name or qualified_name match
             sym_matches = [
                 sn for sn in all_symbols
                 if sn.name == symbol_name or sn.qualified_name == symbol_name
             ]
+
+            # 2. Try dotted suffix match
             if not sym_matches and "." in symbol_name:
                 last = symbol_name.rsplit(".", 1)[-1]
-                sym_matches = [sn for sn in all_symbols if sn.name == last]
-            if len(sym_matches) == 1:
+                by_last = [sn for sn in all_symbols if sn.name == last]
+                suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
+                sym_matches = suffix if suffix else by_last
+
+            # 3. If file hint present in node_id, use it to narrow results
+            if len(sym_matches) > 1 and len(parts) >= 2:
+                file_hint = parts[0]
+                # Try suffix match on file path (handles absolute vs relative)
+                narrowed = [
+                    sn for sn in sym_matches
+                    if (sn.file or "").endswith(file_hint)
+                    or file_hint in (sn.file or "")
+                ]
+                if narrowed:
+                    sym_matches = narrowed
+
+            # 4. Rank by reference count and pick best match
+            if sym_matches:
+                if len(sym_matches) > 1:
+                    def _ref_count(sn):
+                        return len(model.get_incoming(sn.id)) + len(model.get_outgoing(sn.id))
+                    sym_matches.sort(key=_ref_count, reverse=True)
                 node = sym_matches[0]
                 node_id = node.id
-            elif len(sym_matches) > 1 and len(parts) >= 2:
-                file_hint = parts[0]
-                narrowed = [sn for sn in sym_matches if file_hint in (sn.file or "")]
-                if narrowed:
-                    node = narrowed[0]
-                    node_id = node.id
 
         if node is None:
-            sample_ids = [n.id for n in model.all_nodes()[:5]] if hasattr(model, "all_nodes") else []
+            # Provide sample node IDs for debugging
+            from ivy_lsp.semantic.nodes import SymbolNode
+            sample_symbols = model.get_nodes_by_type(SymbolNode)[:5]
+            sample_ids = [sn.id for sn in sample_symbols]
             return json.dumps({
                 "node_id": node_id,
                 "found": False,
@@ -352,7 +375,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             ],
         })
 
-    async def _ivy_query_symbol(symbol_name: str) -> str:
+    async def _ivy_query_symbol(symbol_name: str, protocol: str = "") -> str:
         """Query rich semantic info about a symbol: type, references, requirements."""
         model = await ctx.get_model()
         if model is None:
@@ -372,11 +395,44 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
             symbol_matches = suffix if suffix else by_last
 
+        # Protocol-scoped filtering: when protocol is provided,
+        # filter to symbols with file paths containing protocol-testing/{protocol}/
+        if protocol and symbol_matches:
+            prot_path = f"protocol-testing/{protocol}/"
+            prot_filtered = [sn for sn in symbol_matches if prot_path in (sn.file or "")]
+            if prot_filtered:
+                symbol_matches = prot_filtered
+
+        # Disambiguation: when multiple symbols match and no protocol filter
+        # narrowed them down, prefer:
+        #   a. Files in main protocol directory (not apt/ variants)
+        #   b. Files closer to the workspace root (shorter path)
+        #   c. Files with more references
+        if len(symbol_matches) > 1:
+            def _rank_symbol(sn):
+                fpath = sn.file or ""
+                # Penalize apt/ variant paths
+                is_apt = 1 if "/apt/" in fpath else 0
+                # Prefer shorter paths (closer to workspace root)
+                path_depth = fpath.count("/")
+                # Prefer symbols with more references
+                ref_count = len(model.get_incoming(sn.id)) + len(model.get_outgoing(sn.id))
+                # Lower tuple = better rank
+                return (is_apt, path_depth, -ref_count)
+            symbol_matches.sort(key=_rank_symbol)
+
         # Search TypeNode
         type_matches = [
             tn for tn in model.get_nodes_by_type(TypeNode)
             if tn.name == symbol_name or tn.qualified_name == symbol_name
         ]
+
+        # Apply protocol filter to type matches too
+        if protocol and type_matches:
+            prot_path = f"protocol-testing/{protocol}/"
+            prot_filtered = [tn for tn in type_matches if prot_path in (tn.file or "")]
+            if prot_filtered:
+                type_matches = prot_filtered
 
         if not symbol_matches and not type_matches:
             return json.dumps({
@@ -392,6 +448,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         if symbol_matches:
             sn = symbol_matches[0]
+            incoming = model.get_incoming(sn.id)
+            outgoing = model.get_outgoing(sn.id)
             result["symbol_info"] = {
                 "qualified_name": sn.qualified_name,
                 "kind": sn.kind,
@@ -401,12 +459,19 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 "return_sort": sn.return_sort,
                 "sort_name": sn.sort_name,
             }
-            incoming = model.get_incoming(sn.id)
-            outgoing = model.get_outgoing(sn.id)
             result["references"] = {
                 "incoming": len(incoming),
                 "outgoing": len(outgoing),
             }
+            # Include all match candidates count for transparency
+            if len(symbol_matches) > 1:
+                result["disambiguation"] = {
+                    "total_candidates": len(symbol_matches),
+                    "other_locations": [
+                        {"file": s.file, "line": s.line}
+                        for s in symbol_matches[1:5]  # up to 4 alternatives
+                    ],
+                }
 
         if type_matches:
             tn = type_matches[0]
@@ -562,6 +627,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         mode: Literal["impact", "xrefs", "info"] = "info",
         symbol_name: str | None = None,
         node_id: str | None = None,
+        protocol: str = "",
     ) -> str:
         """Unified semantic query tool for symbols and cross-references.
 
@@ -580,6 +646,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 and "info" modes; optional fallback for "xrefs" mode).
             node_id: The node ID to query for "xrefs" mode
                 (e.g., "test.ivy:5:send").
+            protocol: Optional protocol name (e.g., "quic") to disambiguate
+                symbols. When provided, prefers symbols from the
+                ``protocol-testing/{protocol}/`` directory over
+                ``apt/`` variants.
         """
         _valid_modes = {"impact", "xrefs", "info"}
         if mode not in _valid_modes:
@@ -604,7 +674,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 return error_response(
                     "symbol_name is required for mode='info'"
                 )
-            return await _ivy_query_symbol(symbol_name)
+            return await _ivy_query_symbol(symbol_name, protocol)
 
     @mcp.tool()
     async def ivy_extract_requirements(
@@ -643,3 +713,47 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             )
         else:  # default: structured
             return await _ivy_extract_requirements_logic(rfc_text)
+
+    # --- Individual tool aliases (backward compatibility) ---
+
+    @mcp.tool()
+    async def ivy_requirement_coverage(relative_path: str | None = None) -> str:
+        """RFC requirement coverage statistics by level and layer."""
+        return await _ivy_requirement_coverage(relative_path)
+
+    @mcp.tool()
+    async def ivy_coverage_gaps(
+        test_file: str | None = None, protocol: str | None = None
+    ) -> str:
+        """Identify unguarded state variables, uncovered RFC requirements, and orphan requirements."""
+        return await _ivy_coverage_gaps(test_file, protocol)
+
+    @mcp.tool()
+    async def ivy_traceability_matrix(relative_path: str | None = None) -> str:
+        """RFC requirement-to-annotation traceability matrix."""
+        return await _ivy_traceability_matrix(relative_path)
+
+    @mcp.tool()
+    async def ivy_query_symbol(symbol_name: str, protocol: str = "") -> str:
+        """Query rich semantic info about a symbol."""
+        return await _ivy_query_symbol(symbol_name, protocol)
+
+    @mcp.tool()
+    async def ivy_impact_analysis(symbol_name: str) -> str:
+        """Analyze incoming and outgoing edges for a symbol."""
+        return await _ivy_impact_analysis(symbol_name)
+
+    @mcp.tool()
+    async def ivy_cross_references(node_id: str) -> str:
+        """Query cross-reference graph neighborhood of a node."""
+        return await _ivy_cross_references(node_id)
+
+    @mcp.tool()
+    async def ivy_generate_manifest(
+        rfc_name: str,
+        rfc_text: str,
+        protocol: str = "",
+        base_section: str = "",
+    ) -> str:
+        """Generate YAML requirements manifest from RFC text."""
+        return await _ivy_generate_manifest(rfc_name, rfc_text, protocol, base_section)
