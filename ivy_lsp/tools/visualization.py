@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 def register_visualization_tools(mcp: Any, ctx: Any) -> None:
     """Register visualization-related MCP tools."""
-
     # ------------------------------------------------------------------
     # Private helpers (former standalone tool bodies)
     # ------------------------------------------------------------------
@@ -82,7 +81,11 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         rows = result.get("rows", [])
         if sort_by == "requirement_count":
             rows.sort(
-                key=lambda r: sum(r.get("counts", {}).values()) if isinstance(r.get("counts"), dict) else 0,
+                key=lambda r: (
+                    sum(r.get("counts", {}).values())
+                    if isinstance(r.get("counts"), dict)
+                    else 0
+                ),
                 reverse=True,
             )
         elif sort_by == "name":
@@ -224,9 +227,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 f"Unknown view '{view}'. Valid views: {sorted(_valid_views)}"
             )
         if view == "state_machine":
-            raw = await _ivy_state_machine_view(
-                test_file, state_var_filter, protocol
-            )
+            raw = await _ivy_state_machine_view(test_file, state_var_filter, protocol)
             result = json.loads(raw)
             result = _apply_max_items(result, "states", max_items)
             return json.dumps(result)
@@ -288,7 +289,9 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 and ``"total": N``.
         """
         # Use limit if explicitly set, otherwise fall back to max_items
-        effective_limit = limit if limit is not None else (max_items if max_items > 0 else None)
+        effective_limit = (
+            limit if limit is not None else (max_items if max_items > 0 else None)
+        )
 
         _valid_details = {"summary", "requirements"}
         if detail not in _valid_details:
@@ -313,7 +316,9 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
     ) -> str:
         """Action dependency graph showing shared-state relationships."""
-        return await _ivy_action_dependency_graph(test_file, include_state_vars, protocol)
+        return await _ivy_action_dependency_graph(
+            test_file, include_state_vars, protocol
+        )
 
     @mcp.tool()
     async def ivy_state_machine_view(

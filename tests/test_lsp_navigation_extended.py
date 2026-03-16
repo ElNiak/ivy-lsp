@@ -14,15 +14,21 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.features.definition import _DECL_RE, _INCLUDE_RE, goto_definition  # noqa: E402
+from ivy_lsp.features.definition import (  # noqa: E402
+    _DECL_RE,
+    _INCLUDE_RE,
+    goto_definition,
+)
 from ivy_lsp.features.document_symbols import (  # noqa: E402
     get_document_symbols,
     ivy_symbol_to_document_symbol,
 )
-from ivy_lsp.features.hover import _sort_by_proximity, format_hover_content  # noqa: E402
+from ivy_lsp.features.hover import (  # noqa: E402
+    _sort_by_proximity,
+    format_hover_content,
+)
 from ivy_lsp.features.references import find_references  # noqa: E402
 from ivy_lsp.parsing.symbols import IvySymbol  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,7 +145,9 @@ class TestFindReferences:
     def test_refs_all_occurrences(self, tmp_path):
         """Symbol used on 3 lines -> 3 locations."""
         f = tmp_path / "test.ivy"
-        f.write_text("#lang ivy1.7\ntype cid\nrelation r(X:cid)\naction send(dst:cid)\n")
+        f.write_text(
+            "#lang ivy1.7\ntype cid\nrelation r(X:cid)\naction send(dst:cid)\n"
+        )
         indexer = _make_indexer(all_files=[str(f)])
         source = f.read_text().split("\n")
         pos = lsp.Position(line=1, character=5)  # on "cid" in "type cid"
@@ -155,8 +163,12 @@ class TestFindReferences:
         source = f.read_text().split("\n")
         pos = lsp.Position(line=1, character=5)  # on "cid" in "type cid"
 
-        locs_all = find_references(indexer, str(f), pos, source, include_declaration=True)
-        locs_no_decl = find_references(indexer, str(f), pos, source, include_declaration=False)
+        locs_all = find_references(
+            indexer, str(f), pos, source, include_declaration=True
+        )
+        locs_no_decl = find_references(
+            indexer, str(f), pos, source, include_declaration=False
+        )
         assert len(locs_no_decl) < len(locs_all)
 
     def test_refs_cross_file(self, tmp_path):
@@ -205,8 +217,10 @@ class TestHoverFormatting:
     def test_hover_type_declaration(self):
         """Type symbol -> markdown with 'type cid'."""
         sym = IvySymbol(
-            name="cid", kind=lsp.SymbolKind.Class,
-            range=(2, 0, 2, 8), detail="",
+            name="cid",
+            kind=lsp.SymbolKind.Class,
+            range=(2, 0, 2, 8),
+            detail="",
         )
         result = format_hover_content(sym)
         assert result is not None
@@ -215,8 +229,10 @@ class TestHoverFormatting:
     def test_hover_action_with_params(self):
         """Action with params -> shows param signature."""
         sym = IvySymbol(
-            name="send", kind=lsp.SymbolKind.Function,
-            range=(5, 0, 5, 20), detail="(src:cid, dst:cid)",
+            name="send",
+            kind=lsp.SymbolKind.Function,
+            range=(5, 0, 5, 20),
+            detail="(src:cid, dst:cid)",
         )
         result = format_hover_content(sym)
         assert result is not None
@@ -225,8 +241,10 @@ class TestHoverFormatting:
     def test_hover_enum_type(self):
         """Enum type -> shows {variants}."""
         sym = IvySymbol(
-            name="stream_kind", kind=lsp.SymbolKind.Class,
-            range=(2, 0, 2, 30), detail="enum:unidir, bidir",
+            name="stream_kind",
+            kind=lsp.SymbolKind.Class,
+            range=(2, 0, 2, 30),
+            detail="enum:unidir, bidir",
         )
         result = format_hover_content(sym)
         assert result is not None
@@ -235,8 +253,10 @@ class TestHoverFormatting:
     def test_hover_with_filepath(self):
         """Symbol with file_path -> 'Defined in: filename'."""
         sym = IvySymbol(
-            name="cid", kind=lsp.SymbolKind.Class,
-            range=(2, 0, 2, 8), detail="",
+            name="cid",
+            kind=lsp.SymbolKind.Class,
+            range=(2, 0, 2, 8),
+            detail="",
         )
         sym.file_path = "/a/b/types.ivy"
         result = format_hover_content(sym)
@@ -250,8 +270,10 @@ class TestHoverFormatting:
     def test_hover_relation(self):
         """Relation symbol -> 'relation name(params)'."""
         sym = IvySymbol(
-            name="connected", kind=lsp.SymbolKind.Function,
-            range=(8, 0, 8, 30), detail="relation (X:cid, Y:cid)",
+            name="connected",
+            kind=lsp.SymbolKind.Function,
+            range=(8, 0, 8, 30),
+            detail="relation (X:cid, Y:cid)",
         )
         result = format_hover_content(sym)
         assert result is not None
@@ -284,12 +306,16 @@ class TestDocumentSymbolConversion:
     def test_doc_symbols_with_children(self):
         """IvySymbol with children -> DocumentSymbol with children."""
         child = IvySymbol(
-            name="zero", kind=lsp.SymbolKind.Variable,
-            range=(3, 4, 3, 20), detail="",
+            name="zero",
+            kind=lsp.SymbolKind.Variable,
+            range=(3, 4, 3, 20),
+            detail="",
         )
         parent = IvySymbol(
-            name="bit", kind=lsp.SymbolKind.Module,
-            range=(2, 0, 5, 1), detail="",
+            name="bit",
+            kind=lsp.SymbolKind.Module,
+            range=(2, 0, 5, 1),
+            detail="",
             children=[child],
         )
         doc_sym = ivy_symbol_to_document_symbol(parent)
@@ -301,8 +327,10 @@ class TestDocumentSymbolConversion:
     def test_doc_symbols_no_children(self):
         """IvySymbol without children -> children=None."""
         sym = IvySymbol(
-            name="cid", kind=lsp.SymbolKind.Class,
-            range=(2, 0, 2, 8), detail="",
+            name="cid",
+            kind=lsp.SymbolKind.Class,
+            range=(2, 0, 2, 8),
+            detail="",
         )
         doc_sym = ivy_symbol_to_document_symbol(sym)
         assert doc_sym.name == "cid"
@@ -320,8 +348,10 @@ class TestDocumentSymbolConversion:
         ]
         for kind in kinds:
             sym = IvySymbol(
-                name=f"sym_{kind.value}", kind=kind,
-                range=(0, 0, 0, 10), detail="",
+                name=f"sym_{kind.value}",
+                kind=kind,
+                range=(0, 0, 0, 10),
+                detail="",
             )
             doc_sym = ivy_symbol_to_document_symbol(sym)
             assert doc_sym.name == f"sym_{kind.value}"
@@ -350,7 +380,16 @@ class TestRegexPatterns:
         assert _INCLUDE_RE.match("action send") is None
 
     def test_decl_re_all_keywords(self):
-        for kw in ["action", "relation", "function", "individual", "type", "module", "object", "isolate"]:
+        for kw in [
+            "action",
+            "relation",
+            "function",
+            "individual",
+            "type",
+            "module",
+            "object",
+            "isolate",
+        ]:
             m = _DECL_RE.match(f"{kw} my_name")
             assert m is not None, f"Failed for keyword: {kw}"
             assert m.group(1) == "my_name"

@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 def register_pattern_tools(mcp: Any, ctx: Any) -> None:
     """Register pattern-related MCP tools."""
-
     # ------------------------------------------------------------------
     # Private helpers (former standalone tool bodies)
     # ------------------------------------------------------------------
@@ -69,8 +68,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         # Collect all .ivy files under this protocol
         prot_files = ctx.find_ivy_files(ctx.root)
         prot_files = [
-            f for f in prot_files
-            if f.startswith(f"protocol-testing/{protocol}/")
+            f for f in prot_files if f.startswith(f"protocol-testing/{protocol}/")
         ]
 
         layers_present = []
@@ -83,6 +81,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
 
             if file_pattern:
                 import fnmatch
+
                 pat = file_pattern.replace("{p}", protocol.split("/")[-1])
                 for f in prot_files:
                     basename = os.path.basename(f)
@@ -104,54 +103,68 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                         continue
 
             if found:
-                layers_present.append({
-                    "layer": layer_name,
-                    "files": matched_files[:3],
-                })
+                layers_present.append(
+                    {
+                        "layer": layer_name,
+                        "files": matched_files[:3],
+                    }
+                )
             else:
                 layers_missing.append(layer_name)
-                suggestions.append({
-                    "layer": layer_name,
-                    "priority": "high" if layer_name in (
-                        "types", "frame", "packet", "connection",
-                    ) else "medium",
-                    "suggestion": (
-                        f"Add {layer_name} layer: create "
-                        f"{protocol}_{layer_name}.ivy in "
-                        f"protocol-testing/{protocol}/{protocol}_stack/"
-                    ),
-                })
+                suggestions.append(
+                    {
+                        "layer": layer_name,
+                        "priority": (
+                            "high"
+                            if layer_name
+                            in (
+                                "types",
+                                "frame",
+                                "packet",
+                                "connection",
+                            )
+                            else "medium"
+                        ),
+                        "suggestion": (
+                            f"Add {layer_name} layer: create "
+                            f"{protocol}_{layer_name}.ivy in "
+                            f"protocol-testing/{protocol}/{protocol}_stack/"
+                        ),
+                    }
+                )
 
         total = len(_LAYERS)
         present = len(layers_present)
         score = round(present / total * 100) if total else 0
 
         # Check for manifest
-        has_manifest = any(
-            f.endswith("_requirements.yaml") for f in prot_files
-        )
+        has_manifest = any(f.endswith("_requirements.yaml") for f in prot_files)
         if not has_manifest:
-            suggestions.append({
-                "layer": "traceability",
-                "priority": "medium",
-                "suggestion": (
-                    "No requirements manifest found. Use "
-                    "ivy_extract_requirements(output='manifest') to create one from RFC text."
-                ),
-            })
+            suggestions.append(
+                {
+                    "layer": "traceability",
+                    "priority": "medium",
+                    "suggestion": (
+                        "No requirements manifest found. Use "
+                        "ivy_extract_requirements(output='manifest') to create one from RFC text."
+                    ),
+                }
+            )
 
-        return json.dumps({
-            "protocol": protocol,
-            "completeness_score": score,
-            "total_layers": total,
-            "present": present,
-            "missing": len(layers_missing),
-            "total_ivy_files": len(prot_files),
-            "has_manifest": has_manifest,
-            "layers_present": layers_present,
-            "layers_missing": layers_missing,
-            "suggestions": suggestions,
-        })
+        return json.dumps(
+            {
+                "protocol": protocol,
+                "completeness_score": score,
+                "total_layers": total,
+                "present": present,
+                "missing": len(layers_missing),
+                "total_ivy_files": len(prot_files),
+                "has_manifest": has_manifest,
+                "layers_present": layers_present,
+                "layers_missing": layers_missing,
+                "suggestions": suggestions,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Public MCP tools
@@ -194,7 +207,9 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             # Validate mode and alias "analyze" -> "detect"
             _VALID_MODES = {"analyze", "detect", "validate", "compare", "check"}
             if mode not in _VALID_MODES:
-                return error_response(f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}")
+                return error_response(
+                    f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"
+                )
             effective_mode = "detect" if mode == "analyze" else mode
             return await _ivy_pattern_analysis(
                 protocol, effective_mode, pattern, reference_protocol

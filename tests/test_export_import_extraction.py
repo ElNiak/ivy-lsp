@@ -1,10 +1,12 @@
 """Tests for ExportImportInfo data structure and light-mode extraction."""
-import pytest
-from unittest.mock import MagicMock, patch
-from types import SimpleNamespace
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
+from ivy_lsp.analysis.test_scope import ExportImportInfo
 
 
 class TestExportImportInfoCreation:
@@ -183,9 +185,7 @@ def _patch_ivy_ast_for_exports():
     """Context manager patching sys.modules for import ivy.ivy_ast."""
     ia_module = _make_fake_ia_module()
     ivy_mock = SimpleNamespace(ivy_ast=ia_module)
-    return patch.dict(
-        "sys.modules", {"ivy": ivy_mock, "ivy.ivy_ast": ia_module}
-    )
+    return patch.dict("sys.modules", {"ivy": ivy_mock, "ivy.ivy_ast": ia_module})
 
 
 def _make_export_decl(names_and_lines):
@@ -299,10 +299,12 @@ class TestFullModeExportExtraction:
         assert info.exports == []
 
     def test_multiple_exports_same_decl(self):
-        export_decl = _make_export_decl([
-            ("quic.send", 3),
-            ("quic.recv", 3),  # same decl -> same line
-        ])
+        export_decl = _make_export_decl(
+            [
+                ("quic.send", 3),
+                ("quic.recv", 3),  # same decl -> same line
+            ]
+        )
         ast_obj = SimpleNamespace(decls=[export_decl])
 
         with _patch_ivy_ast_for_exports():

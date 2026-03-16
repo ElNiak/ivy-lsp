@@ -96,22 +96,25 @@ def handle_pattern_analysis(
                     "message": f"Unknown pattern: {pattern_filter}",
                 }
 
-        return _cap_list({
-            "success": True,
-            "protocol": protocol,
-            "mode": "detect",
-            "summary": result.summary,
-            "patterns": [
-                {
-                    "kind": p.kind.value,
-                    "file": os.path.relpath(p.file, root),
-                    "line": p.line,
-                    "name": p.name,
-                    "details": p.details,
-                }
-                for p in detected
-            ],
-        }, "patterns")
+        return _cap_list(
+            {
+                "success": True,
+                "protocol": protocol,
+                "mode": "detect",
+                "summary": result.summary,
+                "patterns": [
+                    {
+                        "kind": p.kind.value,
+                        "file": os.path.relpath(p.file, root),
+                        "line": p.line,
+                        "name": p.name,
+                        "details": p.details,
+                    }
+                    for p in detected
+                ],
+            },
+            "patterns",
+        )
 
     elif mode == "validate":
         xref = PatternCrossReferencer(result)
@@ -223,29 +226,37 @@ def handle_pattern_scaffold(
             if tpl_path:
                 content = _load_and_substitute(
                     os.path.join(patterns_dir, tpl_path),
-                    protocol, variant_names, roles,
+                    protocol,
+                    variant_names,
+                    roles,
                 )
                 if content:
                     target = f"{protocol}/{protocol}_stack/{protocol}_{key.split('_', 1)[1]}.ivy"
-                    files_to_generate.append({
-                        "template": tpl_path,
-                        "target": target,
-                        "content": content,
-                    })
+                    files_to_generate.append(
+                        {
+                            "template": tpl_path,
+                            "target": target,
+                            "content": content,
+                        }
+                    )
 
     elif pattern == "variants":
         tpl_path = templates.get("frame")
         if tpl_path:
             content = _load_and_substitute(
                 os.path.join(patterns_dir, tpl_path),
-                protocol, variant_names, roles,
+                protocol,
+                variant_names,
+                roles,
             )
             if content:
-                files_to_generate.append({
-                    "template": tpl_path,
-                    "target": f"{protocol}/{protocol}_stack/{protocol}_message.ivy",
-                    "content": content,
-                })
+                files_to_generate.append(
+                    {
+                        "template": tpl_path,
+                        "target": f"{protocol}/{protocol}_stack/{protocol}_message.ivy",
+                        "content": content,
+                    }
+                )
 
     elif pattern == "monitors":
         for key in ["before_after", "finalize", "export_weight"]:
@@ -253,15 +264,19 @@ def handle_pattern_scaffold(
             if tpl_path:
                 content = _load_and_substitute(
                     os.path.join(patterns_dir, tpl_path),
-                    protocol, variant_names, roles,
+                    protocol,
+                    variant_names,
+                    roles,
                 )
                 if content:
                     suffix = key.replace("_", "_")
-                    files_to_generate.append({
-                        "template": tpl_path,
-                        "target": f"{protocol}/{protocol}_entities/{protocol}_{suffix}.ivy",
-                        "content": content,
-                    })
+                    files_to_generate.append(
+                        {
+                            "template": tpl_path,
+                            "target": f"{protocol}/{protocol}_entities/{protocol}_{suffix}.ivy",
+                            "content": content,
+                        }
+                    )
 
     elif pattern == "shim":
         transport = wire_format if wire_format in ("udp", "tcp") else "udp"
@@ -269,28 +284,36 @@ def handle_pattern_scaffold(
         if tpl_path:
             content = _load_and_substitute(
                 os.path.join(patterns_dir, tpl_path),
-                protocol, variant_names, roles,
+                protocol,
+                variant_names,
+                roles,
             )
             if content:
-                files_to_generate.append({
-                    "template": tpl_path,
-                    "target": f"{protocol}/{protocol}_shims/{protocol}_shim.ivy",
-                    "content": content,
-                })
+                files_to_generate.append(
+                    {
+                        "template": tpl_path,
+                        "target": f"{protocol}/{protocol}_shims/{protocol}_shim.ivy",
+                        "content": content,
+                    }
+                )
 
     elif pattern == "module":
         tpl_path = templates.get("parameterized")
         if tpl_path:
             content = _load_and_substitute(
                 os.path.join(patterns_dir, tpl_path),
-                protocol, variant_names, roles,
+                protocol,
+                variant_names,
+                roles,
             )
             if content:
-                files_to_generate.append({
-                    "template": tpl_path,
-                    "target": f"{protocol}/{protocol}_stack/{protocol}_module.ivy",
-                    "content": content,
-                })
+                files_to_generate.append(
+                    {
+                        "template": tpl_path,
+                        "target": f"{protocol}/{protocol}_stack/{protocol}_module.ivy",
+                        "content": content,
+                    }
+                )
 
     elif pattern == "entity":
         key = role_type
@@ -298,14 +321,18 @@ def handle_pattern_scaffold(
         if tpl_path:
             content = _load_and_substitute(
                 os.path.join(patterns_dir, tpl_path),
-                protocol, variant_names, roles,
+                protocol,
+                variant_names,
+                roles,
             )
             if content:
-                files_to_generate.append({
-                    "template": tpl_path,
-                    "target": f"{protocol}/{protocol}_stack/{protocol}_endpoint.ivy",
-                    "content": content,
-                })
+                files_to_generate.append(
+                    {
+                        "template": tpl_path,
+                        "target": f"{protocol}/{protocol}_stack/{protocol}_endpoint.ivy",
+                        "content": content,
+                    }
+                )
 
     if not files_to_generate:
         return {
@@ -326,6 +353,7 @@ def handle_pattern_scaffold(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _find_protocol_dir(root: str, protocol: str) -> Optional[str]:
     """Find protocol directory under protocol-testing/."""
@@ -354,6 +382,7 @@ def _load_catalog(patterns_dir: str) -> Optional[dict]:
         # Use a simple YAML-like parser to avoid requiring pyyaml
         # For production, this should use yaml.safe_load
         import yaml
+
         with open(catalog_path, encoding="utf-8") as f:
             return yaml.safe_load(f)
     except ImportError:

@@ -1,4 +1,5 @@
 """Tests for ivy_lsp.utils.path_normalize."""
+
 import os
 import sys
 from pathlib import Path
@@ -8,11 +9,11 @@ if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 from ivy_lsp.utils.path_normalize import (
-    normalize_ivy_path,
-    normalize_file_filter,
-    strip_prefix,
     ensure_prefix,
+    normalize_file_filter,
+    normalize_ivy_path,
     relativize_path,
+    strip_prefix,
 )
 
 
@@ -69,7 +70,10 @@ class TestStripAndEnsurePrefix:
         assert ensure_prefix("quic/x.ivy") == "protocol-testing/quic/x.ivy"
 
     def test_ensure_noop_with_prefix(self):
-        assert ensure_prefix("protocol-testing/quic/x.ivy") == "protocol-testing/quic/x.ivy"
+        assert (
+            ensure_prefix("protocol-testing/quic/x.ivy")
+            == "protocol-testing/quic/x.ivy"
+        )
 
 
 class TestRelativizePath:

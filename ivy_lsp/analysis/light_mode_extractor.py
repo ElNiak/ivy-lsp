@@ -95,9 +95,7 @@ def extract_requirements_light(
 
         # If caller provided a token_stream with errors, skip lexer path.
         if token_stream is not None and token_stream.error_info is not None:
-            return _extract_requirements_regex(
-                source, filepath, known_state_vars
-            )
+            return _extract_requirements_regex(source, filepath, known_state_vars)
 
         # Try lexer; on tokenization error, fall back to regex.
         from ivy_lsp.parsing.token_stream import tokenize_ivy
@@ -110,9 +108,7 @@ def extract_requirements_light(
                 "Lexer had errors for %s; falling back to regex extraction",
                 filepath,
             )
-            return _extract_requirements_regex(
-                source, filepath, known_state_vars
-            )
+            return _extract_requirements_regex(source, filepath, known_state_vars)
 
         return extract_requirements_lexer(
             source, filepath, known_state_vars, token_stream=token_stream
@@ -168,9 +164,7 @@ def _extract_requirements_regex(
     # Phase 3: Extract requirements from all blocks
     all_blocks = monitor_blocks + action_blocks
     for block in all_blocks:
-        block_reqs, block_writes = _extract_from_block(
-            block, filepath, source_lines
-        )
+        block_reqs, block_writes = _extract_from_block(block, filepath, source_lines)
         requirements.extend(block_reqs)
         writes.extend(block_writes)
 
@@ -191,12 +185,16 @@ def _find_monitor_blocks(
         mixin_kind = mixin_kind_raw  # preserve as-is
 
         # Find the matching closing brace using depth tracking
-        start_line = source[:m.start()].count("\n")
+        start_line = source[: m.start()].count("\n")
         body_start = m.end()
         body_end = _find_matching_brace(source, open_brace_offset)
 
         if body_end is None:
-            logger.debug("Unterminated brace in monitor block for %s at line %d", monitor_action, start_line)
+            logger.debug(
+                "Unterminated brace in monitor block for %s at line %d",
+                monitor_action,
+                start_line,
+            )
             continue
 
         blocks.append(
@@ -222,12 +220,16 @@ def _find_action_blocks(
         action_name = m.group(1)
         open_brace_offset = m.end() - 1
 
-        start_line = source[:m.start()].count("\n")
+        start_line = source[: m.start()].count("\n")
         body_start = m.end()
         body_end = _find_matching_brace(source, open_brace_offset)
 
         if body_end is None:
-            logger.debug("Unterminated brace in action block for %s at line %d", action_name, start_line)
+            logger.debug(
+                "Unterminated brace in action block for %s at line %d",
+                action_name,
+                start_line,
+            )
             continue
 
         blocks.append(
@@ -276,7 +278,7 @@ def _find_matching_brace(source: str, open_pos: int) -> Optional[int]:
                     # Skip C++ string literal
                     j += 1
                     while j < len(source) and source[j] != '"':
-                        if source[j] == '\\':
+                        if source[j] == "\\":
                             j += 1  # skip escaped char
                         j += 1
                     j += 1  # skip closing quote

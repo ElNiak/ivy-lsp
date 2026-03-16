@@ -206,13 +206,18 @@ class TestCachedFileExtended:
 
     def test_cache_stores_requirements(self):
         """CachedFile should store requirements alongside symbols."""
-        from ivy_lsp.indexer.file_cache import CachedFile
         from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.indexer.file_cache import CachedFile
 
         req = RequirementNode(
-            id="test:5", kind="require", formula_text="x>0",
-            line=5, col=0, file="test.ivy",
-            monitor_action="act", mixin_kind="before",
+            id="test:5",
+            kind="require",
+            formula_text="x>0",
+            line=5,
+            col=0,
+            file="test.ivy",
+            monitor_action="act",
+            mixin_kind="before",
         )
         entry = CachedFile(
             filepath="test.ivy",
@@ -254,8 +259,11 @@ class TestCachedFileExtended:
         writes = [("act", "x", 5)]
         info = {"exports": ["foo"], "imports": ["bar"]}
         cache.put(
-            str(f), result=None, symbols=[],
-            requirements=reqs, writes=writes,
+            str(f),
+            result=None,
+            symbols=[],
+            requirements=reqs,
+            writes=writes,
             export_import_info=info,
         )
         entry = cache.get(str(f))

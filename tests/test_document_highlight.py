@@ -24,10 +24,7 @@ class TestBasicHighlight:
         from ivy_lsp.features.document_highlight import compute_document_highlights
 
         source = (
-            "#lang ivy1.7\n"
-            "type cid\n"
-            "relation r(X:cid)\n"
-            "action send(dst:cid)\n"
+            "#lang ivy1.7\n" "type cid\n" "relation r(X:cid)\n" "action send(dst:cid)\n"
         )
         lines = source.split("\n")
         highlights = compute_document_highlights(lines, Position(line=1, character=5))
@@ -60,7 +57,8 @@ class TestBasicHighlight:
         lines = source.split("\n")
         filepath = str(tmp_path / "a.ivy")
         highlights = compute_document_highlights(
-            lines, Position(line=1, character=5),
+            lines,
+            Position(line=1, character=5),
             symbols=indexer.get_symbols(filepath),
         )
         kinds = {h.range.start.line: h.kind for h in highlights}

@@ -40,7 +40,9 @@ def format_counterexample(cex: Union[Mapping[str, Any], None]) -> str:
         lines.append("\nNo execution steps in counterexample.")
         return "\n".join(lines)
 
-    lines.append(f"\nExecution trace ({len(steps)} step{'s' if len(steps) != 1 else ''}):")
+    lines.append(
+        f"\nExecution trace ({len(steps)} step{'s' if len(steps) != 1 else ''}):"
+    )
     lines.append("-" * 50)
 
     prev_assignments: Dict[str, str] = {}

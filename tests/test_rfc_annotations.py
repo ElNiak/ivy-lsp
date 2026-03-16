@@ -36,7 +36,9 @@ class TestParseRfcTags:
         assert parse_rfc_tags("    require x > 0; # [7]   ") == ["7"]
 
     def test_compound_dotted_tag(self):
-        assert parse_rfc_tags("    require x > 0; # [frame:ack.sent]") == ["frame:ack.sent"]
+        assert parse_rfc_tags("    require x > 0; # [frame:ack.sent]") == [
+            "frame:ack.sent"
+        ]
 
     def test_invalid_tag_ignored(self):
         # Tags with special chars fail the outer bracket regex entirely
@@ -138,8 +140,12 @@ class TestComputeCoverage:
     def test_full_coverage(self):
         reqs = {
             "rfc9000:4.1": RfcRequirement(
-                id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-                text="must", level="MUST", layer="frame",
+                id="rfc9000:4.1",
+                rfc="RFC9000",
+                section="4.1",
+                text="must",
+                level="MUST",
+                layer="frame",
             ),
         }
         anns = [RfcAnnotation(id="a:0:0", file="a.ivy", line=0, tags=["rfc9000:4.1"])]
@@ -170,8 +176,12 @@ class TestComputeCoverage:
         """C4: bare [4] in source should match rfc9000:4.1 in manifest."""
         reqs = {
             "rfc9000:4.1": RfcRequirement(
-                id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-                text="test", level="MUST", layer="frame",
+                id="rfc9000:4.1",
+                rfc="RFC9000",
+                section="4.1",
+                text="test",
+                level="MUST",
+                layer="frame",
             ),
         }
         anns = [RfcAnnotation(id="t:10:0", file="t.ivy", line=10, tags=["4"])]
@@ -183,12 +193,20 @@ class TestComputeCoverage:
         """C4: bare [4.1] should match rfc9000:4.1."""
         reqs = {
             "rfc9000:4.1": RfcRequirement(
-                id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-                text="test", level="MUST", layer="",
+                id="rfc9000:4.1",
+                rfc="RFC9000",
+                section="4.1",
+                text="test",
+                level="MUST",
+                layer="",
             ),
             "rfc9000:4.6": RfcRequirement(
-                id="rfc9000:4.6", rfc="RFC9000", section="4.6",
-                text="test2", level="SHOULD", layer="",
+                id="rfc9000:4.6",
+                rfc="RFC9000",
+                section="4.6",
+                text="test2",
+                level="SHOULD",
+                layer="",
             ),
         }
         anns = [RfcAnnotation(id="t:5:0", file="t.ivy", line=5, tags=["4.1"])]

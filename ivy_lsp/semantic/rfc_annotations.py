@@ -17,7 +17,9 @@ from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 logger = logging.getLogger(__name__)
 
 _TAG_RE = re.compile(r"^\w+(?:[.:]\w+)*$")  # e.g. "rfc9000", "rfc9000:4.1", "4.1", "4"
-_BRACKET_RE = re.compile(r"#\s*\[([\w:.,\s]+)\]\s*$")  # e.g. "# [rfc9000:4.1, rfc9000:8.1]"
+_BRACKET_RE = re.compile(
+    r"#\s*\[([\w:.,\s]+)\]\s*$"
+)  # e.g. "# [rfc9000:4.1, rfc9000:8.1]"
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +187,7 @@ class CoverageStats:
 
     @property
     def uncovered(self) -> int:
+        """Return count of requirements not yet covered."""
         return self.total - self.covered
 
 

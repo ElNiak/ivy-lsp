@@ -87,7 +87,9 @@ def goto_definition(
                 col = line_text.index(decl_match.group(1))
                 r = lsp.Range(
                     start=lsp.Position(line=position.line, character=col),
-                    end=lsp.Position(line=position.line, character=col + len(decl_match.group(1))),
+                    end=lsp.Position(
+                        line=position.line, character=col + len(decl_match.group(1))
+                    ),
                 )
                 return lsp.Location(uri=uri, range=r)
         return None
@@ -124,8 +126,12 @@ def register(server) -> None:
             filepath = uri_to_path(uri)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, goto_definition,
-                server.indexer, filepath, params.position, lines,
+                None,
+                goto_definition,
+                server.indexer,
+                filepath,
+                params.position,
+                lines,
             )
         except Exception:
             logger.warning("definition handler failed", exc_info=True)

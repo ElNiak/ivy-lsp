@@ -23,17 +23,10 @@ class TestSelectionChain:
         """Selection expands: word -> line -> brace block -> file."""
         from ivy_lsp.features.selection_range import compute_selection_ranges
 
-        source = (
-            "#lang ivy1.7\n"
-            "object foo = {\n"
-            "    type this\n"
-            "}\n"
-        )
+        source = "#lang ivy1.7\n" "object foo = {\n" "    type this\n" "}\n"
         lines = source.split("\n")
         # Cursor on "this" in line 2
-        results = compute_selection_ranges(
-            lines, [Position(line=2, character=9)]
-        )
+        results = compute_selection_ranges(lines, [Position(line=2, character=9)])
         assert len(results) == 1
         sr = results[0]
 

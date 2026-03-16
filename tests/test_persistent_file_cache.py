@@ -1,4 +1,5 @@
 """Tests for PersistentFileCache with SQLite backend."""
+
 import time
 
 from lsprotocol.types import SymbolKind
@@ -12,8 +13,10 @@ class TestPersistentFileCacheBasic:
         f = tmp_path / "a.ivy"
         f.write_text("#lang ivy1.7\ntype t\n")
         sym = IvySymbol(
-            name="t", kind=SymbolKind.Class,
-            range=(1, 0, 1, 6), file_path=str(f),
+            name="t",
+            kind=SymbolKind.Class,
+            range=(1, 0, 1, 6),
+            file_path=str(f),
         )
         cache = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         cache.put(str(f), result=None, symbols=[sym], includes=["quic_types"])
@@ -35,8 +38,10 @@ class TestPersistentFileCachePersistence:
         f = tmp_path / "a.ivy"
         f.write_text("v1")
         sym = IvySymbol(
-            name="x", kind=SymbolKind.Variable,
-            range=(0, 0, 0, 5), file_path=str(f),
+            name="x",
+            kind=SymbolKind.Variable,
+            range=(0, 0, 0, 5),
+            file_path=str(f),
         )
         cache1 = PersistentFileCache(str(tmp_path), cache_dir=str(tmp_path / ".cache"))
         cache1.put(str(f), result=None, symbols=[sym], includes=[])

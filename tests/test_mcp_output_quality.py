@@ -23,7 +23,6 @@ from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
 from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -32,34 +31,53 @@ from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 def _build_test_graph():
     graph = ScopedRequirementModel()
     r1 = RequirementNode(
-        id="/test/q.ivy:12", kind="require", formula_text="x > 0",
-        line=12, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="before",
+        id="/test/q.ivy:12",
+        kind="require",
+        formula_text="x > 0",
+        line=12,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="before",
         bracket_tags=["rfc9000:4.1"],
     )
     r2 = RequirementNode(
-        id="/test/q.ivy:15", kind="ensure", formula_text="sent(C, P)",
-        line=15, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="after",
+        id="/test/q.ivy:15",
+        kind="ensure",
+        formula_text="sent(C, P)",
+        line=15,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="after",
     )
     graph.add_file_requirements("/test/q.ivy", [r1, r2])
     graph.add_action(
         ActionNode(
-            id="send", name="send", qualified_name="quic.send",
-            file="/test/q.ivy", line=10,
+            id="send",
+            name="send",
+            qualified_name="quic.send",
+            file="/test/q.ivy",
+            line=10,
         )
     )
     graph.add_action(
         ActionNode(
-            id="recv", name="recv", qualified_name="quic.recv",
-            file="/test/q.ivy", line=20,
+            id="recv",
+            name="recv",
+            qualified_name="quic.recv",
+            file="/test/q.ivy",
+            line=20,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="conn_open", name="conn_open",
+            id="conn_open",
+            name="conn_open",
             qualified_name="quic.conn_open",
-            file="/test/q.ivy", line=5, is_relation=False,
+            file="/test/q.ivy",
+            line=5,
+            is_relation=False,
         )
     )
     graph.add_edge(r1.id, EdgeType.READS, "conn_open")
@@ -70,14 +88,20 @@ def _build_graph_with_rfc_gaps():
     graph = _build_test_graph()
     graph.add_rfc_requirement(
         RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="Connection must be open", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="Connection must be open",
+            level="MUST",
         )
     )
     graph.add_rfc_requirement(
         RfcRequirement(
-            id="rfc9000:8.1", rfc="RFC9000", section="8.1",
-            text="Must validate address", level="MUST",
+            id="rfc9000:8.1",
+            rfc="RFC9000",
+            section="8.1",
+            text="Must validate address",
+            level="MUST",
         )
     )
     return graph
@@ -86,45 +110,72 @@ def _build_graph_with_rfc_gaps():
 def _build_dependency_graph():
     graph = ScopedRequirementModel()
     r1 = RequirementNode(
-        id="/test/q.ivy:12", kind="require", formula_text="conn_open",
-        line=12, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="before",
+        id="/test/q.ivy:12",
+        kind="require",
+        formula_text="conn_open",
+        line=12,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="before",
     )
     r2 = RequirementNode(
-        id="/test/q.ivy:15", kind="ensure", formula_text="pkt_sent",
-        line=15, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="after",
+        id="/test/q.ivy:15",
+        kind="ensure",
+        formula_text="pkt_sent",
+        line=15,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="after",
     )
     r3 = RequirementNode(
-        id="/test/q.ivy:22", kind="require", formula_text="pkt_sent",
-        line=22, col=0, file="/test/q.ivy",
-        monitor_action="recv", mixin_kind="before",
+        id="/test/q.ivy:22",
+        kind="require",
+        formula_text="pkt_sent",
+        line=22,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="recv",
+        mixin_kind="before",
     )
     graph.add_file_requirements("/test/q.ivy", [r1, r2, r3])
     graph.add_action(
         ActionNode(
-            id="send", name="send", qualified_name="quic.send",
-            file="/test/q.ivy", line=10,
+            id="send",
+            name="send",
+            qualified_name="quic.send",
+            file="/test/q.ivy",
+            line=10,
         )
     )
     graph.add_action(
         ActionNode(
-            id="recv", name="recv", qualified_name="quic.recv",
-            file="/test/q.ivy", line=20,
+            id="recv",
+            name="recv",
+            qualified_name="quic.recv",
+            file="/test/q.ivy",
+            line=20,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="conn_open", name="conn_open",
+            id="conn_open",
+            name="conn_open",
             qualified_name="quic.conn_open",
-            file="/test/q.ivy", line=5, is_relation=False,
+            file="/test/q.ivy",
+            line=5,
+            is_relation=False,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="pkt_sent", name="pkt_sent",
+            id="pkt_sent",
+            name="pkt_sent",
             qualified_name="quic.pkt_sent",
-            file="/test/q.ivy", line=6, is_relation=False,
+            file="/test/q.ivy",
+            line=6,
+            is_relation=False,
         )
     )
     graph.add_edge(r1.id, EdgeType.READS, "conn_open")
@@ -139,9 +190,11 @@ def _build_large_graph(n_actions=10):
     for i in range(n_actions):
         graph.add_action(
             ActionNode(
-                id=f"act_{i}", name=f"act_{i}",
+                id=f"act_{i}",
+                name=f"act_{i}",
                 qualified_name=f"q.act_{i}",
-                file="/test/q.ivy", line=i * 10,
+                file="/test/q.ivy",
+                line=i * 10,
             )
         )
     return graph
@@ -349,9 +402,7 @@ class TestErrorResponseConsistency:
     async def test_lint_error_has_success_field(self, tmp_path):
         """Error response has success: false and message key."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_lint", {"relative_path": "nonexistent.ivy"}
-        )
+        result = await mcp.call_tool("ivy_lint", {"relative_path": "nonexistent.ivy"})
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is False
         assert "message" in parsed
@@ -360,9 +411,7 @@ class TestErrorResponseConsistency:
     async def test_verify_error_has_success_field(self, tmp_path):
         """ivy_verify error response has success: false."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_verify", {"relative_path": "nonexistent.ivy"}
-        )
+        result = await mcp.call_tool("ivy_verify", {"relative_path": "nonexistent.ivy"})
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is False
         assert "message" in parsed
@@ -421,7 +470,9 @@ class TestP1RequirementCoverageUncoveredIds:
         reqs = [
             RfcRequirement(id="r:1", rfc="RFC", section="1", text="...", level="MUST"),
             RfcRequirement(id="r:2", rfc="RFC", section="2", text="...", level="MUST"),
-            RfcRequirement(id="r:3", rfc="RFC", section="3", text="...", level="SHOULD"),
+            RfcRequirement(
+                id="r:3", rfc="RFC", section="3", text="...", level="SHOULD"
+            ),
         ]
         ann = RfcAnnotation(id="f:1:0", file="f", line=1, tags=["r:1"])
         for r in reqs:
@@ -443,9 +494,7 @@ class TestP1DiagnosticsFileField:
         """Each diagnostic dict has a file field."""
         (tmp_path / "test.ivy").write_text("type cid\n")  # missing #lang
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_diagnostics", {"relative_path": "test.ivy"}
-        )
+        result = await mcp.call_tool("ivy_diagnostics", {"relative_path": "test.ivy"})
         parsed = json.loads(_extract_text(result))
         for d in parsed["diagnostics"]:
             assert "file" in d, f"Diagnostic missing 'file' field: {d}"
@@ -504,7 +553,9 @@ class TestP1CoveragePerLevelPercent:
         for entry in by_level.values():
             entry["uncovered"] = entry["total"] - entry["covered"]
             entry["coverage_percent"] = (
-                round(100 * entry["covered"] / entry["total"], 1) if entry["total"] else 0
+                round(100 * entry["covered"] / entry["total"], 1)
+                if entry["total"]
+                else 0
             )
 
         assert by_level["MUST"]["uncovered"] == 1

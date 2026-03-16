@@ -5,9 +5,9 @@ IVY_LSP_EXCLUDE_PATHS environment variables set by workspace detection.
 """
 
 import os
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 
 @pytest.fixture
@@ -20,7 +20,9 @@ def workspace(tmp_path):
 
     # protocol-testing/apt/
     (tmp_path / "protocol-testing" / "apt" / "quic").mkdir(parents=True)
-    (tmp_path / "protocol-testing" / "apt" / "quic" / "types.ivy").write_text("#lang ivy1.7\n")
+    (tmp_path / "protocol-testing" / "apt" / "quic" / "types.ivy").write_text(
+        "#lang ivy1.7\n"
+    )
 
     # doc/examples/
     (tmp_path / "doc" / "examples").mkdir(parents=True)
@@ -38,6 +40,7 @@ def test_no_scoping_returns_all(workspace):
     env_patch = {"IVY_LSP_INCLUDE_PATHS": "", "IVY_LSP_EXCLUDE_PATHS": ""}
     with patch.dict(os.environ, env_patch, clear=False):
         from ivy_lsp.mcp_server import start_mcp
+
         app = start_mcp(workspace_root=str(workspace), _return_app=True)
 
     # The app was created; verify by checking the tool list
@@ -51,8 +54,7 @@ def test_include_paths_filters(workspace):
     include_paths = ["protocol-testing"]
     all_files = find_ivy_files(str(workspace))
     scoped = [
-        f for f in all_files
-        if any(f.startswith(ip + "/") for ip in include_paths)
+        f for f in all_files if any(f.startswith(ip + "/") for ip in include_paths)
     ]
     # Should include protocol-testing files only
     assert any("quic/types.ivy" in f for f in scoped)
@@ -86,7 +88,8 @@ def test_combined_include_and_exclude(workspace):
 
     include_paths = ["protocol-testing"]
     scoped = [
-        f for f in all_files
+        f
+        for f in all_files
         if any(
             f == ip or f.startswith(ip + "/") or f.startswith(ip + os.sep)
             for ip in include_paths
@@ -105,5 +108,6 @@ def test_mcp_start_with_scoping_env(workspace):
     }
     with patch.dict(os.environ, env_patch, clear=False):
         from ivy_lsp.mcp_server import start_mcp
+
         app = start_mcp(workspace_root=str(workspace), _return_app=True)
     assert app is not None

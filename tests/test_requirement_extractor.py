@@ -258,19 +258,17 @@ before foo.step {
         result = wrapper.parse(source, "multi_req.ivy")
         assert result.success, f"Parse failed: {result.errors}"
 
-        reqs, writes = extract_requirements_full(
-            result.ast, "multi_req.ivy", source
-        )
+        reqs, writes = extract_requirements_full(result.ast, "multi_req.ivy", source)
 
         require_reqs = [r for r in reqs if r.kind == "require"]
-        assert len(require_reqs) >= 2, (
-            f"Expected at least 2 require nodes, got {len(require_reqs)}"
-        )
+        assert (
+            len(require_reqs) >= 2
+        ), f"Expected at least 2 require nodes, got {len(require_reqs)}"
 
 
 @requires_ivy
 class TestExtractRequirementsFullDirectAction:
-    """Parse source with direct action body: action send(x:t) = { require x > 0; }"""
+    """Parse source with direct action body: action send(x:t) = { require x > 0; }."""
 
     def test_require_in_direct_action(self):
         from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
@@ -295,9 +293,9 @@ action send(x:t) = {
         )
 
         require_reqs = [r for r in reqs if r.kind == "require"]
-        assert len(require_reqs) >= 1, (
-            f"Expected at least one require in direct action, got {len(require_reqs)}"
-        )
+        assert (
+            len(require_reqs) >= 1
+        ), f"Expected at least one require in direct action, got {len(require_reqs)}"
 
         req = require_reqs[0]
         assert req.kind == "require"
@@ -332,19 +330,17 @@ before foo.step {
         result = wrapper.parse(source, "assign_test.ivy")
         assert result.success, f"Parse failed: {result.errors}"
 
-        reqs, writes = extract_requirements_full(
-            result.ast, "assign_test.ivy", source
-        )
+        reqs, writes = extract_requirements_full(result.ast, "assign_test.ivy", source)
 
-        assert len(writes) >= 1, (
-            f"Expected at least one write for assignment, got {len(writes)}"
-        )
+        assert (
+            len(writes) >= 1
+        ), f"Expected at least one write for assignment, got {len(writes)}"
 
         # Each write is a (var_name, filepath, line) triple
         var_names = [w[0] for w in writes]
-        assert any("sent" in v for v in var_names), (
-            f"Expected 'sent' in write variable names, got {var_names}"
-        )
+        assert any(
+            "sent" in v for v in var_names
+        ), f"Expected 'sent' in write variable names, got {var_names}"
 
         # Verify tuple structure
         for var_name, filepath, line in writes:
@@ -378,9 +374,7 @@ before foo.step {
         result = wrapper.parse(source, "tag_test.ivy")
         assert result.success, f"Parse failed: {result.errors}"
 
-        reqs, writes = extract_requirements_full(
-            result.ast, "tag_test.ivy", source
-        )
+        reqs, writes = extract_requirements_full(result.ast, "tag_test.ivy", source)
 
         require_reqs = [r for r in reqs if r.kind == "require"]
         assert len(require_reqs) >= 1
@@ -389,9 +383,7 @@ before foo.step {
         all_tags = []
         for r in require_reqs:
             all_tags.extend(r.bracket_tags)
-        assert "42" in all_tags, (
-            f"Expected bracket tag '42' in tags, got {all_tags}"
-        )
+        assert "42" in all_tags, f"Expected bracket tag '42' in tags, got {all_tags}"
 
 
 @requires_ivy

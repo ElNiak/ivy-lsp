@@ -15,19 +15,13 @@ from ivy_lsp.features.diagnostics import compute_semantic_diagnostics
 from ivy_lsp.features.hover import _enrich_with_semantic_model
 from ivy_lsp.semantic.edges import SemanticEdgeType
 from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import (
-    RfcAnnotation,
-    RfcRequirement,
-    SymbolNode,
-    TypeNode,
-)
+from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode, TypeNode
 from ivy_lsp.semantic.rfc_annotations import (
     compute_coverage,
     load_requirement_manifest,
     parse_file_rfc_annotations,
     parse_rfc_tags,
 )
-
 
 # --- Test Data ---
 
@@ -249,12 +243,17 @@ class TestSemanticDiagnosticsIntegration:
     def test_orphaned_tag_detected(self):
         model = SemanticModel()
         ann = RfcAnnotation(
-            id="/tmp/test.ivy:5:0", file="/tmp/test.ivy", line=5,
+            id="/tmp/test.ivy:5:0",
+            file="/tmp/test.ivy",
+            line=5,
             tags=["rfc9000:99.99"],
         )
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="...", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
         )
         model.add_node(ann)
         model.add_node(req)
@@ -267,12 +266,17 @@ class TestSemanticDiagnosticsIntegration:
     def test_no_orphan_when_matched(self):
         model = SemanticModel()
         ann = RfcAnnotation(
-            id="/tmp/test.ivy:5:0", file="/tmp/test.ivy", line=5,
+            id="/tmp/test.ivy:5:0",
+            file="/tmp/test.ivy",
+            line=5,
             tags=["rfc9000:4.1"],
         )
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="...", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
         )
         model.add_node(ann)
         model.add_node(req)
@@ -289,12 +293,17 @@ class TestHoverEnrichmentIntegration:
     def test_hover_shows_rfc_info(self):
         model = SemanticModel()
         ann = RfcAnnotation(
-            id="/tmp/test.ivy:2:0", file="test.ivy", line=2,
+            id="/tmp/test.ivy:2:0",
+            file="test.ivy",
+            line=2,
             tags=["rfc9000:4.1"],
         )
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="senders MUST NOT send data beyond limit", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="senders MUST NOT send data beyond limit",
+            level="MUST",
         )
         model.add_node(ann)
         model.add_node(req)
@@ -302,8 +311,12 @@ class TestHoverEnrichmentIntegration:
         from lsprotocol import types as lsp
 
         result = _enrich_with_semantic_model(
-            "base", "require", "test.ivy",
-            lsp.Position(2, 0), ["require x > 0;  # [rfc9000:4.1]"], model,
+            "base",
+            "require",
+            "test.ivy",
+            lsp.Position(2, 0),
+            ["require x > 0;  # [rfc9000:4.1]"],
+            model,
         )
         assert "RFC9000" in result
         assert "MUST" in result
@@ -317,8 +330,11 @@ class TestCodeLensIntegration:
 
         model = SemanticModel()
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="...", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
         )
         model.add_node(req)
 
@@ -326,10 +342,10 @@ class TestCodeLensIntegration:
         indexer.requirement_graph = None
         indexer.include_graph = None
 
-        lenses = compute_code_lenses(
-            indexer, "test.ivy", "#lang ivy1.7\n", model
-        )
-        coverage = [l for l in lenses if "covered" in (l.command.title if l.command else "")]
+        lenses = compute_code_lenses(indexer, "test.ivy", "#lang ivy1.7\n", model)
+        coverage = [
+            l for l in lenses if "covered" in (l.command.title if l.command else "")
+        ]
         assert len(coverage) == 1
         assert "RFC9000: 0/1 covered" in coverage[0].command.title
 
@@ -356,11 +372,17 @@ class TestMcpToolLogic:
         """Verify traceability matrix JSON structure."""
         model = SemanticModel()
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="test", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="test",
+            level="MUST",
         )
         ann = RfcAnnotation(
-            id="f:5:0", file="f", line=5, tags=["rfc9000:4.1"],
+            id="f:5:0",
+            file="f",
+            line=5,
+            tags=["rfc9000:4.1"],
         )
         model.add_node(req)
         model.add_node(ann)
@@ -374,18 +396,22 @@ class TestMcpToolLogic:
 
         matrix = []
         for r in requirements:
-            matrix.append({
-                "id": r.id,
-                "rfc": r.rfc,
-                "level": r.level,
-                "covered": r.id in covered_tags,
-            })
+            matrix.append(
+                {
+                    "id": r.id,
+                    "rfc": r.rfc,
+                    "level": r.level,
+                    "covered": r.id in covered_tags,
+                }
+            )
 
-        result = json.dumps({
-            "total_requirements": len(requirements),
-            "covered": sum(1 for m in matrix if m["covered"]),
-            "matrix": matrix,
-        })
+        result = json.dumps(
+            {
+                "total_requirements": len(requirements),
+                "covered": sum(1 for m in matrix if m["covered"]),
+                "matrix": matrix,
+            }
+        )
         parsed = json.loads(result)
         assert parsed["total_requirements"] == 1
         assert parsed["covered"] == 1

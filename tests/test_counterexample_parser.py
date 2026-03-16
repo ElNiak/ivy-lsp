@@ -55,10 +55,7 @@ class TestParseCounterexample:
 
     def test_counterexample_header_no_steps(self):
         """Counterexample header present but no steps parsed."""
-        output = (
-            "Counterexample:\n"
-            "  (no trace available)\n"
-        )
+        output = "Counterexample:\n" "  (no trace available)\n"
         result = parse_counterexample(output)
         assert result is not None
         assert result["assertion"] is None

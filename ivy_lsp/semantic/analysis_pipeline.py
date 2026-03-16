@@ -84,6 +84,7 @@ class AnalysisPipeline:
         requirement_graph: Any = None,
         notification_callback: Optional[Callable[..., None]] = None,
     ) -> None:
+        """Initialize pipeline with adapters and empty tier state."""
         self._model = model
         self._parser = parser_adapter
         self._enrichment = enrichment_adapter
@@ -154,7 +155,11 @@ class AnalysisPipeline:
         edges: List[Tuple[str, SemanticEdgeType, str]] = []
 
         # Parse (reuse pre-parsed result if provided)
-        if parse_result is not None and parse_result.success and parse_result.ast is not None:
+        if (
+            parse_result is not None
+            and parse_result.success
+            and parse_result.ast is not None
+        ):
             result = parse_result
         else:
             result = self._parser.parse(source, filepath)
@@ -232,6 +237,8 @@ class AnalysisPipeline:
         """Schedule Tier 3 compiler analysis in background thread.
 
         Args:
+            source: The Ivy source text to analyze.
+            filepath: Absolute path to the source file.
             track_state: When *False*, skip ``_tier3.running`` /
                 ``_tier3.current_file`` flag updates.  Used by the deep
                 indexer to submit many files without corrupting the
@@ -254,7 +261,9 @@ class AnalysisPipeline:
                 if current_gen != gen_at_submit:
                     logger.debug(
                         "Discarding stale T3 result for %s (gen %d vs %d)",
-                        filepath, gen_at_submit, current_gen,
+                        filepath,
+                        gen_at_submit,
+                        current_gen,
                     )
                     return
                 if not result.success:
@@ -270,7 +279,9 @@ class AnalysisPipeline:
                         started_at=t3_start,
                         completed_at=completed_at,
                         duration=duration,
-                        error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
+                        error_message=(
+                            "; ".join(error_msgs) if error_msgs else "Unknown error"
+                        ),
                     )
                     return
                 enrichment_performed = False
@@ -284,12 +295,11 @@ class AnalysisPipeline:
                                 enrich_requirement_graph,
                                 enrich_semantic_model,
                             )
+
                             enrich_semantic_model(self._model, ir, filepath)
                             enrichment_performed = True
                             if self._requirement_graph is not None:
-                                enrich_requirement_graph(
-                                    self._requirement_graph, ir
-                                )
+                                enrich_requirement_graph(self._requirement_graph, ir)
                     except Exception:
                         logger.warning(
                             "Tier 3 enrichment failed for %s", filepath, exc_info=True
@@ -389,11 +399,19 @@ class AnalysisPipeline:
         try:
             if num_workers > 1 and len(remaining) > 3:
                 self._run_bulk_parallel_t1(
-                    remaining, result, progress_callback, cancel_event, include_t2,
+                    remaining,
+                    result,
+                    progress_callback,
+                    cancel_event,
+                    include_t2,
                 )
             else:
                 self._run_bulk_sequential(
-                    remaining, result, progress_callback, cancel_event, include_t2,
+                    remaining,
+                    result,
+                    progress_callback,
+                    cancel_event,
+                    include_t2,
                 )
         finally:
             with self._state_lock:
@@ -538,7 +556,10 @@ class AnalysisPipeline:
                     result.t1_completed += 1
                 completed += 1
                 self._bulk_progress_tick(
-                    completed - 1, len(remaining), filepath, progress_callback,
+                    completed - 1,
+                    len(remaining),
+                    filepath,
+                    progress_callback,
                 )
 
         if result.cancelled:
@@ -622,7 +643,9 @@ class AnalysisPipeline:
                 if current_gen != gen_at_submit:
                     logger.debug(
                         "Discarding stale bulk T3 result for %s (gen %d vs %d)",
-                        filepath, gen_at_submit, current_gen,
+                        filepath,
+                        gen_at_submit,
+                        current_gen,
                     )
                     # Still count completion for progress so bulk compilation can finish
                     with self._state_lock:
@@ -709,14 +732,10 @@ class AnalysisPipeline:
                 with open(test_file) as f:
                     source = f.read()
             except OSError:
-                logger.warning(
-                    "Cannot read %s for bulk T3; skipping", test_file
-                )
+                logger.warning("Cannot read %s for bulk T3; skipping", test_file)
                 if progress_callback is not None:
                     try:
-                        progress_callback(
-                            completed_count[0], total, test_file
-                        )
+                        progress_callback(completed_count[0], total, test_file)
                     except Exception:
                         logger.debug(
                             "Bulk T3 progress callback failed in skip path",
@@ -868,11 +887,9 @@ class AnalysisPipeline:
                             test_file,
                         )
                     except OSError:
-                        logger.debug(
-                            "T3 redirect failed: cannot read %s", test_file
-                        )
+                        logger.debug("T3 redirect failed: cannot read %s", test_file)
             # Non-test module files cannot compile standalone — skip T3
-            if not redirected and not re.search(r'^\s*export\s', source, re.MULTILINE):
+            if not redirected and not re.search(r"^\s*export\s", source, re.MULTILINE):
                 logger.debug("T3 skipped for module %s: no enclosing test", filepath)
                 return parse_result
             self.run_tier3_background(t3_source, t3_filepath)

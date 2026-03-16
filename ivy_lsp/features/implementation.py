@@ -71,7 +71,9 @@ def _find_monitors_for_action(
 ) -> List[lsp.Location]:
     """Scan all workspace symbols for before/after blocks matching *action_name*."""
     locations: List[lsp.Location] = []
-    last_component = action_name.rsplit(".", 1)[-1] if "." in action_name else action_name
+    last_component = (
+        action_name.rsplit(".", 1)[-1] if "." in action_name else action_name
+    )
 
     for sym in indexer.lookup_all_symbols():
         detail = (sym.detail or "").strip()
@@ -110,7 +112,11 @@ def _find_action_declaration(
     filtered = []
     for sl in results:
         detail = (sl.symbol.detail or "").strip().lower()
-        if detail.startswith("before ") or detail.startswith("after ") or detail.startswith("around "):
+        if (
+            detail.startswith("before ")
+            or detail.startswith("after ")
+            or detail.startswith("around ")
+        ):
             continue
         filtered.append(sl)
 

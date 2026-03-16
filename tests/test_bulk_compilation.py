@@ -10,6 +10,7 @@ server-level wrapper ``_start_bulk_compilation_via_pipeline`` that:
 * delegates to pipeline.run_bulk_tier3
 * sends ``ivy/compilationProgress`` notifications via ``_send_compilation_progress``
 """
+
 from __future__ import annotations
 
 import os
@@ -38,7 +39,11 @@ class FakeCompilerManager:
         return self._results.get(filepath)
 
     def get_stats(self):
-        return {"cachedFiles": len(self._results), "activeProcesses": 0, "maxConcurrent": 1}
+        return {
+            "cachedFiles": len(self._results),
+            "activeProcesses": 0,
+            "maxConcurrent": 1,
+        }
 
     def shutdown(self):
         pass
@@ -62,6 +67,7 @@ class _NullAdapter:
 
     def compile(self, source, filepath):
         from ivy_lsp.adapters.protocols import CompileResult
+
         return CompileResult(success=True, errors=[])
 
 
@@ -199,9 +205,7 @@ class TestBulkCompilationViaPipeline:
         server = self._make_server(
             test_files=[str(f1)],
             compile_results={
-                str(f1): CompiledModuleIR(
-                    success=True, source_file=str(f1)
-                )
+                str(f1): CompiledModuleIR(success=True, source_file=str(f1))
             },
         )
         server._start_bulk_compilation_via_pipeline()
@@ -239,7 +243,8 @@ class TestBulkCompilationViaPipeline:
 
         # The notification_callback sends ivy/compilationProgress
         notify_calls = [
-            c for c in server.protocol.notify.call_args_list
+            c
+            for c in server.protocol.notify.call_args_list
             if c[0][0] == "ivy/compilationProgress"
         ]
         assert len(notify_calls) >= 1  # At least the final notification

@@ -19,7 +19,6 @@ import pytest
 from ivy_lsp.adapters.ast_enrichment_adapter import AstEnrichmentAdapter, _extract_line
 from ivy_lsp.adapters.protocols import IAstEnrichmentAdapter, TypeAnnotation
 
-
 # ---------------------------------------------------------------------------
 # Mock AST factories
 # ---------------------------------------------------------------------------
@@ -501,9 +500,9 @@ class TestTypeAnnotationNaming:
         assert len(annotations) == 1
         ta = annotations[0]
         assert ta.name == "frame_type", f"name should be short leaf, got '{ta.name}'"
-        assert ta.qualified_name == "quic.frame_type", (
-            f"qualified_name should be full path, got '{ta.qualified_name}'"
-        )
+        assert (
+            ta.qualified_name == "quic.frame_type"
+        ), f"qualified_name should be full path, got '{ta.qualified_name}'"
 
     def test_dotted_action_name_splits_correctly(self):
         """For 'quic.connection.send', name should be 'send'."""
@@ -515,9 +514,9 @@ class TestTypeAnnotationNaming:
         assert len(annotations) == 1
         ta = annotations[0]
         assert ta.name == "send", f"name should be short leaf, got '{ta.name}'"
-        assert ta.qualified_name == "quic.connection.send", (
-            f"qualified_name should be full path, got '{ta.qualified_name}'"
-        )
+        assert (
+            ta.qualified_name == "quic.connection.send"
+        ), f"qualified_name should be full path, got '{ta.qualified_name}'"
 
     def test_simple_type_name_unchanged(self):
         """Non-dotted names: name == qualified_name."""
@@ -619,11 +618,13 @@ class TestConstantDetailEnhancement:
         # An object where accessing .args raises
         atom = MagicMock()
         atom.args = property(lambda self: (_ for _ in ()).throw(AttributeError))
+
         # MagicMock handles getattr weirdly, so use a class
         class BadAtom:
             @property
             def args(self):
                 raise AttributeError("no args")
+
             sort = None
 
         detail = _extract_constant_detail(BadAtom())

@@ -55,6 +55,7 @@ class DiagnosticCache:
     """
 
     def __init__(self) -> None:
+        """Initialize an empty diagnostic cache."""
         self._lock = Lock()
         self._entries: Dict[str, _CachedDiagnosticEntry] = {}
 
@@ -66,9 +67,7 @@ class DiagnosticCache:
     def _result_id(source_hash: str, has_deep: bool) -> str:
         return source_hash + ("-deep" if has_deep else "-fast")
 
-    def update_fast(
-        self, uri: str, source: str, diags: List[lsp.Diagnostic]
-    ) -> str:
+    def update_fast(self, uri: str, source: str, diags: List[lsp.Diagnostic]) -> str:
         """Update fast diagnostics for *uri*.  Returns the new ``result_id``."""
         h = self._hash(source)
         with self._lock:
@@ -83,9 +82,7 @@ class DiagnosticCache:
             self._entries[uri] = _CachedDiagnosticEntry(rid, h, diags, deep)
             return rid
 
-    def update_deep(
-        self, uri: str, deep: List[lsp.Diagnostic]
-    ) -> Optional[str]:
+    def update_deep(self, uri: str, deep: List[lsp.Diagnostic]) -> Optional[str]:
         """Update deep diagnostics overlay.  Returns new ``result_id`` or ``None``."""
         with self._lock:
             e = self._entries.get(uri)
@@ -100,9 +97,7 @@ class DiagnosticCache:
         with self._lock:
             return self._entries.get(uri)
 
-    def get_merged(
-        self, uri: str
-    ) -> Optional[Tuple[str, List[lsp.Diagnostic]]]:
+    def get_merged(self, uri: str) -> Optional[Tuple[str, List[lsp.Diagnostic]]]:
         """Return ``(result_id, fast + deep diagnostics)`` or ``None``."""
         with self._lock:
             e = self._entries.get(uri)
@@ -186,7 +181,9 @@ def check_structural_issues(
     resolve_cb = None
     if indexer:
         resolve_cb = indexer.resolver.resolve
-    raw.extend(check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb))
+    raw.extend(
+        check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
+    )
 
     lines = source.split("\n")
     diags: List[lsp.Diagnostic] = []
@@ -257,9 +254,9 @@ def compute_requirement_diagnostics(
                 continue
 
             # Transitive closure (resolved file + its includes)
-            transitive_files = include_graph.get_transitive_includes(
+            transitive_files = include_graph.get_transitive_includes(resolved_path) | {
                 resolved_path
-            ) | {resolved_path}
+            }
 
             # Deduplicate: only count files not yet claimed
             new_files = transitive_files - seen_files
@@ -267,9 +264,7 @@ def compute_requirement_diagnostics(
 
             # Count requirements in newly-introduced files
             inherited_reqs = [
-                r
-                for r in graph.requirements.values()
-                if r.file in new_files
+                r for r in graph.requirements.values() if r.file in new_files
             ]
 
             if not inherited_reqs:
@@ -318,9 +313,7 @@ def compute_requirement_diagnostics(
         if active_scope is not None:
             if not active_scope.is_action_exported(action_name):
                 continue
-            scoped_counts = graph.get_scoped_counts(
-                active_scope.test_file, action_name
-            )
+            scoped_counts = graph.get_scoped_counts(active_scope.test_file, action_name)
             if not scoped_counts:
                 diags.append(
                     lsp.Diagnostic(
@@ -473,8 +466,10 @@ def compute_diagnostics(
     if parser is None and parse_result is None:
         return diags
 
-    result = parse_result if parse_result is not None else (
-        parser.parse(source, filepath) if parser is not None else None
+    result = (
+        parse_result
+        if parse_result is not None
+        else (parser.parse(source, filepath) if parser is not None else None)
     )
     if result is None:
         return diags
@@ -556,43 +551,54 @@ def compute_diagnostics(
             # Look for export action declarations
             has_export = bool(re.search(r"^\s*export\s+action", source, re.MULTILINE))
             if has_export:
-                diags.append(lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(line=0, character=0),
-                        end=lsp.Position(line=0, character=1),
-                    ),
-                    message="Test file has exports but no _finalize action. "
-                            "Consider adding 'export action _finalize' for end-of-test assertions.",
-                    severity=lsp.DiagnosticSeverity.Warning,
-                    source="ivy-pattern",
-                ))
+                diags.append(
+                    lsp.Diagnostic(
+                        range=lsp.Range(
+                            start=lsp.Position(line=0, character=0),
+                            end=lsp.Position(line=0, character=1),
+                        ),
+                        message="Test file has exports but no _finalize action. "
+                        "Consider adding 'export action _finalize' for end-of-test assertions.",
+                        severity=lsp.DiagnosticSeverity.Warning,
+                        source="ivy-pattern",
+                    )
+                )
 
         # Check for exported actions without monitors
-        exports = set(re.findall(r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE))
-        monitored = set(re.findall(
-            r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE
-        ))
+        exports = set(
+            re.findall(r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE)
+        )
+        monitored = set(
+            re.findall(r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE)
+        )
         for exp_action in exports:
             if exp_action not in monitored and exp_action != "_finalize":
                 # Only warn if this file also defines the action
-                action_defined = bool(re.search(
-                    rf"^\s*action\s+{re.escape(exp_action)}\s*", source, re.MULTILINE
-                ))
+                action_defined = bool(
+                    re.search(
+                        rf"^\s*action\s+{re.escape(exp_action)}\s*",
+                        source,
+                        re.MULTILINE,
+                    )
+                )
                 if action_defined:
                     match = re.search(
                         rf"^\s*export\s+action\s+{re.escape(exp_action)}",
-                        source, re.MULTILINE,
+                        source,
+                        re.MULTILINE,
                     )
-                    line_num = source[:match.start()].count("\n") if match else 0
-                    diags.append(lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line=line_num, character=0),
-                            end=lsp.Position(line=line_num, character=80),
-                        ),
-                        message=f"Exported action '{exp_action}' has no before/after monitor in this file.",
-                        severity=lsp.DiagnosticSeverity.Hint,
-                        source="ivy-pattern",
-                    ))
+                    line_num = source[: match.start()].count("\n") if match else 0
+                    diags.append(
+                        lsp.Diagnostic(
+                            range=lsp.Range(
+                                start=lsp.Position(line=line_num, character=0),
+                                end=lsp.Position(line=line_num, character=80),
+                            ),
+                            message=f"Exported action '{exp_action}' has no before/after monitor in this file.",
+                            severity=lsp.DiagnosticSeverity.Hint,
+                            source="ivy-pattern",
+                        )
+                    )
     except Exception:
         pass  # Don't let pattern checks break diagnostics
 
@@ -644,20 +650,26 @@ async def run_deep_diagnostics(
         slog.info(
             "%s not found on PATH",
             ivy_check_cmd,
-            extra={"event": LogEvent(
-                LogCategory.DIAGNOSTIC, "diagnostics",
-                {"tool": ivy_check_cmd},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.DIAGNOSTIC,
+                    "diagnostics",
+                    {"tool": ivy_check_cmd},
+                )
+            },
         )
         return []
     except asyncio.TimeoutError:
         slog.warning(
             "Deep diagnostics timed out for %s",
             filepath,
-            extra={"event": LogEvent(
-                LogCategory.DIAGNOSTIC, "diagnostics",
-                {"filepath": filepath},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.DIAGNOSTIC,
+                    "diagnostics",
+                    {"filepath": filepath},
+                )
+            },
         )
         return []
     except Exception:
@@ -685,7 +697,9 @@ def register(server) -> None:
             try:
                 return pipeline.analyze(source, filepath, trigger)
             except Exception:
-                logger.warning("Pipeline analysis failed for %s", filepath, exc_info=True)
+                logger.warning(
+                    "Pipeline analysis failed for %s", filepath, exc_info=True
+                )
         return None
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
@@ -699,14 +713,20 @@ def register(server) -> None:
             None, _run_pipeline, source, filepath, "change"
         )
         diags = await loop.run_in_executor(
-            None, compute_diagnostics,
-            server.parser, source, filepath,
-            server.indexer, _get_semantic_model(),
+            None,
+            compute_diagnostics,
+            server.parser,
+            source,
+            filepath,
+            server.indexer,
+            _get_semantic_model(),
             pipeline_result,
         )
         server.diagnostic_cache.update_fast(uri, source, diags)
         server.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
+            lsp.PublishDiagnosticsParams(
+                uri=uri, version=doc.version, diagnostics=diags
+            )
         )
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
@@ -727,26 +747,34 @@ def register(server) -> None:
                     None, _run_pipeline, source, filepath, "change"
                 )
                 diags = await loop.run_in_executor(
-                    None, compute_diagnostics,
-                    server.parser, source, filepath,
-                    server.indexer, _get_semantic_model(),
+                    None,
+                    compute_diagnostics,
+                    server.parser,
+                    source,
+                    filepath,
+                    server.indexer,
+                    _get_semantic_model(),
                     pipeline_result,
                 )
                 server.diagnostic_cache.update_fast(uri, source, diags)
                 server.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
+                    lsp.PublishDiagnosticsParams(
+                        uri=uri, version=doc.version, diagnostics=diags
+                    )
                 )
             except asyncio.CancelledError:
                 logger.debug("Debounced diagnostics task cancelled for %s", uri)
             except Exception:
-                logger.warning("Debounced diagnostics failed for %s", uri, exc_info=True)
+                logger.warning(
+                    "Debounced diagnostics failed for %s", uri, exc_info=True
+                )
 
         loop = asyncio.get_running_loop()
         task = loop.create_task(_debounced())
         task.add_done_callback(
-            lambda t, u=uri: _debounce_tasks.pop(u, None)
-            if _debounce_tasks.get(u) is t
-            else None
+            lambda t, u=uri: (
+                _debounce_tasks.pop(u, None) if _debounce_tasks.get(u) is t else None
+            )
         )
         _debounce_tasks[uri] = task
 
@@ -761,14 +789,20 @@ def register(server) -> None:
             None, _run_pipeline, source, filepath, "save"
         )
         diags = await loop.run_in_executor(
-            None, compute_diagnostics,
-            server.parser, source, filepath,
-            server.indexer, _get_semantic_model(),
+            None,
+            compute_diagnostics,
+            server.parser,
+            source,
+            filepath,
+            server.indexer,
+            _get_semantic_model(),
             pipeline_result,
         )
         server.diagnostic_cache.update_fast(uri, source, diags)
         server.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
+            lsp.PublishDiagnosticsParams(
+                uri=uri, version=doc.version, diagnostics=diags
+            )
         )
 
         if filepath.endswith(".ivy") and server.indexer is not None:
@@ -801,7 +835,9 @@ def register(server) -> None:
                 )
                 server.diagnostic_cache.update_deep(uri, deep)
                 server.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, version=doc_version, diagnostics=diags + deep)
+                    lsp.PublishDiagnosticsParams(
+                        uri=uri, version=doc_version, diagnostics=diags + deep
+                    )
                 )
                 # Notify pull-mode clients to re-request diagnostics
                 try:
@@ -811,7 +847,9 @@ def register(server) -> None:
             except asyncio.CancelledError:
                 logger.debug("Deep diagnostics task cancelled for %s", uri)
             except Exception:
-                logger.warning("Deep diagnostics task failed for %s", uri, exc_info=True)
+                logger.warning(
+                    "Deep diagnostics task failed for %s", uri, exc_info=True
+                )
 
         # Cancel any prior deep task for this URI
         old_deep = _deep_tasks.pop(uri, None)
@@ -820,9 +858,9 @@ def register(server) -> None:
         loop = asyncio.get_running_loop()
         deep_task = loop.create_task(_deep())
         deep_task.add_done_callback(
-            lambda t, u=uri: _deep_tasks.pop(u, None)
-            if _deep_tasks.get(u) is t
-            else None
+            lambda t, u=uri: (
+                _deep_tasks.pop(u, None) if _deep_tasks.get(u) is t else None
+            )
         )
         _deep_tasks[uri] = deep_task
 
@@ -855,7 +893,10 @@ def register(server) -> None:
     )
     async def text_document_diagnostic(
         params: lsp.DocumentDiagnosticParams,
-    ) -> lsp.RelatedFullDocumentDiagnosticReport | lsp.RelatedUnchangedDocumentDiagnosticReport:
+    ) -> (
+        lsp.RelatedFullDocumentDiagnosticReport
+        | lsp.RelatedUnchangedDocumentDiagnosticReport
+    ):
         uri = params.text_document.uri
         cache = server.diagnostic_cache
 
@@ -878,18 +919,27 @@ def register(server) -> None:
                     source = f.read()
             except OSError:
                 return lsp.RelatedFullDocumentDiagnosticReport(
-                    items=[], result_id="empty",
+                    items=[],
+                    result_id="empty",
                 )
 
         filepath = uri_to_path(uri)
         loop = asyncio.get_running_loop()
         pipeline_result = await loop.run_in_executor(
-            None, _run_pipeline, source, filepath, "pull",
+            None,
+            _run_pipeline,
+            source,
+            filepath,
+            "pull",
         )
         diags = await loop.run_in_executor(
-            None, compute_diagnostics,
-            server.parser, source, filepath,
-            server.indexer, _get_semantic_model(),
+            None,
+            compute_diagnostics,
+            server.parser,
+            source,
+            filepath,
+            server.indexer,
+            _get_semantic_model(),
             pipeline_result,
         )
 
@@ -932,18 +982,27 @@ def register(server) -> None:
             if prev_rid is not None:
                 entry = cache.get(uri)
                 if entry is not None and entry.result_id == prev_rid:
-                    items.append(lsp.WorkspaceUnchangedDocumentDiagnosticReport(
-                        uri=uri, version=None, result_id=entry.result_id,
-                    ))
+                    items.append(
+                        lsp.WorkspaceUnchangedDocumentDiagnosticReport(
+                            uri=uri,
+                            version=None,
+                            result_id=entry.result_id,
+                        )
+                    )
                     continue
 
             # Return cached if available
             cached = cache.get_merged(uri)
             if cached is not None:
                 rid, merged = cached
-                items.append(lsp.WorkspaceFullDocumentDiagnosticReport(
-                    uri=uri, items=merged, version=None, result_id=rid,
-                ))
+                items.append(
+                    lsp.WorkspaceFullDocumentDiagnosticReport(
+                        uri=uri,
+                        items=merged,
+                        version=None,
+                        result_id=rid,
+                    )
+                )
                 continue
 
             # Compute fresh (fallback for uncached files)
@@ -960,14 +1019,23 @@ def register(server) -> None:
 
             loop = asyncio.get_running_loop()
             diags = await loop.run_in_executor(
-                None, compute_diagnostics,
-                server.parser, source, filepath,
-                server.indexer, _get_semantic_model(),
+                None,
+                compute_diagnostics,
+                server.parser,
+                source,
+                filepath,
+                server.indexer,
+                _get_semantic_model(),
                 None,
             )
             rid = cache.update_fast(uri, source, diags)
-            items.append(lsp.WorkspaceFullDocumentDiagnosticReport(
-                uri=uri, items=diags, version=None, result_id=rid,
-            ))
+            items.append(
+                lsp.WorkspaceFullDocumentDiagnosticReport(
+                    uri=uri,
+                    items=diags,
+                    version=None,
+                    result_id=rid,
+                )
+            )
 
         return lsp.WorkspaceDiagnosticReport(items=items)

@@ -42,7 +42,11 @@ def test_format_multi_step_trace():
             {
                 "step_number": 2,
                 "action": "quic_stream.send",
-                "assignments": {"stream_id": "4", "stream_state": "open", "bytes_sent": "0"},
+                "assignments": {
+                    "stream_id": "4",
+                    "stream_state": "open",
+                    "bytes_sent": "0",
+                },
             },
         ],
     }

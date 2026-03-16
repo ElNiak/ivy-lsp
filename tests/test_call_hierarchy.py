@@ -61,7 +61,9 @@ class TestPrepareCallHierarchy:
         filepath = str(tmp_path / "proto.ivy")
         lines = Path(filepath).read_text().split("\n")
         # Cursor on "connect" in "action connect" — line 4, char 7
-        result = prepare_call_hierarchy(indexer, filepath, lsp.Position(line=4, character=7), lines)
+        result = prepare_call_hierarchy(
+            indexer, filepath, lsp.Position(line=4, character=7), lines
+        )
         assert result is not None
         assert len(result) == 1
         item = result[0]
@@ -75,7 +77,9 @@ class TestPrepareCallHierarchy:
         filepath = str(tmp_path / "proto.ivy")
         lines = Path(filepath).read_text().split("\n")
         # Cursor on "cid" — a type, not callable
-        result = prepare_call_hierarchy(indexer, filepath, lsp.Position(line=2, character=5), lines)
+        result = prepare_call_hierarchy(
+            indexer, filepath, lsp.Position(line=2, character=5), lines
+        )
         # Types are SymbolKind.Class, should return None
         assert result is None
 
@@ -85,7 +89,9 @@ class TestPrepareCallHierarchy:
         indexer = _index(ws)
         filepath = str(tmp_path / "proto.ivy")
         lines = Path(filepath).read_text().split("\n")
-        result = prepare_call_hierarchy(indexer, filepath, lsp.Position(line=2, character=0), lines)
+        result = prepare_call_hierarchy(
+            indexer, filepath, lsp.Position(line=2, character=0), lines
+        )
         assert result is None
 
     @pytest.mark.unit
@@ -95,7 +101,9 @@ class TestPrepareCallHierarchy:
         filepath = str(tmp_path / "proto.ivy")
         lines = Path(filepath).read_text().split("\n")
         # Cursor on "connect" in "before connect" — line 10, char 7
-        result = prepare_call_hierarchy(indexer, filepath, lsp.Position(line=10, character=7), lines)
+        result = prepare_call_hierarchy(
+            indexer, filepath, lsp.Position(line=10, character=7), lines
+        )
         assert result is not None
         assert len(result) >= 1
 
@@ -128,9 +136,12 @@ class TestIncomingCalls:
 
     @pytest.mark.unit
     def test_no_callers_returns_empty(self, tmp_path):
-        ws = _make_workspace(tmp_path, {
-            "proto.ivy": "#lang ivy1.7\n\ntype cid\n\naction unused(c:cid)\n",
-        })
+        ws = _make_workspace(
+            tmp_path,
+            {
+                "proto.ivy": "#lang ivy1.7\n\ntype cid\n\naction unused(c:cid)\n",
+            },
+        )
         indexer = _index(ws)
         filepath = str(tmp_path / "proto.ivy")
         result = get_incoming_calls(indexer, "unused", filepath)
@@ -153,9 +164,12 @@ class TestOutgoingCalls:
 
     @pytest.mark.unit
     def test_action_with_no_body_returns_empty(self, tmp_path):
-        ws = _make_workspace(tmp_path, {
-            "proto.ivy": "#lang ivy1.7\n\ntype cid\n\naction connect(src:cid, dst:cid)\n",
-        })
+        ws = _make_workspace(
+            tmp_path,
+            {
+                "proto.ivy": "#lang ivy1.7\n\ntype cid\n\naction connect(src:cid, dst:cid)\n",
+            },
+        )
         indexer = _index(ws)
         filepath = str(tmp_path / "proto.ivy")
         result = get_outgoing_calls(indexer, "connect", filepath)
@@ -163,9 +177,12 @@ class TestOutgoingCalls:
 
     @pytest.mark.unit
     def test_file_not_found_returns_empty(self, tmp_path):
-        ws = _make_workspace(tmp_path, {
-            "proto.ivy": "#lang ivy1.7\n\ntype cid\n",
-        })
+        ws = _make_workspace(
+            tmp_path,
+            {
+                "proto.ivy": "#lang ivy1.7\n\ntype cid\n",
+            },
+        )
         indexer = _index(ws)
         result = get_outgoing_calls(indexer, "connect", "/nonexistent/file.ivy")
         assert result == []

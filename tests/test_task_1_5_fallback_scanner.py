@@ -124,7 +124,9 @@ class TestFallbackScanSingleDeclarations:
         """``instance idx : unbounded_sequence`` produces a Variable."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
-        symbols, _error_info = fallback_scan("instance idx : unbounded_sequence", "test.ivy")
+        symbols, _error_info = fallback_scan(
+            "instance idx : unbounded_sequence", "test.ivy"
+        )
         assert len(symbols) == 1
         assert symbols[0].name == "idx"
         assert symbols[0].kind == SymbolKind.Variable

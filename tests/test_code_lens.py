@@ -21,7 +21,6 @@ from ivy_lsp.analysis.requirement_graph import (
 )
 from ivy_lsp.features.code_lens import compute_code_lenses
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -486,7 +485,9 @@ class TestIncludeLenses:
         source = "include quic_types\n"
         lenses = compute_code_lenses(indexer, filepath, source)
         # No include lenses because include_graph is None
-        include_lenses = [l for l in lenses if "brings" in (l.command.title or "").lower()]
+        include_lenses = [
+            l for l in lenses if "brings" in (l.command.title or "").lower()
+        ]
         assert len(include_lenses) == 0
 
     def test_multiple_includes_each_get_lens(self):
@@ -585,9 +586,7 @@ class TestIncludeLenses:
         include_graph = MagicMock()
         include_graph.get_transitive_includes.return_value = {other_file}
 
-        indexer = _make_indexer(
-            graph=graph, include_graph=include_graph, resolver=None
-        )
+        indexer = _make_indexer(graph=graph, include_graph=include_graph, resolver=None)
         source = "include types\n"
         lenses = compute_code_lenses(indexer, filepath, source)
 
@@ -849,6 +848,7 @@ class TestRegisterHandler:
             def decorator(fn):
                 registered[method] = fn
                 return fn
+
             return decorator
 
         server.feature = fake_feature

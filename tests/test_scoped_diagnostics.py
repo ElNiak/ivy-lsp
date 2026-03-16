@@ -22,7 +22,6 @@ from ivy_lsp.analysis.requirement_graph import (
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.diagnostics import compute_requirement_diagnostics
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -39,7 +38,9 @@ def _make_indexer(graph=None, include_graph=None):
     return indexer
 
 
-def _make_req(file, line, kind="require", formula="true", action="", mixin_kind="before"):
+def _make_req(
+    file, line, kind="require", formula="true", action="", mixin_kind="before"
+):
     return RequirementNode(
         id=f"{file}:{line}",
         kind=kind,

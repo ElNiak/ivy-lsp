@@ -1,14 +1,23 @@
 # tests/test_scoped_integration.py
 """Integration tests verifying the triple-counting bug is fixed."""
 import pytest
+
 from ivy_lsp.analysis.requirement_graph import EdgeType, RequirementNode
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 
 
-def _make_req(file, line, kind="require", formula="true", action="", mixin_kind="before"):
+def _make_req(
+    file, line, kind="require", formula="true", action="", mixin_kind="before"
+):
     return RequirementNode(
-        id=f"{file}:{line}", kind=kind, formula_text=formula,
-        line=line, col=0, file=file, monitor_action=action, mixin_kind=mixin_kind,
+        id=f"{file}:{line}",
+        kind=kind,
+        formula_text=formula,
+        line=line,
+        col=0,
+        file=file,
+        monitor_action=action,
+        mixin_kind=mixin_kind,
     )
 
 
@@ -30,9 +39,13 @@ class TestTripleCountingEliminated:
         model = ScopedRequirementModel()
 
         # Requirements in shared file quic_connection.ivy
-        req1 = _make_req("/ws/quic_connection.ivy", 50, "require", "connected", "quic.send")
+        req1 = _make_req(
+            "/ws/quic_connection.ivy", 50, "require", "connected", "quic.send"
+        )
         req2 = _make_req("/ws/quic_connection.ivy", 60, "ensure", "sent", "quic.send")
-        req3 = _make_req("/ws/quic_connection.ivy", 70, "require", "tls_ready", "tls.client_hello")
+        req3 = _make_req(
+            "/ws/quic_connection.ivy", 70, "require", "tls_ready", "tls.client_hello"
+        )
         model.add_requirement(req1)
         model.add_requirement(req2)
         model.add_requirement(req3)
@@ -41,29 +54,35 @@ class TestTripleCountingEliminated:
         model.add_edge(req3.id, EdgeType.CONSTRAINS, "tls.client_hello")
 
         # Requirements in server test file
-        req4 = _make_req("/ws/quic_server_test.ivy", 10, "require", "x > 0", "quic.send")
+        req4 = _make_req(
+            "/ws/quic_server_test.ivy", 10, "require", "x > 0", "quic.send"
+        )
         model.add_requirement(req4)
         model.add_edge(req4.id, EdgeType.CONSTRAINS, "quic.send")
 
         # Register test scopes
         server_scope = TestScope(
             test_file="/ws/quic_server_test.ivy",
-            include_closure=frozenset({
-                "/ws/quic_server_test.ivy",
-                "/ws/quic_connection.ivy",
-                "/ws/quic_types.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/ws/quic_server_test.ivy",
+                    "/ws/quic_connection.ivy",
+                    "/ws/quic_types.ivy",
+                }
+            ),
             exported_actions=frozenset({"quic.send", "quic.recv"}),
             imported_actions=frozenset(),
             tester_role="client",
         )
         client_scope = TestScope(
             test_file="/ws/quic_client_test.ivy",
-            include_closure=frozenset({
-                "/ws/quic_client_test.ivy",
-                "/ws/quic_connection.ivy",
-                "/ws/quic_types.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/ws/quic_client_test.ivy",
+                    "/ws/quic_connection.ivy",
+                    "/ws/quic_types.ivy",
+                }
+            ),
             exported_actions=frozenset({"tls.client_hello"}),
             imported_actions=frozenset(),
             tester_role="server",
@@ -85,8 +104,9 @@ class TestTripleCountingEliminated:
         """Requirements for quic.send don't appear in client test scope."""
         reqs = quic_model.get_scoped_requirements("/ws/quic_client_test.ivy")
         for r in reqs:
-            assert r.monitor_action != "quic.send", \
-                f"quic.send requirement {r.id} leaked into client test scope"
+            assert (
+                r.monitor_action != "quic.send"
+            ), f"quic.send requirement {r.id} leaked into client test scope"
         # Only the tls.client_hello requirement from shared file
         assert len(reqs) == 1
         assert reqs[0].monitor_action == "tls.client_hello"

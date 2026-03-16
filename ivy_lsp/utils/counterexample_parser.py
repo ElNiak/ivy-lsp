@@ -68,7 +68,7 @@ def parse_counterexample(raw_output: str) -> Counterexample | None:
     if header_m:
         assertion_line = int(header_m.group(1))
         # The assertion body is typically the line right after the header
-        after_header = preamble[header_m.end():]
+        after_header = preamble[header_m.end() :]
         body_m = _ASSERTION_BODY_RE.search(after_header)
         if body_m:
             assertion_text = body_m.group(0).strip()
@@ -92,7 +92,9 @@ def parse_counterexample(raw_output: str) -> Counterexample | None:
 
         # Determine the text block for this step (up to next step or end)
         start = step_m.end()
-        end = step_matches[i + 1].start() if i + 1 < len(step_matches) else len(cex_block)
+        end = (
+            step_matches[i + 1].start() if i + 1 < len(step_matches) else len(cex_block)
+        )
         step_text = cex_block[start:end]
 
         # Extract optional action
@@ -113,11 +115,13 @@ def parse_counterexample(raw_output: str) -> Counterexample | None:
                 var_value = assign_m.group(2).strip()
                 assignments[var_name] = var_value
 
-        steps.append({
-            "step_number": step_number,
-            "action": action,
-            "assignments": assignments,
-        })
+        steps.append(
+            {
+                "step_number": step_number,
+                "action": action,
+                "assignments": assignments,
+            }
+        )
 
     return {
         "assertion": assertion_text,

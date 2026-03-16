@@ -81,9 +81,7 @@ def _detect_isolate_at_position(
 
     from ivy_lsp.features.document_symbols import compute_document_symbols
 
-    symbols = compute_document_symbols(
-        server.parser, server.indexer, source, filepath
-    )
+    symbols = compute_document_symbols(server.parser, server.indexer, source, filepath)
 
     def _find_containing(
         syms: Sequence[lsp.DocumentSymbol], line: int
@@ -101,9 +99,7 @@ def _detect_isolate_at_position(
     return _find_containing(symbols, position.line)
 
 
-def _detect_isolate_from_params(
-    server: Any, uri: str, params: Any
-) -> tuple:
+def _detect_isolate_from_params(server: Any, uri: str, params: Any) -> tuple:
     """Extract explicit isolate from params, or detect from cursor position.
 
     Returns (isolate, position) where either may be None.
@@ -145,9 +141,7 @@ def _collect_all_isolates(
         return names
 
     # Check current file
-    symbols = compute_document_symbols(
-        server.parser, server.indexer, source, filepath
-    )
+    symbols = compute_document_symbols(server.parser, server.indexer, source, filepath)
     isolates = _extract_isolate_names(symbols)
 
     # If none found locally, walk transitive includes
@@ -242,9 +236,7 @@ def _get_compile_env() -> Optional[Dict[str, str]]:
         )
     if extra_libs:
         existing = env.get("LIBRARY_PATH", "")
-        env["LIBRARY_PATH"] = os.pathsep.join(
-            filter(None, [existing] + extra_libs)
-        )
+        env["LIBRARY_PATH"] = os.pathsep.join(filter(None, [existing] + extra_libs))
 
     return env
 
@@ -265,9 +257,7 @@ async def _run_tool(
     """
     if token is not None:
         # Skip progress if the client doesn't support work-done progress
-        client_supports = getattr(
-            server, "_client_supports_work_done_progress", False
-        )
+        client_supports = getattr(server, "_client_supports_work_done_progress", False)
         if not client_supports:
             token = None
         else:
@@ -287,7 +277,10 @@ async def _run_tool(
 
     try:
         result = await run_ivy_subprocess(
-            cmd, timeout=timeout, cwd=cwd, env=env,
+            cmd,
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
         )
 
         return {
@@ -308,7 +301,6 @@ async def _run_tool(
                     token,
                     exc_info=True,
                 )
-
 
 
 def _redirect_to_enclosing_test(
@@ -337,16 +329,17 @@ def _redirect_to_enclosing_test(
         op_name,
         filepath,
         enclosing_test,
-        extra={"event": LogEvent(
-            LogCategory.ACTIVITY, op_name,
-            {"module": filepath, "test": enclosing_test},
-        )},
+        extra={
+            "event": LogEvent(
+                LogCategory.ACTIVITY,
+                op_name,
+                {"module": filepath, "test": enclosing_test},
+            )
+        },
     )
 
     if isolate is None:
-        module_basename = os.path.basename(
-            uri_to_path(uri)
-        ).replace(".ivy", "")
+        module_basename = os.path.basename(uri_to_path(uri)).replace(".ivy", "")
         # Read actual source for isolate detection
         enc_source = ""
         try:
@@ -516,17 +509,24 @@ def register(server: Any) -> None:
                 "Redirecting ivyc from module %s to test %s",
                 filepath,
                 enclosing_test,
-                extra={"event": LogEvent(
-                    LogCategory.ACTIVITY, "compile",
-                    {"module": filepath, "test": enclosing_test},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.ACTIVITY,
+                        "compile",
+                        {"module": filepath, "test": enclosing_test},
+                    )
+                },
             )
             filepath = enclosing_test
 
         op_id = _track_start(server, "compile", filepath)
 
         staged_filepath = _resolve_via_staging(server, filepath)
-        cmd = ["ivyc", f"target={_validate_ivy_param(target)}", os.path.basename(staged_filepath)]
+        cmd = [
+            "ivyc",
+            f"target={_validate_ivy_param(target)}",
+            os.path.basename(staged_filepath),
+        ]
         try:
             result = await _run_tool(
                 cmd,
@@ -554,9 +554,7 @@ def register(server: Any) -> None:
         if isolate is None:
             doc = server.workspace.get_text_document(uri)
             source = doc.source or ""
-            all_isolates = _collect_all_isolates(
-                server, filepath, source
-            )
+            all_isolates = _collect_all_isolates(server, filepath, source)
             if len(all_isolates) == 1:
                 isolate = all_isolates[0]
             elif len(all_isolates) > 1:
@@ -631,7 +629,9 @@ def register(server: Any) -> None:
                     srv.parser, doc.source or "", filepath, srv.indexer
                 )
                 srv.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
+                    lsp.PublishDiagnosticsParams(
+                        uri=uri, version=doc.version, diagnostics=diags
+                    )
                 )
             except Exception:
                 logger.warning(
@@ -667,16 +667,16 @@ def register(server: Any) -> None:
                     srv.indexer,
                 )
                 srv.text_document_publish_diagnostics(
-                    lsp.PublishDiagnosticsParams(uri=uri, version=doc.version, diagnostics=diags)
+                    lsp.PublishDiagnosticsParams(
+                        uri=uri, version=doc.version, diagnostics=diags
+                    )
                 )
             except Exception:
                 logger.warning(
                     "Failed to refresh diagnostics for %s", uri, exc_info=True
                 )
 
-        await asyncio.gather(
-            *(_process_one(uri, doc) for uri, doc in items)
-        )
+        await asyncio.gather(*(_process_one(uri, doc) for uri, doc in items))
 
     @server.feature("ivy/setActiveTest")
     async def ivy_set_active_test(params: Any = None) -> Dict[str, Any]:
@@ -729,13 +729,15 @@ def register(server: Any) -> None:
 
         tests = []
         for _test_file, scope in graph.iter_test_scopes():
-            tests.append({
-                "testFile": scope.test_file,
-                "testerRole": scope.tester_role,
-                "exportCount": len(scope.exported_actions),
-                "importCount": len(scope.imported_actions),
-                "includeCount": len(scope.include_closure),
-            })
+            tests.append(
+                {
+                    "testFile": scope.test_file,
+                    "testerRole": scope.tester_role,
+                    "exportCount": len(scope.exported_actions),
+                    "importCount": len(scope.imported_actions),
+                    "includeCount": len(scope.include_closure),
+                }
+            )
 
         active = graph.get_active_scope()
         return {
@@ -852,9 +854,7 @@ def register(server: Any) -> None:
         if ir is None:
             return {
                 "success": False,
-                "error": (
-                    f"No cached compilation for {os.path.basename(filepath)}"
-                ),
+                "error": (f"No cached compilation for {os.path.basename(filepath)}"),
                 "hint": "Run ivy/compile or wait for background compilation",
             }
 
@@ -862,9 +862,7 @@ def register(server: Any) -> None:
         flat_mixins = []
         for mixin_list in ir.mixins.values():
             for m in mixin_list:
-                flat_mixins.append(
-                    {"mixer": m.mixer, "mixee": m.mixee, "kind": m.kind}
-                )
+                flat_mixins.append({"mixer": m.mixer, "mixee": m.mixee, "kind": m.kind})
 
         return {
             "success": True,
@@ -981,9 +979,7 @@ def register(server: Any) -> None:
             if len(inner) > 1:
                 raw = inner[1]
                 if isinstance(raw, str):
-                    from_file = (
-                        uri_to_path(raw) if raw.startswith("file://") else raw
-                    )
+                    from_file = uri_to_path(raw) if raw.startswith("file://") else raw
         elif isinstance(params, dict):
             uri = params.get("uri") or params.get("fromFile")
             if uri:
@@ -1013,7 +1009,10 @@ def register(server: Any) -> None:
         if workspace_root:
             real_resolved = os.path.realpath(resolved)
             real_root = os.path.realpath(workspace_root)
-            if not real_resolved.startswith(real_root + os.sep) and real_resolved != real_root:
+            if (
+                not real_resolved.startswith(real_root + os.sep)
+                and real_resolved != real_root
+            ):
                 logger.warning(
                     "Resolved include %r escapes workspace: %s",
                     include_name,

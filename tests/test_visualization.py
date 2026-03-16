@@ -33,7 +33,6 @@ from ivy_lsp.features.visualization import (  # noqa: E402
 )
 from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -101,9 +100,7 @@ def _build_graph() -> ScopedRequirementModel:
 
 class _FakeServer:
     def __init__(self, graph=None):
-        self.indexer = (
-            type("I", (), {"requirement_graph": graph})() if graph else None
-        )
+        self.indexer = type("I", (), {"requirement_graph": graph})() if graph else None
         self.initializing = False
 
 
@@ -301,41 +298,67 @@ class TestStateVarsWrittenPerAction:
 
         # Requirements for two different actions in different files
         r1 = RequirementNode(
-            id="/test/file_a.ivy:10", kind="require",
-            formula_text="x > 0", line=10, col=0,
-            file="/test/file_a.ivy", monitor_action="action_a",
+            id="/test/file_a.ivy:10",
+            kind="require",
+            formula_text="x > 0",
+            line=10,
+            col=0,
+            file="/test/file_a.ivy",
+            monitor_action="action_a",
             mixin_kind="before",
         )
         r2 = RequirementNode(
-            id="/test/file_b.ivy:20", kind="require",
-            formula_text="y > 0", line=20, col=0,
-            file="/test/file_b.ivy", monitor_action="action_b",
+            id="/test/file_b.ivy:20",
+            kind="require",
+            formula_text="y > 0",
+            line=20,
+            col=0,
+            file="/test/file_b.ivy",
+            monitor_action="action_b",
             mixin_kind="before",
         )
 
         # Writes in file_a (belongs to action_a)
         writes_a = [("var_x", "/test/file_a.ivy", 15)]
         # Writes in file_b (belongs to action_b)
-        writes_b = [("var_y", "/test/file_b.ivy", 25), ("var_z", "/test/file_b.ivy", 26)]
+        writes_b = [
+            ("var_y", "/test/file_b.ivy", 25),
+            ("var_z", "/test/file_b.ivy", 26),
+        ]
 
         graph.add_file_requirements("/test/file_a.ivy", [r1], writes_a)
         graph.add_file_requirements("/test/file_b.ivy", [r2], writes_b)
 
-        graph.add_action_if_absent(ActionNode(
-            id="action_a", name="action_a",
-            qualified_name="action_a", file="/test/file_a.ivy", line=5,
-        ))
-        graph.add_action_if_absent(ActionNode(
-            id="action_b", name="action_b",
-            qualified_name="action_b", file="/test/file_b.ivy", line=15,
-        ))
+        graph.add_action_if_absent(
+            ActionNode(
+                id="action_a",
+                name="action_a",
+                qualified_name="action_a",
+                file="/test/file_a.ivy",
+                line=5,
+            )
+        )
+        graph.add_action_if_absent(
+            ActionNode(
+                id="action_b",
+                name="action_b",
+                qualified_name="action_b",
+                file="/test/file_b.ivy",
+                line=15,
+            )
+        )
 
         for var_name, fp, line in writes_a + writes_b:
             if var_name not in graph.state_vars:
-                graph.add_state_var(StateVarNode(
-                    id=var_name, name=var_name,
-                    qualified_name=var_name, file=fp, line=line,
-                ))
+                graph.add_state_var(
+                    StateVarNode(
+                        id=var_name,
+                        name=var_name,
+                        qualified_name=var_name,
+                        file=fp,
+                        line=line,
+                    )
+                )
 
         snap = graph.snapshot()
 
@@ -417,9 +440,7 @@ def _build_graph_with_gaps() -> ScopedRequirementModel:
     graph.add_edge(r1.id, EdgeType.READS, "conn_state")
 
     # pkt_count is written but never read by any requirement
-    graph.add_edge(
-        "/test/quic.ivy:20:write:pkt_count", EdgeType.WRITES, "pkt_count"
-    )
+    graph.add_edge("/test/quic.ivy:20:write:pkt_count", EdgeType.WRITES, "pkt_count")
 
     return graph
 
@@ -628,9 +649,7 @@ class TestHandleCoverageGaps:
         server = _FakeServer(graph)
         result = handle_coverage_gaps(server, {})
         entry = next(
-            r
-            for r in result["uncoveredRfcRequirements"]
-            if r["id"] == "rfc9000:8.1"
+            r for r in result["uncoveredRfcRequirements"] if r["id"] == "rfc9000:8.1"
         )
         assert entry["rfc"] == "RFC9000"
         assert entry["section"] == "8.1"
@@ -888,7 +907,7 @@ class TestHandleActionDependencyGraph:
         assert "scoped" in result["scopeInfo"]
 
     def test_requirement_count_on_action_nodes(self):
-        """requirementCount reflects the number of requirements for each action."""
+        """RequirementCount reflects the number of requirements for each action."""
         graph = _build_graph_with_shared_state()
         server = _FakeServer(graph)
         result = handle_action_dependency_graph(server, {})
@@ -1121,9 +1140,7 @@ class TestHandleStateMachineView:
         graph.add_edge(r_extra.id, EdgeType.WRITES, "pkt_num")
 
         server = _FakeServer(graph)
-        result = handle_state_machine_view(
-            server, {"stateVarFilter": "conn_state"}
-        )
+        result = handle_state_machine_view(server, {"stateVarFilter": "conn_state"})
         state_nodes = [n for n in result["nodes"] if n["type"] == "state"]
         state_names = {n["label"] for n in state_nodes}
         assert "conn_state" in state_names
@@ -1221,8 +1238,7 @@ class TestHandleSmartSuggestions:
         result = handle_smart_suggestions(server, {})
         assert isinstance(result["suggestions"], list)
         uncovered = [
-            s for s in result["suggestions"]
-            if s["type"] == "uncovered_action"
+            s for s in result["suggestions"] if s["type"] == "uncovered_action"
         ]
         names = [s["name"] for s in uncovered]
         assert "recv_pkt" in names
@@ -1233,32 +1249,33 @@ class TestHandleSmartSuggestions:
         # Add a state var that is written but never read
         graph.add_state_var(
             StateVarNode(
-                id="orphan_var", name="orphan_var",
+                id="orphan_var",
+                name="orphan_var",
                 qualified_name="q.orphan_var",
-                file="/test/q.ivy", line=1, is_relation=True,
+                file="/test/q.ivy",
+                line=1,
+                is_relation=True,
             )
         )
         graph.add_action(
             ActionNode(
-                id="act1", name="act1", qualified_name="q.act1",
-                file="/test/q.ivy", line=5,
+                id="act1",
+                name="act1",
+                qualified_name="q.act1",
+                file="/test/q.ivy",
+                line=5,
             )
         )
         server = _FakeServer(graph)
         result = handle_smart_suggestions(server, {})
-        unguarded = [
-            s for s in result["suggestions"]
-            if s["type"] == "unguarded_state"
-        ]
+        unguarded = [s for s in result["suggestions"] if s["type"] == "unguarded_state"]
         assert any(s["name"] == "orphan_var" for s in unguarded)
 
     def test_pattern_hint_for_frame_file(self):
         """Pattern hints are added for frame/message files."""
         graph = _build_graph()
         server = _FakeServer(graph)
-        result = handle_smart_suggestions(
-            server, {"filePath": "/test/quic_frame.ivy"}
-        )
+        result = handle_smart_suggestions(server, {"filePath": "/test/quic_frame.ivy"})
         hints = [s for s in result["suggestions"] if s["type"] == "pattern_hint"]
         assert len(hints) >= 1
         assert "variant" in hints[0]["message"].lower()
@@ -1368,7 +1385,7 @@ class TestNumericParamValidation:
     """H4: String-type numeric params should be coerced safely."""
 
     def test_max_edges_string_coercion_no_error(self):
-        """maxEdges as '1' (string) should not raise TypeError."""
+        """MaxEdges as '1' (string) should not raise TypeError."""
         graph = _build_graph_with_shared_state()
         server = _FakeServer(graph)
         # With string "1", should coerce to int and truncate (not error out)
@@ -1378,7 +1395,7 @@ class TestNumericParamValidation:
         assert len(result["edges"]) <= 1
 
     def test_max_transitions_string_truncates_correctly(self):
-        """maxTransitions as '1' (string) should truncate to exactly 1 transition."""
+        """MaxTransitions as '1' (string) should truncate to exactly 1 transition."""
         graph = _build_graph_for_state_machine()
         server = _FakeServer(graph)
         # First verify >1 transitions with default

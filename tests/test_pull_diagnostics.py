@@ -20,7 +20,6 @@ if str(IVY_ROOT) not in sys.path:
 
 from ivy_lsp.features.diagnostics import DiagnosticCache, register
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -67,6 +66,7 @@ def _register_handlers(server):
             if options is not None:
                 options_map[method] = options
             return fn
+
         return decorator
 
     server.feature = fake_feature
@@ -770,8 +770,10 @@ class TestEdgeCases:
         assert cache.update_deep("file:///new.ivy", [_make_diag("d")]) is None
 
     def test_empty_deep_list_behavior(self):
-        """Empty deep list is falsy, so get_merged won't extend merged list,
-        but result_id still says '-deep'."""
+        """Empty deep list is falsy, so get_merged won't extend merged list.
+
+        The result_id still says '-deep' even though no deep diagnostics are present.
+        """
         cache = DiagnosticCache()
         cache.update_fast("file:///a.ivy", "src", [_make_diag("fast")])
         cache.update_deep("file:///a.ivy", [])
@@ -788,7 +790,9 @@ class TestEdgeCases:
         def writer():
             try:
                 for i in range(100):
-                    cache.update_fast("file:///shared.ivy", f"src{i}", [_make_diag(f"d{i}")])
+                    cache.update_fast(
+                        "file:///shared.ivy", f"src{i}", [_make_diag(f"d{i}")]
+                    )
             except Exception as e:
                 errors.append(e)
 

@@ -15,27 +15,29 @@ logger = logging.getLogger(__name__)
 # Directory basenames that should be excluded from workspace scanning.
 # These patterns avoid indexing build artifacts, VCS internals, and
 # transient test outputs that produce noisy parse warnings.
-_EXCLUDED_DIR_BASENAMES = frozenset({
-    "build",
-    "dist",
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    "__pycache__",
-    ".tox",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".venv",
-    "venv",
-    "submodules",
-    "test",
-    "include",
-    "doc",
-    "examples",
-    "notebooks",
-    "patches",
-})
+_EXCLUDED_DIR_BASENAMES = frozenset(
+    {
+        "build",
+        "dist",
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "__pycache__",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".venv",
+        "venv",
+        "submodules",
+        "test",
+        "include",
+        "doc",
+        "examples",
+        "notebooks",
+        "patches",
+    }
+)
 
 # Glob-style patterns matched against directory basenames.
 _EXCLUDED_DIR_PATTERNS = [
@@ -61,6 +63,7 @@ class IncludeResolver:
         exclude_paths: Optional[List[str]] = None,
         include_paths: Optional[List[str]] = None,
     ) -> None:
+        """Initialize resolver with workspace root and search paths."""
         self._workspace_root = os.path.abspath(workspace_root)
         self._ivy_include_path = ivy_include_path
         self._exclude_paths = [p.rstrip(os.sep) for p in (exclude_paths or [])]
@@ -148,8 +151,7 @@ class IncludeResolver:
             roots = [search_root]
         elif self._include_paths:
             roots = [
-                os.path.join(self._workspace_root, ip)
-                for ip in self._include_paths
+                os.path.join(self._workspace_root, ip) for ip in self._include_paths
             ]
         else:
             roots = [self._workspace_root]
@@ -162,11 +164,11 @@ class IncludeResolver:
             for dirpath, dirnames, filenames in os.walk(root):
                 # Prune excluded directories in-place.
                 dirnames[:] = [
-                    d for d in dirnames
+                    d
+                    for d in dirnames
                     if d not in _EXCLUDED_DIR_BASENAMES
                     and not any(
-                        fnmatch.fnmatch(d, pat)
-                        for pat in _EXCLUDED_DIR_PATTERNS
+                        fnmatch.fnmatch(d, pat) for pat in _EXCLUDED_DIR_PATTERNS
                     )
                 ]
                 # Path-based exclusions (relative to workspace root).
@@ -252,6 +254,7 @@ class IncludeResolver:
     def cleanup_staging(self) -> None:
         """Remove the staging directory and clear the staged file map."""
         if self._staging_dir and os.path.isdir(self._staging_dir):
+
             def _on_error(func, path, exc_info):
                 logger.warning("Staging cleanup error: %s on %s", func.__name__, path)
 

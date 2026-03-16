@@ -29,6 +29,7 @@ class SemanticModel:
     """
 
     def __init__(self) -> None:
+        """Initialize empty node/edge stores with a reentrant lock."""
         self._lock = threading.RLock()
 
         # Primary storage
@@ -280,7 +281,8 @@ class SemanticModel:
         with self._lock:
             reqs = list(self._nodes_by_type.get(RequirementNode, {}).values())
             covered = [
-                r for r in reqs
+                r
+                for r in reqs
                 if any(
                     et == SemanticEdgeType.COVERS
                     for et, _ in self._outgoing.get(r.id, [])

@@ -5,6 +5,7 @@ and subprocess execution. They are called by:
 - features/commands.py (LSP handlers)
 - mcp_server.py (MCP tool handlers)
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,10 +13,7 @@ import os
 from typing import Any
 
 from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
-from ivy_lsp.utils.ivy_output import (
-    extract_error_summary,
-    parse_ivy_output,
-)
+from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 
 log = logging.getLogger(__name__)
 
@@ -50,11 +48,7 @@ def detect_isolates_for_file(
     """
     if not symbols:
         return []
-    return [
-        s["name"]
-        for s in symbols
-        if s.get("kind") in ("isolate", "extract")
-    ]
+    return [s["name"] for s in symbols if s.get("kind") in ("isolate", "extract")]
 
 
 async def run_ivy_check(

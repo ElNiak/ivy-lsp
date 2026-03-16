@@ -1,10 +1,11 @@
 """Tests for warm-loading index from persistent cache."""
+
 from unittest.mock import MagicMock
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
 from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.parsing.symbols import IvySymbol
 
 
 class TestWarmLoad:
@@ -20,7 +21,10 @@ class TestWarmLoad:
 
         # First run: cold index (populates persistent cache)
         idx1 = WorkspaceIndexer(
-            str(tmp_path), parser, resolver, persistent_cache=True,
+            str(tmp_path),
+            parser,
+            resolver,
+            persistent_cache=True,
             cache_dir=str(tmp_path / ".cache"),
         )
         idx1.index_workspace()
@@ -30,7 +34,10 @@ class TestWarmLoad:
 
         # Second run: warm load (should use cache)
         idx2 = WorkspaceIndexer(
-            str(tmp_path), parser, resolver, persistent_cache=True,
+            str(tmp_path),
+            parser,
+            resolver,
+            persistent_cache=True,
             cache_dir=str(tmp_path / ".cache"),
         )
         idx2.index_workspace()
@@ -46,4 +53,5 @@ class TestWarmLoad:
 
         idx = WorkspaceIndexer(str(tmp_path), parser, resolver)
         from ivy_lsp.indexer.file_cache import FileCache
+
         assert isinstance(idx._cache, FileCache)

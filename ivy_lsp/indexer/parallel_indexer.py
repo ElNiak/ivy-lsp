@@ -57,12 +57,14 @@ def worker_parse_file(
         with open(filepath) as f:
             source = f.read()
     except OSError as e:
-        return WorkerResult(filepath=filepath, success=False, symbols=[], errors=[str(e)])
+        return WorkerResult(
+            filepath=filepath, success=False, symbols=[], errors=[str(e)]
+        )
 
     # Try full parser first
     try:
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         resolve_callback = None
         if resolver_config:
@@ -95,7 +97,9 @@ def worker_parse_file(
     except ImportError as e:
         logger.warning(
             "Worker: ivy import failed for %s: %s (sys.path has %d entries)",
-            filepath, e, len(sys.path),
+            filepath,
+            e,
+            len(sys.path),
         )
     except Exception as e:
         logger.warning("Worker: parse failed for %s: %s", filepath, e)
@@ -124,6 +128,7 @@ class ParallelDeepIndexer:
         resolver_config: Optional[dict] = None,
         stop_event: Optional[threading.Event] = None,
     ) -> None:
+        """Initialize with worker count and optional stop event."""
         if num_workers <= 0:
             num_workers = max(1, (os.cpu_count() or 1) // 2)
         self._num_workers = num_workers
@@ -131,8 +136,10 @@ class ParallelDeepIndexer:
         self._stop_event = stop_event
 
     def parse_files(
-        self, filepaths: List[str],
+        self,
+        filepaths: List[str],
     ) -> Dict[str, WorkerResult]:
+        """Parse files in parallel and return results keyed by path."""
         if self._stop_event is not None and self._stop_event.is_set():
             return {}
 
@@ -166,13 +173,16 @@ class ParallelDeepIndexer:
                         results[filepath] = future.result(timeout=60)
                     except (BrokenExecutor, Exception) as e:
                         results[filepath] = WorkerResult(
-                            filepath=filepath, success=False,
-                            symbols=[], errors=[str(e)],
+                            filepath=filepath,
+                            success=False,
+                            symbols=[],
+                            errors=[str(e)],
                         )
         except (FileNotFoundError, OSError) as exc:
             if self._stop_event is not None and self._stop_event.is_set():
                 logger.debug(
-                    "Parallel indexer pool interrupted during shutdown: %s", exc,
+                    "Parallel indexer pool interrupted during shutdown: %s",
+                    exc,
                 )
             else:
                 raise

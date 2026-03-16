@@ -1,14 +1,22 @@
 """Tests for parallel deep indexing worker functions."""
+
 import sys
 
-from ivy_lsp.indexer.parallel_indexer import WorkerResult, worker_parse_file, _worker_init
+from ivy_lsp.indexer.parallel_indexer import (
+    WorkerResult,
+    _worker_init,
+    worker_parse_file,
+)
 
 
 class TestWorkerResult:
     def test_dataclass_fields(self):
         r = WorkerResult(
-            filepath="/tmp/a.ivy", success=True,
-            symbols=[{"name": "t"}], errors=[], includes=["base"],
+            filepath="/tmp/a.ivy",
+            success=True,
+            symbols=[{"name": "t"}],
+            errors=[],
+            includes=["base"],
         )
         assert r.filepath == "/tmp/a.ivy"
         assert r.success is True

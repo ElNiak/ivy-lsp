@@ -137,9 +137,7 @@ class TestCoverageDiff:
     async def test_diff_without_baseline_returns_error(self):
         """ivy_coverage(mode='diff') without prior stats returns an error."""
         mcp = _get_mcp_app()
-        result = await mcp.call_tool(
-            "ivy_coverage", {"mode": "diff"}
-        )
+        result = await mcp.call_tool("ivy_coverage", {"mode": "diff"})
         text = _extract_text(result)
         data = json.loads(text)
         assert data["success"] is False
@@ -150,18 +148,14 @@ class TestCoverageDiff:
         """ivy_coverage(mode='diff') after stats returns delta with direction."""
         mcp = _get_mcp_app(workspace_root=str(annotated_workspace))
         # First call: build stats baseline
-        result1 = await mcp.call_tool(
-            "ivy_coverage", {"mode": "stats"}
-        )
+        result1 = await mcp.call_tool("ivy_coverage", {"mode": "stats"})
         data1 = json.loads(_extract_text(result1))
         # The workspace may or may not have coverage, but stats should succeed
         if data1.get("total", 0) == 0:
             pytest.skip("No requirements found in annotated_workspace")
 
         # Second call: diff should work now
-        result2 = await mcp.call_tool(
-            "ivy_coverage", {"mode": "diff"}
-        )
+        result2 = await mcp.call_tool("ivy_coverage", {"mode": "diff"})
         data2 = json.loads(_extract_text(result2))
         # Should have diff fields, not an error
         assert "delta_percent" in data2
@@ -182,11 +176,11 @@ class TestCoverageModeValidation:
 
         mcp = _get_mcp_app()
         with pytest.raises((McpError, Exception)) as exc_info:
-            await mcp.call_tool(
-                "ivy_coverage", {"mode": "bogus"}
-            )
+            await mcp.call_tool("ivy_coverage", {"mode": "bogus"})
         # The error message should mention valid modes
-        assert "matrix" in str(exc_info.value) or "literal" in str(exc_info.value).lower()
+        assert (
+            "matrix" in str(exc_info.value) or "literal" in str(exc_info.value).lower()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +193,7 @@ class TestIvyQuery:
     async def test_query_impact_requires_symbol_name(self):
         """ivy_query(mode='impact') without symbol_name returns error."""
         mcp = _get_mcp_app()
-        result = await mcp.call_tool(
-            "ivy_query", {"mode": "impact"}
-        )
+        result = await mcp.call_tool("ivy_query", {"mode": "impact"})
         text = _extract_text(result)
         data = json.loads(text)
         assert data["success"] is False
@@ -211,9 +203,7 @@ class TestIvyQuery:
     async def test_query_xrefs_requires_id(self):
         """ivy_query(mode='xrefs') without node_id or symbol_name returns error."""
         mcp = _get_mcp_app()
-        result = await mcp.call_tool(
-            "ivy_query", {"mode": "xrefs"}
-        )
+        result = await mcp.call_tool("ivy_query", {"mode": "xrefs"})
         text = _extract_text(result)
         data = json.loads(text)
         assert data["success"] is False
@@ -222,9 +212,7 @@ class TestIvyQuery:
     async def test_query_info_requires_symbol_name(self):
         """ivy_query(mode='info') without symbol_name returns error."""
         mcp = _get_mcp_app()
-        result = await mcp.call_tool(
-            "ivy_query", {"mode": "info"}
-        )
+        result = await mcp.call_tool("ivy_query", {"mode": "info"})
         text = _extract_text(result)
         data = json.loads(text)
         assert data["success"] is False

@@ -23,12 +23,14 @@ def _register_commands(server_mock=None):
         def decorator(fn):
             features[method] = fn
             return fn
+
         return decorator
 
     def fake_command(name):
         def decorator(fn):
             commands[name] = fn
             return fn
+
         return decorator
 
     server.feature = fake_feature

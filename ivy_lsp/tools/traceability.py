@@ -26,7 +26,6 @@ _RFC_REQ_PATTERN = re.compile(
 
 def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     """Register traceability-related MCP tools."""
-
     # Coverage baseline cache: stores last coverage stats result per scope.
     # Key is the relative_path (or "__global__" when None).
     _coverage_baselines: dict[str, dict] = {}
@@ -62,29 +61,35 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 for rfc_id in normalize_tag_to_manifest_ids(tag, req_ids):
                     if rfc_id not in covered_tags:
                         covered_tags[rfc_id] = []
-                    covered_tags[rfc_id].append({
-                        "file": ann.file,
-                        "line": ann.line,
-                    })
+                    covered_tags[rfc_id].append(
+                        {
+                            "file": ann.file,
+                            "line": ann.line,
+                        }
+                    )
 
         matrix = []
         for req in requirements:
-            matrix.append({
-                "id": req.id,
-                "rfc": req.rfc,
-                "section": req.section,
-                "level": req.level,
-                "text": req.text[:120],
-                "covered": req.id in covered_tags,
-                "assertions": covered_tags.get(req.id, []),
-            })
+            matrix.append(
+                {
+                    "id": req.id,
+                    "rfc": req.rfc,
+                    "section": req.section,
+                    "level": req.level,
+                    "text": req.text[:120],
+                    "covered": req.id in covered_tags,
+                    "assertions": covered_tags.get(req.id, []),
+                }
+            )
 
-        return json.dumps({
-            "total_requirements": len(requirements),
-            "covered": sum(1 for m in matrix if m["covered"]),
-            "uncovered": sum(1 for m in matrix if not m["covered"]),
-            "matrix": matrix,
-        })
+        return json.dumps(
+            {
+                "total_requirements": len(requirements),
+                "covered": sum(1 for m in matrix if m["covered"]),
+                "uncovered": sum(1 for m in matrix if not m["covered"]),
+                "matrix": matrix,
+            }
+        )
 
     async def _ivy_requirement_coverage(relative_path: str | None = None) -> str:
         """RFC requirement coverage statistics by level and layer."""
@@ -205,7 +210,14 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         baseline_covered = set(baseline.get("_covered_ids", []))
         current_covered = set(current.get("_covered_ids", []))
 
-        all_ids = baseline_covered | current_covered | set(baseline.get("_uncovered_ids_full", baseline.get("uncovered_ids", []))) | set(current.get("_uncovered_ids_full", current.get("uncovered_ids", [])))
+        all_ids = (
+            baseline_covered
+            | current_covered
+            | set(
+                baseline.get("_uncovered_ids_full", baseline.get("uncovered_ids", []))
+            )
+            | set(current.get("_uncovered_ids_full", current.get("uncovered_ids", [])))
+        )
 
         new_gaps = sorted(baseline_covered - current_covered)
         recovered = sorted(current_covered - baseline_covered)
@@ -235,17 +247,19 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             parts.append("no changes")
         summary = f"Coverage {direction} by {abs(delta)}% ({', '.join(parts)})"
 
-        return json.dumps({
-            "baseline_coverage_percent": baseline_pct,
-            "current_coverage_percent": current_pct,
-            "delta_percent": delta,
-            "delta_direction": direction,
-            "new_gaps": new_gaps,
-            "recovered": recovered,
-            "unchanged_covered": unchanged_covered,
-            "unchanged_uncovered": unchanged_uncovered,
-            "summary": summary,
-        })
+        return json.dumps(
+            {
+                "baseline_coverage_percent": baseline_pct,
+                "current_coverage_percent": current_pct,
+                "delta_percent": delta,
+                "delta_direction": direction,
+                "new_gaps": new_gaps,
+                "recovered": recovered,
+                "unchanged_covered": unchanged_covered,
+                "unchanged_uncovered": unchanged_uncovered,
+                "summary": summary,
+            }
+        )
 
     async def _ivy_impact_analysis(symbol_name: str) -> str:
         """Analyze incoming and outgoing edges for a symbol."""
@@ -258,7 +272,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         # H10: Find matching symbol nodes with dotted name resolution
         all_symbols = model.get_nodes_by_type(SymbolNode)
         matches = [
-            sn for sn in all_symbols
+            sn
+            for sn in all_symbols
             if sn.name == symbol_name or sn.qualified_name == symbol_name
         ]
 
@@ -270,31 +285,35 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             matches = suffix if suffix else by_last
 
         if not matches:
-            return json.dumps({
-                "symbol": symbol_name,
-                "found": False,
-                "message": f"Symbol '{symbol_name}' not found in semantic model",
-            })
+            return json.dumps(
+                {
+                    "symbol": symbol_name,
+                    "found": False,
+                    "message": f"Symbol '{symbol_name}' not found in semantic model",
+                }
+            )
 
         sn = matches[0]
         incoming = model.get_incoming(sn.id)
         outgoing = model.get_outgoing(sn.id)
 
-        return json.dumps({
-            "symbol": symbol_name,
-            "found": True,
-            "qualified_name": sn.qualified_name,
-            "kind": sn.kind,
-            "file": sn.file,
-            "line": sn.line,
-            "incoming_edges": [
-                {"type": etype.value, "source": src} for etype, src in incoming
-            ],
-            "outgoing_edges": [
-                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
-            ],
-            "total_references": len(incoming) + len(outgoing),
-        })
+        return json.dumps(
+            {
+                "symbol": symbol_name,
+                "found": True,
+                "qualified_name": sn.qualified_name,
+                "kind": sn.kind,
+                "file": sn.file,
+                "line": sn.line,
+                "incoming_edges": [
+                    {"type": etype.value, "source": src} for etype, src in incoming
+                ],
+                "outgoing_edges": [
+                    {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+                ],
+                "total_references": len(incoming) + len(outgoing),
+            }
+        )
 
     async def _ivy_cross_references(node_id: str) -> str:
         """Query cross-reference graph neighborhood of a node."""
@@ -315,7 +334,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
             # 1. Try exact name or qualified_name match
             sym_matches = [
-                sn for sn in all_symbols
+                sn
+                for sn in all_symbols
                 if sn.name == symbol_name or sn.qualified_name == symbol_name
             ]
 
@@ -323,7 +343,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             if not sym_matches and "." in symbol_name:
                 last = symbol_name.rsplit(".", 1)[-1]
                 by_last = [sn for sn in all_symbols if sn.name == last]
-                suffix = [sn for sn in by_last if sn.qualified_name.endswith(symbol_name)]
+                suffix = [
+                    sn for sn in by_last if sn.qualified_name.endswith(symbol_name)
+                ]
                 sym_matches = suffix if suffix else by_last
 
             # 3. If file hint present in node_id, use it to narrow results
@@ -331,7 +353,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 file_hint = parts[0]
                 # Try suffix match on file path (handles absolute vs relative)
                 narrowed = [
-                    sn for sn in sym_matches
+                    sn
+                    for sn in sym_matches
                     if (sn.file or "").endswith(file_hint)
                     or file_hint in (sn.file or "")
                 ]
@@ -341,8 +364,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             # 4. Rank by reference count and pick best match
             if sym_matches:
                 if len(sym_matches) > 1:
+
                     def _ref_count(sn):
-                        return len(model.get_incoming(sn.id)) + len(model.get_outgoing(sn.id))
+                        return len(model.get_incoming(sn.id)) + len(
+                            model.get_outgoing(sn.id)
+                        )
+
                     sym_matches.sort(key=_ref_count, reverse=True)
                 node = sym_matches[0]
                 node_id = node.id
@@ -350,30 +377,35 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         if node is None:
             # Provide sample node IDs for debugging
             from ivy_lsp.semantic.nodes import SymbolNode
+
             sample_symbols = model.get_nodes_by_type(SymbolNode)[:5]
             sample_ids = [sn.id for sn in sample_symbols]
-            return json.dumps({
-                "node_id": node_id,
-                "found": False,
-                "message": f"Node '{node_id}' not found",
-                "hint": "Try using symbol name directly or qualified_name",
-                "sample_node_ids": sample_ids,
-            })
+            return json.dumps(
+                {
+                    "node_id": node_id,
+                    "found": False,
+                    "message": f"Node '{node_id}' not found",
+                    "hint": "Try using symbol name directly or qualified_name",
+                    "sample_node_ids": sample_ids,
+                }
+            )
 
         incoming = model.get_incoming(node_id)
         outgoing = model.get_outgoing(node_id)
 
-        return json.dumps({
-            "node_id": node_id,
-            "found": True,
-            "node_type": type(node).__name__,
-            "incoming": [
-                {"type": etype.value, "source": src} for etype, src in incoming
-            ],
-            "outgoing": [
-                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
-            ],
-        })
+        return json.dumps(
+            {
+                "node_id": node_id,
+                "found": True,
+                "node_type": type(node).__name__,
+                "incoming": [
+                    {"type": etype.value, "source": src} for etype, src in incoming
+                ],
+                "outgoing": [
+                    {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+                ],
+            }
+        )
 
     async def _ivy_query_symbol(symbol_name: str, protocol: str = "") -> str:
         """Query rich semantic info about a symbol: type, references, requirements."""
@@ -386,7 +418,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         # H10: Search SymbolNode with dotted name resolution
         all_sym_nodes = model.get_nodes_by_type(SymbolNode)
         symbol_matches = [
-            sn for sn in all_sym_nodes
+            sn
+            for sn in all_sym_nodes
             if sn.name == symbol_name or sn.qualified_name == symbol_name
         ]
         if not symbol_matches and "." in symbol_name:
@@ -399,7 +432,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         # filter to symbols with file paths containing protocol-testing/{protocol}/
         if protocol and symbol_matches:
             prot_path = f"protocol-testing/{protocol}/"
-            prot_filtered = [sn for sn in symbol_matches if prot_path in (sn.file or "")]
+            prot_filtered = [
+                sn for sn in symbol_matches if prot_path in (sn.file or "")
+            ]
             if prot_filtered:
                 symbol_matches = prot_filtered
 
@@ -409,6 +444,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         #   b. Files closer to the workspace root (shorter path)
         #   c. Files with more references
         if len(symbol_matches) > 1:
+
             def _rank_symbol(sn):
                 fpath = sn.file or ""
                 # Penalize apt/ variant paths
@@ -416,14 +452,18 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 # Prefer shorter paths (closer to workspace root)
                 path_depth = fpath.count("/")
                 # Prefer symbols with more references
-                ref_count = len(model.get_incoming(sn.id)) + len(model.get_outgoing(sn.id))
+                ref_count = len(model.get_incoming(sn.id)) + len(
+                    model.get_outgoing(sn.id)
+                )
                 # Lower tuple = better rank
                 return (is_apt, path_depth, -ref_count)
+
             symbol_matches.sort(key=_rank_symbol)
 
         # Search TypeNode
         type_matches = [
-            tn for tn in model.get_nodes_by_type(TypeNode)
+            tn
+            for tn in model.get_nodes_by_type(TypeNode)
             if tn.name == symbol_name or tn.qualified_name == symbol_name
         ]
 
@@ -435,11 +475,13 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 type_matches = prot_filtered
 
         if not symbol_matches and not type_matches:
-            return json.dumps({
-                "symbol": symbol_name,
-                "found": False,
-                "message": f"Symbol '{symbol_name}' not found",
-            })
+            return json.dumps(
+                {
+                    "symbol": symbol_name,
+                    "found": False,
+                    "message": f"Symbol '{symbol_name}' not found",
+                }
+            )
 
         result: dict[str, Any] = {
             "symbol": symbol_name,
@@ -502,20 +544,24 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             elif level in ("OPTIONAL",):
                 level = "MAY"
 
-            results.append({
-                "text": text,
-                "level": level,
-                "offset": m.start(),
-            })
+            results.append(
+                {
+                    "text": text,
+                    "level": level,
+                    "offset": m.start(),
+                }
+            )
 
-        return json.dumps({
-            "requirements": results,
-            "total": len(results),
-            "by_level": {
-                level: sum(1 for r in results if r["level"] == level)
-                for level in sorted({r["level"] for r in results})
-            },
-        })
+        return json.dumps(
+            {
+                "requirements": results,
+                "total": len(results),
+                "by_level": {
+                    level: sum(1 for r in results if r["level"] == level)
+                    for level in sorted({r["level"] for r in results})
+                },
+            }
+        )
 
     async def _ivy_generate_manifest(
         rfc_name: str,
@@ -559,19 +605,20 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         suggested_path = ""
         if protocol:
             suggested_path = (
-                f"protocol-testing/{protocol}/"
-                f"{rfc_lower}_requirements.yaml"
+                f"protocol-testing/{protocol}/" f"{rfc_lower}_requirements.yaml"
             )
 
-        return json.dumps({
-            "yaml": yaml_content,
-            "total_requirements": len(results),
-            "suggested_path": suggested_path,
-            "by_level": {
-                level: sum(1 for r in results if r["level"] == level)
-                for level in sorted({r["level"] for r in results})
-            },
-        })
+        return json.dumps(
+            {
+                "yaml": yaml_content,
+                "total_requirements": len(results),
+                "suggested_path": suggested_path,
+                "by_level": {
+                    level: sum(1 for r in results if r["level"] == level)
+                    for level in sorted({r["level"] for r in results})
+                },
+            }
+        )
 
     # ------------------------------------------------------------------
     # Public MCP tools
@@ -658,9 +705,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             )
         if mode == "impact":
             if not symbol_name:
-                return error_response(
-                    "symbol_name is required for mode='impact'"
-                )
+                return error_response("symbol_name is required for mode='impact'")
             return await _ivy_impact_analysis(symbol_name)
         elif mode == "xrefs":
             effective_id = node_id or symbol_name
@@ -671,9 +716,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             return await _ivy_cross_references(effective_id)
         else:  # default: info
             if not symbol_name:
-                return error_response(
-                    "symbol_name is required for mode='info'"
-                )
+                return error_response("symbol_name is required for mode='info'")
             return await _ivy_query_symbol(symbol_name, protocol)
 
     @mcp.tool()
@@ -705,9 +748,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """
         if output == "manifest":
             if not rfc_name:
-                return error_response(
-                    "rfc_name is required for output='manifest'"
-                )
+                return error_response("rfc_name is required for output='manifest'")
             return await _ivy_generate_manifest(
                 rfc_name, rfc_text, protocol, base_section
             )

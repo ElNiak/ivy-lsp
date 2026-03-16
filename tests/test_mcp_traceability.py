@@ -87,9 +87,7 @@ class TestIvyExtractRequirements:
             "The receiver SHOULD validate tokens. "
             "An endpoint MAY send padding."
         )
-        result = await mcp.call_tool(
-            "ivy_extract_requirements", {"rfc_text": rfc_text}
-        )
+        result = await mcp.call_tool("ivy_extract_requirements", {"rfc_text": rfc_text})
         parsed = json.loads(_extract_text(result))
         assert parsed["total"] == 3
         assert "by_level" in parsed
@@ -168,7 +166,9 @@ class TestCoverageComputation:
         reqs = [
             RfcRequirement(id="r:1", rfc="RFC", section="1", text="...", level="MUST"),
             RfcRequirement(id="r:2", rfc="RFC", section="2", text="...", level="MUST"),
-            RfcRequirement(id="r:3", rfc="RFC", section="3", text="...", level="SHOULD"),
+            RfcRequirement(
+                id="r:3", rfc="RFC", section="3", text="...", level="SHOULD"
+            ),
         ]
         ann = RfcAnnotation(id="f:1:0", file="f", line=1, tags=["r:1"])
         for r in reqs:
@@ -204,15 +204,23 @@ class TestTraceabilityMatrix:
 
         model = SemanticModel()
         req1 = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="senders MUST NOT send data", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="senders MUST NOT send data",
+            level="MUST",
         )
         req2 = RfcRequirement(
-            id="rfc9000:8.1", rfc="RFC9000", section="8.1",
-            text="receiver SHOULD validate", level="SHOULD",
+            id="rfc9000:8.1",
+            rfc="RFC9000",
+            section="8.1",
+            text="receiver SHOULD validate",
+            level="SHOULD",
         )
         ann = RfcAnnotation(
-            id="/tmp/test.ivy:5:0", file="/tmp/test.ivy", line=5,
+            id="/tmp/test.ivy:5:0",
+            file="/tmp/test.ivy",
+            line=5,
             tags=["rfc9000:4.1"],
         )
         model.add_node(req1)

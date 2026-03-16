@@ -28,7 +28,6 @@ from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
 from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -332,45 +331,72 @@ def _build_dependency_graph() -> ScopedRequirementModel:
     graph = ScopedRequirementModel()
     # Requirements FIRST (add_file_requirements calls remove_file internally)
     r1 = RequirementNode(
-        id="/test/q.ivy:12", kind="require", formula_text="conn_open",
-        line=12, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="before",
+        id="/test/q.ivy:12",
+        kind="require",
+        formula_text="conn_open",
+        line=12,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="before",
     )
     r2 = RequirementNode(
-        id="/test/q.ivy:15", kind="ensure", formula_text="pkt_sent",
-        line=15, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="after",
+        id="/test/q.ivy:15",
+        kind="ensure",
+        formula_text="pkt_sent",
+        line=15,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="after",
     )
     r3 = RequirementNode(
-        id="/test/q.ivy:22", kind="require", formula_text="pkt_sent",
-        line=22, col=0, file="/test/q.ivy",
-        monitor_action="recv", mixin_kind="before",
+        id="/test/q.ivy:22",
+        kind="require",
+        formula_text="pkt_sent",
+        line=22,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="recv",
+        mixin_kind="before",
     )
     graph.add_file_requirements("/test/q.ivy", [r1, r2, r3])
     graph.add_action(
         ActionNode(
-            id="send", name="send", qualified_name="quic.send",
-            file="/test/q.ivy", line=10,
+            id="send",
+            name="send",
+            qualified_name="quic.send",
+            file="/test/q.ivy",
+            line=10,
         )
     )
     graph.add_action(
         ActionNode(
-            id="recv", name="recv", qualified_name="quic.recv",
-            file="/test/q.ivy", line=20,
+            id="recv",
+            name="recv",
+            qualified_name="quic.recv",
+            file="/test/q.ivy",
+            line=20,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="conn_open", name="conn_open",
+            id="conn_open",
+            name="conn_open",
             qualified_name="quic.conn_open",
-            file="/test/q.ivy", line=5, is_relation=False,
+            file="/test/q.ivy",
+            line=5,
+            is_relation=False,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="pkt_sent", name="pkt_sent",
+            id="pkt_sent",
+            name="pkt_sent",
             qualified_name="quic.pkt_sent",
-            file="/test/q.ivy", line=6, is_relation=False,
+            file="/test/q.ivy",
+            line=6,
+            is_relation=False,
         )
     )
     # send reads conn_open, writes pkt_sent
@@ -429,10 +455,7 @@ class TestIvyActionDependencyGraphTool:
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
         result = await mcp.call_tool("ivy_visualize", {"view": "dependencies"})
         parsed = json.loads(_extract_text(result))
-        shared_edges = [
-            e for e in parsed["edges"]
-            if e["type"] == "shared_state"
-        ]
+        shared_edges = [e for e in parsed["edges"] if e["type"] == "shared_state"]
         assert len(shared_edges) >= 1
         edge = shared_edges[0]
         assert edge["source"] == "send"
@@ -446,9 +469,7 @@ class TestIvyActionDependencyGraphTool:
             "ivy_visualize", {"view": "dependencies", "include_state_vars": True}
         )
         parsed = json.loads(_extract_text(result))
-        state_var_nodes = [
-            n for n in parsed["nodes"] if n["type"] == "stateVar"
-        ]
+        state_var_nodes = [n for n in parsed["nodes"] if n["type"] == "stateVar"]
         assert len(state_var_nodes) >= 1
         state_var_names = {n["label"] for n in state_var_nodes}
         assert "pkt_sent" in state_var_names

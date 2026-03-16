@@ -32,7 +32,6 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     register,
 )
 
-
 # ---------------------------------------------------------------------------
 # Realistic multi-file graph builder
 # ---------------------------------------------------------------------------
@@ -152,9 +151,7 @@ class _FakeServer:
     """Minimal server stub satisfying visualization handler expectations."""
 
     def __init__(self, graph):
-        self.indexer = (
-            type("I", (), {"requirement_graph": graph})() if graph else None
-        )
+        self.indexer = type("I", (), {"requirement_graph": graph})() if graph else None
         self.initializing = False
 
 

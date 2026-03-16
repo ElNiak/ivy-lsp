@@ -13,11 +13,9 @@ from typing import Any
 from ivy_lsp.tools._helpers import error_response
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
-from ivy_lsp.verification import (
-    run_ivy_check as shared_ivy_check,
-    run_ivy_compile as shared_ivy_compile,
-    run_ivy_show as shared_ivy_show,
-)
+from ivy_lsp.verification import run_ivy_check as shared_ivy_check
+from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
+from ivy_lsp.verification import run_ivy_show as shared_ivy_show
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,6 @@ _ISOLATE_STATUS_RE = re.compile(
 
 def register_verification_tools(mcp: Any, ctx: Any) -> None:
     """Register verification-related MCP tools."""
-
     # Per-isolate verification cache: (abs_path, isolate|None) -> result_dict
     # Moved into closure scope so each MCP server instance has its own cache.
     _verify_cache: dict[tuple[str, str | None], dict] = {}
@@ -66,15 +63,17 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             if iso_key not in _verify_cache:
                 iso_success = status in ("PASS", "OK")
                 iso_diags = [
-                    d for d in full_result.get("diagnostics", [])
-                    if iso_name in d.get("message", "")
-                    or iso_name in d.get("file", "")
+                    d
+                    for d in full_result.get("diagnostics", [])
+                    if iso_name in d.get("message", "") or iso_name in d.get("file", "")
                 ]
                 _verify_cache[iso_key] = {
                     "success": iso_success,
                     "diagnostics": iso_diags,
                     "diagnostic_count": len(iso_diags),
-                    "error_summary": full_result.get("error_summary", "") if not iso_success else "",
+                    "error_summary": (
+                        full_result.get("error_summary", "") if not iso_success else ""
+                    ),
                     "duration_seconds": full_result.get("duration_seconds", 0),
                     "cached": False,
                     "isolate": iso_name,
@@ -158,7 +157,10 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 cex = parse_counterexample(raw)
                 if cex is not None:
                     result["counterexample"] = cex
-                    from ivy_lsp.utils.counterexample_formatter import format_counterexample
+                    from ivy_lsp.utils.counterexample_formatter import (
+                        format_counterexample,
+                    )
+
                     result["counterexample_trace"] = format_counterexample(cex)
 
             result["cached"] = False
@@ -234,13 +236,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     workspace_root=ctx.root,
                     timeout=30,
                 )
-                if hasattr(setup_result, 'exit_code') and setup_result.exit_code != 0:
-                    return json.dumps({
-                        "success": False,
-                        "message": f"Docker setup failed (exit {setup_result.exit_code})",
-                        "raw_output": getattr(setup_result, 'stderr', ''),
-                        "duration_seconds": round(time.monotonic() - t0, 2),
-                    })
+                if hasattr(setup_result, "exit_code") and setup_result.exit_code != 0:
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "message": f"Docker setup failed (exit {setup_result.exit_code})",
+                            "raw_output": getattr(setup_result, "stderr", ""),
+                            "duration_seconds": round(time.monotonic() - t0, 2),
+                        }
+                    )
                 exec_result = await asyncio.to_thread(
                     ctx.executor.execute,
                     compile_result.compile_commands,
@@ -249,24 +253,20 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 )
                 duration = time.monotonic() - start
 
-                raw_output = (
-                    exec_result.stderr + "\n" + exec_result.stdout
-                ).strip()
+                raw_output = (exec_result.stderr + "\n" + exec_result.stdout).strip()
                 diagnostics = parse_ivy_output(raw_output)
-                return json.dumps({
-                    "success": exec_result.exit_code == 0
-                    and not any(
-                        d["severity"] == "error" for d in diagnostics
-                    ),
-                    "diagnostics": diagnostics,
-                    "diagnostic_count": len(diagnostics),
-                    "error_summary": extract_error_summary(
-                        raw_output, diagnostics
-                    ),
-                    "raw_output": raw_output,
-                    "target": exec_result.target,
-                    "duration_seconds": round(duration, 2),
-                })
+                return json.dumps(
+                    {
+                        "success": exec_result.exit_code == 0
+                        and not any(d["severity"] == "error" for d in diagnostics),
+                        "diagnostics": diagnostics,
+                        "diagnostic_count": len(diagnostics),
+                        "error_summary": extract_error_summary(raw_output, diagnostics),
+                        "raw_output": raw_output,
+                        "target": exec_result.target,
+                        "duration_seconds": round(duration, 2),
+                    }
+                )
             except ImportError:
                 logger.debug(
                     "panther_ivy.api not available; falling back to direct subprocess"
@@ -372,15 +372,19 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
                 _symbols, error_info = await asyncio.to_thread(
-                    fallback_scan, source, abs_path,
+                    fallback_scan,
+                    source,
+                    abs_path,
                 )
                 if error_info is not None:
-                    all_diags.append({
-                        "line": error_info.get("line", 1),
-                        "severity": "error",
-                        "message": f"Lexer error: {error_info.get('message', 'unknown')}",
-                        "source": "ivy-lsp-lexer",
-                    })
+                    all_diags.append(
+                        {
+                            "line": error_info.get("line", 1),
+                            "severity": "error",
+                            "message": f"Lexer error: {error_info.get('message', 'unknown')}",
+                            "source": "ivy-lsp-lexer",
+                        }
+                    )
             except Exception as exc:
                 logger.warning("Fallback scan failed for %s: %s", relative_path, exc)
                 layer_errors.append({"layer": "lexer", "error": str(exc)})
@@ -394,7 +398,8 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
 
                     rfc_reqs = model.get_nodes_by_type(RfcRequirement)
                     annotations = [
-                        n for n in model.get_nodes_by_type(RfcAnnotation)
+                        n
+                        for n in model.get_nodes_by_type(RfcAnnotation)
                         if n.file == abs_path
                     ]
                     if rfc_reqs:
@@ -402,30 +407,36 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         for ann in annotations:
                             for tag in ann.tags:
                                 if tag not in req_ids:
-                                    all_diags.append({
-                                        "line": ann.line + 1,
-                                        "severity": "warning",
-                                        "message": (
-                                            f"Orphaned RFC tag: [{tag}] does not "
-                                            "match any loaded requirement manifest"
-                                        ),
-                                        "source": "ivy-lsp-semantic",
-                                    })
+                                    all_diags.append(
+                                        {
+                                            "line": ann.line + 1,
+                                            "severity": "warning",
+                                            "message": (
+                                                f"Orphaned RFC tag: [{tag}] does not "
+                                                "match any loaded requirement manifest"
+                                            ),
+                                            "source": "ivy-lsp-semantic",
+                                        }
+                                    )
 
                     # Missing tags on assertions
                     lines = source.split("\n")
                     for m in _ASSERTION_RE.finditer(source):
-                        line_no = source[:m.start()].count("\n")
+                        line_no = source[: m.start()].count("\n")
                         line_text = lines[line_no] if line_no < len(lines) else ""
                         if not _BRACKET_TAG_RE.search(line_text):
-                            all_diags.append({
-                                "line": line_no + 1,
-                                "severity": "hint",
-                                "message": "Assertion without RFC bracket tag annotation",
-                                "source": "ivy-lsp-semantic",
-                            })
+                            all_diags.append(
+                                {
+                                    "line": line_no + 1,
+                                    "severity": "hint",
+                                    "message": "Assertion without RFC bracket tag annotation",
+                                    "source": "ivy-lsp-semantic",
+                                }
+                            )
             except Exception as exc:
-                logger.warning("Semantic diagnostics failed for %s: %s", relative_path, exc)
+                logger.warning(
+                    "Semantic diagnostics failed for %s: %s", relative_path, exc
+                )
                 layer_errors.append({"layer": "semantic", "error": str(exc)})
 
         # 4. Coverage hints
@@ -436,13 +447,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     from ivy_lsp.features.coverage_hints import compute_coverage_hints
 
                     for hint in compute_coverage_hints(graph, abs_path):
-                        all_diags.append({
-                            "line": hint.get("line", 0),
-                            "severity": hint.get("severity", "hint"),
-                            "message": hint["message"],
-                            "source": "ivy-lsp-coverage",
-                            "code": hint.get("code"),
-                        })
+                        all_diags.append(
+                            {
+                                "line": hint.get("line", 0),
+                                "severity": hint.get("severity", "hint"),
+                                "message": hint["message"],
+                                "source": "ivy-lsp-coverage",
+                                "code": hint.get("code"),
+                            }
+                        )
             except Exception as exc:
                 logger.warning("Coverage hints failed for %s: %s", relative_path, exc)
                 layer_errors.append({"layer": "coverage", "error": str(exc)})
@@ -458,47 +471,67 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         re.search(r"^\s*export\s+action", source, re.MULTILINE)
                     )
                     if has_export:
-                        all_diags.append({
-                            "line": 1,
-                            "severity": "warning",
-                            "message": (
-                                "Test file has exports but no _finalize action. "
-                                "Consider adding 'export action _finalize' for "
-                                "end-of-test assertions."
-                            ),
-                            "source": "ivy-pattern",
-                        })
+                        all_diags.append(
+                            {
+                                "line": 1,
+                                "severity": "warning",
+                                "message": (
+                                    "Test file has exports but no _finalize action. "
+                                    "Consider adding 'export action _finalize' for "
+                                    "end-of-test assertions."
+                                ),
+                                "source": "ivy-pattern",
+                            }
+                        )
 
                 # Exported actions without monitors
-                exports = set(re.findall(
-                    r"^\s*export\s+action\s+([\w.]+)", source, re.MULTILINE,
-                ))
-                monitored = set(re.findall(
-                    r"^\s*(?:before|after|around)\s+([\w.]+)", source, re.MULTILINE,
-                ))
+                exports = set(
+                    re.findall(
+                        r"^\s*export\s+action\s+([\w.]+)",
+                        source,
+                        re.MULTILINE,
+                    )
+                )
+                monitored = set(
+                    re.findall(
+                        r"^\s*(?:before|after|around)\s+([\w.]+)",
+                        source,
+                        re.MULTILINE,
+                    )
+                )
                 for exp_action in exports:
                     if exp_action not in monitored and exp_action != "_finalize":
-                        action_defined = bool(re.search(
-                            rf"^\s*action\s+{re.escape(exp_action)}\s*",
-                            source, re.MULTILINE,
-                        ))
+                        action_defined = bool(
+                            re.search(
+                                rf"^\s*action\s+{re.escape(exp_action)}\s*",
+                                source,
+                                re.MULTILINE,
+                            )
+                        )
                         if action_defined:
                             match = re.search(
                                 rf"^\s*export\s+action\s+{re.escape(exp_action)}",
-                                source, re.MULTILINE,
+                                source,
+                                re.MULTILINE,
                             )
-                            line_num = source[:match.start()].count("\n") + 1 if match else 1
-                            all_diags.append({
-                                "line": line_num,
-                                "severity": "hint",
-                                "message": (
-                                    f"Exported action '{exp_action}' has no "
-                                    "before/after monitor in this file."
-                                ),
-                                "source": "ivy-pattern",
-                            })
+                            line_num = (
+                                source[: match.start()].count("\n") + 1 if match else 1
+                            )
+                            all_diags.append(
+                                {
+                                    "line": line_num,
+                                    "severity": "hint",
+                                    "message": (
+                                        f"Exported action '{exp_action}' has no "
+                                        "before/after monitor in this file."
+                                    ),
+                                    "source": "ivy-pattern",
+                                }
+                            )
             except Exception as exc:
-                logger.warning("Pattern diagnostics failed for %s: %s", relative_path, exc)
+                logger.warning(
+                    "Pattern diagnostics failed for %s: %s", relative_path, exc
+                )
                 layer_errors.append({"layer": "pattern", "error": str(exc)})
 
         # P1: Ensure each diagnostic has the file field for multi-file processing
@@ -511,7 +544,8 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             _sev_order = {"error": 4, "warning": 3, "info": 2, "hint": 1}
             min_rank = _sev_order.get(min_severity, 0)
             all_diags = [
-                d for d in all_diags
+                d
+                for d in all_diags
                 if _sev_order.get(d.get("severity", "hint"), 0) >= min_rank
             ]
 
@@ -521,19 +555,25 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             src = d.get("source", "unknown")
             by_source[src] = by_source.get(src, 0) + 1
 
-        return json.dumps({
-            "success": True,
-            "file": relative_path,
-            "diagnostics": all_diags,
-            "diagnostic_count": len(all_diags),
-            "by_source": by_source,
-            "error_count": sum(1 for d in all_diags if d.get("severity") == "error"),
-            "warning_count": sum(1 for d in all_diags if d.get("severity") == "warning"),
-            "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
-            "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
-            "layer_errors": layer_errors,
-            "partial": bool(layer_errors),
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "file": relative_path,
+                "diagnostics": all_diags,
+                "diagnostic_count": len(all_diags),
+                "by_source": by_source,
+                "error_count": sum(
+                    1 for d in all_diags if d.get("severity") == "error"
+                ),
+                "warning_count": sum(
+                    1 for d in all_diags if d.get("severity") == "warning"
+                ),
+                "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
+                "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
+                "layer_errors": layer_errors,
+                "partial": bool(layer_errors),
+            }
+        )
 
     # -- Verification dashboard ------------------------------------------------
 
@@ -572,16 +612,21 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         cache = _get_cache_summary()
         verified_set = set(cache["verified_files"])
         failed_set = set(cache["failed_files"])
-        pending = [f for f in ivy_files if f not in verified_set and f not in failed_set]
+        pending = [
+            f for f in ivy_files if f not in verified_set and f not in failed_set
+        ]
 
-        return json.dumps({
-            "success": True,
-            "total_files": len(ivy_files),
-            "verified": len(verified_set),
-            "failed": len(failed_set),
-            "pending": len(pending),
-            "cache_size": cache["cache_size"],
-            "cache_max": cache["cache_max"],
-            "verified_files": sorted(verified_set),
-            "failed_files": sorted(failed_set),
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "total_files": len(ivy_files),
+                "verified": len(verified_set),
+                "failed": len(failed_set),
+                "pending": len(pending),
+                "cache_size": cache["cache_size"],
+                "cache_max": cache["cache_max"],
+                "verified_files": sorted(verified_set),
+                "failed_files": sorted(failed_set),
+            },
+            indent=2,
+        )

@@ -16,9 +16,7 @@ logger = logging.getLogger(__name__)
 _IDENT_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_.]*")
 
 
-def extract_state_var_references(
-    formula_node: Any, known_vars: Set[str]
-) -> List[str]:
+def extract_state_var_references(formula_node: Any, known_vars: Set[str]) -> List[str]:
     """Walk a formula AST node and return referenced state variable names.
 
     Traverses ``Atom`` and ``App`` nodes recursively, matching ``.relname``

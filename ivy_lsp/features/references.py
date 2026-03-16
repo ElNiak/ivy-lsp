@@ -103,6 +103,11 @@ def register(server) -> None:
         include_decl = params.context.include_declaration if params.context else True
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, find_references, server.indexer,
-            filepath, params.position, lines, include_decl,
+            None,
+            find_references,
+            server.indexer,
+            filepath,
+            params.position,
+            lines,
+            include_decl,
         )

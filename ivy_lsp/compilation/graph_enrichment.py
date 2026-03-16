@@ -3,6 +3,7 @@
 Called after a subprocess compilation completes to upgrade existing
 Tier 1/2 data with Tier 3 compiled information.
 """
+
 from __future__ import annotations
 
 import logging
@@ -75,9 +76,7 @@ def enrich_semantic_model(
                 line=0,
                 sort_name=sym_ir.sort_str,
                 arity=len(sym_ir.domain_sorts),
-                params=[
-                    f"arg{i}:{s}" for i, s in enumerate(sym_ir.domain_sorts)
-                ],
+                params=[f"arg{i}:{s}" for i, s in enumerate(sym_ir.domain_sorts)],
                 return_sort=sym_ir.range_sort,
                 tier="tier3",
             )
@@ -101,9 +100,7 @@ def enrich_semantic_model(
                 arity=len(action_ir.formal_params),
                 params=list(action_ir.formal_params),
                 return_sort=(
-                    action_ir.formal_returns[0]
-                    if action_ir.formal_returns
-                    else None
+                    action_ir.formal_returns[0] if action_ir.formal_returns else None
                 ),
                 tier="tier3",
             )

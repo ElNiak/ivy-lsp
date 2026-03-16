@@ -23,7 +23,6 @@ from ivy_lsp.analysis.requirement_graph import (
     StateVarNode,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -127,7 +126,9 @@ def populated_graph():
 
     # File A nodes
     req_a1 = _make_req("/test/file_a.ivy", 10, "require", "sent_pkt > 0", "quic.send")
-    req_a2 = _make_req("/test/file_a.ivy", 20, "ensure", "sent_pkt = old_val + 1", "quic.send", "after")
+    req_a2 = _make_req(
+        "/test/file_a.ivy", 20, "ensure", "sent_pkt = old_val + 1", "quic.send", "after"
+    )
     sv_sent = _make_state_var("sent_pkt", "/test/file_a.ivy", 5, is_relation=False)
     act_send = _make_action("quic.send", "/test/file_a.ivy", 1)
 
@@ -135,7 +136,9 @@ def populated_graph():
     req_b1 = _make_req("/test/file_b.ivy", 15, "require", "recv_pkt >= 0", "quic.recv")
     sv_recv = _make_state_var("recv_pkt", "/test/file_b.ivy", 3, is_relation=True)
     act_recv = _make_action("quic.recv", "/test/file_b.ivy", 1)
-    inv1 = _make_property("/test/file_b.ivy", 30, "invariant", "inv1", "sent_pkt > 0 & recv_pkt >= 0")
+    inv1 = _make_property(
+        "/test/file_b.ivy", 30, "invariant", "inv1", "sent_pkt > 0 & recv_pkt >= 0"
+    )
 
     g.add_requirement(req_a1)
     g.add_requirement(req_a2)
@@ -216,7 +219,9 @@ def test_create_action_node():
 
 
 def test_create_property_node():
-    node = _make_property("/test/props.ivy", 42, "axiom", "symmetry", "r(X,Y) -> r(Y,X)")
+    node = _make_property(
+        "/test/props.ivy", 42, "axiom", "symmetry", "r(X,Y) -> r(Y,X)"
+    )
     assert node.id == "/test/props.ivy:42"
     assert node.kind == "axiom"
     assert node.name == "symmetry"
@@ -384,9 +389,7 @@ def test_get_requirements_sharing_state_var_excludes_properties(populated_graph)
 
 def test_get_active_requirements_for_file_own_file(populated_graph):
     """Requirements defined in the file itself should be returned."""
-    include_graph = SimpleNamespace(
-        get_transitive_includes=lambda fp: set()
-    )
+    include_graph = SimpleNamespace(get_transitive_includes=lambda fp: set())
     reqs = populated_graph.get_active_requirements_for_file(
         "/test/file_a.ivy", include_graph
     )
@@ -412,9 +415,7 @@ def test_get_active_requirements_for_file_with_includes(populated_graph):
 
 def test_get_active_requirements_for_file_unknown_file(populated_graph):
     """File with no requirements and no includes returns empty list."""
-    include_graph = SimpleNamespace(
-        get_transitive_includes=lambda fp: set()
-    )
+    include_graph = SimpleNamespace(get_transitive_includes=lambda fp: set())
     reqs = populated_graph.get_active_requirements_for_file(
         "/test/no_such_file.ivy", include_graph
     )
@@ -483,9 +484,7 @@ def test_add_file_requirements_adds_reqs_and_constrains(graph):
     assert "/test/bulk.ivy:5" in graph.requirements
 
     # Should have auto-wired CONSTRAINS edges
-    constrains_edges = [
-        (s, t) for s, et, t in graph.edges if et == EdgeType.CONSTRAINS
-    ]
+    constrains_edges = [(s, t) for s, et, t in graph.edges if et == EdgeType.CONSTRAINS]
     assert ("/test/bulk.ivy:1", "act1") in constrains_edges
     assert ("/test/bulk.ivy:5", "act2") in constrains_edges
 
@@ -520,7 +519,9 @@ def test_add_file_requirements_empty_list(graph):
 
 
 def test_wire_state_var_edges_links_formula_refs(graph):
-    req = _make_req("/test/file.ivy", 1, "require", "sent_pkt > 0 & recv_pkt = 1", "act")
+    req = _make_req(
+        "/test/file.ivy", 1, "require", "sent_pkt > 0 & recv_pkt = 1", "act"
+    )
     sv1 = _make_state_var("sent_pkt")
     sv2 = _make_state_var("recv_pkt")
     graph.add_requirement(req)
@@ -591,9 +592,7 @@ def test_wire_dependency_edges_axiom_to_invariant(graph):
 
     graph.wire_dependency_edges()
 
-    depends_edges = [
-        (s, t) for s, et, t in graph.edges if et == EdgeType.DEPENDS_ON
-    ]
+    depends_edges = [(s, t) for s, et, t in graph.edges if et == EdgeType.DEPENDS_ON]
     # Invariant depends on axiom, not the other way around
     assert (inv.id, axiom.id) in depends_edges
     assert (axiom.id, inv.id) not in depends_edges
@@ -645,9 +644,7 @@ def test_wire_dependency_edges_multiple_axioms_and_properties(graph):
 
     graph.wire_dependency_edges()
 
-    depends_edges = [
-        (s, t) for s, et, t in graph.edges if et == EdgeType.DEPENDS_ON
-    ]
+    depends_edges = [(s, t) for s, et, t in graph.edges if et == EdgeType.DEPENDS_ON]
     assert (inv1.id, ax.id) in depends_edges
     assert (inv2.id, ax.id) in depends_edges
     # Axiom itself should not depend on anything
@@ -871,7 +868,9 @@ def test_populate_actions_includes_monitor_action_refs(graph):
     # Both the symbol-based and reference-based actions should exist
     assert "other.action" in graph.actions
     assert "unresolved.action" in graph.actions
-    assert graph.actions["unresolved.action"].file == "/test/file.ivy"  # fallback uses req's file
+    assert (
+        graph.actions["unresolved.action"].file == "/test/file.ivy"
+    )  # fallback uses req's file
 
 
 def test_populate_actions_does_not_overwrite_existing(graph):
@@ -1091,15 +1090,27 @@ class TestRequirementGraphCaching:
     def test_repeated_query_uses_cache(self):
         """Second call with unchanged graph should not re-traverse."""
         graph = RequirementGraph()
-        graph.add_action(ActionNode(
-            id="act1", name="act1", qualified_name="act1",
-            file="/test.ivy", line=1,
-        ))
-        graph.add_requirement(RequirementNode(
-            id="/test.ivy:5", kind="require", formula_text="x>0",
-            line=5, col=0, file="/test.ivy",
-            monitor_action="act1", mixin_kind="before",
-        ))
+        graph.add_action(
+            ActionNode(
+                id="act1",
+                name="act1",
+                qualified_name="act1",
+                file="/test.ivy",
+                line=1,
+            )
+        )
+        graph.add_requirement(
+            RequirementNode(
+                id="/test.ivy:5",
+                kind="require",
+                formula_text="x>0",
+                line=5,
+                col=0,
+                file="/test.ivy",
+                monitor_action="act1",
+                mixin_kind="before",
+            )
+        )
         graph.add_edge("/test.ivy:5", EdgeType.CONSTRAINS, "act1")
 
         spy = _SpyIncludeGraph()
@@ -1119,11 +1130,18 @@ class TestRequirementGraphCaching:
         assert len(r1) == 0
         assert spy.call_count == 1
 
-        graph.add_requirement(RequirementNode(
-            id="/test.ivy:5", kind="require", formula_text="x>0",
-            line=5, col=0, file="/test.ivy",
-            monitor_action="act1", mixin_kind="before",
-        ))
+        graph.add_requirement(
+            RequirementNode(
+                id="/test.ivy:5",
+                kind="require",
+                formula_text="x>0",
+                line=5,
+                col=0,
+                file="/test.ivy",
+                monitor_action="act1",
+                mixin_kind="before",
+            )
+        )
 
         r2 = graph.get_active_requirements_for_file("/test.ivy", spy)
         assert len(r2) == 1
@@ -1138,10 +1156,15 @@ class TestRequirementGraphCaching:
         graph.get_active_requirements_for_file("/test.ivy", spy)
         assert spy.call_count == 1
 
-        graph.add_action(ActionNode(
-            id="act1", name="act1", qualified_name="act1",
-            file="/test.ivy", line=1,
-        ))
+        graph.add_action(
+            ActionNode(
+                id="act1",
+                name="act1",
+                qualified_name="act1",
+                file="/test.ivy",
+                line=1,
+            )
+        )
 
         graph.get_active_requirements_for_file("/test.ivy", spy)
         assert spy.call_count == 2
@@ -1154,10 +1177,15 @@ class TestRequirementGraphCaching:
         graph.get_active_requirements_for_file("/test.ivy", spy)
         assert spy.call_count == 1
 
-        graph.add_state_var(StateVarNode(
-            id="var1", name="var1", qualified_name="var1",
-            file="/test.ivy", line=1,
-        ))
+        graph.add_state_var(
+            StateVarNode(
+                id="var1",
+                name="var1",
+                qualified_name="var1",
+                file="/test.ivy",
+                line=1,
+            )
+        )
 
         graph.get_active_requirements_for_file("/test.ivy", spy)
         assert spy.call_count == 2
@@ -1170,10 +1198,16 @@ class TestRequirementGraphCaching:
         graph.get_active_requirements_for_file("/test.ivy", spy)
         assert spy.call_count == 1
 
-        graph.add_property(PropertyNode(
-            id="/test.ivy:10", kind="invariant", name="inv1",
-            formula_text="true", file="/test.ivy", line=10,
-        ))
+        graph.add_property(
+            PropertyNode(
+                id="/test.ivy:10",
+                kind="invariant",
+                name="inv1",
+                formula_text="true",
+                file="/test.ivy",
+                line=10,
+            )
+        )
 
         graph.get_active_requirements_for_file("/test.ivy", spy)
         assert spy.call_count == 2
@@ -1181,11 +1215,18 @@ class TestRequirementGraphCaching:
     def test_cache_invalidated_after_remove_file(self):
         """remove_file bumps version so stale cache is not reused."""
         graph = RequirementGraph()
-        graph.add_requirement(RequirementNode(
-            id="/test.ivy:5", kind="require", formula_text="x>0",
-            line=5, col=0, file="/test.ivy",
-            monitor_action="act1", mixin_kind="before",
-        ))
+        graph.add_requirement(
+            RequirementNode(
+                id="/test.ivy:5",
+                kind="require",
+                formula_text="x>0",
+                line=5,
+                col=0,
+                file="/test.ivy",
+                monitor_action="act1",
+                mixin_kind="before",
+            )
+        )
         spy = _SpyIncludeGraph()
 
         r1 = graph.get_active_requirements_for_file("/test.ivy", spy)

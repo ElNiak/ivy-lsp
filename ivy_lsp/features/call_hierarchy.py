@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_containing_symbol(symbols: List, target_line: int):
     """Find the symbol whose range encloses *target_line*.
 
@@ -83,6 +84,7 @@ def _get_action_symbols(indexer) -> Dict[str, List]:
 # prepareCallHierarchy
 # ---------------------------------------------------------------------------
 
+
 def prepare_call_hierarchy(
     indexer,
     filepath: str,
@@ -132,6 +134,7 @@ def prepare_call_hierarchy(
 # incomingCalls
 # ---------------------------------------------------------------------------
 
+
 def get_incoming_calls(
     indexer,
     item_name: str,
@@ -172,7 +175,9 @@ def get_incoming_calls(
                 if container is None:
                     continue
                 # Skip if the container IS the target symbol itself.
-                if container.name == last_component and not _is_monitor_symbol(container):
+                if container.name == last_component and not _is_monitor_symbol(
+                    container
+                ):
                     continue
 
                 key = f"{fpath}:{container.range[0]}"
@@ -215,6 +220,7 @@ def get_incoming_calls(
 # ---------------------------------------------------------------------------
 # outgoingCalls
 # ---------------------------------------------------------------------------
+
 
 def get_outgoing_calls(
     indexer,
@@ -270,7 +276,11 @@ def get_outgoing_calls(
                 if action_name not in outgoing:
                     # Use the first location of the action as the target.
                     target_sym = action_locs[0]
-                    target_uri = Path(target_sym.file_path).as_uri() if target_sym.file_path else ""
+                    target_uri = (
+                        Path(target_sym.file_path).as_uri()
+                        if target_sym.file_path
+                        else ""
+                    )
                     target_range = make_range(*target_sym.range)
                     outgoing[action_name] = {
                         "to": lsp.CallHierarchyItem(
@@ -299,6 +309,7 @@ def get_outgoing_calls(
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
+
 
 def register(server) -> None:
     """Register call hierarchy feature handlers."""
@@ -337,12 +348,20 @@ def register(server) -> None:
             if server.indexer is None:
                 return None
             item = params.item
-            data = json.loads(item.data) if isinstance(item.data, str) else (item.data or {})
+            data = (
+                json.loads(item.data)
+                if isinstance(item.data, str)
+                else (item.data or {})
+            )
             name = data.get("name", item.name)
             filepath = data.get("filepath", uri_to_path(item.uri))
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, get_incoming_calls, server.indexer, name, filepath,
+                None,
+                get_incoming_calls,
+                server.indexer,
+                name,
+                filepath,
             )
         except Exception:
             logger.warning("incomingCalls handler failed", exc_info=True)
@@ -357,12 +376,20 @@ def register(server) -> None:
             if server.indexer is None:
                 return None
             item = params.item
-            data = json.loads(item.data) if isinstance(item.data, str) else (item.data or {})
+            data = (
+                json.loads(item.data)
+                if isinstance(item.data, str)
+                else (item.data or {})
+            )
             name = data.get("name", item.name)
             filepath = data.get("filepath", uri_to_path(item.uri))
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, get_outgoing_calls, server.indexer, name, filepath,
+                None,
+                get_outgoing_calls,
+                server.indexer,
+                name,
+                filepath,
             )
         except Exception:
             logger.warning("outgoingCalls handler failed", exc_info=True)

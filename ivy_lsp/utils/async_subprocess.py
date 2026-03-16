@@ -104,9 +104,7 @@ async def run_ivy_subprocess(
             )
 
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             try:

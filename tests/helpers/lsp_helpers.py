@@ -17,9 +17,9 @@ def create_indexed_workspace(workspace_path: str):
     Returns:
         A WorkspaceIndexer instance with all files indexed.
     """
-    from ivy_lsp.parsing.parser_session import IvyParserWrapper
     from ivy_lsp.indexer.include_resolver import IncludeResolver
     from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
     parser = IvyParserWrapper()
     resolver = IncludeResolver(workspace_path)
@@ -46,6 +46,7 @@ def parse_to_symbols(source: str, filename: str = "test.ivy"):
     if not result.success:
         # Fall back to fallback scanner
         from ivy_lsp.parsing.fallback_scanner import scan_symbols
+
         return scan_symbols(source, filename)
     return ast_to_symbols(result.ast, filename, source)
 

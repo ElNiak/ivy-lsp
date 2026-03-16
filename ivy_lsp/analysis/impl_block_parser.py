@@ -25,19 +25,13 @@ MEMBER_BLOCK_RE = re.compile(r"<<<\s*member\b(.*?)>>>", re.DOTALL)
 INLINE_CPP_RE = re.compile(r"<<<(.*?)>>>", re.DOTALL)
 
 # Extract C++ enum state declarations: enum { s1, s2, ... } state;
-CPP_ENUM_RE = re.compile(
-    r"enum\s*\{([^}]+)\}\s*(\w+)\s*;", re.DOTALL
-)
+CPP_ENUM_RE = re.compile(r"enum\s*\{([^}]+)\}\s*(\w+)\s*;", re.DOTALL)
 
 # Detect socket operations
-SOCKET_OPS_RE = re.compile(
-    r"\b(socket|send|recv|bind|listen|accept|connect)\b"
-)
+SOCKET_OPS_RE = re.compile(r"\b(socket|send|recv|bind|listen|accept|connect)\b")
 
 # Detect class inheritance: class `name` : public base_class {
-CLASS_INHERIT_RE = re.compile(
-    r"class\s+`?(\w+)`?\s*:\s*public\s+(\w+)"
-)
+CLASS_INHERIT_RE = re.compile(r"class\s+`?(\w+)`?\s*:\s*public\s+(\w+)")
 
 # Detect ser/deser base classes
 SER_BASE_RE = re.compile(r"ivy_binary_ser_\d+")
@@ -52,9 +46,11 @@ GETN_RE = re.compile(r"\bgetn\s*\(([^)]+)\)")
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ImplBlock:
     """A single <<< impl >>> block extracted from Ivy source."""
+
     content: str
     start_offset: int
     end_offset: int
@@ -64,6 +60,7 @@ class ImplBlock:
 @dataclass
 class MemberBlock:
     """A single <<< member >>> block extracted from Ivy source."""
+
     content: str
     start_offset: int
     end_offset: int
@@ -73,6 +70,7 @@ class MemberBlock:
 @dataclass
 class CppEnumState:
     """Enum-based state machine found in an impl block."""
+
     states: List[str]
     var_name: str  # e.g., "state"
 
@@ -80,6 +78,7 @@ class CppEnumState:
 @dataclass
 class CppClassInfo:
     """C++ class declaration found in an impl/member block."""
+
     name: str
     base_class: Optional[str]
     is_serializer: bool
@@ -89,6 +88,7 @@ class CppClassInfo:
 @dataclass
 class ImplAnalysis:
     """Complete analysis of all impl/member blocks in a file."""
+
     impl_blocks: List[ImplBlock] = field(default_factory=list)
     member_blocks: List[MemberBlock] = field(default_factory=list)
     enum_states: List[CppEnumState] = field(default_factory=list)
@@ -103,17 +103,20 @@ class ImplAnalysis:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def extract_impl_blocks(source: str) -> List[ImplBlock]:
     """Extract all <<< impl ... >>> blocks from Ivy source."""
     blocks = []
     for m in IMPL_BLOCK_RE.finditer(source):
-        line = source[:m.start()].count("\n")
-        blocks.append(ImplBlock(
-            content=m.group(1).strip(),
-            start_offset=m.start(),
-            end_offset=m.end(),
-            line=line,
-        ))
+        line = source[: m.start()].count("\n")
+        blocks.append(
+            ImplBlock(
+                content=m.group(1).strip(),
+                start_offset=m.start(),
+                end_offset=m.end(),
+                line=line,
+            )
+        )
     return blocks
 
 
@@ -121,13 +124,15 @@ def extract_member_blocks(source: str) -> List[MemberBlock]:
     """Extract all <<< member ... >>> blocks from Ivy source."""
     blocks = []
     for m in MEMBER_BLOCK_RE.finditer(source):
-        line = source[:m.start()].count("\n")
-        blocks.append(MemberBlock(
-            content=m.group(1).strip(),
-            start_offset=m.start(),
-            end_offset=m.end(),
-            line=line,
-        ))
+        line = source[: m.start()].count("\n")
+        blocks.append(
+            MemberBlock(
+                content=m.group(1).strip(),
+                start_offset=m.start(),
+                end_offset=m.end(),
+                line=line,
+            )
+        )
     return blocks
 
 
@@ -147,12 +152,14 @@ def parse_class_info(cpp_content: str) -> List[CppClassInfo]:
     for m in CLASS_INHERIT_RE.finditer(cpp_content):
         name = m.group(1)
         base = m.group(2)
-        results.append(CppClassInfo(
-            name=name,
-            base_class=base,
-            is_serializer=bool(SER_BASE_RE.search(base)),
-            is_deserializer=bool(DESER_BASE_RE.search(base)),
-        ))
+        results.append(
+            CppClassInfo(
+                name=name,
+                base_class=base,
+                is_serializer=bool(SER_BASE_RE.search(base)),
+                is_deserializer=bool(DESER_BASE_RE.search(base)),
+            )
+        )
     return results
 
 

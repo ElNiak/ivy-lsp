@@ -46,10 +46,7 @@ def _index(workspace_root: str):
 # Shared multi-file workspace used by most tests.
 WORKSPACE_FILES = {
     "types.ivy": (
-        "#lang ivy1.7\n"
-        "\n"
-        "type cid\n"
-        "type stream_kind = {unidir, bidir}\n"
+        "#lang ivy1.7\n" "\n" "type cid\n" "type stream_kind = {unidir, bidir}\n"
     ),
     "conn.ivy": (
         "#lang ivy1.7\n"
@@ -88,6 +85,7 @@ WORKSPACE_FILES = {
 # =========================================================================
 # goToDefinition
 # =========================================================================
+
 
 class TestGoToDefinition:
     @pytest.mark.unit
@@ -131,6 +129,7 @@ class TestGoToDefinition:
 # findReferences
 # =========================================================================
 
+
 class TestFindReferences:
     @pytest.mark.unit
     @pytest.mark.lsp
@@ -157,6 +156,7 @@ class TestFindReferences:
 # =========================================================================
 # hover
 # =========================================================================
+
 
 class TestHover:
     @pytest.mark.unit
@@ -190,6 +190,7 @@ class TestHover:
 # =========================================================================
 # documentSymbol
 # =========================================================================
+
 
 class TestDocumentSymbol:
     @pytest.mark.unit
@@ -225,6 +226,7 @@ class TestDocumentSymbol:
 # workspaceSymbol
 # =========================================================================
 
+
 class TestWorkspaceSymbol:
     @pytest.mark.unit
     @pytest.mark.lsp
@@ -251,6 +253,7 @@ class TestWorkspaceSymbol:
 # goToImplementation (new)
 # =========================================================================
 
+
 class TestGoToImplementationCoverage:
     @pytest.mark.unit
     @pytest.mark.lsp
@@ -259,7 +262,9 @@ class TestGoToImplementationCoverage:
         indexer = _index(ws)
         fp = str(tmp_path / "conn.ivy")
         lines = Path(fp).read_text().split("\n")
-        result = goto_implementation(indexer, fp, lsp.Position(line=7, character=7), lines)
+        result = goto_implementation(
+            indexer, fp, lsp.Position(line=7, character=7), lines
+        )
         assert result is not None
         # Should find before/after in behavior.ivy
         if isinstance(result, list):
@@ -273,6 +278,7 @@ class TestGoToImplementationCoverage:
 # Call Hierarchy (new)
 # =========================================================================
 
+
 class TestCallHierarchyCoverage:
     @pytest.mark.unit
     @pytest.mark.lsp
@@ -281,7 +287,9 @@ class TestCallHierarchyCoverage:
         indexer = _index(ws)
         fp = str(tmp_path / "conn.ivy")
         lines = Path(fp).read_text().split("\n")
-        result = prepare_call_hierarchy(indexer, fp, lsp.Position(line=7, character=7), lines)
+        result = prepare_call_hierarchy(
+            indexer, fp, lsp.Position(line=7, character=7), lines
+        )
         assert result is not None
         assert len(result) == 1
         assert result[0].name == "connect"

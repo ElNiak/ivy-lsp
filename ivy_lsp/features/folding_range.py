@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FoldRange:
+    """A contiguous range of lines that can be folded in the editor."""
+
     start_line: int
     end_line: int
     kind: str  # "region", "comment", "imports"
@@ -106,7 +108,9 @@ def register(server) -> None:
             source = doc.source or ""
             loop = asyncio.get_running_loop()
             fold_ranges = await loop.run_in_executor(
-                None, compute_folding_ranges, source,
+                None,
+                compute_folding_ranges,
+                source,
             )
             return [_to_lsp_folding_range(fr) for fr in fold_ranges]
         except Exception:

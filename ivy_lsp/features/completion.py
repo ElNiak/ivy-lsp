@@ -142,6 +142,8 @@ IVY_KEYWORDS_SET: Set[str] = set(IVY_KEYWORDS)
 
 
 class CompletionContext(enum.Enum):
+    """Context kinds that determine which completion items are offered."""
+
     DOT_ACCESS = "dot_access"
     INCLUDE = "include"
     AFTER_KEYWORD = "after_keyword"
@@ -227,7 +229,10 @@ def get_completions(
         if requirement_graph is not None:
             block_type = _detect_block_type(source_lines, position.line)
             sem_dicts = compute_semantic_completions(
-                requirement_graph, filepath, position.line, block_type,
+                requirement_graph,
+                filepath,
+                position.line,
+                block_type,
             )
             kind_map = {
                 "variable": lsp.CompletionItemKind.Variable,
@@ -238,7 +243,9 @@ def get_completions(
                 items.append(
                     lsp.CompletionItem(
                         label=d["label"],
-                        kind=kind_map.get(d.get("kind", ""), lsp.CompletionItemKind.Text),
+                        kind=kind_map.get(
+                            d.get("kind", ""), lsp.CompletionItemKind.Text
+                        ),
                         detail=d.get("detail"),
                         insert_text=d.get("insertText"),
                         sort_text=d.get("sortText"),
@@ -361,7 +368,9 @@ def _detect_block_type(source_lines: List[str], line: int) -> str:
             return "after"
         elif re.match(r"^around\s+", stripped):
             return "around"
-        elif re.match(r"^(action|type|relation|function|module|object|isolate)\s+", stripped):
+        elif re.match(
+            r"^(action|type|relation|function|module|object|isolate)\s+", stripped
+        ):
             return "body"
     return "body"
 
@@ -447,34 +456,38 @@ def compute_semantic_completions(
         # Suggest all state vars, prioritizing those already used
         for var_id, var_node in graph.state_vars.items():
             priority = "high" if var_id in seen_vars else "low"
-            completions.append({
-                "label": var_node.name,
-                "detail": f"state var ({priority} relevance)",
-                "kind": "variable",
-                "insertText": var_node.name,
-                "sortText": "0" + var_node.name
-                if priority == "high"
-                else "1" + var_node.name,
-            })
+            completions.append(
+                {
+                    "label": var_node.name,
+                    "detail": f"state var ({priority} relevance)",
+                    "kind": "variable",
+                    "insertText": var_node.name,
+                    "sortText": (
+                        "0" + var_node.name
+                        if priority == "high"
+                        else "1" + var_node.name
+                    ),
+                }
+            )
 
     elif action_name and block_type == "after":
         # In after blocks: suggest state vars commonly written
         written = graph.get_all_state_vars_written()
         for sv in written:
-            completions.append({
-                "label": sv.name,
-                "detail": "state var (written by action)",
-                "kind": "variable",
-                "insertText": sv.name,
-                "sortText": "0" + sv.name,
-            })
+            completions.append(
+                {
+                    "label": sv.name,
+                    "detail": "state var (written by action)",
+                    "kind": "variable",
+                    "insertText": sv.name,
+                    "sortText": "0" + sv.name,
+                }
+            )
 
     return completions
 
 
-def _find_enclosing_action(
-    graph: Any, filepath: str, line: int
-) -> Optional[str]:
+def _find_enclosing_action(graph: Any, filepath: str, line: int) -> Optional[str]:
     """Find the action name for the monitor block at the given line.
 
     Searches requirements in the graph for one whose file matches and
@@ -505,8 +518,12 @@ def register(server) -> None:
         graph = server.indexer.requirement_graph
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, lambda: get_completions(
-                server.indexer, filepath, params.position, lines,
+            None,
+            lambda: get_completions(
+                server.indexer,
+                filepath,
+                params.position,
+                lines,
                 requirement_graph=graph,
             ),
         )

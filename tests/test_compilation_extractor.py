@@ -5,6 +5,7 @@ need Z3 or the ivy package to test extraction logic.  Each test creates
 a mock module with reasonable defaults, runs the extractor, and asserts
 the resulting CompiledModuleIR fields.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -22,7 +23,6 @@ from ivy_lsp.compilation.ir import (
     SortIR,
     SymbolIR,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -152,11 +152,13 @@ class _MockMixin:
 
 class MixinBeforeDef(_MockMixin):
     """Mimics Ivy MixinBeforeDef -- type name contains 'Before'."""
+
     pass
 
 
 class MixinAfterDef(_MockMixin):
     """Mimics Ivy MixinAfterDef -- type name contains 'After'."""
+
     pass
 
 
@@ -793,7 +795,10 @@ class TestMixinKindPropagation:
         sig = _make_mock_sig()
         mod = _make_mock_module(
             sig=sig,
-            actions={"shim.before_send": mixer_action, "server.handle_send": _MockAction()},
+            actions={
+                "shim.before_send": mixer_action,
+                "server.handle_send": _MockAction(),
+            },
             mixins={"server.handle_send": [mixin]},
         )
 
@@ -817,7 +822,10 @@ class TestMixinKindPropagation:
         sig = _make_mock_sig()
         mod = _make_mock_module(
             sig=sig,
-            actions={"shim.after_recv": mixer_action, "client.handle_recv": _MockAction()},
+            actions={
+                "shim.after_recv": mixer_action,
+                "client.handle_recv": _MockAction(),
+            },
             mixins={"client.handle_recv": [mixin]},
         )
 
@@ -875,9 +883,13 @@ class TestHandlesExtractionErrorGracefully:
         def _broken_defines(self):
             raise RuntimeError("Z3 error")
 
-        BrokenSort = type("EnumeratedSort", (), {
-            "defines": _broken_defines,
-        })
+        BrokenSort = type(
+            "EnumeratedSort",
+            (),
+            {
+                "defines": _broken_defines,
+            },
+        )
         broken = BrokenSort()
         broken.name = "broken"
         broken.arity = 0

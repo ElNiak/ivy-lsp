@@ -4,6 +4,7 @@ Generates Hint-severity diagnostics for missing coverage:
 - Actions with no before/after monitors
 - State vars written but never guarded by a requirement
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +26,7 @@ def compute_coverage_hints(
     filepath:
         Absolute path of the file to produce hints for.
 
-    Returns
+    Returns:
     -------
     List of dicts, each with keys:
         ``line``, ``message``, ``severity``, ``code``, and optionally
@@ -46,20 +47,20 @@ def compute_coverage_hints(
             continue
         reqs = graph.get_requirements_for_action(action_id)
         if not reqs:
-            hints.append({
-                "line": action_node.line,
-                "message": (
-                    f"Action '{action_node.name}' has no monitor "
-                    f"requirements (before/after)"
-                ),
-                "severity": "hint",
-                "code": "ivy.no-monitor",
-                "template": (
-                    f"after {action_node.name} {{\n"
-                    f"    ensure ...\n"
-                    f"}}"
-                ),
-            })
+            hints.append(
+                {
+                    "line": action_node.line,
+                    "message": (
+                        f"Action '{action_node.name}' has no monitor "
+                        f"requirements (before/after)"
+                    ),
+                    "severity": "hint",
+                    "code": "ivy.no-monitor",
+                    "template": (
+                        f"after {action_node.name} {{\n" f"    ensure ...\n" f"}}"
+                    ),
+                }
+            )
 
     # -----------------------------------------------------------------
     # 2. State vars written but never guarded by a requirement
@@ -87,15 +88,17 @@ def compute_coverage_hints(
             continue
         is_written = var_id in written_vars
         if is_written and var_id not in guarded_vars:
-            hints.append({
-                "line": var_node.line,
-                "message": (
-                    f"State var '{var_node.name}' is written but "
-                    f"not guarded by any requirement"
-                ),
-                "severity": "hint",
-                "code": "ivy.unguarded-write",
-                "template": f"require {var_node.name}(...) ",
-            })
+            hints.append(
+                {
+                    "line": var_node.line,
+                    "message": (
+                        f"State var '{var_node.name}' is written but "
+                        f"not guarded by any requirement"
+                    ),
+                    "severity": "hint",
+                    "code": "ivy.unguarded-write",
+                    "template": f"require {var_node.name}(...) ",
+                }
+            )
 
     return hints

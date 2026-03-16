@@ -17,7 +17,6 @@ from ivy_lsp.analysis.requirement_graph import RequirementGraph
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.commands import register
 
-
 # ---------------------------------------------------------------------------
 # Helpers (duplicated from test_commands.py -- small, self-contained)
 # ---------------------------------------------------------------------------
@@ -32,6 +31,7 @@ def _make_registered_handlers():
         def decorator(fn):
             registered[method] = fn
             return fn
+
         return decorator
 
     server.feature = fake_feature
@@ -49,12 +49,14 @@ def _call(fn, *args, **kwargs):
 
 def _make_namedtuple_params(fields: dict):
     """Build a nested namedtuple mimicking pygls _dict_to_object() output."""
+
     def _convert(obj):
         if isinstance(obj, dict):
             converted = {k: _convert(v) for k, v in obj.items()}
             NT = namedtuple("Object", list(converted.keys()), rename=True)
             return NT(**converted)
         return obj
+
     return _convert(fields)
 
 
@@ -71,21 +73,25 @@ def scoped_server():
     model = ScopedRequirementModel()
     scope_client = TestScope(
         test_file="/workspace/quic_client_test.ivy",
-        include_closure=frozenset({
-            "/workspace/quic_client_test.ivy",
-            "/workspace/quic_stack.ivy",
-            "/workspace/quic_types.ivy",
-        }),
+        include_closure=frozenset(
+            {
+                "/workspace/quic_client_test.ivy",
+                "/workspace/quic_stack.ivy",
+                "/workspace/quic_types.ivy",
+            }
+        ),
         exported_actions=frozenset({"quic.send_packet", "quic.send_frame"}),
         imported_actions=frozenset({"tls.handshake"}),
         tester_role="client",
     )
     scope_server = TestScope(
         test_file="/workspace/quic_server_test.ivy",
-        include_closure=frozenset({
-            "/workspace/quic_server_test.ivy",
-            "/workspace/quic_stack.ivy",
-        }),
+        include_closure=frozenset(
+            {
+                "/workspace/quic_server_test.ivy",
+                "/workspace/quic_stack.ivy",
+            }
+        ),
         exported_actions=frozenset({"quic.recv_packet"}),
         imported_actions=frozenset(),
         tester_role="server",
@@ -131,10 +137,12 @@ class TestNewCommandsRegistered:
 class TestSetActiveTestHandler:
     def test_set_known_test(self, scoped_server):
         server, registered, model = scoped_server
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params)
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params)
         assert result["success"] is True
         assert result["activeTest"] == "/workspace/quic_client_test.ivy"
         assert model.get_active_scope() is not None
@@ -146,17 +154,19 @@ class TestSetActiveTestHandler:
         model.set_active_test("/workspace/quic_client_test.ivy")
         # Then clear
         params = _make_namedtuple_params({"testFile": None})
-        result = _call(registered["ivy/setActiveTest"],params)
+        result = _call(registered["ivy/setActiveTest"], params)
         assert result["success"] is True
         assert result["activeTest"] is None
         assert model.get_active_scope() is None
 
     def test_set_unknown_test_returns_error(self, scoped_server):
         server, registered, model = scoped_server
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/nonexistent.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params)
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/nonexistent.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params)
         assert result["success"] is False
         assert "error" in result
 
@@ -164,39 +174,49 @@ class TestSetActiveTestHandler:
         server, registered = _make_registered_handlers()
         # Plain RequirementGraph, not ScopedRequirementModel
         server.indexer.requirement_graph = RequirementGraph()
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/test.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params)
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/test.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params)
         assert result["success"] is False
         assert "error" in result
 
     def test_switch_between_tests(self, scoped_server):
         server, registered, model = scoped_server
-        params_a = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-        })
-        params_b = _make_namedtuple_params({
-            "testFile": "/workspace/quic_server_test.ivy",
-        })
-        _call(registered["ivy/setActiveTest"],params_a)
+        params_a = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+            }
+        )
+        params_b = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_server_test.ivy",
+            }
+        )
+        _call(registered["ivy/setActiveTest"], params_a)
         assert model.get_active_scope().tester_role == "client"
-        _call(registered["ivy/setActiveTest"],params_b)
+        _call(registered["ivy/setActiveTest"], params_b)
         assert model.get_active_scope().tester_role == "server"
 
     def test_set_unknown_after_known_returns_error(self, scoped_server):
         """Setting unknown test after a known one must fail, not silently keep the old."""
         server, registered, model = scoped_server
-        params_valid = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params_valid)
+        params_valid = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params_valid)
         assert result["success"] is True
 
-        params_unknown = _make_namedtuple_params({
-            "testFile": "/workspace/nonexistent.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params_unknown)
+        params_unknown = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/nonexistent.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params_unknown)
         assert result["success"] is False
         assert "error" in result
 
@@ -209,7 +229,7 @@ class TestSetActiveTestHandler:
 class TestListTestsHandler:
     def test_list_with_scopes(self, scoped_server):
         server, registered, model = scoped_server
-        result = _call(registered["ivy/listTests"],None)
+        result = _call(registered["ivy/listTests"], None)
         assert "tests" in result
         tests = result["tests"]
         assert len(tests) == 2
@@ -219,9 +239,10 @@ class TestListTestsHandler:
 
     def test_list_entry_fields(self, scoped_server):
         server, registered, model = scoped_server
-        result = _call(registered["ivy/listTests"],None)
+        result = _call(registered["ivy/listTests"], None)
         entry = next(
-            t for t in result["tests"]
+            t
+            for t in result["tests"]
             if t["testFile"] == "/workspace/quic_client_test.ivy"
         )
         assert entry["testerRole"] == "client"
@@ -232,24 +253,24 @@ class TestListTestsHandler:
     def test_list_empty_scopes(self):
         server, registered = _make_registered_handlers()
         server.indexer.requirement_graph = ScopedRequirementModel()
-        result = _call(registered["ivy/listTests"],None)
+        result = _call(registered["ivy/listTests"], None)
         assert result["tests"] == []
 
     def test_list_no_scoped_model(self):
         server, registered = _make_registered_handlers()
         server.indexer.requirement_graph = RequirementGraph()
-        result = _call(registered["ivy/listTests"],None)
+        result = _call(registered["ivy/listTests"], None)
         assert result["tests"] == []
 
     def test_list_includes_active_marker(self, scoped_server):
         server, registered, model = scoped_server
         model.set_active_test("/workspace/quic_client_test.ivy")
-        result = _call(registered["ivy/listTests"],None)
+        result = _call(registered["ivy/listTests"], None)
         assert result["activeTest"] == "/workspace/quic_client_test.ivy"
 
     def test_list_no_active_test(self, scoped_server):
         server, registered, model = scoped_server
-        result = _call(registered["ivy/listTests"],None)
+        result = _call(registered["ivy/listTests"], None)
         assert result["activeTest"] is None
 
 
@@ -266,10 +287,12 @@ class TestCompileTestHandler:
             "/tmp/staging/quic_client_test.ivy"
         )
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -289,10 +312,12 @@ class TestCompileTestHandler:
             "/tmp/staging/quic_client_test.ivy"
         )
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -312,10 +337,12 @@ class TestCompileTestHandler:
         server, registered, model = scoped_server
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -334,10 +361,12 @@ class TestCompileTestHandler:
         server, registered, model = scoped_server
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -354,29 +383,34 @@ class TestCompileTestHandler:
     @pytest.mark.asyncio
     async def test_compile_no_test_file(self, scoped_server):
         server, registered, model = scoped_server
-        params = _make_namedtuple_params({
-            "testFile": None,
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": None,
+                "workDoneToken": None,
+            }
+        )
         result = await registered["ivy/compileTest"](params)
         assert result["success"] is False
-        assert "testFile" in result["message"].lower() or "test" in result["message"].lower()
+        assert (
+            "testFile" in result["message"].lower()
+            or "test" in result["message"].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_compile_failure_exit_code(self, scoped_server):
         server, registered, model = scoped_server
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate.return_value = (
-                b"", b"error: compilation failed\n"
-            )
+            mock_proc.communicate.return_value = (b"", b"error: compilation failed\n")
             mock_proc.returncode = 1
             mock_exec.return_value = mock_proc
 
@@ -392,10 +426,12 @@ class TestCompileTestHandler:
         server.indexer.requirement_graph = RequirementGraph()
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/test.ivy",
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/test.ivy",
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -430,10 +466,12 @@ class TestSetActiveTestDiagnosticRefresh:
             "ivy_lsp.features.diagnostics.compute_diagnostics",
             return_value=[],
         ):
-            params = _make_namedtuple_params({
-                "testFile": "/workspace/quic_client_test.ivy",
-            })
-            result = _call(registered["ivy/setActiveTest"],params)
+            params = _make_namedtuple_params(
+                {
+                    "testFile": "/workspace/quic_client_test.ivy",
+                }
+            )
+            result = _call(registered["ivy/setActiveTest"], params)
 
         assert result["success"] is True
         server.text_document_publish_diagnostics.assert_called_once()
@@ -454,7 +492,7 @@ class TestSetActiveTestDiagnosticRefresh:
             return_value=[],
         ):
             params = _make_namedtuple_params({"testFile": None})
-            result = _call(registered["ivy/setActiveTest"],params)
+            result = _call(registered["ivy/setActiveTest"], params)
 
         assert result["success"] is True
         server.text_document_publish_diagnostics.assert_called_once()
@@ -463,10 +501,12 @@ class TestSetActiveTestDiagnosticRefresh:
         """Setting unknown test should NOT trigger diagnostic publish."""
         server, registered, model = scoped_server
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/nonexistent.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params)
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/nonexistent.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params)
         assert result["success"] is False
         server.text_document_publish_diagnostics.assert_not_called()
 
@@ -491,10 +531,12 @@ class TestSetActiveTestDiagnosticRefresh:
             "ivy_lsp.features.diagnostics.compute_diagnostics",
             return_value=[],
         ) as mock_compute:
-            params = _make_namedtuple_params({
-                "testFile": "/workspace/quic_client_test.ivy",
-            })
-            _call(registered["ivy/setActiveTest"],params)
+            params = _make_namedtuple_params(
+                {
+                    "testFile": "/workspace/quic_client_test.ivy",
+                }
+            )
+            _call(registered["ivy/setActiveTest"], params)
 
         # compute_diagnostics called only for file:// URI, not untitled
         assert mock_compute.call_count == 1
@@ -507,10 +549,12 @@ class TestSetActiveTestDiagnosticRefresh:
         # Don't set text_documents -- MagicMock auto-attr is not iterable,
         # so _refresh_open_diagnostics catches TypeError and returns.
 
-        params = _make_namedtuple_params({
-            "testFile": "/workspace/quic_client_test.ivy",
-        })
-        result = _call(registered["ivy/setActiveTest"],params)
+        params = _make_namedtuple_params(
+            {
+                "testFile": "/workspace/quic_client_test.ivy",
+            }
+        )
+        result = _call(registered["ivy/setActiveTest"], params)
         assert result["success"] is True
 
     def test_multiple_open_docs_all_refreshed(self, scoped_server):
@@ -530,10 +574,12 @@ class TestSetActiveTestDiagnosticRefresh:
             "ivy_lsp.features.diagnostics.compute_diagnostics",
             return_value=[],
         ):
-            params = _make_namedtuple_params({
-                "testFile": "/workspace/quic_client_test.ivy",
-            })
-            _call(registered["ivy/setActiveTest"],params)
+            params = _make_namedtuple_params(
+                {
+                    "testFile": "/workspace/quic_client_test.ivy",
+                }
+            )
+            _call(registered["ivy/setActiveTest"], params)
 
         assert server.text_document_publish_diagnostics.call_count == 3
 
@@ -557,10 +603,12 @@ class TestActiveDocumentChanged:
         server, registered, model = scoped_server
         assert model.get_active_scope() is None
 
-        params = _make_namedtuple_params({
-            "uri": "file:///workspace/quic_client_test.ivy",
-        })
-        _call(registered["ivy/activeDocumentChanged"],params)
+        params = _make_namedtuple_params(
+            {
+                "uri": "file:///workspace/quic_client_test.ivy",
+            }
+        )
+        _call(registered["ivy/activeDocumentChanged"], params)
         assert model.get_active_scope() is not None
         assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
 
@@ -569,10 +617,12 @@ class TestActiveDocumentChanged:
         server, registered, model = scoped_server
         model.set_active_test("/workspace/quic_client_test.ivy")
 
-        params = _make_namedtuple_params({
-            "uri": "file:///workspace/quic_stack.ivy",
-        })
-        _call(registered["ivy/activeDocumentChanged"],params)
+        params = _make_namedtuple_params(
+            {
+                "uri": "file:///workspace/quic_stack.ivy",
+            }
+        )
+        _call(registered["ivy/activeDocumentChanged"], params)
         # Active test should still be quic_client_test.ivy
         assert model.get_active_scope() is not None
         assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
@@ -582,10 +632,12 @@ class TestActiveDocumentChanged:
         server, registered, model = scoped_server
         model.set_active_test("/workspace/quic_client_test.ivy")
 
-        params = _make_namedtuple_params({
-            "uri": "file:///workspace/quic_server_test.ivy",
-        })
-        _call(registered["ivy/activeDocumentChanged"],params)
+        params = _make_namedtuple_params(
+            {
+                "uri": "file:///workspace/quic_server_test.ivy",
+            }
+        )
+        _call(registered["ivy/activeDocumentChanged"], params)
         assert model.get_active_scope().test_file == "/workspace/quic_server_test.ivy"
         assert model.get_active_scope().tester_role == "server"
 
@@ -594,22 +646,26 @@ class TestActiveDocumentChanged:
         server, registered = _make_registered_handlers()
         server.indexer.requirement_graph = RequirementGraph()
 
-        params = _make_namedtuple_params({
-            "uri": "file:///workspace/test.ivy",
-        })
+        params = _make_namedtuple_params(
+            {
+                "uri": "file:///workspace/test.ivy",
+            }
+        )
         # Should not raise
-        _call(registered["ivy/activeDocumentChanged"],params)
+        _call(registered["ivy/activeDocumentChanged"], params)
 
     def test_no_indexer_no_crash(self):
         """Handler should not crash when indexer is missing."""
         server, registered = _make_registered_handlers()
         del server.indexer
 
-        params = _make_namedtuple_params({
-            "uri": "file:///workspace/test.ivy",
-        })
+        params = _make_namedtuple_params(
+            {
+                "uri": "file:///workspace/test.ivy",
+            }
+        )
         # Should not raise
-        _call(registered["ivy/activeDocumentChanged"],params)
+        _call(registered["ivy/activeDocumentChanged"], params)
 
     def test_changed_test_triggers_diagnostic_refresh(self, scoped_server):
         """When active test changes, diagnostics should be refreshed."""
@@ -624,10 +680,12 @@ class TestActiveDocumentChanged:
             "ivy_lsp.features.diagnostics.compute_diagnostics",
             return_value=[],
         ):
-            params = _make_namedtuple_params({
-                "uri": "file:///workspace/quic_client_test.ivy",
-            })
-            _call(registered["ivy/activeDocumentChanged"],params)
+            params = _make_namedtuple_params(
+                {
+                    "uri": "file:///workspace/quic_client_test.ivy",
+                }
+            )
+            _call(registered["ivy/activeDocumentChanged"], params)
 
         server.text_document_publish_diagnostics.assert_called()
 
@@ -636,10 +694,12 @@ class TestActiveDocumentChanged:
         server, registered, model = scoped_server
         model.set_active_test("/workspace/quic_client_test.ivy")
 
-        params = _make_namedtuple_params({
-            "uri": "file:///workspace/quic_client_test.ivy",
-        })
-        _call(registered["ivy/activeDocumentChanged"],params)
+        params = _make_namedtuple_params(
+            {
+                "uri": "file:///workspace/quic_client_test.ivy",
+            }
+        )
+        _call(registered["ivy/activeDocumentChanged"], params)
         server.text_document_publish_diagnostics.assert_not_called()
 
     def test_non_file_uri_ignored(self, scoped_server):
@@ -647,10 +707,12 @@ class TestActiveDocumentChanged:
         server, registered, model = scoped_server
         model.set_active_test("/workspace/quic_client_test.ivy")
 
-        params = _make_namedtuple_params({
-            "uri": "untitled:Untitled-1",
-        })
-        _call(registered["ivy/activeDocumentChanged"],params)
+        params = _make_namedtuple_params(
+            {
+                "uri": "untitled:Untitled-1",
+            }
+        )
+        _call(registered["ivy/activeDocumentChanged"], params)
         assert model.get_active_scope().test_file == "/workspace/quic_client_test.ivy"
 
     def test_none_params_no_crash(self):
@@ -658,7 +720,7 @@ class TestActiveDocumentChanged:
         server, registered = _make_registered_handlers()
         # Should not raise — getattr(None, "uri", None) returns None,
         # triggering the early return on the `not uri` guard.
-        _call(registered["ivy/activeDocumentChanged"],None)
+        _call(registered["ivy/activeDocumentChanged"], None)
 
 
 class TestNoneParamsGuards:
@@ -666,7 +728,7 @@ class TestNoneParamsGuards:
 
     def test_set_active_test_none_params(self):
         server, registered = _make_registered_handlers()
-        result = _call(registered["ivy/setActiveTest"],None)
+        result = _call(registered["ivy/setActiveTest"], None)
         assert result["success"] is False
         assert "No params" in result["error"]
 
@@ -680,7 +742,7 @@ class TestNoneParamsGuards:
     def test_active_document_changed_none_params(self):
         server, registered = _make_registered_handlers()
         # Should return without error (handler returns None)
-        _call(registered["ivy/activeDocumentChanged"],None)
+        _call(registered["ivy/activeDocumentChanged"], None)
 
 
 # ---------------------------------------------------------------------------

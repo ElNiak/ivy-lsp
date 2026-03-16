@@ -41,14 +41,18 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         resolve_cb = ctx.make_resolve_callback()
         diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
-        return json.dumps({
-            "success": True,
-            "file": relative_path,
-            "diagnostics": diagnostics,
-            "diagnostic_count": len(diagnostics),
-            "error_count": sum(1 for d in diagnostics if d["severity"] == "error"),
-            "warning_count": sum(1 for d in diagnostics if d["severity"] == "warning"),
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "file": relative_path,
+                "diagnostics": diagnostics,
+                "diagnostic_count": len(diagnostics),
+                "error_count": sum(1 for d in diagnostics if d["severity"] == "error"),
+                "warning_count": sum(
+                    1 for d in diagnostics if d["severity"] == "warning"
+                ),
+            }
+        )
 
     @mcp.tool()
     async def ivy_include_graph(relative_path: str | None = None) -> str:
@@ -69,7 +73,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
             for rel_path in ctx.find_ivy_files(ctx.root):
                 try:
-                    with open(os.path.join(ctx.root, rel_path), encoding="utf-8", errors="replace") as f:
+                    with open(
+                        os.path.join(ctx.root, rel_path),
+                        encoding="utf-8",
+                        errors="replace",
+                    ) as f:
                         source = f.read()
                     graph[rel_path] = _INCLUDE_PATTERN.findall(source)
                 except OSError as exc:
@@ -122,7 +130,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             if includes is None:
                 for pfx in ["protocol-testing/", "protocol-testing" + os.sep]:
                     if relative_path.startswith(pfx):
-                        stripped = relative_path[len(pfx):]
+                        stripped = relative_path[len(pfx) :]
                         includes = graph.get(stripped)
                         if includes is not None:
                             resolved_key = stripped
@@ -156,24 +164,30 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 if mod_path and mod_path in graph:
                     stack.extend(graph[mod_path])
 
-            return json.dumps({
-                "file": relative_path,
-                "includes": resolved,
-                "included_by": included_by,
-                "transitive_includes": sorted(transitive),
-            })
+            return json.dumps(
+                {
+                    "file": relative_path,
+                    "includes": resolved,
+                    "included_by": included_by,
+                    "transitive_includes": sorted(transitive),
+                }
+            )
         else:
-            return json.dumps({
-                "files": {fp: {"includes": incs} for fp, incs in graph.items()},
-                "total_files": len(graph),
-            })
+            return json.dumps(
+                {
+                    "files": {fp: {"includes": incs} for fp, incs in graph.items()},
+                    "total_files": len(graph),
+                }
+            )
 
     @mcp.tool()
     async def ivy_capabilities() -> str:
         """Report which Ivy CLI tools are available on PATH."""
-        return json.dumps({
-            "success": True,
-            "ivy_check": shutil.which("ivy_check") is not None,
-            "ivyc": shutil.which("ivyc") is not None,
-            "ivy_show": shutil.which("ivy_show") is not None,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "ivy_check": shutil.which("ivy_check") is not None,
+                "ivyc": shutil.which("ivyc") is not None,
+                "ivy_show": shutil.which("ivy_show") is not None,
+            }
+        )

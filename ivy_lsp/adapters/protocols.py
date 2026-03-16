@@ -9,7 +9,15 @@ internals directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 
 from ivy_lsp.parsing.parser_session import ParseResult
 
@@ -67,7 +75,9 @@ class CompileResult:
 class IParserAdapter(Protocol):
     """Parses Ivy source text into an AST."""
 
-    def parse(self, source: str, filename: str) -> ParseResult: ...
+    def parse(self, source: str, filename: str) -> ParseResult:
+        """Parse Ivy source text and return a ParseResult."""
+        ...
 
 
 @runtime_checkable
@@ -76,14 +86,18 @@ class IAstEnrichmentAdapter(Protocol):
 
     def extract_type_info(
         self, ast: Any, filename: str, source: str
-    ) -> List[TypeAnnotation]: ...
+    ) -> List[TypeAnnotation]:
+        """Extract type annotations from a parsed AST."""
+        ...
 
 
 @runtime_checkable
 class ICompilerAdapter(Protocol):
     """Compiles Ivy source through the full compiler pipeline."""
 
-    def compile(self, source: str, filename: str) -> CompileResult: ...
+    def compile(self, source: str, filename: str) -> CompileResult:
+        """Compile Ivy source and return a CompileResult."""
+        ...
 
     def compile_background(
         self,
@@ -97,5 +111,3 @@ class ICompilerAdapter(Protocol):
         may fall back to synchronous compilation in the calling thread.
         """
         ...
-
-

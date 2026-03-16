@@ -43,6 +43,7 @@ class GraphSnapshot:
     incoming: Dict[str, List[Tuple["EdgeType", str]]]
 
     def get_requirements_for_action(self, action_name: str) -> List["RequirementNode"]:
+        """Return requirements constraining the given action."""
         result = []
         for etype, source_id in self.incoming.get(action_name, []):
             if etype == EdgeType.CONSTRAINS and source_id in self.requirements:
@@ -50,6 +51,7 @@ class GraphSnapshot:
         return result
 
     def get_state_vars_read_by(self, requirement_id: str) -> List["StateVarNode"]:
+        """Return state variables read by a requirement."""
         result = []
         for etype, target_id in self.outgoing.get(requirement_id, []):
             if etype == EdgeType.READS and target_id in self.state_vars:
@@ -57,6 +59,7 @@ class GraphSnapshot:
         return result
 
     def get_all_state_vars_written(self) -> List["StateVarNode"]:
+        """Return all state variables with WRITES edges."""
         written: Set[str] = set()
         for _src, etype, dst in self.edges:
             if etype == EdgeType.WRITES:
@@ -64,6 +67,7 @@ class GraphSnapshot:
         return [self.state_vars[v] for v in written if v in self.state_vars]
 
     def get_uncovered_requirements(self) -> List["RfcRequirement"]:
+        """Return RFC requirements not covered by any bracket tag."""
         from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         rfc_keys = set(self.rfc_requirements.keys())
@@ -72,9 +76,12 @@ class GraphSnapshot:
             for tag in req.bracket_tags:
                 covered_ids.update(normalize_tag_to_manifest_ids(tag, rfc_keys))
         covered_ids &= rfc_keys
-        return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
+        return [
+            r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids
+        ]
 
     def get_coverage_stats(self) -> Dict[str, int]:
+        """Compute covered/uncovered/total RFC requirement counts."""
         from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         rfc_keys = set(self.rfc_requirements.keys())
@@ -89,7 +96,10 @@ class GraphSnapshot:
             "uncovered": len(self.rfc_requirements) - len(covered_ids),
         }
 
-    def get_requirements_sharing_state_var(self, var_name: str) -> List["RequirementNode"]:
+    def get_requirements_sharing_state_var(
+        self, var_name: str
+    ) -> List["RequirementNode"]:
+        """Return requirements that read the given state variable."""
         result = []
         for etype, source_id in self.incoming.get(var_name, []):
             if etype == EdgeType.READS and source_id in self.requirements:
@@ -152,7 +162,9 @@ class RequirementNode:
     file: str  # absolute filepath
     monitor_action: str  # action being monitored (mixee)
     mixin_kind: str  # "before" | "after" | "around" | "implement" | "direct"
-    bracket_tags: List[str] = field(default_factory=list)  # parsed from "# [4]" or "# [rfc9000:4.1, rfc9000:8.1]"
+    bracket_tags: List[str] = field(
+        default_factory=list
+    )  # parsed from "# [4]" or "# [rfc9000:4.1, rfc9000:8.1]"
     ast_node: Any = None  # reference to original AST node
 
 
@@ -198,6 +210,8 @@ class PropertyNode:
 
 
 class EdgeType(Enum):
+    """Edge types in the requirement dependency graph."""
+
     READS = "reads"  # requirement/property -> state var
     WRITES = "writes"  # assignment in body -> state var
     CONSTRAINS = "constrains"  # requirement -> action (before/after)
@@ -222,6 +236,7 @@ class RequirementGraph:
     """
 
     def __init__(self) -> None:
+        """Initialize empty graph with lock and adjacency indices."""
         self._lock = threading.RLock()
 
         self.requirements: Dict[str, RequirementNode] = {}
@@ -248,16 +263,19 @@ class RequirementGraph:
     # -- Mutation -----------------------------------------------------------
 
     def add_requirement(self, node: RequirementNode) -> None:
+        """Add a requirement node to the graph."""
         with self._lock:
             self.requirements[node.id] = node
             self._version += 1
 
     def add_state_var(self, node: StateVarNode) -> None:
+        """Add a state variable node to the graph."""
         with self._lock:
             self.state_vars[node.id] = node
             self._version += 1
 
     def add_action(self, node: ActionNode) -> None:
+        """Add an action node to the graph."""
         with self._lock:
             self.actions[node.id] = node
             self._version += 1
@@ -270,16 +288,19 @@ class RequirementGraph:
                 self._version += 1
 
     def add_property(self, node: PropertyNode) -> None:
+        """Add a property node to the graph."""
         with self._lock:
             self.properties[node.id] = node
             self._version += 1
 
     def add_rfc_requirement(self, node: RfcRequirement) -> None:
+        """Add an RFC requirement node to the graph."""
         with self._lock:
             self.rfc_requirements[node.id] = node
             self._version += 1
 
     def add_edge(self, source_id: str, edge_type: EdgeType, target_id: str) -> None:
+        """Add a typed edge between two nodes (deduplicated)."""
         with self._lock:
             edge = (source_id, edge_type, target_id)
             if edge in self._edge_set:
@@ -362,7 +383,9 @@ class RequirementGraph:
         with self._lock:
             self.clear_wiring_edges()
 
-            from ivy_lsp.analysis.formula_analyzer import extract_state_var_references_text
+            from ivy_lsp.analysis.formula_analyzer import (
+                extract_state_var_references_text,
+            )
 
             for req in self.requirements.values():
                 refs = extract_state_var_references_text(req.formula_text, known_vars)
@@ -441,27 +464,29 @@ class RequirementGraph:
             for sym in symbols:
                 if sym.kind == SymbolKind.Function:
                     if sym.name not in self.actions:
-                        self.add_action(ActionNode(
-                            id=sym.name,
-                            name=sym.name.rsplit(".", 1)[-1],
-                            qualified_name=sym.name,
-                            file=sym.file_path or "",
-                            line=sym.range[0] if sym.range else 0,
-                        ))
+                        self.add_action(
+                            ActionNode(
+                                id=sym.name,
+                                name=sym.name.rsplit(".", 1)[-1],
+                                qualified_name=sym.name,
+                                file=sym.file_path or "",
+                                line=sym.range[0] if sym.range else 0,
+                            )
+                        )
 
             for req in self.requirements.values():
                 if req.monitor_action and req.monitor_action not in self.actions:
-                    self.add_action(ActionNode(
-                        id=req.monitor_action,
-                        name=req.monitor_action.rsplit(".", 1)[-1],
-                        qualified_name=req.monitor_action,
-                        file=req.file,
-                        line=req.line,
-                    ))
+                    self.add_action(
+                        ActionNode(
+                            id=req.monitor_action,
+                            name=req.monitor_action.rsplit(".", 1)[-1],
+                            qualified_name=req.monitor_action,
+                            file=req.file,
+                            line=req.line,
+                        )
+                    )
 
-    def populate_state_vars(
-        self, known_vars: Set[str], symbols: List[Any]
-    ) -> None:
+    def populate_state_vars(self, known_vars: Set[str], symbols: List[Any]) -> None:
         """Create StateVarNodes from known variable names and the symbol table."""
         from lsprotocol.types import SymbolKind
 
@@ -474,14 +499,16 @@ class RequirementGraph:
             for var_name in known_vars:
                 if var_name not in self.state_vars:
                     sym = sym_lookup.get(var_name)
-                    self.add_state_var(StateVarNode(
-                        id=var_name,
-                        name=var_name.rsplit(".", 1)[-1],
-                        qualified_name=var_name,
-                        file=sym.file_path if sym and sym.file_path else "",
-                        line=sym.range[0] if sym and sym.range else 0,
-                        is_relation=False,
-                    ))
+                    self.add_state_var(
+                        StateVarNode(
+                            id=var_name,
+                            name=var_name.rsplit(".", 1)[-1],
+                            qualified_name=var_name,
+                            file=sym.file_path if sym and sym.file_path else "",
+                            line=sym.range[0] if sym and sym.range else 0,
+                            is_relation=False,
+                        )
+                    )
 
     def wire_propagation_edges(self, include_graph: Any) -> None:
         """Wire PROPAGATED_FROM edges for cross-file requirement propagation.
@@ -523,7 +550,11 @@ class RequirementGraph:
                 for tag in req.bracket_tags:
                     covered_ids.update(normalize_tag_to_manifest_ids(tag, rfc_keys))
             covered_ids &= rfc_keys
-            return [r for r_id, r in self.rfc_requirements.items() if r_id not in covered_ids]
+            return [
+                r
+                for r_id, r in self.rfc_requirements.items()
+                if r_id not in covered_ids
+            ]
 
     def get_outgoing_edges(self, node_id: str) -> List[Tuple[EdgeType, str]]:
         """Return outgoing edges for the given node (copy of internal list)."""
@@ -561,8 +592,10 @@ class RequirementGraph:
         the same GraphSnapshot instance.
         """
         with self._lock:
-            if (self._cached_snapshot is not None
-                    and self._cached_snapshot_version == self._version):
+            if (
+                self._cached_snapshot is not None
+                and self._cached_snapshot_version == self._version
+            ):
                 return self._cached_snapshot
             snap = GraphSnapshot(
                 actions=dict(self.actions),
@@ -623,9 +656,7 @@ class RequirementGraph:
                     result.append(self.requirements[source_id])
             return result
 
-    def get_properties_depending_on_axiom(
-        self, axiom_id: str
-    ) -> List[PropertyNode]:
+    def get_properties_depending_on_axiom(self, axiom_id: str) -> List[PropertyNode]:
         """Return properties that depend on *axiom_id*."""
         with self._lock:
             result = []
@@ -650,9 +681,7 @@ class RequirementGraph:
 
             active_files = {filepath}
             active_files |= include_graph.get_transitive_includes(filepath)
-            result = [
-                r for r in self.requirements.values() if r.file in active_files
-            ]
+            result = [r for r in self.requirements.values() if r.file in active_files]
 
             # Keep cache bounded to avoid unbounded memory growth.
             if len(self._active_reqs_cache) > 200:
@@ -670,9 +699,7 @@ class RequirementGraph:
                 by_file[req.file].append(req)
             return dict(by_file)
 
-    def get_requirement_counts_for_action(
-        self, action_name: str
-    ) -> Dict[str, int]:
+    def get_requirement_counts_for_action(self, action_name: str) -> Dict[str, int]:
         """Return counts by kind for requirements constraining *action_name*."""
         with self._lock:
             counts: Dict[str, int] = defaultdict(int)

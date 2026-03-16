@@ -39,6 +39,7 @@ class FileCache:
     """
 
     def __init__(self, max_size: int = 500) -> None:
+        """Initialize an empty LRU cache with the given capacity."""
         self._max_size = max_size
         self._cache: OrderedDict[str, CachedFile] = OrderedDict()
         self._lock = threading.Lock()
@@ -126,7 +127,13 @@ class PersistentFileCache:
 
     SCHEMA_VERSION = "1"
 
-    def __init__(self, workspace_root: str, max_memory: int = 200, cache_dir: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        workspace_root: str,
+        max_memory: int = 200,
+        cache_dir: Optional[str] = None,
+    ) -> None:
+        """Initialize SQLite-backed cache for the given workspace."""
         self._workspace_root = workspace_root
         self._memory = FileCache(max_size=max_memory)
         self._db_path = self._get_db_path(workspace_root, cache_dir)
@@ -138,14 +145,15 @@ class PersistentFileCache:
         self._init_schema()
 
     def _get_db_path(self, workspace_root: str, cache_dir: Optional[str] = None) -> str:
-        h = hashlib.sha256(
-            os.path.abspath(workspace_root).encode()
-        ).hexdigest()[:16]
+        h = hashlib.sha256(os.path.abspath(workspace_root).encode()).hexdigest()[:16]
         if cache_dir is not None:
             cache_base = os.path.join(cache_dir, h)
         else:
             cache_base = os.path.join(
-                os.path.expanduser("~"), ".cache", "ivy-lsp", h,
+                os.path.expanduser("~"),
+                ".cache",
+                "ivy-lsp",
+                h,
             )
         return os.path.join(cache_base, "index.db")
 
@@ -177,13 +185,15 @@ class PersistentFileCache:
         self._db.commit()
 
     def get(self, filepath: str) -> Optional[CachedFile]:
+        """Look up a file in memory then SQLite; return None if stale."""
         cached = self._memory.get(filepath)
         if cached is not None:
             return cached
         with self._db_lock:
             try:
                 row = self._db.execute(
-                    "SELECT * FROM file_cache WHERE filepath=?", (filepath,),
+                    "SELECT * FROM file_cache WHERE filepath=?",
+                    (filepath,),
                 ).fetchone()
             except sqlite3.Error:
                 logger.debug("SQLite read failed for %s", filepath, exc_info=True)
@@ -198,7 +208,8 @@ class PersistentFileCache:
             with self._db_lock:
                 try:
                     self._db.execute(
-                        "DELETE FROM file_cache WHERE filepath=?", (filepath,),
+                        "DELETE FROM file_cache WHERE filepath=?",
+                        (filepath,),
                     )
                     self._db.commit()
                 except sqlite3.Error:
@@ -232,9 +243,14 @@ class PersistentFileCache:
         writes: Optional[List[Any]] = None,
         export_import_info: Any = None,
     ) -> None:
+        """Store a parse result in memory and persist to SQLite."""
         self._memory.put(
-            filepath, result, symbols, includes,
-            requirements=requirements, writes=writes,
+            filepath,
+            result,
+            symbols,
+            includes,
+            requirements=requirements,
+            writes=writes,
             export_import_info=export_import_info,
         )
         try:
@@ -256,26 +272,32 @@ class PersistentFileCache:
                 logger.debug("SQLite write failed for %s", filepath, exc_info=True)
 
     def invalidate(self, filepath: str) -> None:
+        """Remove a file from both memory and SQLite caches."""
         self._memory.invalidate(filepath)
         with self._db_lock:
             try:
                 self._db.execute(
-                    "DELETE FROM file_cache WHERE filepath=?", (filepath,),
+                    "DELETE FROM file_cache WHERE filepath=?",
+                    (filepath,),
                 )
                 self._db.commit()
             except sqlite3.Error:
                 logger.debug("SQLite invalidate failed for %s", filepath, exc_info=True)
 
     def invalidate_dependents(
-        self, filepath: str, include_graph: Any,
+        self,
+        filepath: str,
+        include_graph: Any,
     ) -> None:
+        """Invalidate files that include the given file."""
         self._memory.invalidate_dependents(filepath, include_graph)
         dependents = include_graph.get_included_by(filepath)
         with self._db_lock:
             try:
                 for dep in dependents:
                     self._db.execute(
-                        "DELETE FROM file_cache WHERE filepath=?", (dep,),
+                        "DELETE FROM file_cache WHERE filepath=?",
+                        (dep,),
                     )
                 self._db.commit()
             except sqlite3.Error:
@@ -286,6 +308,7 @@ class PersistentFileCache:
                 )
 
     def clear_all(self) -> None:
+        """Wipe both memory and SQLite caches entirely."""
         self._memory = FileCache(max_size=self._memory._max_size)
         with self._db_lock:
             try:
@@ -295,6 +318,7 @@ class PersistentFileCache:
                 logger.debug("SQLite clear_all failed", exc_info=True)
 
     def close(self) -> None:
+        """Close the underlying SQLite connection."""
         with self._db_lock:
             try:
                 self._db.close()

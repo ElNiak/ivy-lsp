@@ -62,9 +62,7 @@ class TestIncludeGraphSimple:
             "#lang ivy1.7\n\ninclude types\n\nrelation connected(X:cid, Y:cid)\n"
         )
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_include_graph", {"relative_path": "conn.ivy"}
-        )
+        result = await mcp.call_tool("ivy_include_graph", {"relative_path": "conn.ivy"})
         data = json.loads(_extract_text(result))
         assert data["file"] == "conn.ivy"
         module_names = [inc["module"] for inc in data["includes"]]
@@ -96,13 +94,9 @@ class TestIncludeGraphTransitive:
         (tmp_path / "mid.ivy").write_text(
             "#lang ivy1.7\n\ninclude base\n\ntype mid_t\n"
         )
-        (tmp_path / "top.ivy").write_text(
-            "#lang ivy1.7\n\ninclude mid\n\ntype top_t\n"
-        )
+        (tmp_path / "top.ivy").write_text("#lang ivy1.7\n\ninclude mid\n\ntype top_t\n")
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_include_graph", {"relative_path": "top.ivy"}
-        )
+        result = await mcp.call_tool("ivy_include_graph", {"relative_path": "top.ivy"})
         data = json.loads(_extract_text(result))
         # Should include both "mid" and transitively "base"
         assert "mid" in data["transitive_includes"]

@@ -12,6 +12,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
+from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.commands import (
     _detect_isolate_at_position,
     _find_enclosing_test,
@@ -19,9 +20,7 @@ from ivy_lsp.features.commands import (
     _run_tool,
     _validate_ivy_param,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.diagnostics import parse_ivy_check_output
-
 
 # ---------------------------------------------------------------------------
 # parse_ivy_check_output
@@ -106,12 +105,8 @@ class TestDetectIsolateAtPosition:
         ns_symbol = lsp.DocumentSymbol(
             name="test_iso",
             kind=lsp.SymbolKind.Namespace,
-            range=lsp.Range(
-                start=lsp.Position(1, 0), end=lsp.Position(3, 1)
-            ),
-            selection_range=lsp.Range(
-                start=lsp.Position(1, 0), end=lsp.Position(1, 8)
-            ),
+            range=lsp.Range(start=lsp.Position(1, 0), end=lsp.Position(3, 1)),
+            selection_range=lsp.Range(start=lsp.Position(1, 0), end=lsp.Position(1, 8)),
             children=None,
         )
         mock_compute.return_value = [ns_symbol]
@@ -126,12 +121,8 @@ class TestDetectIsolateAtPosition:
         ns_symbol = lsp.DocumentSymbol(
             name="test_iso",
             kind=lsp.SymbolKind.Namespace,
-            range=lsp.Range(
-                start=lsp.Position(1, 0), end=lsp.Position(3, 1)
-            ),
-            selection_range=lsp.Range(
-                start=lsp.Position(1, 0), end=lsp.Position(1, 8)
-            ),
+            range=lsp.Range(start=lsp.Position(1, 0), end=lsp.Position(3, 1)),
+            selection_range=lsp.Range(start=lsp.Position(1, 0), end=lsp.Position(1, 8)),
             children=None,
         )
         mock_compute.return_value = [ns_symbol]
@@ -185,9 +176,7 @@ class TestRunTool:
             "asyncio.create_subprocess_exec",
             side_effect=FileNotFoundError("not found"),
         ):
-            result = await _run_tool(
-                ["nonexistent_tool", "f.ivy"], 10.0, server
-            )
+            result = await _run_tool(["nonexistent_tool", "f.ivy"], 10.0, server)
 
         assert result["success"] is False
         assert "not found" in result["message"]
@@ -207,9 +196,7 @@ class TestRunTool:
         server = MagicMock()
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await _run_tool(
-                ["ivy_check", "f.ivy"], 0.01, server
-            )
+            result = await _run_tool(["ivy_check", "f.ivy"], 0.01, server)
 
         assert result["success"] is False
         assert "Timed out" in result["message"]
@@ -251,6 +238,7 @@ class TestCapabilities:
             def decorator(fn):
                 registered[method] = fn
                 return fn
+
             return decorator
 
         server.feature = fake_feature
@@ -275,6 +263,7 @@ class TestVerifyHandler:
             def decorator(fn):
                 registered[method] = fn
                 return fn
+
             return decorator
 
         server.feature = fake_feature
@@ -302,6 +291,7 @@ def _make_registered_handlers():
         def decorator(fn):
             registered[method] = fn
             return fn
+
         return decorator
 
     server.feature = fake_feature
@@ -413,14 +403,20 @@ class TestResolveViaStaging:
 
         server = MagicMock()
         server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/foo.ivy"
-        assert _resolve_via_staging(server, "/project/sub/foo.ivy") == "/tmp/staging/foo.ivy"
+        assert (
+            _resolve_via_staging(server, "/project/sub/foo.ivy")
+            == "/tmp/staging/foo.ivy"
+        )
 
     def test_staging_returns_none(self):
         from ivy_lsp.features.commands import _resolve_via_staging
 
         server = MagicMock()
         server.indexer.resolver.get_staged_path.return_value = None
-        assert _resolve_via_staging(server, "/project/sub/foo.ivy") == "/project/sub/foo.ivy"
+        assert (
+            _resolve_via_staging(server, "/project/sub/foo.ivy")
+            == "/project/sub/foo.ivy"
+        )
 
     def test_no_indexer(self):
         from ivy_lsp.features.commands import _resolve_via_staging
@@ -444,7 +440,10 @@ class TestShowModelUsesStaging:
         server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/test.ivy"
 
         params = _make_namedtuple_params(
-            {"textDocument": {"uri": "file:///project/sub/test.ivy"}, "workDoneToken": None}
+            {
+                "textDocument": {"uri": "file:///project/sub/test.ivy"},
+                "workDoneToken": None,
+            }
         )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
@@ -470,9 +469,7 @@ class TestVerifyUsesStaging:
         server.workspace.get_text_document.return_value = doc
         server.parser = MagicMock()
         server.indexer = MagicMock()
-        server.indexer.resolver.get_staged_path.return_value = (
-            "/tmp/staging/test.ivy"
-        )
+        server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/test.ivy"
 
         params = _make_namedtuple_params(
             {
@@ -499,9 +496,7 @@ class TestCompileUsesStaging:
     async def test_compile_passes_staged_path(self):
         server, registered = _make_registered_handlers()
         server.indexer = MagicMock()
-        server.indexer.resolver.get_staged_path.return_value = (
-            "/tmp/staging/test.ivy"
-        )
+        server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/test.ivy"
 
         params = _make_namedtuple_params(
             {
@@ -565,8 +560,7 @@ def _make_scoped_server(
     test_scopes: dict,
     active_test: str | None = None,
 ) -> MagicMock:
-    """Build a mock server with a ScopedRequirementModel containing the
-    given test scopes.
+    """Build a mock server with a ScopedRequirementModel containing the given test scopes.
 
     *test_scopes* maps test_file -> frozenset of included files.
     """
@@ -590,9 +584,11 @@ def _make_scoped_server(
 
 class TestFindEnclosingTest:
     def test_returns_none_for_test_file(self):
-        server = _make_scoped_server({
-            "/tests/test_quic.ivy": {"/modules/quic_packet.ivy"},
-        })
+        server = _make_scoped_server(
+            {
+                "/tests/test_quic.ivy": {"/modules/quic_packet.ivy"},
+            }
+        )
         result = _find_enclosing_test(server, "/tests/test_quic.ivy")
         assert result is None
 
@@ -608,18 +604,22 @@ class TestFindEnclosingTest:
         assert result == "/tests/test_a.ivy"
 
     def test_returns_any_test_when_no_active(self):
-        server = _make_scoped_server({
-            "/tests/test_b.ivy": {"/modules/mod.ivy"},
-            "/tests/test_a.ivy": {"/modules/mod.ivy"},
-        })
+        server = _make_scoped_server(
+            {
+                "/tests/test_b.ivy": {"/modules/mod.ivy"},
+                "/tests/test_a.ivy": {"/modules/mod.ivy"},
+            }
+        )
         result = _find_enclosing_test(server, "/modules/mod.ivy")
         # Deterministic: sorted picks test_a first
         assert result == "/tests/test_a.ivy"
 
     def test_returns_none_when_no_test_covers(self):
-        server = _make_scoped_server({
-            "/tests/test_quic.ivy": {"/modules/quic_packet.ivy"},
-        })
+        server = _make_scoped_server(
+            {
+                "/tests/test_quic.ivy": {"/modules/quic_packet.ivy"},
+            }
+        )
         result = _find_enclosing_test(server, "/modules/other.ivy")
         assert result is None
 
@@ -675,10 +675,12 @@ class TestShowModelRedirection:
         graph = ScopedRequirementModel()
         scope = TestScope(
             test_file="/tests/test_quic.ivy",
-            include_closure=frozenset({
-                "/tests/test_quic.ivy",
-                "/modules/quic_packet.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/tests/test_quic.ivy",
+                    "/modules/quic_packet.ivy",
+                }
+            ),
             exported_actions=frozenset(),
             imported_actions=frozenset(),
             tester_role="client",
@@ -689,10 +691,12 @@ class TestShowModelRedirection:
         server.indexer.include_graph.get_transitive_includes.return_value = []
         server.indexer._cache = {}
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -724,10 +728,12 @@ class TestShowModelRedirection:
         server.indexer.requirement_graph = graph
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///tests/test_quic.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///tests/test_quic.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -749,10 +755,12 @@ class TestShowModelRedirection:
         graph = ScopedRequirementModel()
         scope = TestScope(
             test_file="/tests/test_quic.ivy",
-            include_closure=frozenset({
-                "/tests/test_quic.ivy",
-                "/modules/quic_packet.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/tests/test_quic.ivy",
+                    "/modules/quic_packet.ivy",
+                }
+            ),
             exported_actions=frozenset(),
             imported_actions=frozenset(),
             tester_role="client",
@@ -763,10 +771,12 @@ class TestShowModelRedirection:
         server.indexer.include_graph.get_transitive_includes.return_value = []
         server.indexer._cache = {}
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -787,10 +797,12 @@ class TestShowModelRedirection:
         graph = ScopedRequirementModel()
         scope = TestScope(
             test_file="/tests/test_quic.ivy",
-            include_closure=frozenset({
-                "/tests/test_quic.ivy",
-                "/modules/quic_packet.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/tests/test_quic.ivy",
+                    "/modules/quic_packet.ivy",
+                }
+            ),
             exported_actions=frozenset(),
             imported_actions=frozenset(),
             tester_role="client",
@@ -806,25 +818,27 @@ class TestShowModelRedirection:
         ns_symbol = lsp.DocumentSymbol(
             name="quic_packet",
             kind=lsp.SymbolKind.Namespace,
-            range=lsp.Range(
-                start=lsp.Position(1, 0), end=lsp.Position(10, 0)
-            ),
+            range=lsp.Range(start=lsp.Position(1, 0), end=lsp.Position(10, 0)),
             selection_range=lsp.Range(
                 start=lsp.Position(1, 0), end=lsp.Position(1, 12)
             ),
             children=None,
         )
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
-        with patch("asyncio.create_subprocess_exec") as mock_exec, \
-             patch(
-                 "ivy_lsp.features.document_symbols.compute_document_symbols",
-                 return_value=[ns_symbol],
-             ):
+        with (
+            patch("asyncio.create_subprocess_exec") as mock_exec,
+            patch(
+                "ivy_lsp.features.document_symbols.compute_document_symbols",
+                return_value=[ns_symbol],
+            ),
+        ):
             mock_proc = AsyncMock()
             mock_proc.communicate.return_value = (b"ok\n", b"")
             mock_proc.returncode = 0
@@ -853,10 +867,12 @@ class TestShowModelRedirection:
         server.indexer.requirement_graph = graph
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///tests/test_quic.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///tests/test_quic.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -878,10 +894,12 @@ class TestVerifyRedirection:
         graph = ScopedRequirementModel()
         scope = TestScope(
             test_file="/tests/test_quic.ivy",
-            include_closure=frozenset({
-                "/tests/test_quic.ivy",
-                "/modules/quic_packet.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/tests/test_quic.ivy",
+                    "/modules/quic_packet.ivy",
+                }
+            ),
             exported_actions=frozenset(),
             imported_actions=frozenset(),
             tester_role="client",
@@ -898,10 +916,12 @@ class TestVerifyRedirection:
         server.workspace.get_text_document.return_value = doc
         server.parser = MagicMock()
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -923,10 +943,12 @@ class TestVerifyRedirection:
         graph = ScopedRequirementModel()
         scope = TestScope(
             test_file="/tests/test_quic.ivy",
-            include_closure=frozenset({
-                "/tests/test_quic.ivy",
-                "/modules/quic_packet.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/tests/test_quic.ivy",
+                    "/modules/quic_packet.ivy",
+                }
+            ),
             exported_actions=frozenset(),
             imported_actions=frozenset(),
             tester_role="client",
@@ -943,10 +965,12 @@ class TestVerifyRedirection:
         server.workspace.get_text_document.return_value = doc
         server.parser = MagicMock()
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -982,10 +1006,12 @@ class TestVerifyRedirection:
         server.workspace.get_text_document.return_value = doc
         server.parser = MagicMock()
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///tests/test_quic.ivy"},
-            "workDoneToken": None,
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///tests/test_quic.ivy"},
+                "workDoneToken": None,
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -1007,10 +1033,12 @@ class TestCompileRedirection:
         graph = ScopedRequirementModel()
         scope = TestScope(
             test_file="/tests/test_quic.ivy",
-            include_closure=frozenset({
-                "/tests/test_quic.ivy",
-                "/modules/quic_packet.ivy",
-            }),
+            include_closure=frozenset(
+                {
+                    "/tests/test_quic.ivy",
+                    "/modules/quic_packet.ivy",
+                }
+            ),
             exported_actions=frozenset(),
             imported_actions=frozenset(),
             tester_role="client",
@@ -1019,11 +1047,13 @@ class TestCompileRedirection:
         server.indexer.requirement_graph = graph
         server.indexer.resolver.get_staged_path.return_value = None
 
-        params = _make_namedtuple_params({
-            "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
-            "workDoneToken": None,
-            "target": "test",
-        })
+        params = _make_namedtuple_params(
+            {
+                "textDocument": {"uri": "file:///modules/quic_packet.ivy"},
+                "workDoneToken": None,
+                "target": "test",
+            }
+        )
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -1038,4 +1068,3 @@ class TestCompileRedirection:
         assert "test_quic.ivy" in call_args
         assert "/modules/quic_packet.ivy" not in call_args
         assert mock_exec.call_args.kwargs.get("cwd") == "/tests"
-

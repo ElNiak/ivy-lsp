@@ -8,12 +8,12 @@ import pytest
 
 from ivy_lsp.workspace_detection import (
     WorkspaceConfig,
-    detect_ivy_workspace,
-    _read_marker,
-    _walk_up_for_marker,
-    _walk_down_for_marker,
     _panther_heuristic,
+    _read_marker,
     _resolve_git_worktree,
+    _walk_down_for_marker,
+    _walk_up_for_marker,
+    detect_ivy_workspace,
 )
 
 

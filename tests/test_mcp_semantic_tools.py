@@ -58,11 +58,16 @@ class TestTraceabilityMatrix:
 
         model = SemanticModel()
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="senders MUST NOT send data", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="senders MUST NOT send data",
+            level="MUST",
         )
         ann = RfcAnnotation(
-            id="/tmp/test.ivy:5:0", file="/tmp/test.ivy", line=5,
+            id="/tmp/test.ivy:5:0",
+            file="/tmp/test.ivy",
+            line=5,
             tags=["rfc9000:4.1"],
         )
         model.add_node(req)
@@ -84,8 +89,11 @@ class TestTraceabilityMatrix:
 
         model = SemanticModel()
         req = RfcRequirement(
-            id="rfc9000:4.2", rfc="RFC9000", section="4.2",
-            text="receiver SHOULD ack", level="SHOULD",
+            id="rfc9000:4.2",
+            rfc="RFC9000",
+            section="4.2",
+            text="receiver SHOULD ack",
+            level="SHOULD",
         )
         model.add_node(req)
 
@@ -105,7 +113,9 @@ class TestCoverageStats:
         reqs = [
             RfcRequirement(id="r:1", rfc="RFC", section="1", text="...", level="MUST"),
             RfcRequirement(id="r:2", rfc="RFC", section="2", text="...", level="MUST"),
-            RfcRequirement(id="r:3", rfc="RFC", section="3", text="...", level="SHOULD"),
+            RfcRequirement(
+                id="r:3", rfc="RFC", section="3", text="...", level="SHOULD"
+            ),
         ]
         ann = RfcAnnotation(id="f:1:0", file="f", line=1, tags=["r:1"])
         for r in reqs:
@@ -138,9 +148,12 @@ class TestImpactAnalysis:
 
         model = SemanticModel()
         sn = SymbolNode(
-            id="test.ivy:5:send", name="send",
-            qualified_name="quic.send", kind="action",
-            file="test.ivy", line=5,
+            id="test.ivy:5:send",
+            name="send",
+            qualified_name="quic.send",
+            kind="action",
+            file="test.ivy",
+            line=5,
         )
         model.add_node(sn)
         model.add_edge("other:1", SemanticEdgeType.MONITORS, sn.id)
@@ -165,12 +178,20 @@ class TestCrossReferences:
 
         model = SemanticModel()
         sn1 = SymbolNode(
-            id="a:1:foo", name="foo", qualified_name="foo",
-            kind="action", file="a", line=1,
+            id="a:1:foo",
+            name="foo",
+            qualified_name="foo",
+            kind="action",
+            file="a",
+            line=1,
         )
         sn2 = SymbolNode(
-            id="a:2:bar", name="bar", qualified_name="bar",
-            kind="action", file="a", line=2,
+            id="a:2:bar",
+            name="bar",
+            qualified_name="bar",
+            kind="action",
+            file="a",
+            line=2,
         )
         model.add_node(sn1)
         model.add_node(sn2)
@@ -191,18 +212,18 @@ class TestQuerySymbol:
 
         model = SemanticModel()
         sn = SymbolNode(
-            id="test.ivy:5:send", name="send",
-            qualified_name="quic.send", kind="action",
-            file="test.ivy", line=5,
+            id="test.ivy:5:send",
+            name="send",
+            qualified_name="quic.send",
+            kind="action",
+            file="test.ivy",
+            line=5,
             params=["dst:endpoint", "pkt:packet"],
             return_sort="bool",
         )
         model.add_node(sn)
 
-        matches = [
-            s for s in model.get_nodes_by_type(SymbolNode)
-            if s.name == "send"
-        ]
+        matches = [s for s in model.get_nodes_by_type(SymbolNode) if s.name == "send"]
         assert len(matches) == 1
         assert matches[0].params == ["dst:endpoint", "pkt:packet"]
         assert matches[0].return_sort == "bool"
@@ -219,11 +240,16 @@ class TestSemanticEdgeWiring:
 
         model = SemanticModel()
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="senders MUST NOT send data", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="senders MUST NOT send data",
+            level="MUST",
         )
         ann = RfcAnnotation(
-            id="/tmp/test.ivy:5:0", file="/tmp/test.ivy", line=5,
+            id="/tmp/test.ivy:5:0",
+            file="/tmp/test.ivy",
+            line=5,
             tags=["rfc9000:4.1", "rfc9000:8.1"],
         )
         model.add_node(req)
@@ -253,12 +279,19 @@ class TestSemanticEdgeWiring:
 
         model = SemanticModel()
         tn = TypeNode(
-            id="/tmp/types.ivy:0:cid", name="cid", qualified_name="cid",
-            file="/tmp/types.ivy", line=0,
+            id="/tmp/types.ivy:0:cid",
+            name="cid",
+            qualified_name="cid",
+            file="/tmp/types.ivy",
+            line=0,
         )
         sn = SymbolNode(
-            id="/tmp/conn.ivy:10:send", name="send", qualified_name="send",
-            kind="action", file="/tmp/conn.ivy", line=10,
+            id="/tmp/conn.ivy:10:send",
+            name="send",
+            qualified_name="send",
+            kind="action",
+            file="/tmp/conn.ivy",
+            line=10,
             params=["dst:cid", "data:stream_data"],
         )
         model.add_node(tn)
@@ -290,13 +323,19 @@ class TestSemanticEdgeWiring:
 
         model = SemanticModel()
         tn = TypeNode(
-            id="/tmp/types.ivy:0:frame_type", name="frame_type",
-            qualified_name="frame_type", file="/tmp/types.ivy", line=0,
+            id="/tmp/types.ivy:0:frame_type",
+            name="frame_type",
+            qualified_name="frame_type",
+            file="/tmp/types.ivy",
+            line=0,
         )
         sn = SymbolNode(
-            id="/tmp/codec.ivy:20:get_type", name="get_type",
-            qualified_name="get_type", kind="function",
-            file="/tmp/codec.ivy", line=20,
+            id="/tmp/codec.ivy:20:get_type",
+            name="get_type",
+            qualified_name="get_type",
+            kind="function",
+            file="/tmp/codec.ivy",
+            line=20,
             return_sort="frame_type",
         )
         model.add_node(tn)
@@ -324,27 +363,32 @@ class TestSemanticEdgeWiring:
 
         # Create two files: one includes the other
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
-        (tmp_path / "packet.ivy").write_text(
-            "#lang ivy1.7\ninclude types\ntype pkt\n"
-        )
+        (tmp_path / "packet.ivy").write_text("#lang ivy1.7\ninclude types\ntype pkt\n")
 
         model = SemanticModel()
         types_abs = str(tmp_path / "types.ivy")
         packet_abs = str(tmp_path / "packet.ivy")
 
         tn1 = TypeNode(
-            id=f"{types_abs}:1:cid", name="cid", qualified_name="cid",
-            file=types_abs, line=1,
+            id=f"{types_abs}:1:cid",
+            name="cid",
+            qualified_name="cid",
+            file=types_abs,
+            line=1,
         )
         tn2 = TypeNode(
-            id=f"{packet_abs}:2:pkt", name="pkt", qualified_name="pkt",
-            file=packet_abs, line=2,
+            id=f"{packet_abs}:2:pkt",
+            name="pkt",
+            qualified_name="pkt",
+            file=packet_abs,
+            line=2,
         )
         model.add_node(tn1)
         model.add_node(tn2)
 
         # Build basename map and wire includes
         import re
+
         include_re = re.compile(r"^include\s+(\w+)", re.MULTILINE)
         basename_to_path = {
             "types": types_abs,
@@ -404,6 +448,7 @@ class TestSemanticEdgeWiring:
         env_patch = {"IVY_LSP_INCLUDE_PATHS": "", "IVY_LSP_EXCLUDE_PATHS": ""}
         with patch.dict(os.environ, env_patch, clear=False):
             from ivy_lsp.mcp_server import start_mcp
+
             app = start_mcp(workspace_root=str(tmp_path), _return_app=True)
 
         assert app is not None

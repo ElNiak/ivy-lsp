@@ -122,7 +122,11 @@ class TestIvyDiagnostics:
         if parsed["diagnostic_count"] > 0:
             for d in parsed["diagnostics"]:
                 source = d.get("source", "")
-                assert "structural" in source or "ivy-lint" in source or "lint" in source.lower()
+                assert (
+                    "structural" in source
+                    or "ivy-lint" in source
+                    or "lint" in source.lower()
+                )
 
     @pytest.mark.asyncio
     async def test_diagnostics_severity_filter(self, tmp_path):
@@ -184,9 +188,7 @@ class TestErrorPaths:
     async def test_lint_nonexistent_file(self, tmp_path):
         """ivy_lint with nonexistent file -> success: False."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_lint", {"relative_path": "no_such_file.ivy"}
-        )
+        result = await mcp.call_tool("ivy_lint", {"relative_path": "no_such_file.ivy"})
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is False
         assert "message" in parsed

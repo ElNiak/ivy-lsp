@@ -1,12 +1,13 @@
 """Tests for ivy/deepIndexProgress and ivy/testFeatureMatrix handlers."""
+
 import threading
 from unittest.mock import MagicMock
 
-from ivy_lsp.indexer.workspace_indexer import FileIndexStatus, DeepIndexProgress
 from ivy_lsp.features.monitoring import (
     handle_deep_index_progress,
     handle_test_feature_matrix,
 )
+from ivy_lsp.indexer.workspace_indexer import DeepIndexProgress, FileIndexStatus
 
 
 class TestDeepIndexProgressHandler:
@@ -27,7 +28,8 @@ class TestDeepIndexProgressHandler:
                 parse_error="module x not found",
             ),
             "/ws/test3.ivy": FileIndexStatus(
-                filepath="/ws/test3.ivy", shallow_indexed=True,
+                filepath="/ws/test3.ivy",
+                shallow_indexed=True,
             ),
         }
         server.indexer = MagicMock()
@@ -89,10 +91,12 @@ class TestTestFeatureMatrixHandler:
         }
         export_imports = {
             "/ws/test1.ivy": ExportImportInfo(
-                file="/ws/test1.ivy", exports=["foo"],
+                file="/ws/test1.ivy",
+                exports=["foo"],
             ),
             "/ws/test2.ivy": ExportImportInfo(
-                file="/ws/test2.ivy", exports=["bar"],
+                file="/ws/test2.ivy",
+                exports=["bar"],
             ),
         }
         server.indexer = MagicMock()

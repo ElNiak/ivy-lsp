@@ -1,4 +1,5 @@
 """Tests for WorkspaceIndexer scoping integration (Task 06)."""
+
 import logging
 import os
 from contextlib import ExitStack
@@ -13,7 +14,6 @@ from ivy_lsp.analysis.test_scope import (
     TestScope,
 )
 from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -245,9 +245,7 @@ class TestScopeComputation:
         indexer._compute_test_scopes()
 
         scope = indexer.requirement_graph.get_test_scope(test_f)
-        assert scope.imported_actions == frozenset(
-            {"tls.handshake", "quic.connection"}
-        )
+        assert scope.imported_actions == frozenset({"tls.handshake", "quic.connection"})
 
     def test_role_from_server_behavior_file(self):
         test_f = "/ws/test.ivy"
@@ -276,7 +274,7 @@ class TestScopeComputation:
         assert indexer.requirement_graph.get_test_scope(test_f).tester_role == "unknown"
 
     def test_diamond_include_shape(self):
-        """test -> A, test -> B, A -> shared, B -> shared."""
+        """Test -> A, test -> B, A -> shared, B -> shared."""
         test_f = "/ws/test.ivy"
         a_f = "/ws/a.ivy"
         b_f = "/ws/b.ivy"
@@ -424,9 +422,7 @@ class TestReindexInvalidation:
         indexer, _, _ = _make_indexer()
 
         with patch.object(indexer, "_index_single_file", return_value=[]):
-            with patch.object(
-                indexer, "_compute_test_scopes"
-            ) as mock_compute:
+            with patch.object(indexer, "_compute_test_scopes") as mock_compute:
                 indexer.reindex_file("/fake/workspace/file.ivy")
 
         mock_compute.assert_called_once()

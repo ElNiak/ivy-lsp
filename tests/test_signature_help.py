@@ -89,9 +89,7 @@ class TestComputeSignatureHelp:
         from ivy_lsp.features.signature_help import compute_signature_help
 
         lines = ["#lang ivy1.7", "type cid"]
-        result = compute_signature_help(
-            None, "", lines, Position(line=1, character=5)
-        )
+        result = compute_signature_help(None, "", lines, Position(line=1, character=5))
         assert result is None
 
     def test_active_parameter_index(self, tmp_path):

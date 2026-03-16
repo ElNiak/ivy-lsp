@@ -108,9 +108,7 @@ class TestDockerCompileFallback:
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
-            result = await mcp.call_tool(
-                "ivy_compile", {"relative_path": "test.ivy"}
-            )
+            result = await mcp.call_tool("ivy_compile", {"relative_path": "test.ivy"})
             text = _extract_text(result)
             data = json.loads(text)
             # Should have gone through subprocess fallback
@@ -129,13 +127,14 @@ class TestIvyVerifyMCP:
     async def test_verify_file_not_found(self, tmp_path):
         """ivy_verify returns error for non-existent file."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_verify", {"relative_path": "nonexistent.ivy"}
-        )
+        result = await mcp.call_tool("ivy_verify", {"relative_path": "nonexistent.ivy"})
         text = _extract_text(result)
         data = json.loads(text)
         assert data["success"] is False
-        assert "not found" in data["message"].lower() or "File not found" in data["message"]
+        assert (
+            "not found" in data["message"].lower()
+            or "File not found" in data["message"]
+        )
 
     @pytest.mark.asyncio
     async def test_verify_path_traversal_blocked(self, tmp_path):

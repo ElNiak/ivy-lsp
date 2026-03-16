@@ -27,6 +27,7 @@ class TokenStream:
     error_info: Optional[dict] = None
 
     def __post_init__(self):
+        """Derive the lines list from source if not provided."""
         if not self.lines:
             self.lines = self.source.split("\n")
 

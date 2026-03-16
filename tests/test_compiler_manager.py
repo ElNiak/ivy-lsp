@@ -140,6 +140,7 @@ class TestCompilerManager:
 
             def poll(self, timeout):
                 import time
+
                 time.sleep(0.05)
                 # Decrement active when "process completes" (poll returns)
                 with lock:
@@ -168,7 +169,9 @@ class TestCompilerManager:
             return cb
 
         try:
-            with patch("ivy_lsp.compilation.compiler_manager.multiprocessing") as mock_mp:
+            with patch(
+                "ivy_lsp.compilation.compiler_manager.multiprocessing"
+            ) as mock_mp:
                 ctx = mock_mp.get_context.return_value
 
                 call_count = [0]
@@ -256,7 +259,9 @@ class TestCompilerManager:
             events[1].set()
 
         try:
-            with patch("ivy_lsp.compilation.compiler_manager.multiprocessing") as mock_mp:
+            with patch(
+                "ivy_lsp.compilation.compiler_manager.multiprocessing"
+            ) as mock_mp:
                 ctx = mock_mp.get_context.return_value
 
                 def make_pipe(duplex=False):

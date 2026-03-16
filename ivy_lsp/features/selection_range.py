@@ -74,9 +74,7 @@ def compute_selection_ranges(
         # 3. Enclosing brace block
         block = _find_enclosing_brace_block(source_lines, pos.line)
         if block:
-            block_end_len = (
-                len(source_lines[block[1]]) if block[1] < total_lines else 0
-            )
+            block_end_len = len(source_lines[block[1]]) if block[1] < total_lines else 0
             chain.append(make_range(block[0], 0, block[1], block_end_len))
 
         # 4. Whole file
@@ -113,5 +111,8 @@ def register(server) -> None:
         lines = doc.source.split("\n")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, compute_selection_ranges, lines, params.positions,
+            None,
+            compute_selection_ranges,
+            lines,
+            params.positions,
         )

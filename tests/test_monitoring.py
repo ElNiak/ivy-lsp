@@ -1,19 +1,20 @@
 """Tests for monitoring request handlers."""
 
-import pytest
 from unittest.mock import MagicMock
 
-from ivy_lsp.features.status import ServerStateTracker
+import pytest
+
 from ivy_lsp.features.monitoring import (
-    handle_server_status,
-    handle_indexer_stats,
-    handle_operation_history,
-    handle_include_graph,
-    handle_reindex,
+    handle_analysis_pipeline_detail,
     handle_clear_cache,
     handle_feature_status,
-    handle_analysis_pipeline_detail,
+    handle_include_graph,
+    handle_indexer_stats,
+    handle_operation_history,
+    handle_reindex,
+    handle_server_status,
 )
+from ivy_lsp.features.status import ServerStateTracker
 
 
 @pytest.fixture
@@ -59,9 +60,7 @@ class TestServerStatus:
         assert result["mode"] == "light"
 
     def test_includes_active_operations(self, mock_server):
-        mock_server.state_tracker.operation_tracker.record_start(
-            "verify", "test.ivy"
-        )
+        mock_server.state_tracker.operation_tracker.record_start("verify", "test.ivy")
         result = handle_server_status(mock_server)
         assert len(result["activeOperations"]) == 1
         assert result["activeOperations"][0]["type"] == "verify"
@@ -153,8 +152,14 @@ class TestClearCache:
 class TestFeatureStatus:
     """Tests for the ivy/featureStatus endpoint handler."""
 
-    def _make_server(self, full_mode=True, has_indexer=True, has_pipeline=True,
-                     indexing_state="idle", has_parser=True):
+    def _make_server(
+        self,
+        full_mode=True,
+        has_indexer=True,
+        has_pipeline=True,
+        indexing_state="idle",
+        has_parser=True,
+    ):
         """Build a mock server with configurable feature availability."""
         server = MagicMock()
         server.state_tracker = ServerStateTracker()
@@ -175,9 +180,13 @@ class TestFeatureStatus:
             server.semantic_model.edge_count.return_value = 5
             pipeline = MagicMock()
             pipeline.get_pipeline_state.return_value = {
-                "tier1FileCount": 3, "tier2FileCount": 2, "tier3FileCount": 0,
-                "tier3Running": False, "semanticNodeCount": 10,
-                "semanticEdgeCount": 5, "semanticModelReady": True,
+                "tier1FileCount": 3,
+                "tier2FileCount": 2,
+                "tier3FileCount": 0,
+                "tier3Running": False,
+                "semanticNodeCount": 10,
+                "semanticEdgeCount": 5,
+                "semanticModelReady": True,
             }
             server.analysis_pipeline = pipeline
         else:
@@ -254,13 +263,21 @@ class TestAnalysisPipelineDetail:
         server = MagicMock()
         pipeline = MagicMock()
         pipeline.get_pipeline_state.return_value = {
-            "tier1FileCount": 5, "tier2FileCount": 3, "tier3FileCount": 2,
-            "tier3Running": False, "tier3Succeeded": 2, "tier3Failed": 0,
-            "tier3CurrentFile": None, "tier3LastFile": "a.ivy",
-            "tier3LastCompletedAt": 1700000000.0, "tier3Pending": 3,
-            "semanticNodeCount": 10, "semanticEdgeCount": 5,
+            "tier1FileCount": 5,
+            "tier2FileCount": 3,
+            "tier3FileCount": 2,
+            "tier3Running": False,
+            "tier3Succeeded": 2,
+            "tier3Failed": 0,
+            "tier3CurrentFile": None,
+            "tier3LastFile": "a.ivy",
+            "tier3LastCompletedAt": 1700000000.0,
+            "tier3Pending": 3,
+            "semanticNodeCount": 10,
+            "semanticEdgeCount": 5,
             "semanticModelReady": True,
-            "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
+            "bulkAnalysisRunning": False,
+            "bulkAnalysisTotal": 0,
             "bulkAnalysisCompleted": 0,
         }
         pipeline.get_tier3_file_results.return_value = []

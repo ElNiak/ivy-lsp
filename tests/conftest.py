@@ -274,12 +274,7 @@ def multi_file_workspace(tmp_path):
                    and uses ``cid`` in a ``relation connected(X:cid, Y:cid)``
     """
     types_file = tmp_path / "types.ivy"
-    types_file.write_text(
-        "#lang ivy1.7\n"
-        "\n"
-        "type cid\n"
-        "type pkt_num\n"
-    )
+    types_file.write_text("#lang ivy1.7\n" "\n" "type cid\n" "type pkt_num\n")
     conn_file = tmp_path / "conn.ivy"
     conn_file.write_text(
         "#lang ivy1.7\n"
@@ -352,9 +347,7 @@ def syntax_error_workspace(tmp_path):
       bad_include.ivy   — unresolvable include
     """
     (tmp_path / "no_header.ivy").write_text("type cid\n")
-    (tmp_path / "bad_braces.ivy").write_text(
-        "#lang ivy1.7\n\ntype a = { b\n"
-    )
+    (tmp_path / "bad_braces.ivy").write_text("#lang ivy1.7\n\ntype a = { b\n")
     (tmp_path / "bad_include.ivy").write_text(
         "#lang ivy1.7\n\ninclude nonexistent_module\n\ntype x\n"
     )

@@ -1,4 +1,5 @@
 """Tests for context-aware completion enhancements."""
+
 import sys
 from pathlib import Path
 
@@ -72,18 +73,14 @@ class TestComputeSemanticCompletions:
 
     def test_suggests_state_vars_in_before_block(self):
         graph = _build_completion_graph()
-        result = compute_semantic_completions(
-            graph, "/test/quic.ivy", 12, "before"
-        )
+        result = compute_semantic_completions(graph, "/test/quic.ivy", 12, "before")
         names = [c["label"] for c in result]
         # Should suggest state vars relevant to the action's context
         assert any("conn_state" in n or "pkt_num" in n for n in names)
 
     def test_returns_list_of_completion_dicts(self):
         graph = _build_completion_graph()
-        result = compute_semantic_completions(
-            graph, "/test/quic.ivy", 12, "before"
-        )
+        result = compute_semantic_completions(graph, "/test/quic.ivy", 12, "before")
         for item in result:
             assert "label" in item
             assert "detail" in item
@@ -91,9 +88,7 @@ class TestComputeSemanticCompletions:
 
     def test_high_relevance_state_vars_sorted_first(self):
         graph = _build_completion_graph()
-        result = compute_semantic_completions(
-            graph, "/test/quic.ivy", 12, "before"
-        )
+        result = compute_semantic_completions(graph, "/test/quic.ivy", 12, "before")
         # conn_state has a READS edge (high relevance), pkt_num does not (low)
         labels = [c["label"] for c in result]
         assert "conn_state" in labels
@@ -108,18 +103,14 @@ class TestComputeSemanticCompletions:
         graph = _build_completion_graph()
         # Add a WRITES edge so the after-block path has data
         graph.add_edge("write:pkt_num", EdgeType.WRITES, "pkt_num")
-        result = compute_semantic_completions(
-            graph, "/test/quic.ivy", 12, "after"
-        )
+        result = compute_semantic_completions(graph, "/test/quic.ivy", 12, "after")
         names = [c["label"] for c in result]
         assert "pkt_num" in names
 
     def test_no_action_returns_empty(self):
         graph = _build_completion_graph()
         # Line far from any requirement, no enclosing action found
-        result = compute_semantic_completions(
-            graph, "/test/quic.ivy", 500, "before"
-        )
+        result = compute_semantic_completions(graph, "/test/quic.ivy", 500, "before")
         assert result == []
 
     def test_unknown_file_returns_empty(self):
@@ -131,8 +122,6 @@ class TestComputeSemanticCompletions:
 
     def test_body_block_same_as_before(self):
         graph = _build_completion_graph()
-        result = compute_semantic_completions(
-            graph, "/test/quic.ivy", 12, "body"
-        )
+        result = compute_semantic_completions(graph, "/test/quic.ivy", 12, "body")
         names = [c["label"] for c in result]
         assert any("conn_state" in n or "pkt_num" in n for n in names)

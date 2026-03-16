@@ -120,7 +120,9 @@ def compute_workspace_symbols(
     matches = search_symbols(flat, query)
     logger.debug(
         "workspace_symbol: query=%r, %d flat symbols, %d matches",
-        query, len(flat), len(matches),
+        query,
+        len(flat),
+        len(matches),
     )
     return [to_workspace_symbol(f) for f in matches]
 
@@ -140,5 +142,8 @@ def register(server) -> None:
             return []
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, compute_workspace_symbols, server.indexer, params.query or "",
+            None,
+            compute_workspace_symbols,
+            server.indexer,
+            params.query or "",
         )

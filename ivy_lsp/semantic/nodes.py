@@ -45,7 +45,16 @@ class SymbolNode:
     id: str
     name: str
     qualified_name: str
-    kind: Literal["action", "relation", "function", "individual", "module", "destructor", "constructor", "instance"]
+    kind: Literal[
+        "action",
+        "relation",
+        "function",
+        "individual",
+        "module",
+        "destructor",
+        "constructor",
+        "instance",
+    ]
     file: str
     line: int
     col: int = 0

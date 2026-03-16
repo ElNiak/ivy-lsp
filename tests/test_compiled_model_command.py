@@ -1,4 +1,5 @@
 """Tests for the ivy/compiledModel custom command."""
+
 from __future__ import annotations
 
 import asyncio
@@ -48,9 +49,11 @@ class FakeServer:
     def feature(self, name, _options=None):
         def decorator(fn):
             if asyncio.iscoroutinefunction(fn):
+
                 @functools.wraps(fn)
                 def _sync(*args, **kwargs):
                     return asyncio.run(fn(*args, **kwargs))
+
                 self._handlers[name] = _sync
             else:
                 self._handlers[name] = fn
@@ -133,9 +136,7 @@ class TestCompiledModelCommand:
             },
             mixins={
                 "ext:send": [
-                    MixinIR(
-                        mixer="impl.send", mixee="ext:send", kind="before"
-                    ),
+                    MixinIR(mixer="impl.send", mixee="ext:send", kind="before"),
                 ],
             },
             isolates={
@@ -174,9 +175,7 @@ class TestCompiledModelCommand:
         assert result["mixins"][0]["mixer"] == "impl.send"
         # isolates
         assert "iso_quic" in result["isolates"]
-        assert result["isolates"]["iso_quic"]["verifiedComponents"] == [
-            "quic_server"
-        ]
+        assert result["isolates"]["iso_quic"]["verifiedComponents"] == ["quic_server"]
 
     def test_text_document_param_extraction(self):
         server, handler = self._setup_server()
@@ -188,9 +187,7 @@ class TestCompiledModelCommand:
         mgr._cache["/test.ivy"] = ir
         server.compiler_manager = mgr
         # Test textDocument.uri extraction
-        result = handler(
-            FakeParams(text_document=FakeTextDocument("file:///test.ivy"))
-        )
+        result = handler(FakeParams(text_document=FakeTextDocument("file:///test.ivy")))
         assert result["success"] is True
 
     def test_empty_ir_returns_zero_counts(self):

@@ -22,13 +22,7 @@ class TestBraceBlockFolding:
         """Brace block spanning multiple lines produces a fold."""
         from ivy_lsp.features.folding_range import compute_folding_ranges
 
-        source = (
-            "#lang ivy1.7\n"
-            "\n"
-            "object foo = {\n"
-            "    type this\n"
-            "}\n"
-        )
+        source = "#lang ivy1.7\n" "\n" "object foo = {\n" "    type this\n" "}\n"
         ranges = compute_folding_ranges(source)
         brace_folds = [r for r in ranges if r.kind == "region"]
         assert len(brace_folds) >= 1

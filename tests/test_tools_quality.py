@@ -227,8 +227,6 @@ class TestQualityModeValidation:
 
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
         with pytest.raises((McpError, Exception)) as exc_info:
-            await mcp.call_tool(
-                "ivy_quality", {"mode": "bogus"}
-            )
+            await mcp.call_tool("ivy_quality", {"mode": "bogus"})
         # The error should reference valid modes
         assert "gate" in str(exc_info.value) or "literal" in str(exc_info.value).lower()

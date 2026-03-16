@@ -1,4 +1,5 @@
 """Path normalization for consistent path handling across MCP/LSP tools."""
+
 import os
 from typing import Optional
 
@@ -23,7 +24,7 @@ def normalize_ivy_path(
         return with_prefix
     for p in [prefix + "/", prefix + os.sep]:
         if path.startswith(p):
-            without = os.path.join(workspace_root, path[len(p):])
+            without = os.path.join(workspace_root, path[len(p) :])
             if os.path.exists(without):
                 return without
     return direct
@@ -33,7 +34,7 @@ def strip_prefix(path: str, prefix: str = "protocol-testing") -> str:
     """Remove protocol-testing/ prefix if present."""
     for p in [prefix + "/", prefix + os.sep]:
         if path.startswith(p):
-            return path[len(p):]
+            return path[len(p) :]
     return path
 
 
@@ -67,6 +68,6 @@ def relativize_path(abs_path: str, workspace_root: str) -> str:
     if not abs_path or not workspace_root:
         return abs_path
     if abs_path.startswith(workspace_root):
-        rel = abs_path[len(workspace_root):]
+        rel = abs_path[len(workspace_root) :]
         return rel.lstrip(os.sep)
     return abs_path

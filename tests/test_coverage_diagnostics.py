@@ -23,26 +23,46 @@ def _build_hint_graph():
     graph = RequirementGraph()
     # Requirements FIRST (add_file_requirements calls remove_file internally)
     r1 = RequirementNode(
-        id="/test/quic.ivy:12", kind="ensure",
+        id="/test/quic.ivy:12",
+        kind="ensure",
         formula_text="pkt_count(C) = old + 1",
-        line=12, col=0, file="/test/quic.ivy",
-        monitor_action="send_pkt", mixin_kind="after",
+        line=12,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="after",
     )
     graph.add_file_requirements("/test/quic.ivy", [r1])
-    graph.add_action(ActionNode(
-        id="send_pkt", name="send_pkt", qualified_name="quic.send_pkt",
-        file="/test/quic.ivy", line=10,
-    ))
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
     # Action with no monitors
-    graph.add_action(ActionNode(
-        id="idle", name="idle", qualified_name="quic.idle",
-        file="/test/quic.ivy", line=30,
-    ))
+    graph.add_action(
+        ActionNode(
+            id="idle",
+            name="idle",
+            qualified_name="quic.idle",
+            file="/test/quic.ivy",
+            line=30,
+        )
+    )
     # State var written but not guarded
-    graph.add_state_var(StateVarNode(
-        id="pkt_count", name="pkt_count", qualified_name="quic.pkt_count",
-        file="/test/quic.ivy", line=4, is_relation=False,
-    ))
+    graph.add_state_var(
+        StateVarNode(
+            id="pkt_count",
+            name="pkt_count",
+            qualified_name="quic.pkt_count",
+            file="/test/quic.ivy",
+            line=4,
+            is_relation=False,
+        )
+    )
     graph.add_edge(r1.id, EdgeType.WRITES, "pkt_count")
     return graph
 
@@ -77,9 +97,7 @@ class TestComputeCoverageHints:
         graph = _build_hint_graph()
         result = compute_coverage_hints(graph, "/test/quic.ivy")
         messages = [h["message"] for h in result]
-        assert not any(
-            "send_pkt" in m and "no monitor" in m.lower() for m in messages
-        )
+        assert not any("send_pkt" in m and "no monitor" in m.lower() for m in messages)
 
     def test_hint_codes_present(self):
         """Each hint must carry a diagnostic code string."""
@@ -99,9 +117,7 @@ class TestComputeCoverageHints:
         """Unmonitored-action hints should include a template snippet."""
         graph = _build_hint_graph()
         result = compute_coverage_hints(graph, "/test/quic.ivy")
-        no_monitor_hints = [
-            h for h in result if h.get("code") == "ivy.no-monitor"
-        ]
+        no_monitor_hints = [h for h in result if h.get("code") == "ivy.no-monitor"]
         assert len(no_monitor_hints) > 0
         for hint in no_monitor_hints:
             assert "template" in hint
@@ -114,9 +130,7 @@ class TestComputeCoverageHints:
         graph.add_edge("/test/quic.ivy:12", EdgeType.READS, "pkt_count")
         result = compute_coverage_hints(graph, "/test/quic.ivy")
         messages = [h["message"] for h in result]
-        assert not any(
-            "pkt_count" in m and "written" in m.lower() for m in messages
-        )
+        assert not any("pkt_count" in m and "written" in m.lower() for m in messages)
 
 
 class TestCoverageHintDiagnosticTags:
@@ -143,8 +157,11 @@ class TestCoverageHintDiagnosticTags:
         # Add enough lines so line 30 (idle action) exists
         source += "\n" * 24 + "action idle(x:cid)\n" + "action send_pkt(x:cid)\n"
         diags = compute_diagnostics(
-            None, source, "/test/quic.ivy",
-            indexer=indexer, parse_result=fake_result,
+            None,
+            source,
+            "/test/quic.ivy",
+            indexer=indexer,
+            parse_result=fake_result,
         )
 
         coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]

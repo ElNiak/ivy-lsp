@@ -17,7 +17,6 @@ if str(IVY_ROOT) not in sys.path:
 from ivy_lsp.analysis.requirement_graph import EdgeType, RequirementGraph
 from ivy_lsp.semantic.nodes import RfcRequirement
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -140,9 +139,7 @@ class TestRequirementGraphRfcCoverage:
 
         graph.wire_coverage_edges()
 
-        covers_edges = [
-            (s, t) for s, et, t in graph.edges if et == EdgeType.COVERS
-        ]
+        covers_edges = [(s, t) for s, et, t in graph.edges if et == EdgeType.COVERS]
         assert ("/test/file.ivy:8", "rfc9000:4.1") in covers_edges
         assert ("/test/file.ivy:8", "rfc9000:8.1") in covers_edges
 
@@ -188,12 +185,18 @@ class TestRequirementGraphRfcCoverage:
         graph.add_requirement(req)
 
         rfc1 = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="...", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
         )
         rfc2 = RfcRequirement(
-            id="rfc9000:8.1", rfc="RFC9000", section="8.1",
-            text="...", level="SHOULD",
+            id="rfc9000:8.1",
+            rfc="RFC9000",
+            section="8.1",
+            text="...",
+            level="SHOULD",
         )
         graph.add_rfc_requirement(rfc1)
         graph.add_rfc_requirement(rfc2)
@@ -227,16 +230,25 @@ class TestRequirementGraphRfcCoverage:
         graph.add_requirement(req)
 
         rfc1 = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="covered text", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="covered text",
+            level="MUST",
         )
         rfc2 = RfcRequirement(
-            id="rfc9000:8.1", rfc="RFC9000", section="8.1",
-            text="uncovered text", level="SHOULD",
+            id="rfc9000:8.1",
+            rfc="RFC9000",
+            section="8.1",
+            text="uncovered text",
+            level="SHOULD",
         )
         rfc3 = RfcRequirement(
-            id="rfc9000:17.2", rfc="RFC9000", section="17.2",
-            text="also uncovered", level="MUST",
+            id="rfc9000:17.2",
+            rfc="RFC9000",
+            section="17.2",
+            text="also uncovered",
+            level="MUST",
         )
         graph.add_rfc_requirement(rfc1)
         graph.add_rfc_requirement(rfc2)
@@ -275,13 +287,9 @@ class TestRequirementGraphRfcCoverage:
 
         # Call wire_coverage_edges twice
         graph.wire_coverage_edges()
-        covers_after_first = [
-            e for e in graph.edges if e[1] == EdgeType.COVERS
-        ]
+        covers_after_first = [e for e in graph.edges if e[1] == EdgeType.COVERS]
         graph.wire_coverage_edges()
-        covers_after_second = [
-            e for e in graph.edges if e[1] == EdgeType.COVERS
-        ]
+        covers_after_second = [e for e in graph.edges if e[1] == EdgeType.COVERS]
 
         # Should have the same number of COVERS edges (no duplicates)
         assert len(covers_after_first) == len(covers_after_second)
@@ -306,8 +314,11 @@ class TestRequirementGraphRfcCoverage:
         graph.add_requirement(req)
 
         rfc1 = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="...", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
         )
         graph.add_rfc_requirement(rfc1)
 
@@ -321,8 +332,11 @@ class TestRequirementGraphRfcCoverage:
 
 
 class TestWorkspaceRfcIntegration:
-    """Integration tests: create a temp workspace with manifest + Ivy files,
-    index it, and verify coverage edges are wired correctly."""
+    """Integration tests for workspace manifest indexing and coverage edges.
+
+    Create a temp workspace with manifest + Ivy files, index it, and verify
+    coverage edges are wired correctly.
+    """
 
     def _setup_workspace(self, tmp_path: Path) -> Path:
         """Create temp workspace with manifest and Ivy files."""
@@ -367,9 +381,7 @@ class TestWorkspaceRfcIntegration:
         indexer.index_workspace()
 
         graph = indexer.requirement_graph
-        covers_edges = [
-            (s, t) for s, et, t in graph.edges if et == EdgeType.COVERS
-        ]
+        covers_edges = [(s, t) for s, et, t in graph.edges if et == EdgeType.COVERS]
 
         # The Ivy source has bracket tags [rfc9000:4.1, rfc9000:8.1]
         covered_targets = {t for _, t in covers_edges}

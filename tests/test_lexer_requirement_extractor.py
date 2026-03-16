@@ -15,11 +15,7 @@ class TestBeforeBlockRequireLexer:
     """Parity: TestBeforeBlockRequire from test_light_mode_extractor."""
 
     def test_single_require_in_before(self):
-        source = (
-            "before foo.step {\n"
-            "    require x ~= y;\n"
-            "}\n"
-        )
+        source = "before foo.step {\n" "    require x ~= y;\n" "}\n"
         reqs, writes = extract_requirements_lexer(source, FILEPATH)
         assert len(reqs) == 1
         req = reqs[0]
@@ -120,11 +116,7 @@ class TestDirectActionBodyLexer:
         assert reqs[0].formula_text == "x ~= y"
 
     def test_ensure_in_action_body(self):
-        source = (
-            "action compute(x:t) returns (y:t) = {\n"
-            "    ensure y > x;\n"
-            "}\n"
-        )
+        source = "action compute(x:t) returns (y:t) = {\n" "    ensure y > x;\n" "}\n"
         reqs, _ = extract_requirements_lexer(source, FILEPATH)
         assert len(reqs) == 1
         assert reqs[0].kind == "ensure"
@@ -212,7 +204,9 @@ class TestBracketTagParsingLexer:
         assert reqs[0].bracket_tags == ["frame:ack.sent"]
 
     def test_multi_tag(self):
-        source = "before foo.step {\n    require x > 0; # [rfc9000:4.1, rfc9000:8.1]\n}\n"
+        source = (
+            "before foo.step {\n    require x > 0; # [rfc9000:4.1, rfc9000:8.1]\n}\n"
+        )
         reqs, _ = extract_requirements_lexer(source, FILEPATH)
         assert reqs[0].bracket_tags == ["rfc9000:4.1", "rfc9000:8.1"]
 
@@ -439,6 +433,7 @@ class TestExportsImportsLexer:
         from ivy_lsp.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
+
         source = "export foo\nexport bar.baz\n"
         info = extract_exports_imports_lexer(source, FILEPATH)
         assert "foo" in info.exports
@@ -448,6 +443,7 @@ class TestExportsImportsLexer:
         from ivy_lsp.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
+
         source = "import recv\nimport packet.send\n"
         info = extract_exports_imports_lexer(source, FILEPATH)
         assert "recv" in info.imports
@@ -457,6 +453,7 @@ class TestExportsImportsLexer:
         from ivy_lsp.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
+
         info = extract_exports_imports_lexer("", FILEPATH)
         assert info.exports == []
         assert info.imports == []

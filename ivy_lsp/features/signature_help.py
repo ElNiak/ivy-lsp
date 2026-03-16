@@ -46,9 +46,7 @@ def _parse_parameters(detail: Optional[str]) -> List[lsp.ParameterInformation]:
     return params
 
 
-def _find_call_context(
-    line_text: str, character: int
-) -> Optional[tuple[str, int]]:
+def _find_call_context(line_text: str, character: int) -> Optional[tuple[str, int]]:
     """Find the function name and active parameter index at cursor position.
 
     Scans backwards from cursor to find the enclosing ``(`` and counts
@@ -156,7 +154,12 @@ def register(server) -> None:
             indexer = getattr(server, "indexer", None)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, compute_signature_help, indexer, filepath, lines, params.position,
+                None,
+                compute_signature_help,
+                indexer,
+                filepath,
+                lines,
+                params.position,
             )
         except Exception:
             logger.warning("signature_help handler failed", exc_info=True)

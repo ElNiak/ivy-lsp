@@ -23,11 +23,9 @@ from typing import Any, Callable
 # Re-export verification functions so that external code and tests that patch
 # ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.tools.*``.
-from ivy_lsp.verification import (  # noqa: F401
-    run_ivy_check as shared_ivy_check,
-    run_ivy_compile as shared_ivy_compile,
-    run_ivy_show as shared_ivy_show,
-)
+from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
+from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
+from ivy_lsp.verification import run_ivy_show as shared_ivy_show
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +33,7 @@ logger = logging.getLogger(__name__)
 _INCLUDE_PATTERN = re.compile(r"^include\s+(\w+)", re.MULTILINE)
 
 # Symbol/type extraction patterns for lightweight semantic model
-_TYPE_DECL_RE = re.compile(
-    r"^\s*type\s+([\w.]+)(?:\s*=\s*\{([^}]+)\})?", re.MULTILINE
-)
+_TYPE_DECL_RE = re.compile(r"^\s*type\s+([\w.]+)(?:\s*=\s*\{([^}]+)\})?", re.MULTILINE)
 _ACTION_DECL_RE = re.compile(
     r"^\s*action\s+([\w.]+)\s*(?:\(([^)]*)\))?(?:\s*returns\s*\(([^)]*)\))?",
     re.MULTILINE,
@@ -49,9 +45,7 @@ _FUNCTION_DECL_RE = re.compile(
     r"^\s*function\s+([\w.]+)\s*(?:\(([^)]*)\))?(?:\s*:\s*(\w+))?",
     re.MULTILINE,
 )
-_INDIVIDUAL_DECL_RE = re.compile(
-    r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MULTILINE
-)
+_INDIVIDUAL_DECL_RE = re.compile(r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MULTILINE)
 _OBJECT_DECL_RE = re.compile(
     r"^\s*(?:object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
 )
@@ -69,19 +63,15 @@ def _validate_path(root: str, relative_path: str) -> str:
 
     # C1: If file doesn't exist, try with protocol-testing/ prefix
     if not os.path.exists(abs_path):
-        alt = os.path.realpath(
-            os.path.join(root, "protocol-testing", relative_path)
-        )
+        alt = os.path.realpath(os.path.join(root, "protocol-testing", relative_path))
         if alt.startswith(real_root + os.sep) and os.path.exists(alt):
             return alt
 
     return abs_path
 
 
-from ivy_lsp.utils.ivy_output import (
-    DEFAULT_EXCLUDE_DIRS,
-    find_ivy_files as _find_ivy_files_raw,
-)
+from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
+from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_files_raw
 from ivy_lsp.utils.structural_lint import (
     check_structural_issues_raw,
     check_unresolved_includes_raw,
@@ -115,17 +105,28 @@ class ToolContext:
     # Callable helpers — assigned after construction inside start_mcp()
     find_ivy_files: Callable[..., list[str]] = field(default=lambda: [])
     get_model: Callable[..., Any] = field(default=lambda: None)
-    get_model_status: Callable[..., dict] = field(default=lambda: {"state": "not_built"})
+    get_model_status: Callable[..., dict] = field(
+        default=lambda: {"state": "not_built"}
+    )
     get_req_graph: Callable[..., Any] = field(default=lambda: None)
     make_viz_server_proxy: Callable[..., Any] = field(default=lambda: None)
     get_basename_cache: Callable[..., dict[str, list[str]]] = field(default=lambda: {})
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
 
     # Known Ivy standard library modules
-    stdlib_modules: frozenset[str] = frozenset({
-        "order", "collections", "ip", "ipv6", "tcp", "udp",
-        "byte_stream", "timeout", "net",
-    })
+    stdlib_modules: frozenset[str] = frozenset(
+        {
+            "order",
+            "collections",
+            "ip",
+            "ipv6",
+            "tcp",
+            "udp",
+            "byte_stream",
+            "timeout",
+            "net",
+        }
+    )
 
     def validate_path(self, relative_path: str) -> str:
         """Resolve *relative_path* under workspace root."""
@@ -197,7 +198,8 @@ def start_mcp(
         if not _include_paths:
             return all_files
         return [
-            f for f in all_files
+            f
+            for f in all_files
             if any(
                 f == ip or f.startswith(ip + "/") or f.startswith(ip + os.sep)
                 for ip in _include_paths
@@ -216,9 +218,7 @@ def start_mcp(
             from panther_ivy.api.executor import IvyExecutor
 
             executor = IvyExecutor(docker_image=docker_image)
-            logger.info(
-                "Docker executor configured with image: %s", docker_image
-            )
+            logger.info("Docker executor configured with image: %s", docker_image)
         except ImportError:
             logger.warning(
                 "panther_ivy.api.executor not available; "
@@ -257,10 +257,19 @@ def start_mcp(
 
     # Known Ivy standard library modules that should never be flagged
     # as unresolved by lint (they live in ivy/include/ or ivy2/).
-    _STDLIB_MODULES = frozenset({
-        "order", "collections", "ip", "ipv6", "tcp", "udp",
-        "byte_stream", "timeout", "net",
-    })
+    _STDLIB_MODULES = frozenset(
+        {
+            "order",
+            "collections",
+            "ip",
+            "ipv6",
+            "tcp",
+            "udp",
+            "byte_stream",
+            "timeout",
+            "net",
+        }
+    )
 
     _basename_cache: dict[str, list[str]] | None = None
     _basename_cache_lock = threading.Lock()
@@ -306,14 +315,20 @@ def start_mcp(
         if semantic_model is not None:
             return semantic_model
         # Fast path: previous build failed and cooldown has not elapsed
-        if _model_build_attempted and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN:
+        if (
+            _model_build_attempted
+            and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN
+        ):
             return None
 
         async with _model_lock:
             # Double-check after acquiring lock
             if semantic_model is not None:
                 return semantic_model
-            if _model_build_attempted and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN:
+            if (
+                _model_build_attempted
+                and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN
+            ):
                 return None
 
             try:
@@ -327,7 +342,9 @@ def start_mcp(
                 semantic_model = model
             else:
                 _model_build_attempted = time.monotonic()
-                _model_build_error = "Build returned empty model (missing dependencies?)"
+                _model_build_error = (
+                    "Build returned empty model (missing dependencies?)"
+                )
             return model
 
     def _get_model_status() -> dict:
@@ -355,17 +372,16 @@ def start_mcp(
         # Import required modules — narrow ImportError to just these imports
         try:
             from ivy_lsp.semantic.model import SemanticModel
-            from ivy_lsp.semantic.rfc_annotations import (
-                find_manifests,
-                load_requirement_manifest,
-                parse_file_rfc_annotations,
-            )
-
             from ivy_lsp.semantic.nodes import (
                 RfcAnnotation,
                 RfcRequirement,
                 SymbolNode,
                 TypeNode,
+            )
+            from ivy_lsp.semantic.rfc_annotations import (
+                find_manifests,
+                load_requirement_manifest,
+                parse_file_rfc_annotations,
             )
         except ImportError:
             logger.warning(
@@ -409,15 +425,17 @@ def start_mcp(
                     if variants_raw
                     else []
                 )
-                model.add_node(TypeNode(
-                    id=f"{abs_path}:{line}:{name}",
-                    name=name,
-                    qualified_name=name,
-                    file=abs_path,
-                    line=line,
-                    is_enum=is_enum,
-                    variants=variants,
-                ))
+                model.add_node(
+                    TypeNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        file=abs_path,
+                        line=line,
+                        is_enum=is_enum,
+                        variants=variants,
+                    )
+                )
 
             # Action declarations
             for m in _ACTION_DECL_RE.finditer(source):
@@ -429,72 +447,82 @@ def start_mcp(
                     else []
                 )
                 ret = m.group(3).strip() if m.group(3) else None
-                model.add_node(SymbolNode(
-                    id=f"{abs_path}:{line}:{name}",
-                    name=name,
-                    qualified_name=name,
-                    kind="action",
-                    file=abs_path,
-                    line=line,
-                    params=params,
-                    return_sort=ret,
-                ))
+                model.add_node(
+                    SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="action",
+                        file=abs_path,
+                        line=line,
+                        params=params,
+                        return_sort=ret,
+                    )
+                )
 
             # Relation declarations
             for m in _RELATION_DECL_RE.finditer(source):
                 name = m.group(1)
                 line = source[: m.start()].count("\n")
-                model.add_node(SymbolNode(
-                    id=f"{abs_path}:{line}:{name}",
-                    name=name,
-                    qualified_name=name,
-                    kind="relation",
-                    file=abs_path,
-                    line=line,
-                ))
+                model.add_node(
+                    SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="relation",
+                        file=abs_path,
+                        line=line,
+                    )
+                )
 
             # Function declarations
             for m in _FUNCTION_DECL_RE.finditer(source):
                 name = m.group(1)
                 line = source[: m.start()].count("\n")
                 ret_sort = m.group(3) if m.group(3) else None
-                model.add_node(SymbolNode(
-                    id=f"{abs_path}:{line}:{name}",
-                    name=name,
-                    qualified_name=name,
-                    kind="function",
-                    file=abs_path,
-                    line=line,
-                    return_sort=ret_sort,
-                ))
+                model.add_node(
+                    SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="function",
+                        file=abs_path,
+                        line=line,
+                        return_sort=ret_sort,
+                    )
+                )
 
             # Individual declarations
             for m in _INDIVIDUAL_DECL_RE.finditer(source):
                 name = m.group(1)
                 line = source[: m.start()].count("\n")
                 sort_name = m.group(2)
-                model.add_node(SymbolNode(
-                    id=f"{abs_path}:{line}:{name}",
-                    name=name,
-                    qualified_name=name,
-                    kind="individual",
-                    file=abs_path,
-                    line=line,
-                    sort_name=sort_name,
-                ))
+                model.add_node(
+                    SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="individual",
+                        file=abs_path,
+                        line=line,
+                        sort_name=sort_name,
+                    )
+                )
 
             # Object/module/isolate declarations
             for m in _OBJECT_DECL_RE.finditer(source):
                 name = m.group(1)
                 line = source[: m.start()].count("\n")
-                model.add_node(SymbolNode(
-                    id=f"{abs_path}:{line}:{name}",
-                    name=name,
-                    qualified_name=name,
-                    kind="module",
-                    file=abs_path,
-                    line=line,
-                ))
+                model.add_node(
+                    SymbolNode(
+                        id=f"{abs_path}:{line}:{name}",
+                        name=name,
+                        qualified_name=name,
+                        kind="module",
+                        file=abs_path,
+                        line=line,
+                    )
+                )
 
         # -- Wire semantic edges --
         from ivy_lsp.semantic.edges import SemanticEdgeType
@@ -513,9 +541,7 @@ def start_mcp(
             for tag in ann.tags:
                 matched_ids = normalize_tag_to_manifest_ids(tag, req_id_set)
                 for req_id in matched_ids:
-                    model.add_edge(
-                        ann.id, SemanticEdgeType.COVERS, req_id
-                    )
+                    model.add_edge(ann.id, SemanticEdgeType.COVERS, req_id)
 
         # 2. HAS_PARAM / RETURNS_TYPE: SymbolNode -> TypeNode
         type_by_name: dict[str, str] = {}
@@ -532,13 +558,9 @@ def start_mcp(
                         continue
                     type_ref = parts[-1].strip()
                     base = type_ref.split(".")[-1]
-                    target = type_by_name.get(base) or type_by_name.get(
-                        type_ref
-                    )
+                    target = type_by_name.get(base) or type_by_name.get(type_ref)
                     if target:
-                        model.add_edge(
-                            sn.id, SemanticEdgeType.HAS_PARAM, target
-                        )
+                        model.add_edge(sn.id, SemanticEdgeType.HAS_PARAM, target)
 
             # RETURNS_TYPE
             ret = getattr(sn, "return_sort", None)
@@ -546,9 +568,7 @@ def start_mcp(
                 base = ret.split(".")[-1]
                 target = type_by_name.get(base) or type_by_name.get(ret)
                 if target:
-                    model.add_edge(
-                        sn.id, SemanticEdgeType.RETURNS_TYPE, target
-                    )
+                    model.add_edge(sn.id, SemanticEdgeType.RETURNS_TYPE, target)
 
         # 3. INCLUDES: file -> file (via include directives)
         # Build basename -> abs_path map for resolution
@@ -650,9 +670,7 @@ def start_mcp(
             return
 
         try:
-            from ivy_lsp.analysis.requirement_graph import (
-                EdgeType,
-            )
+            from ivy_lsp.analysis.requirement_graph import EdgeType
             from ivy_lsp.semantic.edges import SemanticEdgeType
 
             # Map RequirementGraph EdgeType -> SemanticEdgeType
@@ -710,9 +728,7 @@ def start_mcp(
         and RequirementNode entries, wires CONSTRAINS and WRITES edges.
         """
         try:
-            from ivy_lsp.analysis.light_mode_extractor import (
-                extract_requirements_light,
-            )
+            from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
             from ivy_lsp.analysis.requirement_graph import (
                 ActionNode,
                 RequirementGraph,
@@ -747,24 +763,28 @@ def start_mcp(
             # Create ActionNodes from monitor_action references
             for req in graph.requirements.values():
                 if req.monitor_action:
-                    graph.add_action_if_absent(ActionNode(
-                        id=req.monitor_action,
-                        name=req.monitor_action.rsplit(".", 1)[-1],
-                        qualified_name=req.monitor_action,
-                        file=req.file,
-                        line=req.line,
-                    ))
+                    graph.add_action_if_absent(
+                        ActionNode(
+                            id=req.monitor_action,
+                            name=req.monitor_action.rsplit(".", 1)[-1],
+                            qualified_name=req.monitor_action,
+                            file=req.file,
+                            line=req.line,
+                        )
+                    )
 
             # Create StateVarNodes from write targets
             for var_name, filepath_w, line_w in all_writes:
                 if var_name not in graph.state_vars:
-                    graph.add_state_var(StateVarNode(
-                        id=var_name,
-                        name=var_name.rsplit(".", 1)[-1],
-                        qualified_name=var_name,
-                        file=filepath_w,
-                        line=line_w,
-                    ))
+                    graph.add_state_var(
+                        StateVarNode(
+                            id=var_name,
+                            name=var_name.rsplit(".", 1)[-1],
+                            qualified_name=var_name,
+                            file=filepath_w,
+                            line=line_w,
+                        )
+                    )
 
             # Wire READS edges from requirements to state vars
             if known_vars:
@@ -792,11 +812,7 @@ def start_mcp(
             except ImportError:
                 logger.debug("rfc_annotations unavailable; skipping manifest loading")
 
-            total = (
-                len(graph.requirements)
-                + len(graph.actions)
-                + len(graph.state_vars)
-            )
+            total = len(graph.requirements) + len(graph.actions) + len(graph.state_vars)
             logger.info(
                 "Built requirement graph: %d requirements, %d actions, "
                 "%d state vars, %d edges",

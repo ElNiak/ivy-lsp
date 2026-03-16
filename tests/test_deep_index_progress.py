@@ -1,11 +1,12 @@
 """Tests for deep index progress tracking data structures."""
+
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
 from ivy_lsp.indexer.workspace_indexer import (
-    FileIndexStatus,
     DeepIndexProgress,
+    FileIndexStatus,
     WorkspaceIndexer,
 )
 
@@ -56,7 +57,8 @@ class TestDeepIndexProgress:
         p.started_at = time.time()
         p.current_file = "/tmp/test1.ivy"
         p.file_statuses["/tmp/test1.ivy"] = FileIndexStatus(
-            filepath="/tmp/test1.ivy", shallow_indexed=True,
+            filepath="/tmp/test1.ivy",
+            shallow_indexed=True,
         )
         assert p.total_test_files == 3
         assert len(p.file_statuses) == 1
@@ -107,12 +109,11 @@ class TestWorkspaceIndexerProgressTracking:
         from ivy_lsp.analysis.test_scope import ExportImportInfo
 
         idx._file_export_imports[str(f)] = ExportImportInfo(
-            file=str(f), exports=["foo"],
+            file=str(f),
+            exports=["foo"],
         )
 
-        with patch(
-            "ivy_lsp.parsing.ast_to_symbols.ast_to_symbols", return_value=[]
-        ):
+        with patch("ivy_lsp.parsing.ast_to_symbols.ast_to_symbols", return_value=[]):
             idx._deep_index_from_tests()
 
         progress = idx._deep_index_progress

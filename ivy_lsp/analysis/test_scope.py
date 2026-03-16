@@ -3,6 +3,7 @@
 Provides data structures for export/import tracking, test scope
 computation, and scoped requirement queries.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,9 +28,11 @@ class ExportImportInfo:
 
     @property
     def has_exports(self) -> bool:
+        """Return True if this file declares any exports."""
         return len(self.exports) > 0
 
     def to_dict(self) -> dict:
+        """Serialize to a plain dictionary."""
         return {
             "file": self.file,
             "exports": list(self.exports),
@@ -40,6 +43,7 @@ class ExportImportInfo:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExportImportInfo":
+        """Deserialize from a plain dictionary."""
         return cls(
             file=d["file"],
             exports=d.get("exports", []),
@@ -60,13 +64,17 @@ class TestScope:
     tester_role: Literal["client", "server", "mim", "unknown"]
 
     def is_action_exported(self, action_name: str) -> bool:
+        """Return True if the action is in this scope's exports."""
         return action_name in self.exported_actions
 
     def is_file_in_scope(self, filepath: str) -> bool:
+        """Return True if the file is in this scope's include closure."""
         return filepath in self.include_closure
 
 
-def detect_test_role(include_closure: FrozenSet[str]) -> Literal["client", "server", "mim", "unknown"]:
+def detect_test_role(
+    include_closure: FrozenSet[str],
+) -> Literal["client", "server", "mim", "unknown"]:
     """Derive tester role from included behavior files.
 
     Uses Ivy role inversion: testing a server means tester is client.
@@ -139,6 +147,7 @@ class ScopedRequirementModel(RequirementGraph):
     """
 
     def __init__(self) -> None:
+        """Initialize with empty test scopes and caches."""
         super().__init__()
         self._test_scopes: Dict[str, TestScope] = {}
         self._file_to_tests: Dict[str, Set[str]] = defaultdict(set)
@@ -175,6 +184,7 @@ class ScopedRequirementModel(RequirementGraph):
     # -- Registration / mutation -------------------------------------------
 
     def register_test_scope(self, scope: TestScope) -> None:
+        """Register a test scope and update file-to-test mappings."""
         with self._lock:
             self._test_scopes[scope.test_file] = scope
             for f in scope.include_closure:
@@ -183,20 +193,26 @@ class ScopedRequirementModel(RequirementGraph):
             self._scope_cache.pop((scope.test_file, True), None)
 
     def set_active_test(self, test_file: Optional[str]) -> None:
+        """Set the active test file for scoped queries."""
         if test_file is None or test_file in self._test_scopes:
             self._active_test = test_file
 
     def get_active_scope(self) -> Optional[TestScope]:
+        """Return the currently active test scope, or None."""
         if self._active_test is None:
             return None
         return self._test_scopes.get(self._active_test)
 
     def get_tests_for_file(self, filepath: str) -> Set[str]:
+        """Return test files whose scope includes the given file."""
         return set(self._file_to_tests.get(filepath, set()))
 
     def get_scoped_requirements(
-        self, test_file: str, include_imported: bool = False,
+        self,
+        test_file: str,
+        include_imported: bool = False,
     ) -> List[RequirementNode]:
+        """Return requirements filtered to a test's scope."""
         cache_key = (test_file, include_imported)
         with self._lock:
             cached = self._scope_cache.get(cache_key)
@@ -207,12 +223,14 @@ class ScopedRequirementModel(RequirementGraph):
                 return []
             if include_imported:
                 result = [
-                    r for r in self.requirements.values()
+                    r
+                    for r in self.requirements.values()
                     if r.file in scope.include_closure
                 ]
             else:
                 result = [
-                    r for r in self.requirements.values()
+                    r
+                    for r in self.requirements.values()
                     if r.file in scope.include_closure
                     and r.monitor_action in scope.exported_actions
                 ]
@@ -220,6 +238,7 @@ class ScopedRequirementModel(RequirementGraph):
             return result
 
     def get_scoped_counts(self, test_file: str, action_name: str) -> Dict[str, int]:
+        """Return requirement kind counts for an action within a test scope."""
         scope = self._test_scopes.get(test_file)
         if scope is None or action_name not in scope.exported_actions:
             return {}
@@ -253,7 +272,8 @@ class ScopedRequirementModel(RequirementGraph):
 
         if direction == ActionClassification.RECEIVED:
             matching_requirements = [
-                req for req in self.requirements.values()
+                req
+                for req in self.requirements.values()
                 if (
                     req.file in scope.include_closure
                     and req.monitor_action == action_name
@@ -261,7 +281,8 @@ class ScopedRequirementModel(RequirementGraph):
             ]
         else:
             matching_requirements = [
-                req for req in self.get_scoped_requirements(test_file)
+                req
+                for req in self.get_scoped_requirements(test_file)
                 if req.monitor_action == action_name
             ]
 
@@ -279,6 +300,7 @@ class ScopedRequirementModel(RequirementGraph):
         ]
 
     def add_requirement(self, node: RequirementNode) -> None:
+        """Add a requirement and invalidate affected scope caches."""
         super().add_requirement(node)
         self._invalidate_scope_cache_for_file(node.file)
 
@@ -288,10 +310,12 @@ class ScopedRequirementModel(RequirementGraph):
         reqs: List[RequirementNode],
         writes: Optional[List[Tuple[str, str, int]]] = None,
     ) -> None:
+        """Bulk-add file requirements and invalidate scope caches."""
         super().add_file_requirements(filepath, reqs, writes)
         self._invalidate_scope_cache_for_file(filepath)
 
     def invalidate_file(self, filepath: str) -> None:
+        """Invalidate scope caches affected by changes to a file."""
         self._invalidate_scope_cache_for_file(filepath)
 
     def _invalidate_scope_cache_for_file(self, filepath: str) -> None:
