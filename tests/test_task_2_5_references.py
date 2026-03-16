@@ -84,6 +84,6 @@ class TestReferencesNotBlocking:
         from ivy_lsp.features import references as refs_mod
 
         source = inspect.getsource(refs_mod.register)
-        assert "run_in_executor" in source, (
-            "references handler must use run_in_executor to avoid blocking event loop"
-        )
+        assert (
+            "run_in_executor" in source
+        ), "references handler must use run_in_executor to avoid blocking event loop"

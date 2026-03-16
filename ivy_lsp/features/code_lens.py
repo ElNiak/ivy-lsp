@@ -27,18 +27,10 @@ from ivy_lsp.utils import uri_to_path
 logger = logging.getLogger(__name__)
 
 # Patterns for detecting monitor/declaration lines in source
-_MONITOR_LINE_RE = re.compile(
-    r"^\s*(before|after|around)\s+([\w.]+)", re.MULTILINE
-)
-_RELATION_LINE_RE = re.compile(
-    r"^\s*relation\s+([\w.]+)", re.MULTILINE
-)
-_FUNCTION_LINE_RE = re.compile(
-    r"^\s*function\s+([\w.]+)", re.MULTILINE
-)
-_INDIVIDUAL_LINE_RE = re.compile(
-    r"^\s*individual\s+([\w.]+)", re.MULTILINE
-)
+_MONITOR_LINE_RE = re.compile(r"^\s*(before|after|around)\s+([\w.]+)", re.MULTILINE)
+_RELATION_LINE_RE = re.compile(r"^\s*relation\s+([\w.]+)", re.MULTILINE)
+_FUNCTION_LINE_RE = re.compile(r"^\s*function\s+([\w.]+)", re.MULTILINE)
+_INDIVIDUAL_LINE_RE = re.compile(r"^\s*individual\s+([\w.]+)", re.MULTILINE)
 _PROPERTY_LINE_RE = re.compile(
     r"^\s*(invariant|property|axiom|conjecture)\s+", re.MULTILINE
 )
@@ -177,9 +169,7 @@ def _monitor_lenses(
         parts = []
         if nct_entries:
             for entry in nct_entries:
-                parts.append(
-                    f"{entry['count']} {entry['kind']} [{entry['nct_tag']}]"
-                )
+                parts.append(f"{entry['count']} {entry['kind']} [{entry['nct_tag']}]")
         else:
             for kind in ("require", "ensure", "assume", "assert"):
                 if kind in counts:
@@ -189,7 +179,9 @@ def _monitor_lenses(
 
         title = " | ".join(parts) if parts else f"{len(reqs)} requirements"
 
-        lenses.append(_make_lens(lines, line, title, "ivy.showActionRequirements", [action_name]))
+        lenses.append(
+            _make_lens(lines, line, title, "ivy.showActionRequirements", [action_name])
+        )
 
     return lenses
 
@@ -215,7 +207,9 @@ def _state_var_lenses(
             files: set = {r.file for r in readers}
             title = f"read by {len(readers)} requirements across {len(files)} files"
 
-            lenses.append(_make_lens(lines, line, title, "ivy.showActionRequirements", [var_name]))
+            lenses.append(
+                _make_lens(lines, line, title, "ivy.showActionRequirements", [var_name])
+            )
 
     return lenses
 
@@ -269,7 +263,9 @@ def _property_lenses(
 
         title = " | ".join(parts)
 
-        lenses.append(_make_lens(lines, line, title, "ivy.showPropertyDetails", [prop_node.id]))
+        lenses.append(
+            _make_lens(lines, line, title, "ivy.showPropertyDetails", [prop_node.id])
+        )
 
     return lenses
 
@@ -309,9 +305,9 @@ def _include_lenses(
             continue
 
         # Transitive closure: the resolved file + everything it includes
-        transitive_files = include_graph.get_transitive_includes(
+        transitive_files = include_graph.get_transitive_includes(resolved_path) | {
             resolved_path
-        ) | {resolved_path}
+        }
 
         # Only count files not already claimed by earlier includes
         new_files = transitive_files - seen_files
@@ -328,7 +324,9 @@ def _include_lenses(
 
         title = f"brings {inherited_count} requirements into scope"
 
-        lenses.append(_make_lens(lines, line, title, "ivy.navigateToInclude", [include_name]))
+        lenses.append(
+            _make_lens(lines, line, title, "ivy.navigateToInclude", [include_name])
+        )
 
     return lenses
 
@@ -344,8 +342,7 @@ def _rfc_tag_lenses(
     annotations = [
         n
         for n in semantic_model.get_nodes_by_type(RfcAnnotation)
-        if n.file
-        and (n.file == filepath or os.path.abspath(n.file) == filepath)
+        if n.file and (n.file == filepath or os.path.abspath(n.file) == filepath)
     ]
 
     for ann in annotations:
@@ -365,10 +362,15 @@ def _rfc_tag_lenses(
             continue
 
         title = "RFC: " + ", ".join(tag_parts)
-        lenses.append(_make_lens(
-            lines, line, title, "ivy.showRfcDetails",
-            [ann.tags[0] if ann.tags else ""],
-        ))
+        lenses.append(
+            _make_lens(
+                lines,
+                line,
+                title,
+                "ivy.showRfcDetails",
+                [ann.tags[0] if ann.tags else ""],
+            )
+        )
 
     return lenses
 
@@ -438,8 +440,12 @@ def register(server) -> None:
         try:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, compute_code_lenses,
-                server.indexer, filepath, source, model,
+                None,
+                compute_code_lenses,
+                server.indexer,
+                filepath,
+                source,
+                model,
             )
         except (IndexError, KeyError, ValueError) as exc:
             logger.warning(

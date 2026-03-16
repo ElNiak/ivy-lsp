@@ -1,0 +1,12 @@
+rfc: rfc9999
+sections:
+  "4.1":
+    level: MUST
+    text: "An endpoint MUST NOT initiate a connection to a peer it is already connected to."
+    tags:
+      - "rfc9999:4.1"
+  "4.2":
+    level: MUST
+    text: "After connecting, the connected_to mapping MUST reflect the destination."
+    tags:
+      - "rfc9999:4.2"

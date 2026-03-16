@@ -68,9 +68,7 @@ def compute_rename(
             for match in pattern.finditer(line):
                 edits.append(
                     lsp.TextEdit(
-                        range=make_range(
-                            line_no, match.start(), line_no, match.end()
-                        ),
+                        range=make_range(line_no, match.start(), line_no, match.end()),
                         new_text=new_name,
                     )
                 )
@@ -104,6 +102,11 @@ def register(server) -> None:
         indexer = server.indexer
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, compute_rename, indexer, filepath, params.position,
-            lines, params.new_name,
+            None,
+            compute_rename,
+            indexer,
+            filepath,
+            params.position,
+            lines,
+            params.new_name,
         )

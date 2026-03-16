@@ -182,7 +182,9 @@ class TestTryTokenize:
             "ivy_lsp.parsing.token_stream.tokenize_ivy",
             side_effect=RuntimeError("tokenizer bug"),
         ):
-            with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.workspace_indexer"):
+            with caplog.at_level(
+                logging.DEBUG, logger="ivy_lsp.indexer.workspace_indexer"
+            ):
                 result = _try_tokenize("type foo", "test.ivy")
         assert result is None
         assert any("Tokenization failed" in r.message for r in caplog.records)

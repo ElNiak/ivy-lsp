@@ -11,8 +11,12 @@ class TestSemanticModelCRUD:
     def test_add_and_get_node(self):
         model = SemanticModel()
         node = SymbolNode(
-            id="test.ivy:5:foo", name="foo", qualified_name="bar.foo",
-            kind="action", file="test.ivy", line=5,
+            id="test.ivy:5:foo",
+            name="foo",
+            qualified_name="bar.foo",
+            kind="action",
+            file="test.ivy",
+            line=5,
         )
         model.add_node(node)
         assert model.get_node("test.ivy:5:foo") is node
@@ -23,8 +27,12 @@ class TestSemanticModelCRUD:
 
     def test_get_nodes_by_type(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="f", line=1)
-        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="relation", file="f", line=2)
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="f", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="relation", file="f", line=2
+        )
         t1 = TypeNode(id="t1", name="cid", qualified_name="cid", file="f", line=3)
         model.add_node(s1)
         model.add_node(s2)
@@ -34,8 +42,12 @@ class TestSemanticModelCRUD:
 
     def test_get_nodes_in_file(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
-        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1)
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
         model.add_node(s1)
         model.add_node(s2)
         assert len(model.get_nodes_in_file("a.ivy")) == 1
@@ -46,8 +58,16 @@ class TestSemanticModelCRUD:
 class TestSemanticModelEdges:
     def test_add_and_query_edges(self):
         model = SemanticModel()
-        model.add_node(SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="f", line=1))
-        model.add_node(SymbolNode(id="s2", name="b", qualified_name="b", kind="relation", file="f", line=2))
+        model.add_node(
+            SymbolNode(
+                id="s1", name="a", qualified_name="a", kind="action", file="f", line=1
+            )
+        )
+        model.add_node(
+            SymbolNode(
+                id="s2", name="b", qualified_name="b", kind="relation", file="f", line=2
+            )
+        )
         model.add_edge("s1", SemanticEdgeType.READS, "s2")
 
         outgoing = model.get_outgoing("s1")
@@ -72,8 +92,12 @@ class TestSemanticModelEdges:
 class TestSemanticModelFileOps:
     def test_remove_file(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
-        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1)
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
         model.add_node(s1)
         model.add_node(s2)
         model.add_edge("s1", SemanticEdgeType.READS, "s2")
@@ -86,29 +110,63 @@ class TestSemanticModelFileOps:
 
     def test_update_file_replaces_at_tier(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1, tier="tier1")
+        s1 = SymbolNode(
+            id="s1",
+            name="a",
+            qualified_name="a",
+            kind="action",
+            file="a.ivy",
+            line=1,
+            tier="tier1",
+        )
         model.add_node(s1)
         assert model.get_node("s1").name == "a"
 
         # Update at tier2 - should overwrite tier1
-        s1_v2 = SymbolNode(id="s1", name="a_v2", qualified_name="a_v2", kind="action", file="a.ivy", line=1, tier="tier2")
+        s1_v2 = SymbolNode(
+            id="s1",
+            name="a_v2",
+            qualified_name="a_v2",
+            kind="action",
+            file="a.ivy",
+            line=1,
+            tier="tier2",
+        )
         model.update_file("a.ivy", [s1_v2], [], "tier2")
         assert model.get_node("s1").name == "a_v2"
 
     def test_update_file_preserves_higher_tier(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1, tier="tier2")
+        s1 = SymbolNode(
+            id="s1",
+            name="a",
+            qualified_name="a",
+            kind="action",
+            file="a.ivy",
+            line=1,
+            tier="tier2",
+        )
         model.update_file("a.ivy", [s1], [], "tier2")
 
         # Update at tier1 - should NOT overwrite tier2 data
-        s1_lower = SymbolNode(id="s1", name="a_lower", qualified_name="a_lower", kind="action", file="a.ivy", line=1, tier="tier1")
+        s1_lower = SymbolNode(
+            id="s1",
+            name="a_lower",
+            qualified_name="a_lower",
+            kind="action",
+            file="a.ivy",
+            line=1,
+            tier="tier1",
+        )
         model.update_file("a.ivy", [s1_lower], [], "tier1")
         # tier2 node should still be there (tier1 can't overwrite tier2)
         assert model.get_node("s1").name == "a"
 
     def test_update_file_with_edges(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
         edges = [("s1", SemanticEdgeType.READS, "ext")]
         model.update_file("a.ivy", [s1], edges, "tier1")
         assert model.edge_count() == 1
@@ -120,7 +178,11 @@ class TestSemanticModelCounts:
         model = SemanticModel()
         assert model.node_count() == 0
         assert model.edge_count() == 0
-        model.add_node(SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="f", line=1))
+        model.add_node(
+            SymbolNode(
+                id="s1", name="a", qualified_name="a", kind="action", file="f", line=1
+            )
+        )
         assert model.node_count() == 1
         model.add_edge("s1", SemanticEdgeType.READS, "ext")
         assert model.edge_count() == 1
@@ -129,15 +191,21 @@ class TestSemanticModelCounts:
 class TestSemanticModelUpdateFileEdgeCleanup:
     def test_update_file_removes_old_edges(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
-        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="relation", file="a.ivy", line=2)
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="relation", file="a.ivy", line=2
+        )
         edges = [("s1", SemanticEdgeType.READS, "s2")]
         model.update_file("a.ivy", [s1, s2], edges, "tier1")
         assert model.edge_count() == 1
         assert model.get_outgoing("s1") == [(SemanticEdgeType.READS, "s2")]
 
         # Update with different nodes/edges - old edges should be removed
-        s3 = SymbolNode(id="s3", name="c", qualified_name="c", kind="action", file="a.ivy", line=3)
+        s3 = SymbolNode(
+            id="s3", name="c", qualified_name="c", kind="action", file="a.ivy", line=3
+        )
         new_edges = [("s3", SemanticEdgeType.WRITES, "ext")]
         model.update_file("a.ivy", [s3], new_edges, "tier2")
 
@@ -154,9 +222,15 @@ class TestIncrementalAdjacency:
 
     def test_remove_file_preserves_unrelated_edges(self):
         model = SemanticModel()
-        s1 = SymbolNode(id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1)
-        s2 = SymbolNode(id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1)
-        s3 = SymbolNode(id="s3", name="c", qualified_name="c", kind="action", file="b.ivy", line=2)
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
+        s3 = SymbolNode(
+            id="s3", name="c", qualified_name="c", kind="action", file="b.ivy", line=2
+        )
         model.add_node(s1)
         model.add_node(s2)
         model.add_node(s3)
@@ -171,29 +245,89 @@ class TestIncrementalAdjacency:
 
     def test_update_file_replaces_edges_correctly(self):
         model = SemanticModel()
-        n1 = SymbolNode(id="n1", name="x", qualified_name="x", kind="action", file="f.ivy", line=1, tier="tier1")
-        n2 = SymbolNode(id="n2", name="y", qualified_name="y", kind="action", file="f.ivy", line=2, tier="tier1")
-        model.update_file("f.ivy", [n1, n2], [("n1", SemanticEdgeType.READS, "n2")], "tier1")
+        n1 = SymbolNode(
+            id="n1",
+            name="x",
+            qualified_name="x",
+            kind="action",
+            file="f.ivy",
+            line=1,
+            tier="tier1",
+        )
+        n2 = SymbolNode(
+            id="n2",
+            name="y",
+            qualified_name="y",
+            kind="action",
+            file="f.ivy",
+            line=2,
+            tier="tier1",
+        )
+        model.update_file(
+            "f.ivy", [n1, n2], [("n1", SemanticEdgeType.READS, "n2")], "tier1"
+        )
 
         assert model.edge_count() == 1
         assert len(model.get_outgoing("n1")) == 1
 
-        n1b = SymbolNode(id="n1", name="x", qualified_name="x", kind="action", file="f.ivy", line=1, tier="tier2")
-        n3 = SymbolNode(id="n3", name="z", qualified_name="z", kind="action", file="f.ivy", line=3, tier="tier2")
-        model.update_file("f.ivy", [n1b, n3], [("n1", SemanticEdgeType.WRITES, "n3")], "tier2")
+        n1b = SymbolNode(
+            id="n1",
+            name="x",
+            qualified_name="x",
+            kind="action",
+            file="f.ivy",
+            line=1,
+            tier="tier2",
+        )
+        n3 = SymbolNode(
+            id="n3",
+            name="z",
+            qualified_name="z",
+            kind="action",
+            file="f.ivy",
+            line=3,
+            tier="tier2",
+        )
+        model.update_file(
+            "f.ivy", [n1b, n3], [("n1", SemanticEdgeType.WRITES, "n3")], "tier2"
+        )
 
         assert len(model.get_outgoing("n1", SemanticEdgeType.READS)) == 0
         assert len(model.get_outgoing("n1", SemanticEdgeType.WRITES)) == 1
 
     def test_cross_file_edges_preserved_on_single_file_update(self):
         model = SemanticModel()
-        a = SymbolNode(id="a", name="a", qualified_name="a", kind="action", file="a.ivy", line=1, tier="tier1")
-        b = SymbolNode(id="b", name="b", qualified_name="b", kind="action", file="b.ivy", line=1, tier="tier1")
+        a = SymbolNode(
+            id="a",
+            name="a",
+            qualified_name="a",
+            kind="action",
+            file="a.ivy",
+            line=1,
+            tier="tier1",
+        )
+        b = SymbolNode(
+            id="b",
+            name="b",
+            qualified_name="b",
+            kind="action",
+            file="b.ivy",
+            line=1,
+            tier="tier1",
+        )
         model.update_file("a.ivy", [a], [], "tier1")
         model.update_file("b.ivy", [b], [], "tier1")
         model.add_edge("a", SemanticEdgeType.HAS_PARAM, "b")
 
-        a2 = SymbolNode(id="a", name="a", qualified_name="a", kind="action", file="a.ivy", line=1, tier="tier2")
+        a2 = SymbolNode(
+            id="a",
+            name="a",
+            qualified_name="a",
+            kind="action",
+            file="a.ivy",
+            line=1,
+            tier="tier2",
+        )
         model.update_file("a.ivy", [a2], [("a", SemanticEdgeType.READS, "b")], "tier2")
 
         assert len(model.get_outgoing("a", SemanticEdgeType.HAS_PARAM)) == 0
@@ -204,10 +338,16 @@ class TestSemanticModelThreadSafety:
     def test_concurrent_reads_during_update(self):
         model = SemanticModel()
         for i in range(100):
-            model.add_node(SymbolNode(
-                id=f"s{i}", name=f"sym{i}", qualified_name=f"sym{i}",
-                kind="action", file="f.ivy", line=i,
-            ))
+            model.add_node(
+                SymbolNode(
+                    id=f"s{i}",
+                    name=f"sym{i}",
+                    qualified_name=f"sym{i}",
+                    kind="action",
+                    file="f.ivy",
+                    line=i,
+                )
+            )
 
         errors = []
 
@@ -222,10 +362,16 @@ class TestSemanticModelThreadSafety:
         def writer():
             try:
                 for i in range(100, 150):
-                    model.add_node(SymbolNode(
-                        id=f"s{i}", name=f"sym{i}", qualified_name=f"sym{i}",
-                        kind="action", file="f.ivy", line=i,
-                    ))
+                    model.add_node(
+                        SymbolNode(
+                            id=f"s{i}",
+                            name=f"sym{i}",
+                            qualified_name=f"sym{i}",
+                            kind="action",
+                            file="f.ivy",
+                            line=i,
+                        )
+                    )
             except Exception as e:
                 errors.append(e)
 
@@ -246,11 +392,16 @@ class TestSemanticModelThreadSafety:
             try:
                 filepath = f"file_{file_suffix}.ivy"
                 for i in range(20):
-                    nodes = [SymbolNode(
-                        id=f"n{file_suffix}_{i}", name=f"sym{i}",
-                        qualified_name=f"sym{i}", kind="action",
-                        file=filepath, line=i,
-                    )]
+                    nodes = [
+                        SymbolNode(
+                            id=f"n{file_suffix}_{i}",
+                            name=f"sym{i}",
+                            qualified_name=f"sym{i}",
+                            kind="action",
+                            file=filepath,
+                            line=i,
+                        )
+                    ]
                     edges = [
                         (f"n{file_suffix}_{i}", SemanticEdgeType.READS, f"ext_{i}")
                     ]
@@ -269,3 +420,83 @@ class TestSemanticModelThreadSafety:
         for j in range(4):
             nodes = model.get_nodes_in_file(f"file_{j}.ivy")
             assert len(nodes) == 1
+
+
+class TestSemanticModelDomainQueries:
+    """Tests for RequirementGraph-compatible domain query methods."""
+
+    def test_get_requirements_for_action(self):
+        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementNode
+
+        model = SemanticModel()
+        action = ActionNode(
+            id="act:open",
+            name="open",
+            qualified_name="conn.open",
+            file="/t.ivy",
+            line=10,
+        )
+        req = RequirementNode(
+            id="/t.ivy:15",
+            kind="require",
+            formula_text="conn_seen(C)",
+            line=15,
+            col=0,
+            file="/t.ivy",
+            monitor_action="conn.open",
+            mixin_kind="before",
+            bracket_tags=[],
+        )
+        model.add_node(action)
+        model.add_node(req)
+        model.add_edge(req.id, SemanticEdgeType.CONSTRAINS, action.id)
+
+        result = model.get_requirements_for_action("act:open")
+        assert len(result) == 1
+        assert result[0].id == "/t.ivy:15"
+
+    def test_get_requirements_for_action_empty(self):
+        model = SemanticModel()
+        s = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="f", line=1
+        )
+        model.add_node(s)
+        assert model.get_requirements_for_action("s1") == []
+
+    def test_get_state_vars_read_by(self):
+        from ivy_lsp.analysis.requirement_graph import RequirementNode, StateVarNode
+
+        model = SemanticModel()
+        req = RequirementNode(
+            id="/t.ivy:15",
+            kind="require",
+            formula_text="conn_seen(C)",
+            line=15,
+            col=0,
+            file="/t.ivy",
+            monitor_action="conn.open",
+            mixin_kind="before",
+            bracket_tags=[],
+        )
+        sv = StateVarNode(
+            id="conn_seen",
+            name="conn_seen",
+            qualified_name="conn_seen",
+            file="/t.ivy",
+            line=5,
+            is_relation=True,
+        )
+        model.add_node(req)
+        model.add_node(sv)
+        model.add_edge(req.id, SemanticEdgeType.READS, sv.id)
+
+        result = model.get_state_vars_read_by("/t.ivy:15")
+        assert len(result) == 1
+        assert result[0].id == "conn_seen"
+
+    def test_get_coverage_stats_empty(self):
+        model = SemanticModel()
+        stats = model.get_coverage_stats()
+        assert stats["total_requirements"] == 0
+        assert stats["covered"] == 0
+        assert stats["uncovered"] == 0

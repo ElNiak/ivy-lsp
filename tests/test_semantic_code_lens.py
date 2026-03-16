@@ -25,12 +25,17 @@ class TestRfcTagLenses:
     def test_rfc_tag_lens_on_annotated_line(self):
         model = SemanticModel()
         ann = RfcAnnotation(
-            id="test.ivy:2:0", file="test.ivy", line=2,
+            id="test.ivy:2:0",
+            file="test.ivy",
+            line=2,
             tags=["rfc9000:4.1"],
         )
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="senders MUST NOT send data beyond limit", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="senders MUST NOT send data beyond limit",
+            level="MUST",
         )
         model.add_node(ann)
         model.add_node(req)
@@ -39,7 +44,9 @@ class TestRfcTagLenses:
         indexer = _make_indexer()
         lenses = compute_code_lenses(indexer, "test.ivy", source, model)
 
-        rfc_lenses = [l for l in lenses if "RFC:" in (l.command.title if l.command else "")]
+        rfc_lenses = [
+            l for l in lenses if "RFC:" in (l.command.title if l.command else "")
+        ]
         assert len(rfc_lenses) == 1
         assert "rfc9000:4.1" in rfc_lenses[0].command.title
         assert "MUST" in rfc_lenses[0].command.title
@@ -47,7 +54,9 @@ class TestRfcTagLenses:
     def test_rfc_tag_without_matching_requirement(self):
         model = SemanticModel()
         ann = RfcAnnotation(
-            id="test.ivy:2:0", file="test.ivy", line=2,
+            id="test.ivy:2:0",
+            file="test.ivy",
+            line=2,
             tags=["rfc9000:99.1"],
         )
         model.add_node(ann)
@@ -56,7 +65,9 @@ class TestRfcTagLenses:
         indexer = _make_indexer()
         lenses = compute_code_lenses(indexer, "test.ivy", source, model)
 
-        rfc_lenses = [l for l in lenses if "RFC:" in (l.command.title if l.command else "")]
+        rfc_lenses = [
+            l for l in lenses if "RFC:" in (l.command.title if l.command else "")
+        ]
         assert len(rfc_lenses) == 1
         assert "[rfc9000:99.1]" in rfc_lenses[0].command.title
 
@@ -65,15 +76,23 @@ class TestCoverageSummaryLens:
     def test_coverage_lens_at_line_zero(self):
         model = SemanticModel()
         req1 = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="...", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
         )
         req2 = RfcRequirement(
-            id="rfc9000:4.2", rfc="RFC9000", section="4.2",
-            text="...", level="SHOULD",
+            id="rfc9000:4.2",
+            rfc="RFC9000",
+            section="4.2",
+            text="...",
+            level="SHOULD",
         )
         ann = RfcAnnotation(
-            id="test.ivy:5:0", file="test.ivy", line=5,
+            id="test.ivy:5:0",
+            file="test.ivy",
+            line=5,
             tags=["rfc9000:4.1"],
         )
         model.add_node(req1)
@@ -85,8 +104,10 @@ class TestCoverageSummaryLens:
         lenses = compute_code_lenses(indexer, "test.ivy", source, model)
 
         coverage_lenses = [
-            l for l in lenses
-            if l.range.start.line == 0 and "covered" in (l.command.title if l.command else "")
+            l
+            for l in lenses
+            if l.range.start.line == 0
+            and "covered" in (l.command.title if l.command else "")
         ]
         assert len(coverage_lenses) == 1
         assert "RFC9000: 1/2 covered" in coverage_lenses[0].command.title
@@ -98,7 +119,9 @@ class TestCoverageSummaryLens:
         lenses = compute_code_lenses(indexer, "test.ivy", source, model)
 
         coverage_lenses = [
-            l for l in lenses
-            if l.range.start.line == 0 and "covered" in (l.command.title if l.command else "")
+            l
+            for l in lenses
+            if l.range.start.line == 0
+            and "covered" in (l.command.title if l.command else "")
         ]
         assert len(coverage_lenses) == 0

@@ -8,11 +8,12 @@ import pytest
 
 from ivy_lsp.workspace_detection import (
     WorkspaceConfig,
-    detect_ivy_workspace,
-    _read_marker,
-    _walk_up_for_marker,
-    _walk_down_for_marker,
     _panther_heuristic,
+    _read_marker,
+    _resolve_git_worktree,
+    _walk_down_for_marker,
+    _walk_up_for_marker,
+    detect_ivy_workspace,
 )
 
 
@@ -200,6 +201,84 @@ class TestDetectIvyWorkspace:
         (panther_ivy / "protocol-testing").mkdir(parents=True)
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "heuristic"
+        assert config.project_type == "panther"
+
+
+class TestResolveGitWorktree:
+    def test_worktree_resolves_to_main_tree(self, tmp_workspace):
+        """Git worktree .git file should resolve back to main tree."""
+        main_repo = tmp_workspace / "main-repo"
+        main_git = main_repo / ".git"
+        main_git.mkdir(parents=True)
+
+        # Create worktree that points to main repo
+        worktree = tmp_workspace / "worktree"
+        worktree.mkdir()
+        worktree_gitdir = main_git / "worktrees" / "my-worktree"
+        worktree_gitdir.mkdir(parents=True)
+        (worktree_gitdir / "commondir").write_text("../..")
+        (worktree / ".git").write_text(f"gitdir: {worktree_gitdir}")
+
+        result = _resolve_git_worktree(str(worktree))
+        assert result == str(main_repo)
+
+    def test_non_repo_returns_none(self, tmp_workspace):
+        result = _resolve_git_worktree(str(tmp_workspace))
+        assert result is None
+
+    def test_regular_repo_returns_none(self, tmp_workspace):
+        (tmp_workspace / ".git").mkdir()
+        result = _resolve_git_worktree(str(tmp_workspace))
+        assert result is None
+
+    def test_broken_git_file_returns_none(self, tmp_workspace):
+        (tmp_workspace / ".git").write_text("not a gitdir line")
+        result = _resolve_git_worktree(str(tmp_workspace))
+        assert result is None
+
+
+class TestWorktreeWorkspaceDetection:
+    def test_worktree_detects_panther_via_main_tree(self, tmp_workspace, monkeypatch):
+        """detect_ivy_workspace should follow worktree link to find PANTHER structure."""
+        monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
+        monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+
+        # Main repo with panther_ivy
+        main_repo = tmp_workspace / "main"
+        main_git = main_repo / ".git"
+        main_git.mkdir(parents=True)
+        panther_ivy = (
+            main_repo / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        )
+        (panther_ivy / "protocol-testing").mkdir(parents=True)
+
+        # Worktree with empty panther_ivy (simulates uninitialized submodule)
+        worktree = tmp_workspace / "worktree"
+        worktree.mkdir()
+        (
+            worktree / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        ).mkdir(parents=True)
+        worktree_gitdir = main_git / "worktrees" / "wt"
+        worktree_gitdir.mkdir(parents=True)
+        (worktree_gitdir / "commondir").write_text("../..")
+        (worktree / ".git").write_text(f"gitdir: {worktree_gitdir}")
+
+        config = detect_ivy_workspace(start_dir=str(worktree))
+        assert "worktree" in config.detected_by
+        assert config.project_type == "panther"
+        assert config.workspace_root == str(panther_ivy)
+
+
+class TestHintWithHeuristic:
+    def test_hint_with_panther_structure_no_marker(self, tmp_workspace, monkeypatch):
+        """Hint pointing to a dir with PANTHER structure but no marker should work."""
+        monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
+        panther_ivy = tmp_workspace / "panther_ivy"
+        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        (panther_ivy / "panther_ivy.py").write_text("# marker")
+        monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", str(panther_ivy))
+        config = detect_ivy_workspace(start_dir=str(tmp_workspace))
+        assert config.detected_by == "hint"
         assert config.project_type == "panther"
 
 

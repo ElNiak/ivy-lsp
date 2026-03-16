@@ -5,6 +5,7 @@ Leaf types (SortIR, SymbolIR, etc.) are frozen with immutable collections
 attribute level but contains Dict fields that are shallowly mutable.
 All values survive pickle round-trips without requiring Z3 or Ivy imports.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -158,6 +159,7 @@ class CompiledModuleIR:
     compile_duration: float = 0.0
 
     def __post_init__(self) -> None:
+        """Validate that success and errors are not mutually contradictory."""
         if self.success and self.errors:
             raise ValueError(
                 "CompiledModuleIR: success=True is incompatible with non-empty errors"

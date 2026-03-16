@@ -47,9 +47,7 @@ def extract_requirements_full(
         if is_from_included_file(decl, abs_filepath):
             continue
         try:
-            _process_decl(
-                decl, filepath, source_lines, mixin_map, requirements, writes
-            )
+            _process_decl(decl, filepath, source_lines, mixin_map, requirements, writes)
         except Exception:
             logger.warning(
                 "Failed to extract requirements from %s in %s",
@@ -83,9 +81,8 @@ def extract_exports_imports_full(
     try:
         import ivy.ivy_ast as ia
     except ImportError:
-        from ivy_lsp.analysis.light_mode_extractor import (
-            extract_exports_imports_light,
-        )
+        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
+
         return extract_exports_imports_light(source, filepath)
 
     exports: List[str] = []
@@ -213,29 +210,49 @@ def _walk_body(
     # Requirement statements
     if isinstance(node, iact.RequiresAction):
         _add_requirement(
-            node, "require", filepath, source_lines, monitor_action,
-            mixin_kind, requirements,
+            node,
+            "require",
+            filepath,
+            source_lines,
+            monitor_action,
+            mixin_kind,
+            requirements,
         )
         return
 
     if isinstance(node, iact.EnsuresAction):
         _add_requirement(
-            node, "ensure", filepath, source_lines, monitor_action,
-            mixin_kind, requirements,
+            node,
+            "ensure",
+            filepath,
+            source_lines,
+            monitor_action,
+            mixin_kind,
+            requirements,
         )
         return
 
     if isinstance(node, iact.AssumeAction):
         _add_requirement(
-            node, "assume", filepath, source_lines, monitor_action,
-            mixin_kind, requirements,
+            node,
+            "assume",
+            filepath,
+            source_lines,
+            monitor_action,
+            mixin_kind,
+            requirements,
         )
         return
 
     if isinstance(node, iact.AssertAction):
         _add_requirement(
-            node, "assert", filepath, source_lines, monitor_action,
-            mixin_kind, requirements,
+            node,
+            "assert",
+            filepath,
+            source_lines,
+            monitor_action,
+            mixin_kind,
+            requirements,
         )
         return
 
@@ -249,8 +266,13 @@ def _walk_body(
     if isinstance(node, iact.Sequence):
         for arg in node.args:
             _walk_body(
-                arg, filepath, source_lines, monitor_action,
-                mixin_kind, requirements, writes,
+                arg,
+                filepath,
+                source_lines,
+                monitor_action,
+                mixin_kind,
+                requirements,
+                writes,
             )
         return
 
@@ -258,8 +280,13 @@ def _walk_body(
         # args[0] = condition, args[1] = then branch, args[2]? = else
         for arg in node.args[1:]:
             _walk_body(
-                arg, filepath, source_lines, monitor_action,
-                mixin_kind, requirements, writes,
+                arg,
+                filepath,
+                source_lines,
+                monitor_action,
+                mixin_kind,
+                requirements,
+                writes,
             )
         return
 
@@ -267,8 +294,13 @@ def _walk_body(
         # args[:-1] = local vars, args[-1] = body
         if node.args:
             _walk_body(
-                node.args[-1], filepath, source_lines, monitor_action,
-                mixin_kind, requirements, writes,
+                node.args[-1],
+                filepath,
+                source_lines,
+                monitor_action,
+                mixin_kind,
+                requirements,
+                writes,
             )
         return
 
@@ -280,8 +312,13 @@ def _walk_body(
     for arg in getattr(node, "args", ()):
         if hasattr(arg, "args"):
             _walk_body(
-                arg, filepath, source_lines, monitor_action,
-                mixin_kind, requirements, writes,
+                arg,
+                filepath,
+                source_lines,
+                monitor_action,
+                mixin_kind,
+                requirements,
+                writes,
             )
 
 
@@ -353,9 +390,7 @@ def _formula_to_text(node: Any) -> str:
         return repr(formula)
 
 
-def _extract_bracket_tags(
-    source_lines: List[str], line: int
-) -> List[str]:
+def _extract_bracket_tags(source_lines: List[str], line: int) -> List[str]:
     """Parse bracket annotations from comment suffix.
 
     Delegates to rfc_annotations.parse_rfc_tags for the actual parsing.
@@ -367,9 +402,7 @@ def _extract_bracket_tags(
     return parse_rfc_tags(source_lines[line])
 
 
-def _build_mixin_map(
-    ast_obj: Any, filepath: Optional[str] = None
-) -> Dict[str, str]:
+def _build_mixin_map(ast_obj: Any, filepath: Optional[str] = None) -> Dict[str, str]:
     """Map mangled mixer names to mixee (monitored action) names.
 
     Scans ``MixinDecl`` entries in ``ast.decls``.  Each ``MixinDecl``

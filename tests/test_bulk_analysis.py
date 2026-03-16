@@ -1,8 +1,8 @@
 """Tests for the bulk background T1+T2 analysis pipeline."""
 
 import os
-import threading
 import tempfile
+import threading
 from unittest.mock import patch
 
 from ivy_lsp.adapters.null_adapter import (
@@ -10,12 +10,8 @@ from ivy_lsp.adapters.null_adapter import (
     NullCompilerAdapter,
     NullParserAdapter,
 )
-from ivy_lsp.semantic.analysis_pipeline import (
-    AnalysisPipeline,
-    BulkAnalysisResult,
-)
+from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
 from ivy_lsp.semantic.model import SemanticModel
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,12 +20,15 @@ from ivy_lsp.semantic.model import SemanticModel
 
 def _make_pipeline(model=None):
     m = model or SemanticModel()
-    return AnalysisPipeline(
-        model=m,
-        parser_adapter=NullParserAdapter(),
-        enrichment_adapter=NullAstEnrichmentAdapter(),
-        compiler_adapter=NullCompilerAdapter(),
-    ), m
+    return (
+        AnalysisPipeline(
+            model=m,
+            parser_adapter=NullParserAdapter(),
+            enrichment_adapter=NullAstEnrichmentAdapter(),
+            compiler_adapter=NullCompilerAdapter(),
+        ),
+        m,
+    )
 
 
 def _write_ivy_file(tmpdir: str, name: str, content: str) -> str:
@@ -125,7 +124,8 @@ class TestRunBulkT1T2:
             f2 = _write_ivy_file(tmpdir, "b.ivy", "type pkt\n")
 
             result = pipeline.run_bulk_t1_t2(
-                [f1, f2], cancel_event=cancel,
+                [f1, f2],
+                cancel_event=cancel,
             )
 
         assert result.cancelled is True
@@ -168,7 +168,8 @@ class TestRunBulkT1T2:
             f2 = _write_ivy_file(tmpdir, "b.ivy", "type pkt\n")
 
             pipeline.run_bulk_t1_t2(
-                [f1, f2], progress_callback=on_progress,
+                [f1, f2],
+                progress_callback=on_progress,
             )
 
         assert len(calls) == 2
@@ -219,7 +220,7 @@ class TestBulkPipelineState:
             f1 = _write_ivy_file(tmpdir, "a.ivy", "type cid\n")
             pipeline.run_bulk_t1_t2([f1])
 
-        assert pipeline._bulk_running is False
+        assert pipeline._bulk.running is False
 
 
 # ---------------------------------------------------------------------------
@@ -234,9 +235,13 @@ class TestBulkAnalysisEnvVars:
 
         server = IvyLanguageServer.__new__(IvyLanguageServer)
         server._analysis_pipeline = object()  # non-None sentinel
-        server._indexer = type("FakeIndexer", (), {
-            "get_all_ivy_file_paths": lambda self: ["/fake/a.ivy"],
-        })()
+        server._indexer = type(
+            "FakeIndexer",
+            (),
+            {
+                "get_all_ivy_file_paths": lambda self: ["/fake/a.ivy"],
+            },
+        )()
         server._bulk_analysis_cancel = threading.Event()
 
         with patch.dict(os.environ, {"IVY_LSP_BULK_ANALYSIS": "0"}):

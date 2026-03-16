@@ -34,6 +34,7 @@ def _get_tool_cache() -> Dict[str, bool]:
 
 
 def handle_server_status(server: IvyServerProtocol) -> Dict[str, Any]:
+    """Return server status including mode, uptime, and tool availability."""
     mode = "full" if server.full_mode else "light"
     result = server.state_tracker.to_status_dict(
         mode=mode, version=__version__, tools=_get_tool_cache()
@@ -43,6 +44,7 @@ def handle_server_status(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_indexer_stats(server: IvyServerProtocol) -> Dict[str, Any]:
+    """Return indexer statistics such as file, symbol, and edge counts."""
     if server.indexer is None:
         return {
             "fileCount": 0,
@@ -68,12 +70,11 @@ def handle_indexer_stats(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_operation_history(server: IvyServerProtocol) -> Dict[str, Any]:
+    """Return the recent operation history from the state tracker."""
     history = server.state_tracker.operation_tracker.get_history()
     ops = []
     for rec in history:
-        start_iso = datetime.fromtimestamp(
-            rec.start_time, tz=timezone.utc
-        ).isoformat()
+        start_iso = datetime.fromtimestamp(rec.start_time, tz=timezone.utc).isoformat()
         ops.append(
             {
                 "type": rec.type,
@@ -88,6 +89,7 @@ def handle_operation_history(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_include_graph(server: IvyServerProtocol) -> Dict[str, Any]:
+    """Return the include dependency graph as nodes and edges."""
     if server.indexer is None:
         return {"nodes": [], "edges": []}
     graph = server.indexer.include_graph
@@ -118,6 +120,7 @@ def handle_include_graph(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_reindex(server: IvyServerProtocol) -> Dict[str, Any]:
+    """Trigger a workspace re-index and return the result."""
     if server.indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
@@ -133,6 +136,7 @@ def handle_reindex(server: IvyServerProtocol) -> Dict[str, Any]:
 
 
 def handle_clear_cache(server: IvyServerProtocol) -> Dict[str, Any]:
+    """Clear the resolver staging cache and re-index the workspace."""
     if server.indexer is None:
         return {"success": False, "message": "No indexer available"}
     try:
@@ -163,80 +167,132 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
 
     # --- Code Lens ---
     if indexer_loading:
-        features.append({
-            "id": "codeLens", "name": "Code Lens", "status": "loading",
-            "reason": "Indexing in progress", "dependsOn": ["indexing"],
-        })
+        features.append(
+            {
+                "id": "codeLens",
+                "name": "Code Lens",
+                "status": "loading",
+                "reason": "Indexing in progress",
+                "dependsOn": ["indexing"],
+            }
+        )
     elif not indexer_ok:
-        features.append({
-            "id": "codeLens", "name": "Code Lens", "status": "unavailable",
-            "reason": "Requires successful indexing", "dependsOn": ["indexing"],
-        })
+        features.append(
+            {
+                "id": "codeLens",
+                "name": "Code Lens",
+                "status": "unavailable",
+                "reason": "Requires successful indexing",
+                "dependsOn": ["indexing"],
+            }
+        )
     else:
-        features.append({
-            "id": "codeLens", "name": "Code Lens", "status": "ready",
-            "reason": "Requirement graph available" if has_graph
-            else "Index available", "dependsOn": ["indexing"],
-        })
+        features.append(
+            {
+                "id": "codeLens",
+                "name": "Code Lens",
+                "status": "ready",
+                "reason": (
+                    "Requirement graph available" if has_graph else "Index available"
+                ),
+                "dependsOn": ["indexing"],
+            }
+        )
 
     # --- Document Symbols ---
     if has_parser and is_full:
-        features.append({
-            "id": "documentSymbols", "name": "Document Symbols",
-            "status": "ready", "reason": "Full parser available",
-        })
+        features.append(
+            {
+                "id": "documentSymbols",
+                "name": "Document Symbols",
+                "status": "ready",
+                "reason": "Full parser available",
+            }
+        )
     elif has_parser:
-        features.append({
-            "id": "documentSymbols", "name": "Document Symbols",
-            "status": "degraded", "reason": "Fallback parser (light mode)",
-        })
+        features.append(
+            {
+                "id": "documentSymbols",
+                "name": "Document Symbols",
+                "status": "degraded",
+                "reason": "Fallback parser (light mode)",
+            }
+        )
     else:
-        features.append({
-            "id": "documentSymbols", "name": "Document Symbols",
-            "status": "unavailable", "reason": "No parser available",
-        })
+        features.append(
+            {
+                "id": "documentSymbols",
+                "name": "Document Symbols",
+                "status": "unavailable",
+                "reason": "No parser available",
+            }
+        )
 
     # --- Diagnostics ---
-    features.append({
-        "id": "diagnostics", "name": "Diagnostics",
-        "status": "ready" if is_full else "degraded",
-        "reason": "Full diagnostics active" if is_full
-        else "Structural checks only (light mode)",
-    })
+    features.append(
+        {
+            "id": "diagnostics",
+            "name": "Diagnostics",
+            "status": "ready" if is_full else "degraded",
+            "reason": (
+                "Full diagnostics active"
+                if is_full
+                else "Structural checks only (light mode)"
+            ),
+        }
+    )
 
     # --- Semantic Analysis ---
     if not has_pipeline:
-        features.append({
-            "id": "semanticAnalysis", "name": "Semantic Analysis",
-            "status": "unavailable", "reason": "Pipeline not initialized",
-        })
+        features.append(
+            {
+                "id": "semanticAnalysis",
+                "name": "Semantic Analysis",
+                "status": "unavailable",
+                "reason": "Pipeline not initialized",
+            }
+        )
     elif not is_full:
-        features.append({
-            "id": "semanticAnalysis", "name": "Semantic Analysis",
-            "status": "degraded",
-            "reason": "Tier 1 only (light mode, no z3)",
-        })
+        features.append(
+            {
+                "id": "semanticAnalysis",
+                "name": "Semantic Analysis",
+                "status": "degraded",
+                "reason": "Tier 1 only (light mode, no z3)",
+            }
+        )
     else:
-        features.append({
-            "id": "semanticAnalysis", "name": "Semantic Analysis",
-            "status": "ready", "reason": "All tiers available",
-        })
+        features.append(
+            {
+                "id": "semanticAnalysis",
+                "name": "Semantic Analysis",
+                "status": "ready",
+                "reason": "All tiers available",
+            }
+        )
 
     # --- RFC Coverage ---
     if not has_model:
-        features.append({
-            "id": "rfcCoverage", "name": "RFC Coverage",
-            "status": "unavailable",
-            "reason": "Semantic model not initialized",
-            "dependsOn": ["semanticAnalysis"],
-        })
+        features.append(
+            {
+                "id": "rfcCoverage",
+                "name": "RFC Coverage",
+                "status": "unavailable",
+                "reason": "Semantic model not initialized",
+                "dependsOn": ["semanticAnalysis"],
+            }
+        )
     else:
         model_ready = server.semantic_model.node_count() > 0
         rfc_feature: Dict[str, Any] = {
-            "id": "rfcCoverage", "name": "RFC Coverage",
+            "id": "rfcCoverage",
+            "name": "RFC Coverage",
             "status": "ready" if model_ready else "degraded",
-            "reason": f"Semantic model active ({server.semantic_model.node_count()} nodes)"
-            if model_ready else "No data in semantic model yet",
+            "reason": (
+                f"Semantic model active ({server.semantic_model.node_count()} nodes)"
+                if model_ready
+                else "No data in semantic model yet"
+            ),
             "dependsOn": ["semanticAnalysis"],
         }
         if model_ready:
@@ -261,40 +317,60 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
 
     # --- Navigation (completion, definition, hover, references) ---
     if indexer_loading:
-        features.append({
-            "id": "navigation", "name": "Navigation",
-            "status": "loading",
-            "reason": "Indexing in progress",
-            "dependsOn": ["indexing"],
-        })
+        features.append(
+            {
+                "id": "navigation",
+                "name": "Navigation",
+                "status": "loading",
+                "reason": "Indexing in progress",
+                "dependsOn": ["indexing"],
+            }
+        )
     elif indexer_ok:
-        features.append({
-            "id": "navigation", "name": "Navigation",
-            "status": "ready",
-            "reason": "Index available",
-            "dependsOn": ["indexing"],
-        })
+        features.append(
+            {
+                "id": "navigation",
+                "name": "Navigation",
+                "status": "ready",
+                "reason": "Index available",
+                "dependsOn": ["indexing"],
+            }
+        )
     else:
-        features.append({
-            "id": "navigation", "name": "Navigation",
-            "status": "unavailable",
-            "reason": "Requires indexing",
-            "dependsOn": ["indexing"],
-        })
+        features.append(
+            {
+                "id": "navigation",
+                "name": "Navigation",
+                "status": "unavailable",
+                "reason": "Requires indexing",
+                "dependsOn": ["indexing"],
+            }
+        )
 
     # --- Pipeline state ---
     pipeline_state = {
-        "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
-        "tier3Running": False, "tier3Succeeded": 0, "tier3Failed": 0,
-        "tier3CurrentFile": None, "tier3LastFile": None,
-        "tier3LastCompletedAt": None, "tier3Pending": 0,
-        "semanticNodeCount": 0, "semanticEdgeCount": 0,
+        "tier1FileCount": 0,
+        "tier2FileCount": 0,
+        "tier3FileCount": 0,
+        "tier3Running": False,
+        "tier3Succeeded": 0,
+        "tier3Failed": 0,
+        "tier3CurrentFile": None,
+        "tier3LastFile": None,
+        "tier3LastCompletedAt": None,
+        "tier3Pending": 0,
+        "semanticNodeCount": 0,
+        "semanticEdgeCount": 0,
         "semanticModelReady": False,
-        "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
+        "bulkAnalysisRunning": False,
+        "bulkAnalysisTotal": 0,
         "bulkAnalysisCompleted": 0,
-        "bulkCompileRunning": False, "bulkCompileTotal": 0,
+        "bulkCompileRunning": False,
+        "bulkCompileTotal": 0,
         "bulkCompileCompleted": 0,
-        "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
+        "cachedFiles": 0,
+        "activeProcesses": 0,
+        "maxConcurrent": 0,
     }
     if has_pipeline:
         pipeline_state = server.analysis_pipeline.get_pipeline_state()
@@ -302,7 +378,9 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
     return {"features": features, "analysisPipeline": pipeline_state}
 
 
-def handle_deep_index_progress(server: IvyServerProtocol, params: dict | None = None) -> Dict[str, Any]:
+def handle_deep_index_progress(
+    server: IvyServerProtocol, params: dict | None = None
+) -> Dict[str, Any]:
     """Return current deep indexing progress.
 
     By default only summary counts are returned.  Pass
@@ -340,9 +418,7 @@ def handle_deep_index_progress(server: IvyServerProtocol, params: dict | None = 
     started_at_iso = None
     if started_at is not None:
         elapsed = round(time.time() - started_at, 1)
-        started_at_iso = datetime.fromtimestamp(
-            started_at, tz=timezone.utc
-        ).isoformat()
+        started_at_iso = datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat()
 
     result: Dict[str, Any] = {
         "running": running,
@@ -363,9 +439,7 @@ def handle_deep_index_progress(server: IvyServerProtocol, params: dict | None = 
                 "deepParseSucceeded": s.deep_parse_succeeded,
                 "parseError": s.parse_error,
                 "parseDuration": (
-                    round(s.parse_duration, 2)
-                    if s.parse_duration is not None
-                    else None
+                    round(s.parse_duration, 2) if s.parse_duration is not None else None
                 ),
             }
             for s in file_statuses_snapshot
@@ -392,8 +466,12 @@ def handle_compilation_progress(server: IvyServerProtocol) -> Dict[str, Any]:
             "maxConcurrent": ps.get("maxConcurrent", 0),
         }
     return {
-        "running": False, "total": 0, "completed": 0,
-        "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
+        "running": False,
+        "total": 0,
+        "completed": 0,
+        "cachedFiles": 0,
+        "activeProcesses": 0,
+        "maxConcurrent": 0,
     }
 
 
@@ -408,17 +486,28 @@ def handle_analysis_pipeline_detail(
         ps = server.analysis_pipeline.get_pipeline_state()
     else:
         ps = {
-            "tier1FileCount": 0, "tier2FileCount": 0, "tier3FileCount": 0,
-            "tier3Running": False, "tier3Succeeded": 0, "tier3Failed": 0,
-            "tier3CurrentFile": None, "tier3LastFile": None,
-            "tier3LastCompletedAt": None, "tier3Pending": 0,
-            "semanticNodeCount": 0, "semanticEdgeCount": 0,
+            "tier1FileCount": 0,
+            "tier2FileCount": 0,
+            "tier3FileCount": 0,
+            "tier3Running": False,
+            "tier3Succeeded": 0,
+            "tier3Failed": 0,
+            "tier3CurrentFile": None,
+            "tier3LastFile": None,
+            "tier3LastCompletedAt": None,
+            "tier3Pending": 0,
+            "semanticNodeCount": 0,
+            "semanticEdgeCount": 0,
             "semanticModelReady": False,
-            "bulkAnalysisRunning": False, "bulkAnalysisTotal": 0,
+            "bulkAnalysisRunning": False,
+            "bulkAnalysisTotal": 0,
             "bulkAnalysisCompleted": 0,
-            "bulkCompileRunning": False, "bulkCompileTotal": 0,
+            "bulkCompileRunning": False,
+            "bulkCompileTotal": 0,
             "bulkCompileCompleted": 0,
-            "cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0,
+            "cachedFiles": 0,
+            "activeProcesses": 0,
+            "maxConcurrent": 0,
         }
 
     # T3 detail

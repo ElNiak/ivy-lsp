@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -21,6 +22,17 @@ class WorkerResult:
     symbols: List[dict]
     errors: List[str] = field(default_factory=list)
     includes: List[str] = field(default_factory=list)
+
+
+def _worker_init(parent_sys_path: list[str]) -> None:
+    """Initialize worker process with parent's sys.path.
+
+    ``ProcessPoolExecutor`` with the ``spawn`` start method creates fresh
+    Python interpreters that may not inherit the parent's ``sys.path``
+    (especially when running under ``uvx`` or similar tools).
+    """
+    new_paths = [p for p in parent_sys_path if p not in sys.path]
+    sys.path[0:0] = new_paths
 
 
 def worker_parse_file(
@@ -45,12 +57,14 @@ def worker_parse_file(
         with open(filepath) as f:
             source = f.read()
     except OSError as e:
-        return WorkerResult(filepath=filepath, success=False, symbols=[], errors=[str(e)])
+        return WorkerResult(
+            filepath=filepath, success=False, symbols=[], errors=[str(e)]
+        )
 
     # Try full parser first
     try:
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         resolve_callback = None
         if resolver_config:
@@ -81,7 +95,12 @@ def worker_parse_file(
             "; ".join(error_strs) if error_strs else "(no error details)",
         )
     except ImportError as e:
-        logger.warning("Worker: ivy import failed for %s: %s", filepath, e)
+        logger.warning(
+            "Worker: ivy import failed for %s: %s (sys.path has %d entries)",
+            filepath,
+            e,
+            len(sys.path),
+        )
     except Exception as e:
         logger.warning("Worker: parse failed for %s: %s", filepath, e)
 
@@ -109,6 +128,7 @@ class ParallelDeepIndexer:
         resolver_config: Optional[dict] = None,
         stop_event: Optional[threading.Event] = None,
     ) -> None:
+        """Initialize with worker count and optional stop event."""
         if num_workers <= 0:
             num_workers = max(1, (os.cpu_count() or 1) // 2)
         self._num_workers = num_workers
@@ -116,8 +136,10 @@ class ParallelDeepIndexer:
         self._stop_event = stop_event
 
     def parse_files(
-        self, filepaths: List[str],
+        self,
+        filepaths: List[str],
     ) -> Dict[str, WorkerResult]:
+        """Parse files in parallel and return results keyed by path."""
         if self._stop_event is not None and self._stop_event.is_set():
             return {}
 
@@ -126,8 +148,13 @@ class ParallelDeepIndexer:
             return {f: worker_parse_file(f, cfg) for f in filepaths}
 
         results: Dict[str, WorkerResult] = {}
+        parent_path = list(sys.path)
         try:
-            with ProcessPoolExecutor(max_workers=self._num_workers) as pool:
+            with ProcessPoolExecutor(
+                max_workers=self._num_workers,
+                initializer=_worker_init,
+                initargs=(parent_path,),
+            ) as pool:
                 futures = {}
                 for f in filepaths:
                     if self._stop_event is not None and self._stop_event.is_set():
@@ -146,13 +173,16 @@ class ParallelDeepIndexer:
                         results[filepath] = future.result(timeout=60)
                     except (BrokenExecutor, Exception) as e:
                         results[filepath] = WorkerResult(
-                            filepath=filepath, success=False,
-                            symbols=[], errors=[str(e)],
+                            filepath=filepath,
+                            success=False,
+                            symbols=[],
+                            errors=[str(e)],
                         )
         except (FileNotFoundError, OSError) as exc:
             if self._stop_event is not None and self._stop_event.is_set():
                 logger.debug(
-                    "Parallel indexer pool interrupted during shutdown: %s", exc,
+                    "Parallel indexer pool interrupted during shutdown: %s",
+                    exc,
                 )
             else:
                 raise

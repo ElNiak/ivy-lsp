@@ -21,7 +21,6 @@ from ivy_lsp.analysis.requirement_graph import (
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.code_lens import compute_code_lenses
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -38,7 +37,9 @@ def _make_indexer(graph=None, include_graph=None):
     return indexer
 
 
-def _make_req(file, line, kind="require", formula="true", action="", mixin_kind="before"):
+def _make_req(
+    file, line, kind="require", formula="true", action="", mixin_kind="before"
+):
     return RequirementNode(
         id=f"{file}:{line}",
         kind=kind,
@@ -216,16 +217,24 @@ class TestScopedStateVarReads:
 
         # Add state var and READS edge from req_s1 (quic.send, in scope A)
         sv = StateVarNode(
-            id="sv_conn", name="conn_state", qualified_name="conn_state",
-            file=fp_shared, line=1, is_relation=True,
+            id="sv_conn",
+            name="conn_state",
+            qualified_name="conn_state",
+            file=fp_shared,
+            line=1,
+            is_relation=True,
         )
         scoped_graph.add_state_var(sv)
         scoped_graph.add_edge(f"{fp_shared}:5", EdgeType.READS, "sv_conn")
 
         # Add another state var read from req_s2 (quic.recv, NOT in scope A)
         sv2 = StateVarNode(
-            id="sv_ack", name="ack_state", qualified_name="ack_state",
-            file=fp_shared, line=2, is_relation=True,
+            id="sv_ack",
+            name="ack_state",
+            qualified_name="ack_state",
+            file=fp_shared,
+            line=2,
+            is_relation=True,
         )
         scoped_graph.add_state_var(sv2)
         scoped_graph.add_edge(f"{fp_shared}:10", EdgeType.READS, "sv_ack")
@@ -246,7 +255,7 @@ class TestNctCodeLensLabels:
     """Tests for NCT classification tags in code lens titles."""
 
     def test_scoped_lens_shows_nct_assumption_for_require_before(self):
-        """require + before mixin on exported action -> [ASSUMPTION] tag.
+        """Require + before mixin on exported action -> [ASSUMPTION] tag.
 
         Per-requirement NCT classification: require in a before-mixin
         is an assumption (precondition the tester must satisfy).
@@ -270,7 +279,9 @@ class TestNctCodeLensLabels:
         source = "before quic.send {\n    require x > 0;\n}\n"
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
-        assert any("[ASSUMPTION]" in t for t in titles), f"Expected [ASSUMPTION] in titles: {titles}"
+        assert any(
+            "[ASSUMPTION]" in t for t in titles
+        ), f"Expected [ASSUMPTION] in titles: {titles}"
 
     def test_scoped_lens_shows_nct_assumption_tag(self):
         """Imported action requirements should show [ASSUMPTION] tag."""
@@ -293,7 +304,9 @@ class TestNctCodeLensLabels:
         source = "before tls.handshake {\n    require tls_ready;\n}\n"
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
-        assert any("[ASSUMPTION]" in t for t in titles), f"Expected [ASSUMPTION] in titles: {titles}"
+        assert any(
+            "[ASSUMPTION]" in t for t in titles
+        ), f"Expected [ASSUMPTION] in titles: {titles}"
 
     def test_nct_label_format_per_requirement_tags(self):
         """Labels show per-requirement NCT: require+before=[ASSUMPTION], ensure+before=[GUARANTEE]."""
@@ -320,8 +333,7 @@ class TestNctCodeLensLabels:
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
         assert any(
-            "require [ASSUMPTION]" in t and "ensure [GUARANTEE]" in t
-            for t in titles
+            "require [ASSUMPTION]" in t and "ensure [GUARANTEE]" in t for t in titles
         ), f"Expected per-requirement NCT format in titles: {titles}"
 
     def test_unscoped_lens_has_no_nct_tags(self):
@@ -360,7 +372,9 @@ class TestNctCodeLensLabels:
         source = "before internal.action {\n    require x > 0;\n}\n"
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
-        assert len(titles) == 0, f"Internal action should produce no lens, got: {titles}"
+        assert (
+            len(titles) == 0
+        ), f"Internal action should produce no lens, got: {titles}"
 
     def test_plain_graph_no_nct_tags(self):
         """Plain RequirementGraph (not scoped) should never show NCT tags."""
@@ -374,5 +388,9 @@ class TestNctCodeLensLabels:
         lenses = compute_code_lenses(indexer, _abs("/f.ivy"), source)
         titles = [l.command.title for l in lenses if l.command]
         for t in titles:
-            assert "[GUARANTEE]" not in t, f"Unexpected NCT tag in plain graph lens: {t}"
-            assert "[ASSUMPTION]" not in t, f"Unexpected NCT tag in plain graph lens: {t}"
+            assert (
+                "[GUARANTEE]" not in t
+            ), f"Unexpected NCT tag in plain graph lens: {t}"
+            assert (
+                "[ASSUMPTION]" not in t
+            ), f"Unexpected NCT tag in plain graph lens: {t}"

@@ -68,12 +68,7 @@ class TestComputeSemanticDiagnostics:
 
     def test_missing_tag_hint(self):
         model = SemanticModel()
-        source = (
-            "#lang ivy1.7\n"
-            "before send_pkt {\n"
-            "    require x > 0;\n"
-            "}\n"
-        )
+        source = "#lang ivy1.7\n" "before send_pkt {\n" "    require x > 0;\n" "}\n"
         diags = compute_semantic_diagnostics(model, "/tmp/test.ivy", source)
         hint_diags = [
             d

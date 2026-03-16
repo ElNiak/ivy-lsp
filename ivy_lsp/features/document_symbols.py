@@ -106,9 +106,7 @@ def compute_document_symbols(
             else:
                 symbols, _error_info = fallback_scan(source, filepath)
         except TimeoutError:
-            logger.debug(
-                "Parser lock busy, using cached symbols for %s", filepath
-            )
+            logger.debug("Parser lock busy, using cached symbols for %s", filepath)
             if indexer is not None:
                 symbols = indexer.get_symbols(filepath) or []
             if not symbols:
@@ -140,7 +138,12 @@ def register(server) -> None:
             indexer = getattr(server, "indexer", None)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, compute_document_symbols, parser, indexer, source, filepath,
+                None,
+                compute_document_symbols,
+                parser,
+                indexer,
+                source,
+                filepath,
             )
         except Exception:
             logger.warning("document_symbol handler failed", exc_info=True)

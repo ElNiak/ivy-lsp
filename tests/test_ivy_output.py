@@ -1,4 +1,5 @@
 """Tests for shared ivy_check output parser and unified error extraction."""
+
 from ivy_lsp.utils.ivy_output import (
     extract_error_summary,
     find_ivy_files,
@@ -100,10 +101,7 @@ def test_parse_ivy_output_ivy_error_traceback():
 
 def test_parse_ivy_output_ivy_error_without_severity():
     """IvyError without explicit severity keyword defaults to 'error'."""
-    output = (
-        "ivy.ivy_utils.IvyError: model.ivy: line 10: "
-        "undeclared: variable x"
-    )
+    output = "ivy.ivy_utils.IvyError: model.ivy: line 10: " "undeclared: variable x"
     result = parse_ivy_output(output)
     assert len(result) == 1
     assert result[0]["severity"] == "error"
@@ -171,11 +169,11 @@ def test_parse_ivy_output_no_errors():
 def test_parse_ivy_output_full_traceback():
     """Real-world full traceback extracts the IvyError at the bottom."""
     output = (
-        'Traceback (most recent call last):\n'
+        "Traceback (most recent call last):\n"
         '  File "ivy_compiler.py", line 66, in other_thing\n'
-        '    return self.clone([a.compile() for a in self.args])\n'
+        "    return self.clone([a.compile() for a in self.args])\n"
         '  File "ivy_compiler.py", line 52, in thing\n'
-        '    return self.cmpl()\n'
+        "    return self.cmpl()\n"
         '  File "ivy_compiler.py", line 220, in sort_infer_covariant\n'
         '    raise IvyError(None,"cannot convert...")\n'
         "ivy.ivy_utils.IvyError: "
@@ -195,8 +193,12 @@ def test_parse_ivy_output_full_traceback():
 def test_extract_error_summary_from_diagnostics():
     """Summary is formatted from first error diagnostic."""
     diagnostics = [
-        {"file": "model.ivy", "line": 42, "severity": "error",
-         "message": "type mismatch"},
+        {
+            "file": "model.ivy",
+            "line": 42,
+            "severity": "error",
+            "message": "type mismatch",
+        },
     ]
     summary = extract_error_summary("", diagnostics)
     assert summary == "model.ivy:42: type mismatch"
@@ -205,10 +207,8 @@ def test_extract_error_summary_from_diagnostics():
 def test_extract_error_summary_prefers_errors_over_warnings():
     """First error is used even if warnings come first."""
     diagnostics = [
-        {"file": "a.ivy", "line": 1, "severity": "warning",
-         "message": "unused"},
-        {"file": "b.ivy", "line": 5, "severity": "error",
-         "message": "bad type"},
+        {"file": "a.ivy", "line": 1, "severity": "warning", "message": "unused"},
+        {"file": "b.ivy", "line": 5, "severity": "error", "message": "bad type"},
     ]
     summary = extract_error_summary("", diagnostics)
     assert summary == "b.ivy:5: bad type"
@@ -217,8 +217,7 @@ def test_extract_error_summary_prefers_errors_over_warnings():
 def test_extract_error_summary_warning_fallback():
     """If only warnings, uses first warning."""
     diagnostics = [
-        {"file": "a.ivy", "line": 1, "severity": "warning",
-         "message": "unused"},
+        {"file": "a.ivy", "line": 1, "severity": "warning", "message": "unused"},
     ]
     summary = extract_error_summary("", diagnostics)
     assert summary == "a.ivy:1: unused"
@@ -271,7 +270,15 @@ def test_format_ivy_error_deeply_nested():
         (
             "/path/shim.ivy",
             47,
-            ("/path/protection.ivy", 13, ("/path/order.ivy", 30, ("/path/order.ivy", 10, ("/path/order.ivy", 4)))),
+            (
+                "/path/protection.ivy",
+                13,
+                (
+                    "/path/order.ivy",
+                    30,
+                    ("/path/order.ivy", 10, ("/path/order.ivy", 4)),
+                ),
+            ),
         ),
         None,
     )
@@ -300,8 +307,10 @@ def test_format_ivy_error_single_location():
 
 def test_format_ivy_error_with_msg_attribute():
     """Error objects with .msg attribute use the message directly."""
+
     class FakeError:
         msg = "type mismatch"
+
     result = format_ivy_error(FakeError())
     assert result == "type mismatch"
 

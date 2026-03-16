@@ -10,6 +10,8 @@ from typing import Any, Dict, MutableMapping, Optional, Tuple
 
 
 class LogCategory(str, Enum):
+    """Categories used to classify structured log events."""
+
     MILESTONE = "MIL"
     ACTIVITY = "ACT"
     DIAGNOSTIC = "DIA"
@@ -18,15 +20,20 @@ class LogCategory(str, Enum):
 
 @dataclass
 class LogEvent:
+    """A structured log event carrying a category, phase, and data payload."""
+
     category: LogCategory
     phase: str = ""
     data: Dict[str, Any] = field(default_factory=dict)
 
 
 class StructuredLogAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
+    """Logging adapter that formats messages with category and phase prefixes."""
+
     def process(
         self, msg: str, kwargs: MutableMapping[str, Any]
     ) -> Tuple[str, MutableMapping[str, Any]]:
+        """Prepend category/phase prefix and append JSON data to msg."""
         extra = kwargs.get("extra", {})
         event: Optional[LogEvent] = extra.pop("event", None)
         if event is None:

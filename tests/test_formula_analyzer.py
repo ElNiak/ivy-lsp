@@ -15,7 +15,6 @@ from ivy_lsp.analysis.formula_analyzer import (
     extract_state_var_references_text,
 )
 
-
 # ---------------------------------------------------------------------------
 # Lightweight mock AST helpers
 # ---------------------------------------------------------------------------
@@ -53,9 +52,7 @@ class TestExtractStateVarReferencesText:
 
     # 1. Simple match
     def test_simple_match(self):
-        result = extract_state_var_references_text(
-            "sent_pkt(C, N)", {"sent_pkt"}
-        )
+        result = extract_state_var_references_text("sent_pkt(C, N)", {"sent_pkt"})
         assert result == ["sent_pkt"]
 
     # 2. Dotted match (full path present in known_vars)
@@ -124,8 +121,10 @@ class TestExtractStateVarReferencesText:
         assert result == []
 
     def test_suffix_middle_segment_matching(self):
-        """Known var 'ack.sent_pkt' matches middle-to-end suffix of
-        'frame.ack.sent_pkt'."""
+        """Known var 'ack.sent_pkt' matches middle-to-end suffix of 'frame.ack.sent_pkt'.
+
+        Suffix matching allows inner segments to match against longer dotted paths.
+        """
         result = extract_state_var_references_text(
             "frame.ack.sent_pkt(C, N)", {"ack.sent_pkt"}
         )
@@ -139,11 +138,11 @@ class TestExtractStateVarReferencesText:
         assert "frame" in result
 
     def test_no_partial_identifier_match(self):
-        """'pkt' should NOT match inside 'sent_pkt' as a standalone token
-        because the regex tokenizer extracts whole identifiers."""
-        result = extract_state_var_references_text(
-            "sent_pkt(C, N)", {"pkt"}
-        )
+        """'pkt' should NOT match inside 'sent_pkt' as a standalone token.
+
+        The regex tokenizer extracts whole identifiers, so partial matches are excluded.
+        """
+        result = extract_state_var_references_text("sent_pkt(C, N)", {"pkt"})
         # 'pkt' is not a standalone token in 'sent_pkt', so no match expected.
         assert "pkt" not in result
 
@@ -154,9 +153,7 @@ class TestExtractStateVarReferencesText:
         assert result == ["_internal_state"]
 
     def test_numeric_suffix_identifier(self):
-        result = extract_state_var_references_text(
-            "pkt_num0(X)", {"pkt_num0"}
-        )
+        result = extract_state_var_references_text("pkt_num0(X)", {"pkt_num0"})
         assert result == ["pkt_num0"]
 
     def test_preserves_first_seen_order(self):
@@ -168,18 +165,23 @@ class TestExtractStateVarReferencesText:
         assert result == ["beta", "alpha", "gamma"]
 
     def test_both_full_and_suffix_deduplication(self):
-        """If 'sent_pkt' appears both as a standalone token and as a suffix
-        of 'frame.sent_pkt', it should only appear once."""
+        """Duplicate matches from standalone and suffix are deduplicated.
+
+        If 'sent_pkt' appears both as a standalone token and as a suffix
+        of 'frame.sent_pkt', it should only appear once.
+        """
         result = extract_state_var_references_text(
             "sent_pkt(X) & frame.sent_pkt(Y)", {"sent_pkt"}
         )
         assert result == ["sent_pkt"]
 
     def test_full_dotted_and_suffix_both_in_known_vars(self):
-        """When the full dotted path matches as a token, the `continue`
+        """Full dotted path match triggers continue, skipping suffix processing.
+
+        When the full dotted path matches as a token, the `continue`
         statement skips suffix and individual-part processing.  So only the
-        full match is returned even though 'sent_pkt' is also in
-        known_vars."""
+        full match is returned even though 'sent_pkt' is also in known_vars.
+        """
         result = extract_state_var_references_text(
             "frame.ack.sent_pkt(C, N)",
             {"frame.ack.sent_pkt", "sent_pkt"},
@@ -188,8 +190,11 @@ class TestExtractStateVarReferencesText:
         assert result == ["frame.ack.sent_pkt"]
 
     def test_full_dotted_and_suffix_in_separate_tokens(self):
-        """When the full dotted path and a plain occurrence both appear as
-        separate tokens, both are found."""
+        """Full dotted path and plain occurrence as separate tokens are both found.
+
+        When the full dotted path and a plain occurrence both appear as
+        separate tokens, both are included in the result.
+        """
         result = extract_state_var_references_text(
             "frame.ack.sent_pkt(C, N) & sent_pkt(X)",
             {"frame.ack.sent_pkt", "sent_pkt"},
@@ -216,17 +221,13 @@ class TestExtractStateVarReferences:
     def test_nested_args(self):
         child = MockNode(relname="ack_received")
         parent = MockNode(relname="sent_pkt", args=[child])
-        result = extract_state_var_references(
-            parent, {"sent_pkt", "ack_received"}
-        )
+        result = extract_state_var_references(parent, {"sent_pkt", "ack_received"})
         assert result == ["sent_pkt", "ack_received"]
 
     # 3. rep attribute match
     def test_rep_attribute(self):
         node = MockNode(rep="connection_state")
-        result = extract_state_var_references(
-            node, {"connection_state"}
-        )
+        result = extract_state_var_references(node, {"connection_state"})
         assert result == ["connection_state"]
 
     # 4. None node
@@ -263,8 +264,10 @@ class TestExtractStateVarReferences:
         assert len(result) == 2
 
     def test_relname_and_rep_same_value(self):
-        """If relname and rep resolve to the same string, it should be
-        deduplicated."""
+        """If relname and rep resolve to the same string, it should be deduplicated.
+
+        Only one entry should appear in the result list.
+        """
         node = MockNode(relname="same_var", rep="same_var")
         result = extract_state_var_references(node, {"same_var"})
         assert result == ["same_var"]
@@ -290,14 +293,14 @@ class TestExtractStateVarReferences:
         assert result == []
 
     def test_preserves_first_seen_order(self):
-        """Order follows depth-first traversal (parent before children,
-        left before right)."""
+        """Order follows depth-first traversal (parent before children, left before right).
+
+        The result list preserves first-seen order during the tree walk.
+        """
         c1 = MockNode(relname="beta")
         c2 = MockNode(relname="gamma")
         root = MockNode(relname="alpha", args=[c1, c2])
-        result = extract_state_var_references(
-            root, {"alpha", "beta", "gamma"}
-        )
+        result = extract_state_var_references(root, {"alpha", "beta", "gamma"})
         assert result == ["alpha", "beta", "gamma"]
 
     def test_node_with_empty_args_tuple(self):
@@ -311,9 +314,7 @@ class TestExtractStateVarReferences:
         n1 = MockNode(relname="sent_pkt")
         n2 = MockNode(rep="ack_received")
         root = MockNode(args=[n1, n2])
-        result = extract_state_var_references(
-            root, {"sent_pkt", "ack_received"}
-        )
+        result = extract_state_var_references(root, {"sent_pkt", "ack_received"})
         assert set(result) == {"sent_pkt", "ack_received"}
         assert len(result) == 2
 

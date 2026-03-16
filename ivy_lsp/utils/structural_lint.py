@@ -3,6 +3,7 @@
 Returns plain dicts so consumers (LSP diagnostics, MCP tools) can
 convert to their own output types.
 """
+
 from __future__ import annotations
 
 import os
@@ -25,13 +26,15 @@ def check_structural_issues_raw(
     # 1. Missing #lang header
     stripped = source.lstrip()
     if not stripped.startswith("#lang"):
-        diags.append({
-            "line": 1,
-            "severity": "warning",
-            "message": "Missing '#lang ivy1.7' header",
-            "source": "ivy-lint",
-            "code": "missing-lang-header",
-        })
+        diags.append(
+            {
+                "line": 1,
+                "severity": "warning",
+                "message": "Missing '#lang ivy1.7' header",
+                "source": "ivy-lint",
+                "code": "missing-lang-header",
+            }
+        )
 
     # 2. Unmatched braces
     depth = 0
@@ -46,20 +49,24 @@ def check_structural_issues_raw(
             elif ch == "}":
                 depth -= 1
             if depth < 0:
-                diags.append({
-                    "line": i + 1,
-                    "severity": "error",
-                    "message": "Unmatched closing brace",
-                    "source": "ivy-lint",
-                })
+                diags.append(
+                    {
+                        "line": i + 1,
+                        "severity": "error",
+                        "message": "Unmatched closing brace",
+                        "source": "ivy-lint",
+                    }
+                )
                 depth = 0
     if depth > 0:
-        diags.append({
-            "line": len(lines),
-            "severity": "error",
-            "message": f"Unmatched opening brace ({depth} unclosed)",
-            "source": "ivy-lint",
-        })
+        diags.append(
+            {
+                "line": len(lines),
+                "severity": "error",
+                "message": f"Unmatched opening brace ({depth} unclosed)",
+                "source": "ivy-lint",
+            }
+        )
 
     return diags
 
@@ -72,6 +79,8 @@ def check_unresolved_includes_raw(
     """Check for unresolved include directives.
 
     Args:
+        source: The Ivy source text to scan for include directives.
+        filepath: Absolute path to the source file being checked.
         resolve_callback: Optional callable(name, from_file) -> Optional[str].
             If None, uses simple os.path.isfile check in parent directory.
     """
@@ -88,12 +97,14 @@ def check_unresolved_includes_raw(
 
         if resolved is None:
             line_no = source[: match.start()].count("\n") + 1
-            diags.append({
-                "line": line_no,
-                "severity": "warning",
-                "message": f"Unresolved include: {inc_name}",
-                "source": "ivy-lint",
-                "code": "unresolved-include",
-            })
+            diags.append(
+                {
+                    "line": line_no,
+                    "severity": "warning",
+                    "message": f"Unresolved include: {inc_name}",
+                    "source": "ivy-lint",
+                    "code": "unresolved-include",
+                }
+            )
 
     return diags

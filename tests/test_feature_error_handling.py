@@ -22,6 +22,6 @@ def test_handler_has_try_except(module_path, handler_name):
 
     mod = importlib.import_module(module_path)
     source = inspect.getsource(mod.register)
-    assert "try:" in source and "except" in source, (
-        f"{module_path}.register must wrap handler in try/except"
-    )
+    assert (
+        "try:" in source and "except" in source
+    ), f"{module_path}.register must wrap handler in try/except"

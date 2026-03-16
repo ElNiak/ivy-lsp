@@ -9,8 +9,10 @@ from ivy_lsp.compilation.ir import CompiledModuleIR
 
 class TestCompilerWorker:
     def test_worker_returns_failed_ir_when_ivy_unavailable(self):
-        """Worker should send a failed IR when ivy is not importable,
-        not crash the subprocess."""
+        """Worker should send a failed IR when ivy is not importable.
+
+        It must not crash the subprocess.
+        """
         from ivy_lsp.compilation.worker import compiler_worker
 
         parent_conn, child_conn = multiprocessing.Pipe(duplex=False)

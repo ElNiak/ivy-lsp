@@ -257,3 +257,141 @@ def quic_stack_ivy_files():
     if not QUIC_STACK_DIR.exists():
         pytest.skip(f"QUIC stack directory not found at {QUIC_STACK_DIR}")
     return sorted(QUIC_STACK_DIR.glob("*.ivy"))
+
+
+# ---------------------------------------------------------------------------
+# Multi-file workspace fixtures (tmp_path-based)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def multi_file_workspace(tmp_path):
+    """Two-file workspace with include dependency and shared symbols.
+
+    Creates:
+      types.ivy  — declares ``type cid`` and ``type pkt_num``
+      conn.ivy   — includes types, declares ``action send(src:cid, dst:cid)``
+                   and uses ``cid`` in a ``relation connected(X:cid, Y:cid)``
+    """
+    types_file = tmp_path / "types.ivy"
+    types_file.write_text("#lang ivy1.7\n" "\n" "type cid\n" "type pkt_num\n")
+    conn_file = tmp_path / "conn.ivy"
+    conn_file.write_text(
+        "#lang ivy1.7\n"
+        "\n"
+        "include types\n"
+        "\n"
+        "action send(src:cid, dst:cid) = {\n"
+        "    require src ~= dst;\n"
+        "}\n"
+        "\n"
+        "relation connected(X:cid, Y:cid)\n"
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def annotated_workspace(tmp_path):
+    """Workspace with RFC bracket-tag annotations and a requirements manifest.
+
+    Creates:
+      test_requirements.yaml  — manifest with rfc9000:4.1 (MUST) and rfc9000:8.1 (SHOULD)
+      types.ivy               — type cid
+      monitor.ivy             — annotated require/ensure with bracket tags
+    """
+    manifest = tmp_path / "test_requirements.yaml"
+    manifest.write_text(
+        "rfc: RFC9000\n"
+        "requirements:\n"
+        "  rfc9000:4.1:\n"
+        "    text: Sender MUST open connection before sending.\n"
+        "    section: '4.1'\n"
+        "    level: MUST\n"
+        "    layer: transport\n"
+        "    testable: true\n"
+        "  rfc9000:8.1:\n"
+        "    text: Receiver SHOULD validate address.\n"
+        "    section: '8.1'\n"
+        "    level: SHOULD\n"
+        "    layer: transport\n"
+        "    testable: true\n"
+    )
+    types_file = tmp_path / "types.ivy"
+    types_file.write_text("#lang ivy1.7\n\ntype cid\n")
+    monitor_file = tmp_path / "monitor.ivy"
+    monitor_file.write_text(
+        "#lang ivy1.7\n"
+        "\n"
+        "include types\n"
+        "\n"
+        "action send(src:cid, dst:cid)\n"
+        "\n"
+        "before send {\n"
+        "    require src ~= dst; # [rfc9000:4.1]\n"
+        "}\n"
+        "\n"
+        "after send {\n"
+        "    ensure true;\n"
+        "}\n"
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def syntax_error_workspace(tmp_path):
+    """Workspace with files containing deliberate structural errors.
+
+    Creates:
+      no_header.ivy     — missing #lang header
+      bad_braces.ivy    — unmatched braces
+      bad_include.ivy   — unresolvable include
+    """
+    (tmp_path / "no_header.ivy").write_text("type cid\n")
+    (tmp_path / "bad_braces.ivy").write_text("#lang ivy1.7\n\ntype a = { b\n")
+    (tmp_path / "bad_include.ivy").write_text(
+        "#lang ivy1.7\n\ninclude nonexistent_module\n\ntype x\n"
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def large_workspace_source():
+    """Ivy source with 160 symbol declarations for cap testing."""
+    lines = ["#lang ivy1.7\n"]
+    for i in range(80):
+        lines.append(f"type sym_type_{i}")
+    for i in range(80):
+        lines.append(f"action sym_action_{i}")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.fixture
+def ivy_source_test_file():
+    """Ivy source simulating a test file with exports but no _finalize."""
+    return """\
+#lang ivy1.7
+
+type cid
+action send(src:cid, dst:cid)
+export send
+
+before send {
+    require src ~= dst;
+}
+"""
+
+
+@pytest.fixture
+def ivy_source_untagged_assertion():
+    """Ivy source with assertions that lack bracket-tag annotations."""
+    return """\
+#lang ivy1.7
+
+type cid
+action send(src:cid, dst:cid)
+
+before send {
+    require src ~= dst;
+    ensure true;
+}
+"""

@@ -8,6 +8,7 @@ The top-level function :func:`extract_compiled_module_ir` **never raises**.
 On any exception it returns a failed ``CompiledModuleIR`` via
 :meth:`CompiledModuleIR.empty`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,10 +54,7 @@ def verify_requirement_types() -> bool:
     try:
         import ivy.ivy_actions as ia
 
-        missing = [
-            name for name in _REQUIREMENT_TYPES
-            if not hasattr(ia, name)
-        ]
+        missing = [name for name in _REQUIREMENT_TYPES if not hasattr(ia, name)]
         if missing:
             logger.warning(
                 "Ivy AST class mismatch -- missing: %s. "
@@ -95,7 +93,7 @@ def extract_compiled_module_ir(
     duration:
         Wall-clock seconds that compilation took.
 
-    Returns
+    Returns:
     -------
     CompiledModuleIR
         Always returns a well-typed result.
@@ -154,7 +152,9 @@ def _extract(
     export_names = _relname_set(exports_raw)
     import_names = _relname_set(imports_raw)
 
-    actions = _extract_actions(actions_dict, public_actions_raw, export_names, import_names)
+    actions = _extract_actions(
+        actions_dict, public_actions_raw, export_names, import_names
+    )
     public_actions = _safe_set_of_str(public_actions_raw)
 
     # --- mixins ---
@@ -168,18 +168,14 @@ def _extract(
     isolates = _extract_isolates(getattr(mod, "isolates", {}) or {})
 
     # --- labeled formulas ---
-    labeled_axioms = _extract_labeled_formulas(
-        getattr(mod, "labeled_axioms", []) or []
-    )
+    labeled_axioms = _extract_labeled_formulas(getattr(mod, "labeled_axioms", []) or [])
     labeled_properties = _extract_labeled_formulas(
         getattr(mod, "labeled_props", []) or []
     )
     labeled_conjectures = _extract_labeled_formulas(
         getattr(mod, "labeled_conjs", []) or []
     )
-    definitions = _extract_labeled_formulas(
-        getattr(mod, "definitions", []) or []
-    )
+    definitions = _extract_labeled_formulas(getattr(mod, "definitions", []) or [])
 
     # --- requirements (from action bodies, with mixin kind propagation) ---
     requirements = _extract_all_requirements(actions_dict, mixer_kind_map)
@@ -258,9 +254,7 @@ def _sort_to_ir(name: str, sort_obj: Any) -> SortIR:
             defines = sort_obj.defines()
             constructors = tuple(str(getattr(d, "name", d)) for d in defines)
         except Exception:
-            logger.debug(
-                "Failed to get constructors for sort %s", name, exc_info=True
-            )
+            logger.debug("Failed to get constructors for sort %s", name, exc_info=True)
 
     interpretation: Optional[str] = getattr(sort_obj, "_interpretation", None)
     if interpretation is None:
@@ -334,9 +328,7 @@ def _symbol_to_ir(
             try:
                 is_relation = bool(_is_rel())
             except Exception:
-                logger.debug(
-                    "is_relation() check failed for %s", name, exc_info=True
-                )
+                logger.debug("is_relation() check failed for %s", name, exc_info=True)
 
     return SymbolIR(
         name=str(name),
@@ -383,12 +375,8 @@ def _action_to_ir(
     import_names: FrozenSet[str],
 ) -> ActionIR:
     """Convert a single Ivy action object to ``ActionIR``."""
-    formal_params = _stringify_params(
-        getattr(action_obj, "formal_params", []) or []
-    )
-    formal_returns = _stringify_params(
-        getattr(action_obj, "formal_returns", []) or []
-    )
+    formal_params = _stringify_params(getattr(action_obj, "formal_params", []) or [])
+    formal_returns = _stringify_params(getattr(action_obj, "formal_returns", []) or [])
 
     is_exported = str(name) in export_names
     is_imported = str(name) in import_names
@@ -432,7 +420,7 @@ def _extract_mixins(
 
     for mixee_name, mixin_list in mixins_dict.items():
         ir_list: List[MixinIR] = []
-        for mixin_obj in (mixin_list or []):
+        for mixin_obj in mixin_list or []:
             try:
                 ir_list.append(_mixin_to_ir(str(mixee_name), mixin_obj))
             except Exception:
@@ -501,17 +489,13 @@ def _isolate_to_ir(name: str, iso_obj: Any) -> IsolateIR:
 
     if hasattr(iso_obj, "verified") and callable(iso_obj.verified):
         try:
-            verified = tuple(
-                str(getattr(v, "relname", v)) for v in iso_obj.verified()
-            )
+            verified = tuple(str(getattr(v, "relname", v)) for v in iso_obj.verified())
         except Exception:
             logger.debug("Failed to get verified for %s", name, exc_info=True)
 
     if hasattr(iso_obj, "present") and callable(iso_obj.present):
         try:
-            present = tuple(
-                str(getattr(p, "relname", p)) for p in iso_obj.present()
-            )
+            present = tuple(str(getattr(p, "relname", p)) for p in iso_obj.present())
         except Exception:
             logger.debug("Failed to get present for %s", name, exc_info=True)
 
@@ -588,7 +572,7 @@ def _build_mixer_kind_map(
     """
     result: Dict[str, str] = {}
     for _mixee_name, mixin_list in raw_mixins.items():
-        for mixin_obj in (mixin_list or []):
+        for mixin_obj in mixin_list or []:
             try:
                 args = getattr(mixin_obj, "args", []) or []
                 if args:
@@ -691,9 +675,7 @@ def _extract_hierarchy(
         try:
             result[str(key)] = frozenset(str(v) for v in value)
         except Exception:
-            logger.debug(
-                "Hierarchy entry %s conversion failed", key, exc_info=True
-            )
+            logger.debug("Hierarchy entry %s conversion failed", key, exc_info=True)
             result[str(key)] = frozenset()
     return result
 
@@ -711,7 +693,9 @@ def _relname_set(items: list) -> FrozenSet[str]:
         except Exception:
             logger.warning(
                 "Failed to extract relname from item %d (type=%s)",
-                i, type(item).__name__, exc_info=True,
+                i,
+                type(item).__name__,
+                exc_info=True,
             )
     return frozenset(result)
 
@@ -729,7 +713,9 @@ def _relname_list(items: list) -> Tuple[str, ...]:
         except Exception:
             logger.warning(
                 "Failed to extract relname from item %d (type=%s)",
-                i, type(item).__name__, exc_info=True,
+                i,
+                type(item).__name__,
+                exc_info=True,
             )
     return tuple(result)
 
@@ -741,7 +727,8 @@ def _safe_set_of_str(raw: Any) -> FrozenSet[str]:
     except Exception:
         logger.warning(
             "Failed to convert iterable to frozenset of strings (type=%s)",
-            type(raw).__name__, exc_info=True,
+            type(raw).__name__,
+            exc_info=True,
         )
         return frozenset()
 
@@ -753,7 +740,8 @@ def _safe_list_of_str(raw: Any) -> Tuple[str, ...]:
     except Exception:
         logger.warning(
             "Failed to convert iterable to tuple of strings (type=%s)",
-            type(raw).__name__, exc_info=True,
+            type(raw).__name__,
+            exc_info=True,
         )
         return ()
 
@@ -765,7 +753,8 @@ def _safe_dict_str_str(raw: Any) -> Dict[str, str]:
     except Exception:
         logger.warning(
             "Failed to convert mapping to dict (type=%s)",
-            type(raw).__name__, exc_info=True,
+            type(raw).__name__,
+            exc_info=True,
         )
         return {}
 

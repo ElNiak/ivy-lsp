@@ -70,11 +70,7 @@ class TestUnresolvedInclude:
         actions = compute_code_actions("file:///test.ivy", source, [diag])
         fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
         assert len(fix) == 1
-        assert (
-            "remove" in fix[0].title.lower()
-            or "include" in fix[0].title.lower()
-        )
-
+        assert "remove" in fix[0].title.lower() or "include" in fix[0].title.lower()
 
     def test_quickfix_last_line_include_no_trailing_newline(self):
         """Include on last line without trailing newline produces valid range."""
@@ -152,10 +148,6 @@ class TestDiagnosticCodeField:
         mock_indexer.resolver.resolve.return_value = None
 
         source = "#lang ivy1.7\ninclude nonexistent\n"
-        diags = check_structural_issues(
-            source, "/tmp/test.ivy", indexer=mock_indexer
-        )
-        include_diags = [
-            d for d in diags if d.code == "unresolved-include"
-        ]
+        diags = check_structural_issues(source, "/tmp/test.ivy", indexer=mock_indexer)
+        include_diags = [d for d in diags if d.code == "unresolved-include"]
         assert len(include_diags) == 1

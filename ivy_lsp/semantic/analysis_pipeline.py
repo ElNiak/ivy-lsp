@@ -56,6 +56,20 @@ class BulkAnalysisResult:
     cancelled: bool = False
 
 
+@dataclass
+class _TierState:
+    """Consolidated state for a single analysis tier."""
+
+    running: bool = False
+    total: int = 0
+    completed: int = 0
+    cancelled: bool = False
+    current_file: Optional[str] = None
+    last_file: Optional[str] = None
+    last_completed_at: Optional[float] = None
+    pending: int = 0
+
+
 class AnalysisPipeline:
     """Orchestrates the three analysis tiers feeding into a SemanticModel."""
 
@@ -70,6 +84,7 @@ class AnalysisPipeline:
         requirement_graph: Any = None,
         notification_callback: Optional[Callable[..., None]] = None,
     ) -> None:
+        """Initialize pipeline with adapters and empty tier state."""
         self._model = model
         self._parser = parser_adapter
         self._enrichment = enrichment_adapter
@@ -80,24 +95,15 @@ class AnalysisPipeline:
         self._notification_callback = notification_callback
         self._tier1_files: set[str] = set()
         self._tier2_files: set[str] = set()
-        # Lock protecting _tier1_files, _tier2_files, and all _tier3_* /
-        # _bulk_* / _bulk_compile_* state that is written from background
-        # threads and read from the LSP main thread.
+        # Lock protecting _tier1_files, _tier2_files, and the _TierState
+        # instances (_tier3, _bulk, _bulk_compile) that are written from
+        # background threads and read from the LSP main thread.
         self._state_lock = threading.Lock()
         self._tier3_results: OrderedDict[str, Tier3FileResult] = OrderedDict()
-        self._tier3_running: bool = False
-        self._tier3_current_file: Optional[str] = None
-        self._tier3_last_file: Optional[str] = None
-        self._tier3_last_completed_at: Optional[float] = None
-        self._tier3_pending: int = 0
-        self._bulk_running: bool = False
-        self._bulk_total: int = 0
-        self._bulk_completed: int = 0
+        self._tier3 = _TierState()
+        self._bulk = _TierState()
         # Bulk compilation state (workspace-wide T3)
-        self._bulk_compile_running: bool = False
-        self._bulk_compile_total: int = 0
-        self._bulk_compile_completed: int = 0
-        self._bulk_compile_cancelled: bool = False
+        self._bulk_compile = _TierState()
         self._file_generation: Dict[str, int] = {}
 
     # -- Tier 1 ----------------------------------------------------------------
@@ -149,7 +155,11 @@ class AnalysisPipeline:
         edges: List[Tuple[str, SemanticEdgeType, str]] = []
 
         # Parse (reuse pre-parsed result if provided)
-        if parse_result is not None and parse_result.success and parse_result.ast is not None:
+        if (
+            parse_result is not None
+            and parse_result.success
+            and parse_result.ast is not None
+        ):
             result = parse_result
         else:
             result = self._parser.parse(source, filepath)
@@ -227,8 +237,10 @@ class AnalysisPipeline:
         """Schedule Tier 3 compiler analysis in background thread.
 
         Args:
-            track_state: When *False*, skip ``_tier3_running`` /
-                ``_tier3_current_file`` flag updates.  Used by the deep
+            source: The Ivy source text to analyze.
+            filepath: Absolute path to the source file.
+            track_state: When *False*, skip ``_tier3.running`` /
+                ``_tier3.current_file`` flag updates.  Used by the deep
                 indexer to submit many files without corrupting the
                 monitoring display.
         """
@@ -249,7 +261,9 @@ class AnalysisPipeline:
                 if current_gen != gen_at_submit:
                     logger.debug(
                         "Discarding stale T3 result for %s (gen %d vs %d)",
-                        filepath, gen_at_submit, current_gen,
+                        filepath,
+                        gen_at_submit,
+                        current_gen,
                     )
                     return
                 if not result.success:
@@ -265,7 +279,9 @@ class AnalysisPipeline:
                         started_at=t3_start,
                         completed_at=completed_at,
                         duration=duration,
-                        error_message="; ".join(error_msgs) if error_msgs else "Unknown error",
+                        error_message=(
+                            "; ".join(error_msgs) if error_msgs else "Unknown error"
+                        ),
                     )
                     return
                 enrichment_performed = False
@@ -279,12 +295,11 @@ class AnalysisPipeline:
                                 enrich_requirement_graph,
                                 enrich_semantic_model,
                             )
+
                             enrich_semantic_model(self._model, ir, filepath)
                             enrichment_performed = True
                             if self._requirement_graph is not None:
-                                enrich_requirement_graph(
-                                    self._requirement_graph, ir
-                                )
+                                enrich_requirement_graph(self._requirement_graph, ir)
                     except Exception:
                         logger.warning(
                             "Tier 3 enrichment failed for %s", filepath, exc_info=True
@@ -305,19 +320,19 @@ class AnalysisPipeline:
             finally:
                 if not track_state:
                     with self._state_lock:
-                        self._tier3_pending = max(0, self._tier3_pending - 1)
+                        self._tier3.pending = max(0, self._tier3.pending - 1)
                 if track_state:
                     with self._state_lock:
-                        self._tier3_running = False
-                        self._tier3_current_file = None
+                        self._tier3.running = False
+                        self._tier3.current_file = None
 
         if not track_state:
             with self._state_lock:
-                self._tier3_pending += 1
+                self._tier3.pending += 1
         if track_state:
             with self._state_lock:
-                self._tier3_running = True
-                self._tier3_current_file = filepath
+                self._tier3.running = True
+                self._tier3.current_file = filepath
 
         _on_result_called = False  # Guard against double-decrement in sync path
 
@@ -334,11 +349,11 @@ class AnalysisPipeline:
                 # Only decrement if _on_result's finally hasn't already done it
                 if not track_state:
                     with self._state_lock:
-                        self._tier3_pending = max(0, self._tier3_pending - 1)
+                        self._tier3.pending = max(0, self._tier3.pending - 1)
                 if track_state:
                     with self._state_lock:
-                        self._tier3_running = False
-                        self._tier3_current_file = None
+                        self._tier3.running = False
+                        self._tier3.current_file = None
             raise
 
     # -- Bulk T1+T2 analysis ---------------------------------------------------
@@ -374,9 +389,9 @@ class AnalysisPipeline:
                 remaining = [f for f in filepaths if f not in self._tier2_files]
             else:
                 remaining = [f for f in filepaths if f not in self._tier1_files]
-            self._bulk_running = True
-            self._bulk_total = len(remaining)
-            self._bulk_completed = 0
+            self._bulk.running = True
+            self._bulk.total = len(remaining)
+            self._bulk.completed = 0
 
         result = BulkAnalysisResult(total=len(remaining))
 
@@ -384,15 +399,23 @@ class AnalysisPipeline:
         try:
             if num_workers > 1 and len(remaining) > 3:
                 self._run_bulk_parallel_t1(
-                    remaining, result, progress_callback, cancel_event, include_t2,
+                    remaining,
+                    result,
+                    progress_callback,
+                    cancel_event,
+                    include_t2,
                 )
             else:
                 self._run_bulk_sequential(
-                    remaining, result, progress_callback, cancel_event, include_t2,
+                    remaining,
+                    result,
+                    progress_callback,
+                    cancel_event,
+                    include_t2,
                 )
         finally:
             with self._state_lock:
-                self._bulk_running = False
+                self._bulk.running = False
 
         logger.info(
             "Bulk analysis: %d/%d T1, %d/%d T2, %d errors, cancelled=%s",
@@ -414,7 +437,7 @@ class AnalysisPipeline:
     ) -> None:
         """Update bulk progress counter and invoke callback."""
         with self._state_lock:
-            self._bulk_completed = idx + 1
+            self._bulk.completed = idx + 1
         if progress_callback is not None:
             try:
                 progress_callback(idx + 1, total, filepath)
@@ -533,7 +556,10 @@ class AnalysisPipeline:
                     result.t1_completed += 1
                 completed += 1
                 self._bulk_progress_tick(
-                    completed - 1, len(remaining), filepath, progress_callback,
+                    completed - 1,
+                    len(remaining),
+                    filepath,
+                    progress_callback,
                 )
 
         if result.cancelled:
@@ -577,7 +603,7 @@ class AnalysisPipeline:
 
         Iterates *test_files*, compiles each via ``CompilerManager.compile_async``,
         and enriches both RequirementGraph and SemanticModel on completion.
-        Tracks ``_bulk_compile_*`` state for monitoring endpoints.
+        Tracks ``_bulk_compile`` state for monitoring endpoints.
 
         Args:
             test_files: Absolute paths to test ``.ivy`` files.
@@ -589,17 +615,17 @@ class AnalysisPipeline:
             return
 
         with self._state_lock:
-            if self._bulk_compile_running:
+            if self._bulk_compile.running:
                 logger.info("Bulk T3 already running, skipping")
                 return
-            self._bulk_compile_running = True
-            self._bulk_compile_total = len(test_files)
-            self._bulk_compile_completed = 0
-            self._bulk_compile_cancelled = False
+            self._bulk_compile.running = True
+            self._bulk_compile.total = len(test_files)
+            self._bulk_compile.completed = 0
+            self._bulk_compile.cancelled = False
 
         if not test_files:
             with self._state_lock:
-                self._bulk_compile_running = False
+                self._bulk_compile.running = False
             return
 
         completed_count = [0]
@@ -617,16 +643,18 @@ class AnalysisPipeline:
                 if current_gen != gen_at_submit:
                     logger.debug(
                         "Discarding stale bulk T3 result for %s (gen %d vs %d)",
-                        filepath, gen_at_submit, current_gen,
+                        filepath,
+                        gen_at_submit,
+                        current_gen,
                     )
                     # Still count completion for progress so bulk compilation can finish
                     with self._state_lock:
                         completed_count[0] += 1
-                        self._bulk_compile_completed = completed_count[0]
+                        self._bulk_compile.completed = completed_count[0]
                         stale_is_final = completed_count[0] >= submitted_count[0]
                     if stale_is_final:
                         with self._state_lock:
-                            self._bulk_compile_running = False
+                            self._bulk_compile.running = False
                         logger.info(
                             "Bulk T3 compilation complete (stale final): %d/%d files",
                             completed_count[0],
@@ -637,7 +665,7 @@ class AnalysisPipeline:
                 with self._state_lock:
                     completed_count[0] += 1
                     current = completed_count[0]
-                    self._bulk_compile_completed = current
+                    self._bulk_compile.completed = current
                     # Throttle check under lock to prevent bursts
                     now = time.time()
                     is_final = current >= submitted_count[0]
@@ -684,7 +712,7 @@ class AnalysisPipeline:
 
                 if is_final:
                     with self._state_lock:
-                        self._bulk_compile_running = False
+                        self._bulk_compile.running = False
                     logger.info(
                         "Bulk T3 compilation complete: %d/%d files",
                         current,
@@ -696,22 +724,18 @@ class AnalysisPipeline:
         for test_file in test_files:
             if cancel_event is not None and cancel_event.is_set():
                 with self._state_lock:
-                    self._bulk_compile_running = False
-                    self._bulk_compile_cancelled = True
+                    self._bulk_compile.running = False
+                    self._bulk_compile.cancelled = True
                 break
 
             try:
                 with open(test_file) as f:
                     source = f.read()
             except OSError:
-                logger.warning(
-                    "Cannot read %s for bulk T3; skipping", test_file
-                )
+                logger.warning("Cannot read %s for bulk T3; skipping", test_file)
                 if progress_callback is not None:
                     try:
-                        progress_callback(
-                            completed_count[0], total, test_file
-                        )
+                        progress_callback(completed_count[0], total, test_file)
                     except Exception:
                         logger.debug(
                             "Bulk T3 progress callback failed in skip path",
@@ -749,8 +773,8 @@ class AnalysisPipeline:
                 duration=duration,
                 error_message=error_message,
             )
-            self._tier3_last_file = filepath
-            self._tier3_last_completed_at = completed_at
+            self._tier3.last_file = filepath
+            self._tier3.last_completed_at = completed_at
             while len(self._tier3_results) > _T3_MAX_RESULTS:
                 self._tier3_results.popitem(last=False)
 
@@ -783,20 +807,20 @@ class AnalysisPipeline:
             succeeded = sum(1 for r in self._tier3_results.values() if r.success)
             failed = sum(1 for r in self._tier3_results.values() if not r.success)
             t3_count = len(self._tier3_results)
-            t3_running = self._tier3_running
-            t3_current = self._tier3_current_file
-            t3_last = self._tier3_last_file
-            t3_last_at = self._tier3_last_completed_at
-            t3_pending = self._tier3_pending
-            bulk_running = self._bulk_running
-            bulk_total = self._bulk_total
-            bulk_completed = self._bulk_completed
+            t3_running = self._tier3.running
+            t3_current = self._tier3.current_file
+            t3_last = self._tier3.last_file
+            t3_last_at = self._tier3.last_completed_at
+            t3_pending = self._tier3.pending
+            bulk_running = self._bulk.running
+            bulk_total = self._bulk.total
+            bulk_completed = self._bulk.completed
             t1_count = len(self._tier1_files)
             t2_count = len(self._tier2_files)
-            bulk_compile_running = self._bulk_compile_running
-            bulk_compile_total = self._bulk_compile_total
-            bulk_compile_completed = self._bulk_compile_completed
-            bulk_compile_cancelled = self._bulk_compile_cancelled
+            bulk_compile_running = self._bulk_compile.running
+            bulk_compile_total = self._bulk_compile.total
+            bulk_compile_completed = self._bulk_compile.completed
+            bulk_compile_cancelled = self._bulk_compile.cancelled
 
         # Compiler manager stats (cache/process counts)
         mgr_stats = {"cachedFiles": 0, "activeProcesses": 0, "maxConcurrent": 0}
@@ -863,11 +887,9 @@ class AnalysisPipeline:
                             test_file,
                         )
                     except OSError:
-                        logger.debug(
-                            "T3 redirect failed: cannot read %s", test_file
-                        )
+                        logger.debug("T3 redirect failed: cannot read %s", test_file)
             # Non-test module files cannot compile standalone — skip T3
-            if not redirected and not re.search(r'^\s*export\s', source, re.MULTILINE):
+            if not redirected and not re.search(r"^\s*export\s", source, re.MULTILINE):
                 logger.debug("T3 skipped for module %s: no enclosing test", filepath)
                 return parse_result
             self.run_tier3_background(t3_source, t3_filepath)

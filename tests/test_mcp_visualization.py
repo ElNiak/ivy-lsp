@@ -1,9 +1,8 @@
-"""Tests for MCP visualization tool wrappers (Tasks 5 and 15).
+"""Tests for MCP visualization tool wrappers.
 
-Tests the five MCP tools added to mcp_server.py that wrap the
-visualization handlers: ivy_action_requirements, ivy_model_summary,
-ivy_coverage_gaps (P1, Task 5), ivy_action_dependency_graph, and
-ivy_state_machine_view (P2, Task 15).
+Tests the consolidated MCP tools: ivy_model_summary (detail="summary"|"requirements"),
+ivy_visualize (view="dependencies"|"state_machine"|"layers"),
+and ivy_coverage (mode="gaps").
 
 Uses FastMCP.call_tool() for integration-level testing of tool
 registration, parameter passing, and JSON output.
@@ -28,7 +27,6 @@ from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
 )
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
 from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -147,20 +145,20 @@ class TestStartMcpSignature:
 
 
 # ---------------------------------------------------------------------------
-# Test: visualization tools are registered
+# Test: consolidated visualization tools are registered
 # ---------------------------------------------------------------------------
 
 
 class TestToolRegistration:
     @pytest.mark.asyncio
     async def test_visualization_tools_registered(self):
-        """The three visualization tools should appear in list_tools()."""
+        """Consolidated visualization tools should appear in list_tools()."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
         tools = await mcp.list_tools()
         tool_names = {t.name for t in tools}
-        assert "ivy_action_requirements" in tool_names
         assert "ivy_model_summary" in tool_names
-        assert "ivy_coverage_gaps" in tool_names
+        assert "ivy_visualize" in tool_names
+        assert "ivy_coverage" in tool_names
 
     @pytest.mark.asyncio
     async def test_existing_tools_still_registered(self):
@@ -174,7 +172,7 @@ class TestToolRegistration:
 
 
 # ---------------------------------------------------------------------------
-# Test: ivy_action_requirements tool
+# Test: ivy_model_summary (detail="requirements") — formerly ivy_action_requirements
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +181,7 @@ class TestIvyActionRequirementsTool:
     async def test_returns_valid_json(self):
         """Tool should return a parseable JSON string."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_action_requirements", {})
+        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
         # call_tool returns content blocks; extract text
         text = _extract_text(result)
         parsed = json.loads(text)
@@ -194,7 +192,7 @@ class TestIvyActionRequirementsTool:
     async def test_returns_all_actions_when_no_filter(self):
         """Without filters, all actions should be returned."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_action_requirements", {})
+        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
         parsed = json.loads(_extract_text(result))
         names = {a["actionName"] for a in parsed["actions"]}
         assert "send" in names
@@ -205,7 +203,7 @@ class TestIvyActionRequirementsTool:
         """Filtering by action_name should return only matching actions."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
         result = await mcp.call_tool(
-            "ivy_action_requirements", {"action_name": "send"}
+            "ivy_model_summary", {"detail": "requirements", "action_name": "send"}
         )
         parsed = json.loads(_extract_text(result))
         assert len(parsed["actions"]) == 1
@@ -215,14 +213,14 @@ class TestIvyActionRequirementsTool:
     async def test_missing_graph_returns_empty(self):
         """When no requirement_graph is provided, modelReady should be False."""
         mcp = _get_mcp_app(requirement_graph=None)
-        result = await mcp.call_tool("ivy_action_requirements", {})
+        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
         parsed = json.loads(_extract_text(result))
         assert parsed["modelReady"] is False
         assert parsed["actions"] == []
 
 
 # ---------------------------------------------------------------------------
-# Test: ivy_model_summary tool
+# Test: ivy_model_summary (detail="summary") — formerly ivy_model_summary
 # ---------------------------------------------------------------------------
 
 
@@ -264,7 +262,7 @@ class TestIvyModelSummaryTool:
 
 
 # ---------------------------------------------------------------------------
-# Test: ivy_coverage_gaps tool
+# Test: ivy_coverage (mode="gaps") — formerly ivy_coverage_gaps
 # ---------------------------------------------------------------------------
 
 
@@ -274,7 +272,7 @@ class TestIvyCoverageGapsTool:
         """Tool should return parseable JSON with gap categories."""
         graph = _build_graph_with_rfc_gaps()
         mcp = _get_mcp_app(requirement_graph=graph)
-        result = await mcp.call_tool("ivy_coverage_gaps", {})
+        result = await mcp.call_tool("ivy_coverage", {"mode": "gaps"})
         parsed = json.loads(_extract_text(result))
         assert isinstance(parsed["unguardedStateVars"], list)
         assert isinstance(parsed["uncoveredRfcRequirements"], list)
@@ -286,7 +284,7 @@ class TestIvyCoverageGapsTool:
         """Uncovered RFC requirements should appear in the output."""
         graph = _build_graph_with_rfc_gaps()
         mcp = _get_mcp_app(requirement_graph=graph)
-        result = await mcp.call_tool("ivy_coverage_gaps", {})
+        result = await mcp.call_tool("ivy_coverage", {"mode": "gaps"})
         parsed = json.loads(_extract_text(result))
         uncovered_ids = [r["id"] for r in parsed["uncoveredRfcRequirements"]]
         # rfc9000:4.1 is covered by r1's bracket_tags
@@ -299,7 +297,7 @@ class TestIvyCoverageGapsTool:
         """Summary should have correct aggregate counts."""
         graph = _build_graph_with_rfc_gaps()
         mcp = _get_mcp_app(requirement_graph=graph)
-        result = await mcp.call_tool("ivy_coverage_gaps", {})
+        result = await mcp.call_tool("ivy_coverage", {"mode": "gaps"})
         parsed = json.loads(_extract_text(result))
         s = parsed["summary"]
         assert s["totalActions"] == 2
@@ -310,14 +308,14 @@ class TestIvyCoverageGapsTool:
     async def test_missing_graph_returns_empty(self):
         """When no requirement_graph is provided, all gaps should be empty."""
         mcp = _get_mcp_app(requirement_graph=None)
-        result = await mcp.call_tool("ivy_coverage_gaps", {})
+        result = await mcp.call_tool("ivy_coverage", {"mode": "gaps"})
         parsed = json.loads(_extract_text(result))
         assert parsed["unguardedStateVars"] == []
         assert parsed["summary"]["totalActions"] == 0
 
 
 # ---------------------------------------------------------------------------
-# Helpers: richer graph for P2 tools (dependency graph / state machine)
+# Helpers: richer graph for visualization tools (dependency graph / state machine)
 # ---------------------------------------------------------------------------
 
 
@@ -333,45 +331,72 @@ def _build_dependency_graph() -> ScopedRequirementModel:
     graph = ScopedRequirementModel()
     # Requirements FIRST (add_file_requirements calls remove_file internally)
     r1 = RequirementNode(
-        id="/test/q.ivy:12", kind="require", formula_text="conn_open",
-        line=12, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="before",
+        id="/test/q.ivy:12",
+        kind="require",
+        formula_text="conn_open",
+        line=12,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="before",
     )
     r2 = RequirementNode(
-        id="/test/q.ivy:15", kind="ensure", formula_text="pkt_sent",
-        line=15, col=0, file="/test/q.ivy",
-        monitor_action="send", mixin_kind="after",
+        id="/test/q.ivy:15",
+        kind="ensure",
+        formula_text="pkt_sent",
+        line=15,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="send",
+        mixin_kind="after",
     )
     r3 = RequirementNode(
-        id="/test/q.ivy:22", kind="require", formula_text="pkt_sent",
-        line=22, col=0, file="/test/q.ivy",
-        monitor_action="recv", mixin_kind="before",
+        id="/test/q.ivy:22",
+        kind="require",
+        formula_text="pkt_sent",
+        line=22,
+        col=0,
+        file="/test/q.ivy",
+        monitor_action="recv",
+        mixin_kind="before",
     )
     graph.add_file_requirements("/test/q.ivy", [r1, r2, r3])
     graph.add_action(
         ActionNode(
-            id="send", name="send", qualified_name="quic.send",
-            file="/test/q.ivy", line=10,
+            id="send",
+            name="send",
+            qualified_name="quic.send",
+            file="/test/q.ivy",
+            line=10,
         )
     )
     graph.add_action(
         ActionNode(
-            id="recv", name="recv", qualified_name="quic.recv",
-            file="/test/q.ivy", line=20,
+            id="recv",
+            name="recv",
+            qualified_name="quic.recv",
+            file="/test/q.ivy",
+            line=20,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="conn_open", name="conn_open",
+            id="conn_open",
+            name="conn_open",
             qualified_name="quic.conn_open",
-            file="/test/q.ivy", line=5, is_relation=False,
+            file="/test/q.ivy",
+            line=5,
+            is_relation=False,
         )
     )
     graph.add_state_var(
         StateVarNode(
-            id="pkt_sent", name="pkt_sent",
+            id="pkt_sent",
+            name="pkt_sent",
             qualified_name="quic.pkt_sent",
-            file="/test/q.ivy", line=6, is_relation=False,
+            file="/test/q.ivy",
+            line=6,
+            is_relation=False,
         )
     )
     # send reads conn_open, writes pkt_sent
@@ -383,33 +408,24 @@ def _build_dependency_graph() -> ScopedRequirementModel:
 
 
 # ---------------------------------------------------------------------------
-# Test: P2 tools are registered alongside P1 tools
+# Test: consolidated tools are all registered
 # ---------------------------------------------------------------------------
 
 
 class TestP2ToolRegistration:
     @pytest.mark.asyncio
-    async def test_p2_visualization_tools_registered(self):
-        """The two P2 visualization tools should appear in list_tools()."""
+    async def test_consolidated_visualization_tools_registered(self):
+        """All consolidated visualization tools should appear in list_tools()."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
         tools = await mcp.list_tools()
         tool_names = {t.name for t in tools}
-        assert "ivy_action_dependency_graph" in tool_names
-        assert "ivy_state_machine_view" in tool_names
-
-    @pytest.mark.asyncio
-    async def test_p1_tools_still_present_after_p2(self):
-        """P1 visualization tools must still be registered after P2 additions."""
-        mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        tools = await mcp.list_tools()
-        tool_names = {t.name for t in tools}
-        assert "ivy_action_requirements" in tool_names
+        assert "ivy_visualize" in tool_names
         assert "ivy_model_summary" in tool_names
-        assert "ivy_coverage_gaps" in tool_names
+        assert "ivy_coverage" in tool_names
 
 
 # ---------------------------------------------------------------------------
-# Test: ivy_action_dependency_graph tool
+# Test: ivy_visualize (view="dependencies") — formerly ivy_action_dependency_graph
 # ---------------------------------------------------------------------------
 
 
@@ -418,7 +434,7 @@ class TestIvyActionDependencyGraphTool:
     async def test_returns_valid_json(self):
         """Tool should return parseable JSON with nodes and edges."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
-        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "dependencies"})
         parsed = json.loads(_extract_text(result))
         assert isinstance(parsed["nodes"], list)
         assert isinstance(parsed["edges"], list)
@@ -427,7 +443,7 @@ class TestIvyActionDependencyGraphTool:
     async def test_action_nodes_present(self):
         """Both actions should appear as nodes in the dependency graph."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
-        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "dependencies"})
         parsed = json.loads(_extract_text(result))
         node_ids = {n["id"] for n in parsed["nodes"] if n["type"] == "action"}
         assert "send" in node_ids
@@ -437,12 +453,9 @@ class TestIvyActionDependencyGraphTool:
     async def test_shared_state_edge(self):
         """An edge from send to recv via pkt_sent should exist."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
-        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "dependencies"})
         parsed = json.loads(_extract_text(result))
-        shared_edges = [
-            e for e in parsed["edges"]
-            if e["type"] == "shared_state"
-        ]
+        shared_edges = [e for e in parsed["edges"] if e["type"] == "shared_state"]
         assert len(shared_edges) >= 1
         edge = shared_edges[0]
         assert edge["source"] == "send"
@@ -453,12 +466,10 @@ class TestIvyActionDependencyGraphTool:
         """With include_state_vars=True, state var nodes should appear."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
         result = await mcp.call_tool(
-            "ivy_action_dependency_graph", {"include_state_vars": True}
+            "ivy_visualize", {"view": "dependencies", "include_state_vars": True}
         )
         parsed = json.loads(_extract_text(result))
-        state_var_nodes = [
-            n for n in parsed["nodes"] if n["type"] == "stateVar"
-        ]
+        state_var_nodes = [n for n in parsed["nodes"] if n["type"] == "stateVar"]
         assert len(state_var_nodes) >= 1
         state_var_names = {n["label"] for n in state_var_nodes}
         assert "pkt_sent" in state_var_names
@@ -467,14 +478,14 @@ class TestIvyActionDependencyGraphTool:
     async def test_missing_graph_returns_empty(self):
         """When no requirement_graph is provided, nodes/edges should be empty."""
         mcp = _get_mcp_app(requirement_graph=None)
-        result = await mcp.call_tool("ivy_action_dependency_graph", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "dependencies"})
         parsed = json.loads(_extract_text(result))
         assert parsed["nodes"] == []
         assert parsed["edges"] == []
 
 
 # ---------------------------------------------------------------------------
-# Test: ivy_state_machine_view tool
+# Test: ivy_visualize (view="state_machine") — formerly ivy_state_machine_view
 # ---------------------------------------------------------------------------
 
 
@@ -483,7 +494,7 @@ class TestIvyStateMachineViewTool:
     async def test_returns_valid_json(self):
         """Tool should return parseable JSON with nodes and transitions."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
-        result = await mcp.call_tool("ivy_state_machine_view", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "state_machine"})
         parsed = json.loads(_extract_text(result))
         assert isinstance(parsed["nodes"], list)
         assert isinstance(parsed["transitions"], list)
@@ -492,7 +503,7 @@ class TestIvyStateMachineViewTool:
     async def test_state_nodes_present(self):
         """Active state variables should appear as state nodes."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
-        result = await mcp.call_tool("ivy_state_machine_view", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "state_machine"})
         parsed = json.loads(_extract_text(result))
         state_nodes = [n for n in parsed["nodes"] if n["type"] == "state"]
         state_labels = {n["label"] for n in state_nodes}
@@ -504,7 +515,7 @@ class TestIvyStateMachineViewTool:
     async def test_transitions_include_action(self):
         """Transitions should reference the action name."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
-        result = await mcp.call_tool("ivy_state_machine_view", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "state_machine"})
         parsed = json.loads(_extract_text(result))
         action_names = {t["action"] for t in parsed["transitions"]}
         assert "send" in action_names
@@ -514,7 +525,7 @@ class TestIvyStateMachineViewTool:
         """Filtering by state_var_filter should limit state nodes."""
         mcp = _get_mcp_app(requirement_graph=_build_dependency_graph())
         result = await mcp.call_tool(
-            "ivy_state_machine_view", {"state_var_filter": "pkt_sent"}
+            "ivy_visualize", {"view": "state_machine", "state_var_filter": "pkt_sent"}
         )
         parsed = json.loads(_extract_text(result))
         state_nodes = [n for n in parsed["nodes"] if n["type"] == "state"]
@@ -525,7 +536,7 @@ class TestIvyStateMachineViewTool:
     async def test_missing_graph_returns_empty(self):
         """When no requirement_graph is provided, nodes/transitions should be empty."""
         mcp = _get_mcp_app(requirement_graph=None)
-        result = await mcp.call_tool("ivy_state_machine_view", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "state_machine"})
         parsed = json.loads(_extract_text(result))
         assert parsed["nodes"] == []
         assert parsed["transitions"] == []

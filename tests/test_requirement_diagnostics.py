@@ -24,7 +24,6 @@ from ivy_lsp.features.diagnostics import (
     compute_requirement_diagnostics,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -114,7 +113,9 @@ class TestIncludeChainPropagation:
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
         include_diags = [
-            d for d in diags if "brings" in d.message.lower() and "scope" in d.message.lower()
+            d
+            for d in diags
+            if "brings" in d.message.lower() and "scope" in d.message.lower()
         ]
         assert len(include_diags) >= 1
         diag = include_diags[0]
@@ -245,11 +246,7 @@ class TestIncludeChainPropagation:
 
         resolver = MagicMock()
         resolver.resolve.side_effect = lambda name, _from: (
-            types_file
-            if name == "types"
-            else utils_file
-            if name == "utils"
-            else None
+            types_file if name == "types" else utils_file if name == "utils" else None
         )
 
         indexer = _make_indexer(
@@ -390,11 +387,7 @@ class TestUnmonitoredAction:
         graph = RequirementGraph()
 
         indexer = _make_indexer(graph=graph)
-        source = (
-            "#lang ivy1.7\n"
-            "    action send(x:t)\n"
-            "    action recv(x:t)\n"
-        )
+        source = "#lang ivy1.7\n" "    action send(x:t)\n" "    action recv(x:t)\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
         action_diags = [
@@ -445,9 +438,7 @@ class TestHighImpactStateVariable:
         source = "#lang ivy1.7\n    relation connected(X:cid, Y:cid)\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
-        impact_diags = [
-            d for d in diags if "high-impact" in d.message.lower()
-        ]
+        impact_diags = [d for d in diags if "high-impact" in d.message.lower()]
         assert len(impact_diags) >= 1
         diag = impact_diags[0]
         assert diag.severity == DiagnosticSeverity.Information
@@ -487,9 +478,7 @@ class TestHighImpactStateVariable:
         source = "#lang ivy1.7\n    relation connected(X:cid, Y:cid)\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
-        impact_diags = [
-            d for d in diags if "high-impact" in d.message.lower()
-        ]
+        impact_diags = [d for d in diags if "high-impact" in d.message.lower()]
         assert len(impact_diags) == 0
 
     def test_exactly_at_threshold(self):
@@ -515,9 +504,7 @@ class TestHighImpactStateVariable:
         source = "#lang ivy1.7\n    relation status(X:node)\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
-        impact_diags = [
-            d for d in diags if "high-impact" in d.message.lower()
-        ]
+        impact_diags = [d for d in diags if "high-impact" in d.message.lower()]
         assert len(impact_diags) >= 1
 
     def test_high_impact_reports_file_count(self):
@@ -544,9 +531,7 @@ class TestHighImpactStateVariable:
         source = "#lang ivy1.7\n    relation data(X:t)\n"
         diags = compute_requirement_diagnostics(source, filepath, indexer=indexer)
 
-        impact_diags = [
-            d for d in diags if "high-impact" in d.message.lower()
-        ]
+        impact_diags = [d for d in diags if "high-impact" in d.message.lower()]
         assert len(impact_diags) >= 1
         assert "5 files" in impact_diags[0].message
 
@@ -633,11 +618,7 @@ class TestComputeDiagnosticsIntegration:
             graph=graph, include_graph=include_graph, resolver=resolver
         )
 
-        source = (
-            "#lang ivy1.7\n"
-            "include other\n"
-            "    action unmonitored(x:t)\n"
-        )
+        source = "#lang ivy1.7\n" "include other\n" "    action unmonitored(x:t)\n"
 
         parser = MagicMock()
         parse_result = MagicMock()
@@ -652,4 +633,7 @@ class TestComputeDiagnosticsIntegration:
         assert "ivy-lsp-reqs" in sources
 
         severities = {d.severity for d in diags}
-        assert DiagnosticSeverity.Information in severities or DiagnosticSeverity.Hint in severities
+        assert (
+            DiagnosticSeverity.Information in severities
+            or DiagnosticSeverity.Hint in severities
+        )

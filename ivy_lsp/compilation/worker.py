@@ -41,8 +41,8 @@ def compiler_worker(
             os.chdir(staging_dir)
 
         import ivy.ivy_compiler as ic
-        import ivy.ivy_module as im
         import ivy.ivy_logic as il
+        import ivy.ivy_module as im
         import ivy.ivy_utils as iu
 
         # --- Step 8: Diagnostic instrumentation ---
@@ -52,7 +52,7 @@ def compiler_worker(
             "ivy_version=%s, "
             "cwd=%s, "
             "staging_dir=%s",
-            getattr(__import__('ivy'), '__file__', 'UNKNOWN'),
+            getattr(__import__("ivy"), "__file__", "UNKNOWN"),
             iu.get_std_include_dir(),
             iu.get_string_version(),
             os.getcwd(),
@@ -65,11 +65,12 @@ def compiler_worker(
             logger.debug("DIAG: stdlib %s exists=%s", path, os.path.isfile(path))
 
         # Monkey-patch import_module to trace every include resolution
-        _orig_import_module = getattr(ic, 'import_module', None)
+        _orig_import_module = getattr(ic, "import_module", None)
 
         if _orig_import_module is not None:
+
             def _traced_import_module(name: str):  # type: ignore[no-untyped-def]
-                fname = name + '.ivy'
+                fname = name + ".ivy"
                 cwd_path = os.path.join(os.getcwd(), fname)
                 std_path = os.path.join(iu.get_std_include_dir(), fname)
                 logger.debug(
@@ -85,6 +86,7 @@ def compiler_worker(
                 except Exception as exc:
                     logger.debug("DIAG: import_module(%r) — FAILED: %s", name, exc)
                     raise
+
             ic.import_module = _traced_import_module  # type: ignore[attr-defined]
 
         # --- Step 9: Symlink stdlib files into staging directory ---
@@ -98,21 +100,13 @@ def compiler_worker(
                         link_path = os.path.join(staging_dir, fn)
                         if not os.path.exists(link_path):
                             try:
-                                os.symlink(
-                                    os.path.join(std_dir, fn), link_path
-                                )
+                                os.symlink(os.path.join(std_dir, fn), link_path)
                                 staged_count += 1
                             except OSError as exc:
-                                logger.debug(
-                                    "Could not symlink stdlib %s: %s", fn, exc
-                                )
-                logger.info(
-                    "Staged %d stdlib files from %s", staged_count, std_dir
-                )
+                                logger.debug("Could not symlink stdlib %s: %s", fn, exc)
+                logger.info("Staged %d stdlib files from %s", staged_count, std_dir)
             else:
-                logger.warning(
-                    "Could not locate stdlib include dir: %s", std_dir
-                )
+                logger.warning("Could not locate stdlib include dir: %s", std_dir)
 
         # --- ivyc-equivalent initialization ---
         # These match what ivy_to_cpp.main_int does for target=test.
@@ -122,9 +116,9 @@ def compiler_worker(
         ivy_ast = None
         try:
             import ivy.ivy_actions as ia
+            import ivy.ivy_ast as ivy_ast
             import ivy.ivy_isolate as iso
             import ivy.ivy_solver as slv
-            import ivy.ivy_ast as ivy_ast
 
             ia.set_determinize(True)
             slv.set_use_native_enums(True)
@@ -133,15 +127,17 @@ def compiler_worker(
         except (ImportError, AttributeError) as init_err:
             logger.debug("Optional ivyc init flags unavailable: %s", init_err)
 
-        iu.set_parameters({
-            "coi": "false",
-            "create_imports": "true",
-            "enforce_axioms": "true",
-            "ui": "none",
-            "isolate_mode": "test",
-            "assume_invariants": "false",
-            "keep_destructors": "true",
-        })
+        iu.set_parameters(
+            {
+                "coi": "false",
+                "create_imports": "true",
+                "enforce_axioms": "true",
+                "ui": "none",
+                "isolate_mode": "test",
+                "assume_invariants": "false",
+                "keep_destructors": "true",
+            }
+        )
 
         # Write source to a file in CWD so ivy_load_file sees a real
         # file object, matching ivyc's source_file() code path exactly.
@@ -177,7 +173,8 @@ def compiler_worker(
                 isolates = [isolate]
             else:
                 extracts = [
-                    (x, y) for x, y in im.module.isolates.items()
+                    (x, y)
+                    for x, y in im.module.isolates.items()
                     if isinstance(y, ivy_ast.ExtractDef)
                 ]
                 if not extracts:
@@ -211,9 +208,7 @@ def compiler_worker(
     except Exception as exc:
         logger.warning("Compilation failed for %s: %s", filename, exc, exc_info=True)
         duration = time.monotonic() - start
-        ir = CompiledModuleIR.empty(
-            filename, errors=[str(exc)], duration=duration
-        )
+        ir = CompiledModuleIR.empty(filename, errors=[str(exc)], duration=duration)
         try:
             result_conn.send(ir)
         except OSError:

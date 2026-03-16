@@ -14,7 +14,6 @@ from ivy_lsp.semantic.edges import SemanticEdgeType
 from ivy_lsp.semantic.model import SemanticModel
 from ivy_lsp.semantic.nodes import RfcAnnotation, SymbolNode, TypeNode
 
-
 # ---------------------------------------------------------------------------
 # Helper: stub adapters that return controllable data
 # ---------------------------------------------------------------------------
@@ -29,7 +28,9 @@ class StubParserAdapter:
     def parse(self, source: str, filename: str) -> ParseResult:
         if self._success:
             # Return a non-None AST sentinel so enrichment runs
-            return ParseResult(ast={"stub": True}, errors=[], success=True, filename=filename)
+            return ParseResult(
+                ast={"stub": True}, errors=[], success=True, filename=filename
+            )
         return ParseResult(ast=None, errors=[], success=False, filename=filename)
 
 
@@ -355,6 +356,7 @@ class StubCompilerAdapter:
 
     def compile(self, source: str, filename: str):
         from ivy_lsp.adapters.protocols import CompileResult
+
         return CompileResult(success=self._success)
 
     def compile_background(self, source, filename, callback=None):
@@ -405,8 +407,8 @@ class TestTier3:
         )
 
         pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=False)
-        assert pipeline._tier3_running is False
-        assert pipeline._tier3_current_file is None
+        assert pipeline._tier3.running is False
+        assert pipeline._tier3.current_file is None
 
     def test_tier3_track_state_false_still_records_result(self):
         """When track_state=False, _record_tier3_result() should still be called."""
@@ -437,7 +439,7 @@ class TestTier3:
 
         # After synchronous completion, running should be False again
         pipeline.run_tier3_background("type cid\n", "test.ivy", track_state=True)
-        assert pipeline._tier3_running is False
+        assert pipeline._tier3.running is False
 
     def test_tier3_track_state_false_failure_does_not_touch_flags(self):
         """When track_state=False and compilation fails, flags stay untouched."""
@@ -451,8 +453,8 @@ class TestTier3:
         )
 
         pipeline.run_tier3_background("bad\n", "test.ivy", track_state=False)
-        assert pipeline._tier3_running is False
-        assert pipeline._tier3_current_file is None
+        assert pipeline._tier3.running is False
+        assert pipeline._tier3.current_file is None
         # But failure is still recorded
         state = pipeline.get_pipeline_state()
         assert state["tier3Failed"] == 1
@@ -461,7 +463,10 @@ class TestTier3:
         model = SemanticModel()
         # Pre-populate with tier1 data
         from ivy_lsp.semantic.nodes import RfcAnnotation
-        model.add_node(RfcAnnotation(id="test.ivy:0:0", file="test.ivy", line=0, tags=["x"]))
+
+        model.add_node(
+            RfcAnnotation(id="test.ivy:0:0", file="test.ivy", line=0, tags=["x"])
+        )
 
         compiler = StubCompilerAdapter(success=False)
         pipeline = AnalysisPipeline(
@@ -564,13 +569,17 @@ class TestPipelineState:
             NullCompilerAdapter,
             NullParserAdapter,
         )
+
         m = model or SemanticModel()
-        return AnalysisPipeline(
-            model=m,
-            parser_adapter=NullParserAdapter(),
-            enrichment_adapter=NullAstEnrichmentAdapter(),
-            compiler_adapter=compiler or NullCompilerAdapter(),
-        ), m
+        return (
+            AnalysisPipeline(
+                model=m,
+                parser_adapter=NullParserAdapter(),
+                enrichment_adapter=NullAstEnrichmentAdapter(),
+                compiler_adapter=compiler or NullCompilerAdapter(),
+            ),
+            m,
+        )
 
     def test_initial_state_all_zeros(self):
         pipeline, _ = self._make_pipeline()
@@ -703,6 +712,7 @@ class TestPipelineState:
                 captured_pending.append(state["tier3Pending"])
                 # Now call back
                 from ivy_lsp.adapters.protocols import CompileResult
+
                 callback(CompileResult(success=True))
 
         pipeline = AnalysisPipeline(
@@ -746,7 +756,9 @@ class TestTier2ParseResultReuse:
 
             def parse(self, source, filename):
                 self.parse_called = True
-                return ParseResult(ast={"stub": True}, errors=[], success=True, filename=filename)
+                return ParseResult(
+                    ast={"stub": True}, errors=[], success=True, filename=filename
+                )
 
         tracking_parser = TrackingParser()
         pipeline = AnalysisPipeline(
@@ -776,7 +788,9 @@ class TestTier2ParseResultReuse:
 
             def parse(self, source, filename):
                 self.parse_called = True
-                return ParseResult(ast={"stub": True}, errors=[], success=True, filename=filename)
+                return ParseResult(
+                    ast={"stub": True}, errors=[], success=True, filename=filename
+                )
 
         tracking_parser = TrackingParser()
         pipeline = AnalysisPipeline(
@@ -799,7 +813,9 @@ class TestTier2ParseResultReuse:
 
             def parse(self, source, filename):
                 self.parse_called = True
-                return ParseResult(ast=None, errors=[], success=False, filename=filename)
+                return ParseResult(
+                    ast=None, errors=[], success=False, filename=filename
+                )
 
         tracking_parser = TrackingParser()
         pipeline = AnalysisPipeline(
@@ -809,7 +825,9 @@ class TestTier2ParseResultReuse:
             compiler_adapter=NullCompilerAdapter(),
         )
 
-        bad_result = ParseResult(ast=None, errors=[], success=False, filename="test.ivy")
+        bad_result = ParseResult(
+            ast=None, errors=[], success=False, filename="test.ivy"
+        )
         pipeline.run_tier2("type cid\n", "test.ivy", parse_result=bad_result)
         assert tracking_parser.parse_called
 
@@ -982,7 +1000,6 @@ import threading
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # C2: Bulk compilation graph enrichment thread safety
 # ---------------------------------------------------------------------------
@@ -1013,8 +1030,7 @@ class TestBulkCompilationThreadSafety:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=add_actions, args=(f"t{i}", 50))
-            for i in range(4)
+            threading.Thread(target=add_actions, args=(f"t{i}", 50)) for i in range(4)
         ]
         for t in threads:
             t.start()
@@ -1045,8 +1061,7 @@ class TestBulkCompilationThreadSafety:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=add_nodes, args=(f"t{i}", 50))
-            for i in range(4)
+            threading.Thread(target=add_nodes, args=(f"t{i}", 50)) for i in range(4)
         ]
         for t in threads:
             t.start()
@@ -1066,8 +1081,10 @@ class TestTier3DoubleDecrement:
     """C1: Verify _tier3_pending is decremented exactly once on sync error."""
 
     def test_sync_fallback_no_double_decrement(self):
-        """When _on_result raises internally, pending counter should
-        decrement exactly once, not twice."""
+        """When _on_result raises internally, pending counter should not double-decrement.
+
+        The pending counter must decrement exactly once, not twice.
+        """
         model = SemanticModel()
 
         class SyncOnlyCompiler:
@@ -1094,20 +1111,22 @@ class TestTier3DoubleDecrement:
         # Pre-set pending to 1 to detect double-decrement
         # (if double-decrement happens, it goes from 2 -> 0 instead of 2 -> 1)
         with pipeline._state_lock:
-            pipeline._tier3_pending = 1
+            pipeline._tier3.pending = 1
 
         with pytest.raises(RuntimeError, match="Simulated"):
             pipeline.run_tier3_background("source", "/test.ivy", track_state=False)
 
         with pipeline._state_lock:
-            assert pipeline._tier3_pending == 1, (
+            assert pipeline._tier3.pending == 1, (
                 f"Expected 1 pending (pre-set=1 + increment=2 - single decrement=1), "
-                f"got {pipeline._tier3_pending} (double-decrement bug)"
+                f"got {pipeline._tier3.pending} (double-decrement bug)"
             )
 
     def test_sync_fallback_track_state_true_no_double_cleanup(self):
-        """When track_state=True and _on_result raises, running flag should
-        be cleaned up exactly once."""
+        """When track_state=True and _on_result raises, running flag is cleaned up once.
+
+        The running flag should be cleaned up exactly once.
+        """
         model = SemanticModel()
 
         class SyncOnlyCompiler:
@@ -1133,8 +1152,8 @@ class TestTier3DoubleDecrement:
 
         # After _on_result's finally, running should be False
         with pipeline._state_lock:
-            assert pipeline._tier3_running is False
-            assert pipeline._tier3_current_file is None
+            assert pipeline._tier3.running is False
+            assert pipeline._tier3.current_file is None
 
 
 # ---------------------------------------------------------------------------
@@ -1223,7 +1242,7 @@ class TestRequirementGraphEnrichmentInT3:
         )
 
         # Pre-populate the cache so _on_result finds the IR
-        from ivy_lsp.compilation.ir import CompiledModuleIR, ActionIR
+        from ivy_lsp.compilation.ir import ActionIR, CompiledModuleIR
 
         ir = CompiledModuleIR(
             source_file="test.ivy",
@@ -1325,7 +1344,7 @@ class TestBulkTier3:
 
         # Manually set running flag
         with pipeline._state_lock:
-            pipeline._bulk_compile_running = True
+            pipeline._bulk_compile.running = True
 
         f1 = tmp_path / "test.ivy"
         f1.write_text("type cid\n")
@@ -1339,7 +1358,7 @@ class TestBulkTier3:
 
         # Cleanup
         with pipeline._state_lock:
-            pipeline._bulk_compile_running = False
+            pipeline._bulk_compile.running = False
 
     def test_bulk_tier3_calls_notification_callback(self, tmp_path):
         """Notification callback should be invoked at least once."""
@@ -1457,9 +1476,7 @@ class TestTier2ReusesAnnotations:
         with mock.patch(
             "ivy_lsp.semantic.analysis_pipeline.parse_file_rfc_annotations"
         ) as mock_parse:
-            pipeline.run_tier2(
-                source, "test.ivy", rfc_annotations=pre_annotations
-            )
+            pipeline.run_tier2(source, "test.ivy", rfc_annotations=pre_annotations)
             mock_parse.assert_not_called()
 
         nodes = model.get_nodes_in_file("test.ivy")
@@ -1507,15 +1524,15 @@ class TestBulkTier3SubmittedCount:
         )
 
         assert len(callbacks) == 1, "Only the readable file should be submitted"
-        assert pipeline._bulk_compile_running is True, "Should still be running"
+        assert pipeline._bulk_compile.running is True, "Should still be running"
 
         mock_ir = mock.MagicMock()
         mock_ir.success = True
         callbacks[0](mock_ir)
 
-        assert pipeline._bulk_compile_running is False, (
-            "Should be done after all submitted files complete"
-        )
+        assert (
+            pipeline._bulk_compile.running is False
+        ), "Should be done after all submitted files complete"
 
     def test_submitted_count_incremented_before_async_call(self):
         """submitted_count must be >= completed_count when callback fires synchronously."""
@@ -1537,12 +1554,10 @@ class TestBulkTier3SubmittedCount:
 
         mock_compiler.compile_async.side_effect = fire_immediately
 
-        import tempfile
         import os
+        import tempfile
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".ivy", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".ivy", delete=False) as f:
             f.write("# test file")
             test_file = f.name
 
@@ -1551,8 +1566,8 @@ class TestBulkTier3SubmittedCount:
                 [test_file],
                 progress_callback=None,
             )
-            assert pipeline._bulk_compile_running is False
-            assert pipeline._bulk_compile_completed == 1
+            assert pipeline._bulk_compile.running is False
+            assert pipeline._bulk_compile.completed == 1
         finally:
             os.unlink(test_file)
 
@@ -1649,6 +1664,6 @@ class TestStaleGenerationDiscard:
         callbacks[0][1](mock_ir)
 
         # Completion counted (for progress) but model NOT enriched
-        assert pipeline._bulk_compile_completed == 1
+        assert pipeline._bulk_compile.completed == 1
         # Stale result not stored
         assert str(test_file) not in pipeline._tier3_results

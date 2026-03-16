@@ -41,9 +41,11 @@ class ParserSession:
     """
 
     def __init__(self, timeout: Optional[float] = None) -> None:
+        """Store the lock acquisition timeout."""
         self._timeout = timeout if timeout is not None else _DEFAULT_LOCK_TIMEOUT
 
     def __enter__(self):
+        """Acquire the parser lock and save all Ivy parser globals."""
         self._lock_acquired = _ivy_state_lock.acquire(timeout=self._timeout)
         if not self._lock_acquired:
             raise TimeoutError(
@@ -93,6 +95,7 @@ class ParserSession:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Restore saved Ivy parser globals and release the parser lock."""
         try:
             ip, iu, ia = self._ip, self._iu, self._ia
             ip.error_list = self._saved["ip.error_list"]
@@ -134,6 +137,7 @@ class IvyParserWrapper:
         self,
         resolve_callback: Optional[Callable[[str, str], Optional[str]]] = None,
     ) -> None:
+        """Store the optional include-resolution callback."""
         self._resolve_callback = resolve_callback
 
     def parse(

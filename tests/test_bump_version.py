@@ -35,6 +35,6 @@ class TestBumpVersionConfig:
                 continue
             pattern = entry[2]
             text = (base / filepath).read_text()
-            assert re.search(pattern, text, re.MULTILINE), (
-                f"Pattern {pattern!r} did not match in {filepath}"
-            )
+            assert re.search(
+                pattern, text, re.MULTILINE
+            ), f"Pattern {pattern!r} did not match in {filepath}"

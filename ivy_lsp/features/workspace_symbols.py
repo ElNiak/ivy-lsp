@@ -9,6 +9,7 @@ LSP :class:`WorkspaceSymbol` objects.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -17,6 +18,8 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.parsing.symbols import IvySymbol
 from ivy_lsp.utils.position_utils import make_range
+
+logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 100
 
@@ -115,6 +118,12 @@ def compute_workspace_symbols(
     all_syms = indexer.lookup_all_symbols()
     flat = flatten_symbols(all_syms)
     matches = search_symbols(flat, query)
+    logger.debug(
+        "workspace_symbol: query=%r, %d flat symbols, %d matches",
+        query,
+        len(flat),
+        len(matches),
+    )
     return [to_workspace_symbol(f) for f in matches]
 
 
@@ -133,5 +142,8 @@ def register(server) -> None:
             return []
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, compute_workspace_symbols, server.indexer, params.query or "",
+            None,
+            compute_workspace_symbols,
+            server.indexer,
+            params.query or "",
         )

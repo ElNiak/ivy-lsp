@@ -2,19 +2,18 @@
 
 import pytest
 
-from ivy_lsp.semantic.nodes import (
-    MonitorNode,
-    RfcAnnotation,
-    RfcRequirement,
-    SymbolNode,
-    TypeNode,
-    # Re-exported backward compat
+from ivy_lsp.semantic.edges import EdgeType, SemanticEdgeType
+from ivy_lsp.semantic.nodes import (  # Re-exported backward compat
     ActionNode,
+    MonitorNode,
     PropertyNode,
     RequirementNode,
+    RfcAnnotation,
+    RfcRequirement,
     StateVarNode,
+    SymbolNode,
+    TypeNode,
 )
-from ivy_lsp.semantic.edges import EdgeType, SemanticEdgeType
 
 
 class TestSymbolNode:
@@ -121,8 +120,14 @@ class TestRfcAnnotation:
 class TestBackwardCompatReexports:
     def test_requirement_node_importable(self):
         n = RequirementNode(
-            id="x:1", kind="require", formula_text="true",
-            line=0, col=0, file="x", monitor_action="a", mixin_kind="before",
+            id="x:1",
+            kind="require",
+            formula_text="true",
+            line=0,
+            col=0,
+            file="x",
+            monitor_action="a",
+            mixin_kind="before",
         )
         assert n.kind == "require"
 
@@ -136,8 +141,12 @@ class TestBackwardCompatReexports:
 
     def test_property_node_importable(self):
         n = PropertyNode(
-            id="p:1", kind="invariant", name="p",
-            formula_text="true", file="x", line=0,
+            id="p:1",
+            kind="invariant",
+            name="p",
+            formula_text="true",
+            file="x",
+            line=0,
         )
         assert n.kind == "invariant"
 

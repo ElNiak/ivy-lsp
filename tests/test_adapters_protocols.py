@@ -16,16 +16,17 @@ class TestProtocolDefinitions:
     """Verify Protocol classes are importable and runtime_checkable."""
 
     def test_iparser_adapter_is_runtime_checkable(self):
-        assert hasattr(IParserAdapter, "__protocol_attrs__") or hasattr(
-            IParserAdapter, "__abstractmethods__"
-        ) or isinstance(IParserAdapter, type)
+        assert (
+            hasattr(IParserAdapter, "__protocol_attrs__")
+            or hasattr(IParserAdapter, "__abstractmethods__")
+            or isinstance(IParserAdapter, type)
+        )
 
     def test_iast_enrichment_adapter_is_runtime_checkable(self):
         assert isinstance(IAstEnrichmentAdapter, type)
 
     def test_icompiler_adapter_is_runtime_checkable(self):
         assert isinstance(ICompilerAdapter, type)
-
 
 
 class TestDataClasses:

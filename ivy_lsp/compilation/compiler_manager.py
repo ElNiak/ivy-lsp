@@ -40,6 +40,7 @@ class CompilerManager:
         cache_ttl: float = 600.0,
         max_concurrent: int = 1,
     ) -> None:
+        """Initialize compiler manager with cache and concurrency settings."""
         self._staging_dir = staging_dir
         self._timeout = timeout
         self._cache_ttl = cache_ttl
@@ -82,7 +83,8 @@ class CompilerManager:
                     except Exception as exc:
                         logger.warning(
                             "Failed to start compilation process for %s: %s",
-                            filepath, exc,
+                            filepath,
+                            exc,
                         )
                         raise
                     child_conn.close()
@@ -92,7 +94,9 @@ class CompilerManager:
                         except EOFError:
                             ir = CompiledModuleIR.empty(
                                 filepath,
-                                errors=["Compilation subprocess crashed without producing output"],
+                                errors=[
+                                    "Compilation subprocess crashed without producing output"
+                                ],
                                 duration=self._timeout,
                             )
                             logger.warning(
@@ -102,17 +106,22 @@ class CompilerManager:
                         except Exception as recv_exc:
                             ir = CompiledModuleIR.empty(
                                 filepath,
-                                errors=[f"Failed to read compilation result: {type(recv_exc).__name__}: {recv_exc}"],
+                                errors=[
+                                    f"Failed to read compilation result: {type(recv_exc).__name__}: {recv_exc}"
+                                ],
                                 duration=self._timeout,
                             )
                             logger.warning(
                                 "Failed to read compilation result for %s: %s",
-                                filepath, recv_exc,
+                                filepath,
+                                recv_exc,
                             )
                         if not isinstance(ir, CompiledModuleIR):
                             ir = CompiledModuleIR.empty(
                                 filepath,
-                                errors=["Invalid response type from compilation subprocess"],
+                                errors=[
+                                    "Invalid response type from compilation subprocess"
+                                ],
                                 duration=self._timeout,
                             )
                         self._put_cache(filepath, content_hash, ir)
@@ -170,9 +179,7 @@ class CompilerManager:
             child_conn.close()
             raise
 
-    def compile_sync(
-        self, source: str, filepath: str
-    ) -> CompiledModuleIR:
+    def compile_sync(self, source: str, filepath: str) -> CompiledModuleIR:
         """Blocking compilation. For use in custom commands."""
         event = threading.Event()
         result_holder: list = [None]
@@ -212,9 +219,7 @@ class CompilerManager:
         with self._lock:
             self._cache.pop(filepath, None)
 
-    def invalidate_dependents(
-        self, filepath: str, include_graph: Any
-    ) -> None:
+    def invalidate_dependents(self, filepath: str, include_graph: Any) -> None:
         """Invalidate *filepath* and all files that directly include it."""
         self.invalidate(filepath)
         if hasattr(include_graph, "get_included_by"):

@@ -9,6 +9,7 @@ from ivy_lsp.semantic.rfc_annotations import (
     compute_coverage,
     find_manifests,
     load_requirement_manifest,
+    normalize_tag_to_manifest_ids,
     parse_file_rfc_annotations,
     parse_rfc_tags,
 )
@@ -35,7 +36,9 @@ class TestParseRfcTags:
         assert parse_rfc_tags("    require x > 0; # [7]   ") == ["7"]
 
     def test_compound_dotted_tag(self):
-        assert parse_rfc_tags("    require x > 0; # [frame:ack.sent]") == ["frame:ack.sent"]
+        assert parse_rfc_tags("    require x > 0; # [frame:ack.sent]") == [
+            "frame:ack.sent"
+        ]
 
     def test_invalid_tag_ignored(self):
         # Tags with special chars fail the outer bracket regex entirely
@@ -137,8 +140,12 @@ class TestComputeCoverage:
     def test_full_coverage(self):
         reqs = {
             "rfc9000:4.1": RfcRequirement(
-                id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-                text="must", level="MUST", layer="frame",
+                id="rfc9000:4.1",
+                rfc="RFC9000",
+                section="4.1",
+                text="must",
+                level="MUST",
+                layer="frame",
             ),
         }
         anns = [RfcAnnotation(id="a:0:0", file="a.ivy", line=0, tags=["rfc9000:4.1"])]
@@ -164,3 +171,69 @@ class TestComputeCoverage:
         stats = compute_coverage([], {})
         assert stats.total == 0
         assert stats.covered == 0
+
+    def test_bare_tag_matches_manifest_via_normalization(self):
+        """C4: bare [4] in source should match rfc9000:4.1 in manifest."""
+        reqs = {
+            "rfc9000:4.1": RfcRequirement(
+                id="rfc9000:4.1",
+                rfc="RFC9000",
+                section="4.1",
+                text="test",
+                level="MUST",
+                layer="frame",
+            ),
+        }
+        anns = [RfcAnnotation(id="t:10:0", file="t.ivy", line=10, tags=["4"])]
+        stats = compute_coverage(anns, reqs)
+        assert stats.covered == 1
+        assert stats.total == 1
+
+    def test_bare_section_tag_matches(self):
+        """C4: bare [4.1] should match rfc9000:4.1."""
+        reqs = {
+            "rfc9000:4.1": RfcRequirement(
+                id="rfc9000:4.1",
+                rfc="RFC9000",
+                section="4.1",
+                text="test",
+                level="MUST",
+                layer="",
+            ),
+            "rfc9000:4.6": RfcRequirement(
+                id="rfc9000:4.6",
+                rfc="RFC9000",
+                section="4.6",
+                text="test2",
+                level="SHOULD",
+                layer="",
+            ),
+        }
+        anns = [RfcAnnotation(id="t:5:0", file="t.ivy", line=5, tags=["4.1"])]
+        stats = compute_coverage(anns, reqs)
+        assert stats.covered == 1  # only 4.1, not 4.6
+
+
+class TestNormalizeTagToManifestIds:
+    def test_exact_match(self):
+        keys = {"rfc9000:4.1", "rfc9000:8.1"}
+        assert normalize_tag_to_manifest_ids("rfc9000:4.1", keys) == {"rfc9000:4.1"}
+
+    def test_bare_numeric_matches_prefix(self):
+        keys = {"rfc9000:4.1", "rfc9000:4.6", "rfc9000:8.1"}
+        result = normalize_tag_to_manifest_ids("4", keys)
+        assert result == {"rfc9000:4.1", "rfc9000:4.6"}
+
+    def test_bare_section_matches_exact(self):
+        keys = {"rfc9000:4.1", "rfc9000:4.6"}
+        result = normalize_tag_to_manifest_ids("4.1", keys)
+        assert result == {"rfc9000:4.1"}
+
+    def test_no_match_returns_empty(self):
+        keys = {"rfc9000:4.1"}
+        assert normalize_tag_to_manifest_ids("99", keys) == set()
+
+    def test_qualified_prefix_match(self):
+        keys = {"rfc9000:4.1", "rfc9000:4.1.1"}
+        result = normalize_tag_to_manifest_ids("rfc9000:4", keys)
+        assert result == {"rfc9000:4.1", "rfc9000:4.1.1"}

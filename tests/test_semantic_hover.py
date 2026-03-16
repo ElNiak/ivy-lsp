@@ -17,27 +17,40 @@ from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
 class TestEnrichWithSemanticModel:
     def test_returns_original_when_no_model(self):
         result = _enrich_with_semantic_model(
-            "base content", "foo", "test.ivy",
-            lsp.Position(0, 0), ["foo"], None,
+            "base content",
+            "foo",
+            "test.ivy",
+            lsp.Position(0, 0),
+            ["foo"],
+            None,
         )
         assert result == "base content"
 
     def test_adds_rfc_requirement_text(self):
         model = SemanticModel()
         ann = RfcAnnotation(
-            id="test.ivy:2:0", file="test.ivy", line=2,
+            id="test.ivy:2:0",
+            file="test.ivy",
+            line=2,
             tags=["rfc9000:4.1"],
         )
         req = RfcRequirement(
-            id="rfc9000:4.1", rfc="RFC9000", section="4.1",
-            text="senders MUST NOT send data beyond limit", level="MUST",
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="senders MUST NOT send data beyond limit",
+            level="MUST",
         )
         model.add_node(ann)
         model.add_node(req)
 
         result = _enrich_with_semantic_model(
-            "base", "require", "test.ivy",
-            lsp.Position(2, 0), ["require x > 0;  # [rfc9000:4.1]"], model,
+            "base",
+            "require",
+            "test.ivy",
+            lsp.Position(2, 0),
+            ["require x > 0;  # [rfc9000:4.1]"],
+            model,
         )
         assert "RFC9000" in result
         assert "4.1" in result
@@ -58,8 +71,12 @@ class TestEnrichWithSemanticModel:
         model.add_node(sn)
 
         result = _enrich_with_semantic_model(
-            "base", "send", "test.ivy",
-            lsp.Position(5, 0), ["action send(...)"], model,
+            "base",
+            "send",
+            "test.ivy",
+            lsp.Position(5, 0),
+            ["action send(...)"],
+            model,
         )
         assert "dst:endpoint" in result
         assert "bool" in result
@@ -80,8 +97,12 @@ class TestEnrichWithSemanticModel:
         model.add_edge("other:1", SemanticEdgeType.CONSTRAINS, sn.id)
 
         result = _enrich_with_semantic_model(
-            "base", "foo", "test.ivy",
-            lsp.Position(5, 0), ["action foo = {}"], model,
+            "base",
+            "foo",
+            "test.ivy",
+            lsp.Position(5, 0),
+            ["action foo = {}"],
+            model,
         )
         assert "incoming" in result
 
@@ -117,7 +138,9 @@ class TestGetHoverInfoWithModel:
         model = SemanticModel()
 
         result = get_hover_info(
-            indexer, "test.ivy", lsp.Position(5, 5),
+            indexer,
+            "test.ivy",
+            lsp.Position(5, 5),
             ["", "", "", "", "", "action foo = {}"],
             semantic_model=model,
         )

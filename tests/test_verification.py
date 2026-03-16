@@ -1,15 +1,17 @@
 """Tests for shared verification functions."""
-import pytest
+
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from ivy_lsp.utils.async_subprocess import SubprocessResult
 from ivy_lsp.verification import (
-    resolve_staging_path,
     detect_isolates_for_file,
+    resolve_staging_path,
     run_ivy_check,
     run_ivy_compile,
     run_ivy_show,
 )
-from ivy_lsp.utils.async_subprocess import SubprocessResult
 
 
 def test_resolve_staging_path_with_staging_dir(tmp_path):
@@ -274,9 +276,9 @@ async def test_run_ivy_compile_with_ivy_error_traceback():
         success=False,
         message="Exit code 1",
         output_lines=[
-            'Traceback (most recent call last):',
+            "Traceback (most recent call last):",
             '  File "ivy_compiler.py", line 66, in other_thing',
-            '    return self.clone([a.compile() for a in self.args])',
+            "    return self.clone([a.compile() for a in self.args])",
             "ivy.ivy_utils.IvyError: test.ivy: line 51: "
             "error: cannot convert argument of type milliseconds to microseconds",
         ],

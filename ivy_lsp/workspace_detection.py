@@ -55,7 +55,9 @@ def _apply_marker(marker_path: str, data: dict) -> WorkspaceConfig:
     )
 
 
-def _walk_up_for_marker(start_dir: str, max_depth: int = 10) -> Optional[WorkspaceConfig]:
+def _walk_up_for_marker(
+    start_dir: str, max_depth: int = 10
+) -> Optional[WorkspaceConfig]:
     """Walk up from *start_dir* looking for ``.ivyworkspace``."""
     current = os.path.abspath(start_dir)
     for _ in range(max_depth):
@@ -71,7 +73,9 @@ def _walk_up_for_marker(start_dir: str, max_depth: int = 10) -> Optional[Workspa
     return None
 
 
-def _walk_down_for_marker(start_dir: str, max_depth: int = 3) -> Optional[WorkspaceConfig]:
+def _walk_down_for_marker(
+    start_dir: str, max_depth: int = 6
+) -> Optional[WorkspaceConfig]:
     """Walk down up to *max_depth* levels looking for ``.ivyworkspace``."""
     start = os.path.abspath(start_dir)
     for dirpath, dirnames, filenames in os.walk(start):
@@ -90,6 +94,56 @@ def _walk_down_for_marker(start_dir: str, max_depth: int = 3) -> Optional[Worksp
     return None
 
 
+def _resolve_git_worktree(start_dir: str) -> Optional[str]:
+    """If *start_dir* is inside a git worktree, return the main working tree root.
+
+    Git worktrees store a **file** at ``.git`` (not a directory) containing::
+
+        gitdir: /path/to/main-repo/.git/worktrees/<name>
+
+    From that gitdir, reading the ``commondir`` file gives the path to the
+    main ``.git`` directory, whose parent is the main working tree.
+    """
+    current = os.path.abspath(start_dir)
+    for _ in range(10):
+        git_path = os.path.join(current, ".git")
+        if os.path.isfile(git_path):
+            try:
+                with open(git_path) as f:
+                    content = f.read().strip()
+                if not content.startswith("gitdir:"):
+                    break
+                gitdir = content[len("gitdir:") :].strip()
+                if not os.path.isabs(gitdir):
+                    gitdir = os.path.join(current, gitdir)
+                gitdir = os.path.normpath(gitdir)
+                commondir_file = os.path.join(gitdir, "commondir")
+                if not os.path.isfile(commondir_file):
+                    break
+                with open(commondir_file) as f:
+                    commondir = f.read().strip()
+                if not os.path.isabs(commondir):
+                    commondir = os.path.normpath(os.path.join(gitdir, commondir))
+                main_root = os.path.dirname(commondir)
+                if os.path.isdir(main_root) and main_root != current:
+                    logger.debug(
+                        "Resolved git worktree %s -> main tree %s",
+                        current,
+                        main_root,
+                    )
+                    return main_root
+            except (OSError, ValueError) as exc:
+                logger.debug("Failed to resolve git worktree: %s", exc)
+            break
+        elif os.path.isdir(git_path):
+            break  # Regular repo, not a worktree
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
 def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
     """Detect PANTHER project by looking for ``protocol-testing/`` with ``.ivy`` files."""
     current = os.path.abspath(start_dir)
@@ -101,7 +155,14 @@ def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
             return WorkspaceConfig(
                 workspace_root=candidate,
                 include_paths=["protocol-testing"],
-                exclude_paths=["submodules", "test", "doc", "examples", "notebooks", "patches"],
+                exclude_paths=[
+                    "submodules",
+                    "test",
+                    "doc",
+                    "examples",
+                    "notebooks",
+                    "patches",
+                ],
                 detected_by="heuristic",
                 project_type="panther",
             )
@@ -112,7 +173,14 @@ def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
             return WorkspaceConfig(
                 workspace_root=current,
                 include_paths=["protocol-testing"],
-                exclude_paths=["submodules", "test", "doc", "examples", "notebooks", "patches"],
+                exclude_paths=[
+                    "submodules",
+                    "test",
+                    "doc",
+                    "examples",
+                    "notebooks",
+                    "patches",
+                ],
                 detected_by="heuristic",
                 project_type="panther",
             )
@@ -133,10 +201,11 @@ def detect_ivy_workspace(
 
     Detection priority:
         1. Explicit ``--workspace`` / ``IVY_LSP_WORKSPACE`` env var
-        2. ``IVY_LSP_WORKSPACE_HINT`` env var → check relative path for marker
+        2. ``IVY_LSP_WORKSPACE_HINT`` env var → check for marker or PANTHER heuristic
         3. Walk up from *start_dir* looking for ``.ivyworkspace``
-        4. Walk down 3 levels looking for ``.ivyworkspace``
+        4. Walk down 6 levels looking for ``.ivyworkspace``
         5. PANTHER heuristic (``protocol-testing/`` directory)
+        5.5. Git worktree resolution → re-run detection on main working tree
         6. Fallback: use *start_dir* as-is
 
     Args:
@@ -172,11 +241,18 @@ def detect_ivy_workspace(
             if data is not None:
                 config = _apply_marker(marker_path, data)
                 config.detected_by = "hint"
+                logger.info("Workspace detected via hint: %s", config.workspace_root)
+                return config
+        elif os.path.isdir(hint_path):
+            config = _panther_heuristic(hint_path)
+            if config is not None:
+                config.detected_by = "hint"
                 logger.info(
-                    "Workspace detected via hint: %s", config.workspace_root
+                    "Workspace detected via hint heuristic: %s",
+                    config.workspace_root,
                 )
                 return config
-        logger.debug("Workspace hint %s did not resolve to a .ivyworkspace", hint)
+        logger.debug("Workspace hint %s did not resolve to a workspace", hint)
 
     # 3. Walk up for .ivyworkspace
     config = _walk_up_for_marker(abs_start)
@@ -187,14 +263,33 @@ def detect_ivy_workspace(
     # 4. Walk down for .ivyworkspace
     config = _walk_down_for_marker(abs_start)
     if config is not None:
-        logger.info("Workspace detected via walk-down marker: %s", config.workspace_root)
+        logger.info(
+            "Workspace detected via walk-down marker: %s", config.workspace_root
+        )
         return config
 
     # 5. PANTHER heuristic
     config = _panther_heuristic(abs_start)
     if config is not None:
-        logger.info("Workspace detected via PANTHER heuristic: %s", config.workspace_root)
+        logger.info(
+            "Workspace detected via PANTHER heuristic: %s", config.workspace_root
+        )
         return config
+
+    # 5.5. Git worktree resolution: try the main working tree
+    main_tree = _resolve_git_worktree(abs_start)
+    if main_tree is not None:
+        config = _walk_down_for_marker(main_tree, max_depth=6)
+        if config is None:
+            config = _panther_heuristic(main_tree)
+        if config is not None:
+            config.detected_by = f"worktree+{config.detected_by}"
+            logger.info(
+                "Workspace detected via worktree -> %s: %s",
+                config.detected_by,
+                config.workspace_root,
+            )
+            return config
 
     # 6. Fallback
     logger.info("No workspace markers found, using start directory: %s", abs_start)

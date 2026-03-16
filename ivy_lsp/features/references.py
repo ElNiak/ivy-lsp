@@ -51,6 +51,10 @@ def find_references(
     all_files = indexer.resolver.find_all_ivy_files()
 
     abs_filepath = str(Path(filepath).resolve())
+    # H4: Ensure the queried file is always in the scan list
+    resolved_set = {str(Path(f).resolve()) for f in all_files}
+    if abs_filepath not in resolved_set:
+        all_files = list(all_files) + [abs_filepath]
     cursor_line = position.line
 
     locations: List[lsp.Location] = []
@@ -99,6 +103,11 @@ def register(server) -> None:
         include_decl = params.context.include_declaration if params.context else True
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, find_references, server.indexer,
-            filepath, params.position, lines, include_decl,
+            None,
+            find_references,
+            server.indexer,
+            filepath,
+            params.position,
+            lines,
+            include_decl,
         )

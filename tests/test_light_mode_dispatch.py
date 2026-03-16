@@ -36,9 +36,7 @@ class TestDispatch:
 
     def test_exports_dispatch(self):
         """Export extraction works through dispatch."""
-        from ivy_lsp.analysis.light_mode_extractor import (
-            extract_exports_imports_light,
-        )
+        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
 
         source = "export foo\nimport bar\n"
         info = extract_exports_imports_light(source, FILEPATH)
@@ -48,9 +46,7 @@ class TestDispatch:
     def test_exports_regex_fallback(self):
         """Export extraction regex fallback works."""
         import ivy_lsp.analysis.light_mode_extractor as mod
-        from ivy_lsp.analysis.light_mode_extractor import (
-            extract_exports_imports_light,
-        )
+        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
 
         saved = mod._LEXER_AVAILABLE
         try:

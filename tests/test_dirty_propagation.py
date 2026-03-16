@@ -1,4 +1,5 @@
 """Tests for incremental dirty-only re-indexing."""
+
 from unittest.mock import MagicMock, patch
 
 from ivy_lsp.analysis.test_scope import ExportImportInfo
@@ -19,18 +20,24 @@ class TestReindexFileWithDependents:
         return WorkspaceIndexer(str(tmp_path), parser, resolver)
 
     def test_reindex_propagates_to_direct_dependents(self, tmp_path):
-        idx = self._make_indexer(tmp_path, {
-            "base.ivy": "type t",
-            "uses_base.ivy": "include base\ntype u",
-            "unrelated.ivy": "type v",
-        })
+        idx = self._make_indexer(
+            tmp_path,
+            {
+                "base.ivy": "type t",
+                "uses_base.ivy": "include base\ntype u",
+                "unrelated.ivy": "type v",
+            },
+        )
         idx._include_graph.add_edge(
-            str(tmp_path / "uses_base.ivy"), str(tmp_path / "base.ivy"),
+            str(tmp_path / "uses_base.ivy"),
+            str(tmp_path / "base.ivy"),
         )
         idx._fast_index_all_files()
 
         with patch.object(
-            idx, "_index_single_file", wraps=idx._index_single_file,
+            idx,
+            "_index_single_file",
+            wraps=idx._index_single_file,
         ) as mock_index:
             idx.reindex_file_with_dependents(str(tmp_path / "base.ivy"))
 
@@ -40,17 +47,22 @@ class TestReindexFileWithDependents:
         assert str(tmp_path / "unrelated.ivy") not in indexed_files
 
     def test_reindex_transitive_dependents(self, tmp_path):
-        idx = self._make_indexer(tmp_path, {
-            "a.ivy": "type a",
-            "b.ivy": "include a\ntype b",
-            "c.ivy": "include b\ntype c",
-        })
+        idx = self._make_indexer(
+            tmp_path,
+            {
+                "a.ivy": "type a",
+                "b.ivy": "include a\ntype b",
+                "c.ivy": "include b\ntype c",
+            },
+        )
         idx._include_graph.add_edge(str(tmp_path / "b.ivy"), str(tmp_path / "a.ivy"))
         idx._include_graph.add_edge(str(tmp_path / "c.ivy"), str(tmp_path / "b.ivy"))
         idx._fast_index_all_files()
 
         with patch.object(
-            idx, "_index_single_file", wraps=idx._index_single_file,
+            idx,
+            "_index_single_file",
+            wraps=idx._index_single_file,
         ) as mock_index:
             idx.reindex_file_with_dependents(str(tmp_path / "a.ivy"))
 

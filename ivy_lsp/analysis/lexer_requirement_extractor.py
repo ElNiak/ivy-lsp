@@ -116,12 +116,14 @@ def _find_blocks(tokens: list, source: str) -> List[Dict[str, Any]]:
             if body_end is None:
                 i += 1
                 continue
-            blocks.append({
-                "monitor_action": name,
-                "mixin_kind": mixin_kind,
-                "body_start_idx": body_start,
-                "body_end_idx": body_end,
-            })
+            blocks.append(
+                {
+                    "monitor_action": name,
+                    "mixin_kind": mixin_kind,
+                    "body_start_idx": body_start,
+                    "body_end_idx": body_end,
+                }
+            )
             i = body_end + 1
             continue
 
@@ -153,12 +155,14 @@ def _find_blocks(tokens: list, source: str) -> List[Dict[str, Any]]:
             if body_end is None:
                 i += 1
                 continue
-            blocks.append({
-                "monitor_action": name,
-                "mixin_kind": "direct",
-                "body_start_idx": body_start,
-                "body_end_idx": body_end,
-            })
+            blocks.append(
+                {
+                    "monitor_action": name,
+                    "mixin_kind": "direct",
+                    "body_start_idx": body_start,
+                    "body_end_idx": body_end,
+                }
+            )
             i = body_end + 1
             continue
 

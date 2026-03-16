@@ -77,7 +77,5 @@ class TestTokenStreamDataclass:
         assert stream.lines == ["a", "b", "c"]
 
     def test_explicit_lines_not_overwritten(self):
-        stream = TokenStream(
-            tokens=[], source="a\nb", filename="f.ivy", lines=["x"]
-        )
+        stream = TokenStream(tokens=[], source="a\nb", filename="f.ivy", lines=["x"])
         assert stream.lines == ["x"]

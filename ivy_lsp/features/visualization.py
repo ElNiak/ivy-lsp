@@ -4,11 +4,13 @@ Provides handlers for model visualization features: action boundary
 requirements, summary tables, coverage gaps, dependency graphs, etc.
 All handlers follow the pure-function pattern from monitoring.py.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
@@ -65,9 +67,7 @@ def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGra
         indexer = server.indexer
         if indexer is None:
             if server.initializing:
-                logger.debug(
-                    "_get_requirement_graph: server still initializing"
-                )
+                logger.debug("_get_requirement_graph: server still initializing")
             else:
                 logger.warning(
                     "_get_requirement_graph: indexer is None (server not initialized?)"
@@ -101,6 +101,38 @@ def _resolve_scope(graph: Any, params: dict) -> dict:
     return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
 
 
+def _filter_by_scope(items: dict, scope_info: dict) -> dict:
+    """Filter a dict of ActionNode/StateVarNode by scope's include_closure.
+
+    Returns unmodified dict if no scope is active.
+    """
+    scope = scope_info.get("_scope")
+    if scope is None:
+        return items
+    closure = getattr(scope, "include_closure", None)
+    if not closure:
+        return items
+    return {k: v for k, v in items.items() if v.file in closure}
+
+
+def _filter_by_protocol(items: dict, protocol_filter: Optional[str]) -> dict:
+    """Filter items by protocol directory path substring."""
+    if not protocol_filter:
+        return items
+    return {k: v for k, v in items.items() if protocol_filter in v.file}
+
+
+def _rel(path: str, server: Any) -> str:
+    """Relativize a path against server's workspace root."""
+    ws_root = getattr(server, "workspace_root", "")
+    if not path or not ws_root:
+        return path
+    if path.startswith(ws_root):
+        rel = path[len(ws_root) :]
+        return rel.lstrip(os.sep)
+    return path
+
+
 def _classify_direction(action_id: str, scope_info: dict) -> Optional[str]:
     """Classify an action's direction (send/receive) within a test scope."""
     scope = scope_info.get("_scope")
@@ -111,9 +143,7 @@ def _classify_direction(action_id: str, scope_info: dict) -> Optional[str]:
 
         return classify_action_direction(action_id, scope).value
     except Exception:
-        logger.debug(
-            "Direction classification failed for %s", action_id, exc_info=True
-        )
+        logger.debug("Direction classification failed for %s", action_id, exc_info=True)
         return None
 
 
@@ -176,8 +206,12 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
     graph = _get_requirement_graph(server)
     if graph is None:
         indexer = server.indexer
-        logger.warning("handle_action_requirements: graph is None, returning modelReady=False")
-        _not_ready["_debug"] = f"graph=None, indexer={type(indexer).__name__ if indexer != 'MISSING' else 'MISSING'}"
+        logger.warning(
+            "handle_action_requirements: graph is None, returning modelReady=False"
+        )
+        _not_ready["_debug"] = (
+            f"graph=None, indexer={type(indexer).__name__ if indexer != 'MISSING' else 'MISSING'}"
+        )
         return _not_ready
 
     try:
@@ -186,23 +220,36 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
         t_snap = time.monotonic()
         logger.info(
             "handle_action_requirements: snapshot in %.1fms, %d actions, %d reqs",
-            (t_snap - t0) * 1000, len(snap.actions), len(snap.requirements),
+            (t_snap - t0) * 1000,
+            len(snap.actions),
+            len(snap.requirements),
         )
         slog.info(
             "handle_action_requirements: snapshot has %d actions, %d requirements",
             len(snap.actions),
             len(snap.requirements),
-            extra={"event": LogEvent(
-                LogCategory.PERFORMANCE, "analysis",
-                {"actions": len(snap.actions),
-                 "requirements": len(snap.requirements)},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.PERFORMANCE,
+                    "analysis",
+                    {
+                        "actions": len(snap.actions),
+                        "requirements": len(snap.requirements),
+                    },
+                )
+            },
         )
         scope_info = _resolve_scope(graph, params)
         action_filter = params.get("actionName")
         file_filter = params.get("filePath")
 
         actions_to_process = dict(snap.actions)
+        # C2: Apply scope filtering from test_file
+        actions_to_process = _filter_by_scope(actions_to_process, scope_info)
+        # H1: Apply protocol filtering
+        actions_to_process = _filter_by_protocol(
+            actions_to_process, params.get("protocolFilter")
+        )
         if action_filter:
             actions_to_process = {
                 k: v
@@ -212,9 +259,20 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
                 or k == action_filter
             }
         if file_filter:
-            actions_to_process = {
+            # C8: Match by exact, basename, or suffix
+            exact = {
                 k: v for k, v in actions_to_process.items() if v.file == file_filter
             }
+            if exact:
+                actions_to_process = exact
+            else:
+                filter_base = os.path.basename(file_filter)
+                actions_to_process = {
+                    k: v
+                    for k, v in actions_to_process.items()
+                    if os.path.basename(v.file) == filter_base
+                    or v.file.endswith("/" + file_filter)
+                }
 
         # Pagination: limit/offset to cap response size.
         # Default to returning all actions when no limit is specified,
@@ -223,7 +281,7 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
         total_actions = len(all_action_items)
         offset = params.get("offset", 0)
         limit = params.get("limit", total_actions)
-        paginated_items = all_action_items[offset:offset + limit]
+        paginated_items = all_action_items[offset : offset + limit]
 
         result_actions = []
         for action_id, action_node in paginated_items:
@@ -249,7 +307,7 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
                     if sv.id not in seen_read_ids:
                         seen_read_ids.add(sv.id)
                         state_vars_read.append(sv)
-            state_vars_written = snap.get_all_state_vars_written()
+            state_vars_written = snap.get_state_vars_written_by_action(action_id)
 
             result_actions.append(
                 {
@@ -262,7 +320,9 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
                         "before": [_serialize_requirement(r, snap) for r in before],
                         "after": [_serialize_requirement(r, snap) for r in after],
                         "around": [_serialize_requirement(r, snap) for r in around],
-                        "implement": [_serialize_requirement(r, snap) for r in implement],
+                        "implement": [
+                            _serialize_requirement(r, snap) for r in implement
+                        ],
                         "direct": [_serialize_requirement(r, snap) for r in direct],
                     },
                     "stateVarsRead": [
@@ -298,7 +358,8 @@ def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
         }
         logger.info(
             "handle_action_requirements: total %.1fms (snapshot %.1fms)",
-            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
         )
         return _cap_response(result, "actions")
     except Exception as exc:
@@ -341,7 +402,14 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
         rows: List[dict] = []
         total_reqs = 0
 
-        for action_id, action_node in snap.actions.items():
+        # C2/H1: Apply scope and protocol filtering
+        actions_to_iter = dict(snap.actions)
+        actions_to_iter = _filter_by_scope(actions_to_iter, scope_info)
+        actions_to_iter = _filter_by_protocol(
+            actions_to_iter, params.get("protocolFilter")
+        )
+
+        for action_id, action_node in actions_to_iter.items():
             reqs = snap.get_requirements_for_action(action_id)
             before_reqs = [r for r in reqs if r.mixin_kind == "before"]
             after_reqs = [r for r in reqs if r.mixin_kind == "after"]
@@ -361,7 +429,7 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
             for r in reqs:
                 for sv in snap.get_state_vars_read_by(r.id):
                     vars_read_ids.add(sv.id)
-            vars_written = snap.get_all_state_vars_written()
+            vars_written = snap.get_state_vars_written_by_action(action_id)
 
             direction = _classify_direction(action_id, scope_info)
 
@@ -404,7 +472,8 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
         }
         logger.info(
             "handle_model_summary_table: total %.1fms (snapshot %.1fms)",
-            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
         )
         return _cap_response(result, "rows")
     except Exception as exc:
@@ -510,9 +579,7 @@ def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
                         "formulaText": req.formula_text,
                         "file": req.file,
                         "line": req.line,
-                        "reason": (
-                            f"Action '{req.monitor_action}' not found in graph"
-                        ),
+                        "reason": (f"Action '{req.monitor_action}' not found in graph"),
                     }
                 )
 
@@ -536,11 +603,54 @@ def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
         }
         logger.info(
             "handle_coverage_gaps: total %.1fms (snapshot %.1fms)",
-            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
         )
         result = _cap_response(result, "unguardedStateVars")
         result = _cap_response(result, "uncoveredRfcRequirements")
         result = _cap_response(result, "orphanRequirements")
+
+        # --- Pattern coverage gaps (lightweight) ---
+        pattern_gaps: dict = {"serdesGaps": [], "monitorGaps": [], "shimGaps": []}
+        try:
+            from ivy_lsp.analysis.pattern_library import (
+                PatternCrossReferencer,
+                PatternKind,
+                analyze_protocol,
+            )
+
+            # Only run if we can find a protocol directory
+            if scope_info.get("_scope"):
+                scope_path = scope_info["_scope"]
+                if os.path.isdir(scope_path):
+                    prot_result = analyze_protocol(scope_path)
+                    xref = PatternCrossReferencer(prot_result)
+                    for issue in xref.validate_serdes_coverage():
+                        pattern_gaps["serdesGaps"].append(
+                            {
+                                "message": issue.message,
+                                "file": issue.file,
+                                "related": issue.related,
+                            }
+                        )
+                    for issue in xref.validate_monitor_coverage():
+                        pattern_gaps["monitorGaps"].append(
+                            {
+                                "message": issue.message,
+                                "related": issue.related,
+                            }
+                        )
+                    for issue in xref.validate_shim_completeness():
+                        pattern_gaps["shimGaps"].append(
+                            {
+                                "message": issue.message,
+                            }
+                        )
+        except ImportError:
+            pass  # pattern_library not available
+
+        result["patternCoverage"] = pattern_gaps
+
         return result
     except Exception as exc:
         logger.exception("handle_coverage_gaps failed")
@@ -575,10 +685,17 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
         scope_info = _resolve_scope(graph, params)
         include_state_vars = params.get("includeStateVars", False)
 
+        # C2/H1: Apply scope and protocol filtering
+        actions_filtered = dict(snap.actions)
+        actions_filtered = _filter_by_scope(actions_filtered, scope_info)
+        actions_filtered = _filter_by_protocol(
+            actions_filtered, params.get("protocolFilter")
+        )
+
         nodes: List[Dict[str, Any]] = []
         edges: List[Dict[str, Any]] = []
 
-        for action_id, action_node in snap.actions.items():
+        for action_id, action_node in actions_filtered.items():
             reqs = snap.get_requirements_for_action(action_id)
             nodes.append(
                 {
@@ -594,7 +711,7 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
         writers: Dict[str, Set[str]] = defaultdict(set)
         readers: Dict[str, Set[str]] = defaultdict(set)
 
-        for action_id in snap.actions:
+        for action_id in actions_filtered:
             reqs = snap.get_requirements_for_action(action_id)
             for req in reqs:
                 for etype, target_id in snap.outgoing.get(req.id, []):
@@ -673,7 +790,8 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
         }
         logger.info(
             "handle_action_dependency_graph: total %.1fms (snapshot %.1fms)",
-            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
         )
         return _cap_response(result, "nodes")
     except Exception as exc:
@@ -712,11 +830,18 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
         scope_info = _resolve_scope(graph, params)
         state_var_filter = params.get("stateVarFilter")
 
+        # C2/H1: Apply scope and protocol filtering
+        actions_filtered = dict(snap.actions)
+        actions_filtered = _filter_by_scope(actions_filtered, scope_info)
+        actions_filtered = _filter_by_protocol(
+            actions_filtered, params.get("protocolFilter")
+        )
+
         nodes: List[Dict[str, Any]] = []
         transitions: List[Dict[str, Any]] = []
 
         active_vars: Set[str] = set()
-        for action_id in snap.actions:
+        for action_id in actions_filtered:
             reqs = snap.get_requirements_for_action(action_id)
             for req in reqs:
                 for etype, target_id in snap.outgoing.get(req.id, []):
@@ -807,7 +932,8 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
         }
         logger.info(
             "handle_state_machine_view: total %.1fms (snapshot %.1fms)",
-            (time.monotonic() - t0) * 1000, (t_snap - t0) * 1000,
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
         )
         return _cap_response(result, "nodes")
     except Exception as exc:
@@ -836,9 +962,16 @@ def handle_layered_overview(server: IvyServerProtocol, params: dict) -> dict:
         scope_info = _resolve_scope(graph, params)
         group_by = params.get("groupBy", "file")
 
+        # C2/H1: Apply scope and protocol filtering
+        actions_filtered = dict(snap.actions)
+        actions_filtered = _filter_by_scope(actions_filtered, scope_info)
+        actions_filtered = _filter_by_protocol(
+            actions_filtered, params.get("protocolFilter")
+        )
+
         by_group: Dict[str, Dict[str, Any]] = {}
 
-        for action_id, action_node in snap.actions.items():
+        for action_id, action_node in actions_filtered.items():
             key = (
                 action_node.file
                 if group_by == "file"
@@ -915,10 +1048,12 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
         file_path = params.get("filePath", "")
         line = params.get("line", 0)
         action_name = params.get("actionName")
+        _context_hint = params.get("context", "")  # reserved for future use
 
         suggestions: List[Dict[str, Any]] = []
 
         if action_name:
+            # --- Action-specific suggestions ---
             reqs = snap.get_requirements_for_action(action_name)
             seen_vars: Set[str] = set()
             for req in reqs:
@@ -951,7 +1086,7 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                         }
                     )
 
-            written_vars = snap.get_all_state_vars_written()
+            written_vars = snap.get_state_vars_written_by_action(action_name)
             for sv in written_vars:
                 guarded = any(
                     etype == EdgeType.READS and target == sv.id
@@ -971,6 +1106,149 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                             "template": f"require {sv.name}(...) ",
                         }
                     )
+        else:
+            # --- Workspace/file-level suggestions (no specific action) ---
+            # C2/H1: Apply scope and protocol filtering
+            scoped_actions = dict(snap.actions)
+            scoped_actions = _filter_by_scope(
+                scoped_actions, _resolve_scope(graph, params)
+            )
+            scoped_actions = _filter_by_protocol(
+                scoped_actions, params.get("protocolFilter")
+            )
+            # Uncovered actions: actions with no CONSTRAINS edges
+            for action_id, action_node in scoped_actions.items():
+                incoming = snap.incoming.get(action_id, [])
+                has_reqs = any(etype == EdgeType.CONSTRAINS for etype, _ in incoming)
+                if not has_reqs:
+                    suggestions.append(
+                        {
+                            "type": "uncovered_action",
+                            "name": action_node.name,
+                            "file": action_node.file,
+                            "reason": (
+                                f"Action '{action_node.name}' has no monitor "
+                                f"requirements — consider adding before/after clauses"
+                            ),
+                            "priority": "high",
+                        }
+                    )
+
+            # State vars written but never read by any requirement
+            all_read_vars: Set[str] = set()
+            for req_id in snap.requirements:
+                for etype, target_id in snap.outgoing.get(req_id, []):
+                    if etype == EdgeType.READS:
+                        all_read_vars.add(target_id)
+            for sv_id, sv_node in snap.state_vars.items():
+                if sv_id not in all_read_vars:
+                    suggestions.append(
+                        {
+                            "type": "unguarded_state",
+                            "name": sv_node.name,
+                            "reason": (
+                                f"State var '{sv_node.name}' is never read "
+                                f"by any requirement — may lack invariant checks"
+                            ),
+                            "priority": "medium",
+                        }
+                    )
+
+            # C3: File-scoped filtering with fuzzy path matching
+            if file_path:
+                file_base = os.path.basename(file_path)
+
+                def _file_matches(f: str) -> bool:
+                    return (
+                        f == file_path
+                        or os.path.basename(f) == file_base
+                        or f.endswith("/" + file_path)
+                    )
+
+                file_actions = {
+                    aid for aid, a in snap.actions.items() if _file_matches(a.file)
+                }
+                file_vars = {
+                    vid for vid, v in snap.state_vars.items() if _file_matches(v.file)
+                }
+                if file_actions or file_vars:
+                    file_action_names = {
+                        a.name for a in snap.actions.values() if a.id in file_actions
+                    }
+                    file_var_names = {
+                        v.name for v in snap.state_vars.values() if v.id in file_vars
+                    }
+                    suggestions = [
+                        s
+                        for s in suggestions
+                        if _file_matches(s.get("file", ""))
+                        or s.get("name") in file_action_names
+                        or s.get("name") in file_var_names
+                    ]
+
+            # C3: Sort by line proximity when both file_path and line given
+            if file_path and line:
+
+                def _proximity(s: dict) -> int:
+                    s_line = s.get("line", 0)
+                    return abs(s_line - line) if s_line else 9999
+
+                suggestions.sort(key=_proximity)
+
+        # --- Pattern-based suggestions ---
+        try:
+            if file_path:
+                basename = os.path.basename(file_path)
+                if "_frame" in basename or "_message" in basename:
+                    suggestions.append(
+                        {
+                            "type": "pattern_hint",
+                            "message": (
+                                "This looks like a variant/message definition file. "
+                                "Consider using /nct-add-pattern to scaffold "
+                                "monitors and serdes."
+                            ),
+                            "priority": "low",
+                        }
+                    )
+                elif "_ser" in basename or "_deser" in basename:
+                    suggestions.append(
+                        {
+                            "type": "pattern_hint",
+                            "message": (
+                                "This is a serialization file. Ensure enum states "
+                                "match variant tags 1:1 (use ivy_pattern_analysis "
+                                "to validate)."
+                            ),
+                            "priority": "low",
+                        }
+                    )
+                elif "_behavior" in basename:
+                    suggestions.append(
+                        {
+                            "type": "pattern_hint",
+                            "message": (
+                                "This is a behavior specification. Verify all "
+                                "exported actions have before/after monitors "
+                                "(use ivy_pattern_analysis mode=validate)."
+                            ),
+                            "priority": "low",
+                        }
+                    )
+                elif "_shim" in basename:
+                    suggestions.append(
+                        {
+                            "type": "pattern_hint",
+                            "message": (
+                                "This is a shim file. Ensure all entity roles "
+                                "have dispatch branches (use ivy_pattern_analysis "
+                                "mode=validate)."
+                            ),
+                            "priority": "low",
+                        }
+                    )
+        except Exception:
+            pass  # Don't let pattern hints break suggestions
 
         return {
             "suggestions": suggestions,
@@ -998,54 +1276,68 @@ def register(server: Any) -> None:
     async def on_action_requirements(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_action_requirements,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_action_requirements,
+            server,
+            params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/modelSummaryTable")
     async def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_model_summary_table,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_model_summary_table,
+            server,
+            params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/coverageGaps")
     async def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_coverage_gaps,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_coverage_gaps,
+            server,
+            params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/actionDependencyGraph")
     async def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_action_dependency_graph,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_action_dependency_graph,
+            server,
+            params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/stateMachineView")
     async def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_state_machine_view,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_state_machine_view,
+            server,
+            params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/layeredOverview")
     async def on_layered_overview(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_layered_overview,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_layered_overview,
+            server,
+            params if isinstance(params, dict) else {},
         )
 
     @server.feature("ivy/smartSuggestions")
     async def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, handle_smart_suggestions,
-            server, params if isinstance(params, dict) else {},
+            None,
+            handle_smart_suggestions,
+            server,
+            params if isinstance(params, dict) else {},
         )

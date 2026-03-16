@@ -24,8 +24,10 @@ class TestCompilerCacheInvalidation:
     """reindex_file should call compiler_manager.invalidate_dependents."""
 
     def test_reindex_file_invalidates_compiler_cache(self):
-        """When an analysis pipeline with a compiler manager is set,
-        reindex_file must call invalidate_dependents on it."""
+        """When an analysis pipeline with a compiler manager is set, invalidate dependents.
+
+        reindex_file must call invalidate_dependents on the compiler manager.
+        """
         indexer, _, _ = _make_indexer()
 
         # Set up a mock analysis pipeline with a mock compiler manager
@@ -65,8 +67,10 @@ class TestCompilerCacheInvalidation:
             indexer.reindex_file("/fake/workspace/file.ivy")
 
     def test_reindex_file_with_dependents_invalidates_compiler_cache(self):
-        """reindex_file_with_dependents should also invalidate the compiler cache
-        for every dirty file."""
+        """reindex_file_with_dependents should also invalidate the compiler cache.
+
+        It invalidates the compiler cache for every dirty file.
+        """
         indexer, _, _ = _make_indexer()
 
         mock_compiler_manager = MagicMock()

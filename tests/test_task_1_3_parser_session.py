@@ -36,6 +36,7 @@ class TestParserSession:
 
     def test_restores_error_list(self):
         import ivy.ivy_parser as ip
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         ip.error_list = ["pre-existing"]
@@ -46,6 +47,7 @@ class TestParserSession:
 
     def test_restores_stack(self):
         import ivy.ivy_parser as ip
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         ip.stack = ["something"]
@@ -56,6 +58,7 @@ class TestParserSession:
 
     def test_restores_special_attribute(self):
         import ivy.ivy_parser as ip
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         ip.special_attribute = "test_val"
@@ -66,6 +69,7 @@ class TestParserSession:
 
     def test_restores_parent_object(self):
         import ivy.ivy_parser as ip
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         ip.parent_object = "parent"
@@ -76,6 +80,7 @@ class TestParserSession:
 
     def test_restores_filename(self):
         import ivy.ivy_utils as iu
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         iu.filename = "/some/file.ivy"
@@ -86,6 +91,7 @@ class TestParserSession:
 
     def test_sets_version_to_1_7(self):
         import ivy.ivy_utils as iu
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         original = iu.ivy_language_version
@@ -95,6 +101,7 @@ class TestParserSession:
 
     def test_restores_on_exception(self):
         import ivy.ivy_parser as ip
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         ip.error_list = ["keep"]
@@ -107,6 +114,7 @@ class TestParserSession:
 
     def test_restores_ast_globals(self):
         import ivy.ivy_ast as ia
+
         from ivy_lsp.parsing.parser_session import ParserSession
 
         ia.lf_counter = 42
@@ -307,9 +315,7 @@ class TestIvyParserWrapperResolveCallback:
 
         (stack / "quic_types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
         test_file = tests / "test.ivy"
-        test_file.write_text(
-            "#lang ivy1.7\n\ninclude quic_types\n\ntype pkt\n"
-        )
+        test_file.write_text("#lang ivy1.7\n\ninclude quic_types\n\ntype pkt\n")
 
         resolver = IncludeResolver(str(tmp_path))
         resolver.create_staging_directory()

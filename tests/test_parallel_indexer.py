@@ -1,12 +1,22 @@
 """Tests for parallel deep indexing worker functions."""
-from ivy_lsp.indexer.parallel_indexer import WorkerResult, worker_parse_file
+
+import sys
+
+from ivy_lsp.indexer.parallel_indexer import (
+    WorkerResult,
+    _worker_init,
+    worker_parse_file,
+)
 
 
 class TestWorkerResult:
     def test_dataclass_fields(self):
         r = WorkerResult(
-            filepath="/tmp/a.ivy", success=True,
-            symbols=[{"name": "t"}], errors=[], includes=["base"],
+            filepath="/tmp/a.ivy",
+            success=True,
+            symbols=[{"name": "t"}],
+            errors=[],
+            includes=["base"],
         )
         assert r.filepath == "/tmp/a.ivy"
         assert r.success is True
@@ -49,3 +59,19 @@ class TestParallelDeepIndexer:
         indexer = ParallelDeepIndexer(num_workers=2)
         results = indexer.parse_files([str(f)])
         assert len(results) == 1
+
+
+class TestWorkerInit:
+    def test_adds_new_paths(self):
+        original = list(sys.path)
+        try:
+            _worker_init(["/fake/test/path/for/ivy"])
+            assert "/fake/test/path/for/ivy" in sys.path
+        finally:
+            sys.path[:] = original
+
+    def test_no_duplicates(self):
+        existing = sys.path[0]
+        original_len = len(sys.path)
+        _worker_init([existing])
+        assert len(sys.path) == original_len

@@ -4,6 +4,7 @@ Handles output from ivy_check, ivyc, and ivy_show, including IvyError
 tracebacks and C++ compiler errors.  Also provides error formatting for
 Ivy parser error objects and tuples, plus workspace file discovery.
 """
+
 from __future__ import annotations
 
 import os
@@ -27,10 +28,24 @@ _CPP_ERROR_LINE = re.compile(
 )
 
 # Unified exclusion set — superset of mcp_server.py and include_resolver.py
-_DEFAULT_EXCLUDE_DIRS = frozenset({
-    ".git", ".hg", ".svn", ".venv", "venv", "node_modules", "__pycache__",
-    "build", "dist", "submodules", ".tox", ".mypy_cache", ".pytest_cache",
-})
+DEFAULT_EXCLUDE_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        "build",
+        "dist",
+        "submodules",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+    }
+)
+_DEFAULT_EXCLUDE_DIRS = DEFAULT_EXCLUDE_DIRS  # back-compat alias
 
 
 def parse_ivy_check_lines(output: str) -> List[Dict[str, Any]]:
@@ -43,12 +58,14 @@ def parse_ivy_check_lines(output: str) -> List[Dict[str, Any]]:
     for line in output.splitlines():
         m = _IVY_CHECK_LINE.match(line)
         if m:
-            results.append({
-                "file": m.group(1),
-                "line": int(m.group(2)),
-                "severity": m.group(3),
-                "message": m.group(4),
-            })
+            results.append(
+                {
+                    "file": m.group(1),
+                    "line": int(m.group(2)),
+                    "severity": m.group(3),
+                    "message": m.group(4),
+                }
+            )
     return results
 
 

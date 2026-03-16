@@ -58,9 +58,7 @@ _DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER"}
 # ---------------------------------------------------------------------------
 
 
-def _tokenize(
-    source: str, filename: str = "<string>"
-) -> Tuple[list, Optional[dict]]:
+def _tokenize(source: str, filename: str = "<string>") -> Tuple[list, Optional[dict]]:
     """Tokenize *source* using the shared ``tokenize_ivy`` entry point.
 
     Returns ``(tokens, error_info)`` where *error_info* is ``None`` on
@@ -143,7 +141,7 @@ def fallback_scan(
         tokenization (avoids double-tokenizing when the caller already
         has a stream).
 
-    Returns
+    Returns:
     -------
     A tuple ``(symbols, error_info)`` where *symbols* is a list of
     ``IvySymbol`` instances with correct parent/child nesting for
@@ -279,7 +277,9 @@ def fallback_scan(
                 kind=kind,
                 range=sym_range,
                 file_path=filename,
-                detail=lines[line_idx].strip() if line_idx < len(lines) else keyword_str,
+                detail=(
+                    lines[line_idx].strip() if line_idx < len(lines) else keyword_str
+                ),
             )
 
             # Attach to current scope parent or root list.

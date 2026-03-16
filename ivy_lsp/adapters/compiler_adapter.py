@@ -41,17 +41,19 @@ class CompilerSession:
     """
 
     def __init__(self, timeout: Optional[float] = None) -> None:
+        """Store the lock timeout for use when entering the session."""
         self._timeout = timeout
 
     def __enter__(self) -> CompilerSession:
+        """Enter the compiler session, saving and resetting compiler globals."""
         from ivy_lsp.parsing.parser_session import ParserSession
 
         self._parser_session = ParserSession(timeout=self._timeout)
         self._parser_session.__enter__()
 
         try:
-            import ivy.ivy_module as im
             import ivy.ivy_logic as il
+            import ivy.ivy_module as im
 
             self._compiler_saved = {
                 "im.module": getattr(im, "module", None),
@@ -63,17 +65,20 @@ class CompilerSession:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+        """Exit the compiler session, restoring saved compiler globals."""
         # Restore compiler globals
         try:
-            import ivy.ivy_module as im
             import ivy.ivy_logic as il
+            import ivy.ivy_module as im
 
             if "im.module" in self._compiler_saved:
                 im.module = self._compiler_saved["im.module"]
             if "il.sig" in self._compiler_saved:
                 il.sig = self._compiler_saved["il.sig"]
         except ImportError:
-            logger.warning("Cannot restore compiler state: ivy modules no longer importable")
+            logger.warning(
+                "Cannot restore compiler state: ivy modules no longer importable"
+            )
 
         self._parser_session.__exit__(exc_type, exc_val, exc_tb)
         return False
@@ -92,6 +97,7 @@ class CompilerAdapter:
         compiler_manager: Any = None,
         staging_dir: Optional[str] = None,
     ) -> None:
+        """Initialize with optional compiler manager and staging dir."""
         self._manager = compiler_manager
         self._staging_dir = staging_dir
 
@@ -134,10 +140,12 @@ class CompilerAdapter:
                         )
                         return CompileResult(
                             success=False,
-                            errors=[CompileError(
-                                message="Compilation succeeded but snapshot extraction failed",
-                                file=filename,
-                            )],
+                            errors=[
+                                CompileError(
+                                    message="Compilation succeeded but snapshot extraction failed",
+                                    file=filename,
+                                )
+                            ],
                         )
 
                     return CompileResult(
@@ -169,10 +177,12 @@ class CompilerAdapter:
             logger.warning("Snapshot conversion failed", exc_info=True)
             return CompileResult(
                 success=False,
-                errors=[CompileError(
-                    message="Compilation succeeded but snapshot extraction failed",
-                    file=filename,
-                )],
+                errors=[
+                    CompileError(
+                        message="Compilation succeeded but snapshot extraction failed",
+                        file=filename,
+                    )
+                ],
             )
 
         return CompileResult(
@@ -253,9 +263,7 @@ class CompilerAdapter:
             if not ir.success:
                 result = CompileResult(
                     success=False,
-                    errors=[
-                        CompileError(message=e, file=filename) for e in ir.errors
-                    ],
+                    errors=[CompileError(message=e, file=filename) for e in ir.errors],
                 )
             else:
                 try:
@@ -269,10 +277,12 @@ class CompilerAdapter:
                     )
                     result = CompileResult(
                         success=False,
-                        errors=[CompileError(
-                            message="Compilation succeeded but snapshot extraction failed",
-                            file=filename,
-                        )],
+                        errors=[
+                            CompileError(
+                                message="Compilation succeeded but snapshot extraction failed",
+                                file=filename,
+                            )
+                        ],
                     )
                 else:
                     result = CompileResult(

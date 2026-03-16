@@ -117,12 +117,11 @@ class WorkspaceIndexer:
         parser: Any,
         resolver: IncludeResolver,
         persistent_cache: bool = False,
-        progress_callback: Optional[
-            Callable[[int, int, Optional[str]], None]
-        ] = None,
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = None,
         done_callback: Optional[Callable[[], None]] = None,
         cache_dir: Optional[str] = None,
     ) -> None:
+        """Initialize indexer with parser, resolver, and empty indices."""
         self._workspace_root = os.path.abspath(workspace_root)
         self._parser = parser
         self._resolver = resolver
@@ -342,7 +341,9 @@ class WorkspaceIndexer:
             self._fast_index_sequential(files, fallback_scan)
 
     def _fast_index_sequential(
-        self, files: List[str], fallback_scan: Any,
+        self,
+        files: List[str],
+        fallback_scan: Any,
     ) -> None:
         """Sequential fast index (original path)."""
         for filepath in files:
@@ -367,7 +368,9 @@ class WorkspaceIndexer:
                     )
                     if cached.export_import_info is not None:
                         with self._exports_lock:
-                            self._file_export_imports[filepath] = cached.export_import_info
+                            self._file_export_imports[filepath] = (
+                                cached.export_import_info
+                            )
                     continue
                 # Fallback: re-extract if cache entry predates this feature
                 source = self._read_source(filepath)
@@ -378,9 +381,7 @@ class WorkspaceIndexer:
                 reqs, writes = extract_requirements_light(
                     source, filepath, token_stream=stream
                 )
-                self._requirement_graph.add_file_requirements(
-                    filepath, reqs, writes
-                )
+                self._requirement_graph.add_file_requirements(filepath, reqs, writes)
                 info = extract_exports_imports_light(
                     source, filepath, token_stream=stream
                 )
@@ -390,16 +391,12 @@ class WorkspaceIndexer:
 
             source = self._read_source(filepath)
             if source is None:
-                logger.warning(
-                    "Cannot read %s; file will not be indexed", filepath
-                )
+                logger.warning("Cannot read %s; file will not be indexed", filepath)
                 continue
 
             # Tokenize once for symbol scanning + requirement + export extraction
             stream = _try_tokenize(source, filepath)
-            symbols, _error_info = fallback_scan(
-                source, filepath, token_stream=stream
-            )
+            symbols, _error_info = fallback_scan(source, filepath, token_stream=stream)
             includes = self._extract_includes(source)
 
             with self._progress_lock:
@@ -420,20 +417,20 @@ class WorkspaceIndexer:
             reqs, writes = extract_requirements_light(
                 source, filepath, token_stream=stream
             )
-            self._requirement_graph.add_file_requirements(
-                filepath, reqs, writes
-            )
+            self._requirement_graph.add_file_requirements(filepath, reqs, writes)
 
-            info = extract_exports_imports_light(
-                source, filepath, token_stream=stream
-            )
+            info = extract_exports_imports_light(source, filepath, token_stream=stream)
             with self._exports_lock:
                 self._file_export_imports[filepath] = info
 
             # Cache after extraction so requirements/exports are stored too
             self._cache.put(
-                filepath, None, symbols, includes,
-                requirements=reqs, writes=writes,
+                filepath,
+                None,
+                symbols,
+                includes,
+                requirements=reqs,
+                writes=writes,
                 export_import_info=info,
             )
 
@@ -444,7 +441,10 @@ class WorkspaceIndexer:
             )
 
     def _fast_index_parallel(
-        self, files: List[str], num_workers: int, fallback_scan: Any,
+        self,
+        files: List[str],
+        num_workers: int,
+        fallback_scan: Any,
     ) -> None:
         """Parallel fast index: scan in threads, merge on main thread.
 
@@ -457,15 +457,27 @@ class WorkspaceIndexer:
 
         def _process_file(
             filepath: str,
-        ) -> Tuple[str, bool, Optional[list], Optional[List[str]], Optional[str], Optional[tuple], Optional[Any]]:
+        ) -> Tuple[
+            str,
+            bool,
+            Optional[list],
+            Optional[List[str]],
+            Optional[str],
+            Optional[tuple],
+            Optional[Any],
+        ]:
             """Thread worker: read + scan + light extract.  No shared state mutation."""
             cached = self._cache.get(filepath)
             if cached is not None:
                 # Restore requirements from cache if available
                 if cached.requirements:
                     return (
-                        filepath, True, cached.symbols, cached.includes,
-                        None, (cached.requirements, cached.writes),
+                        filepath,
+                        True,
+                        cached.symbols,
+                        cached.includes,
+                        None,
+                        (cached.requirements, cached.writes),
                         cached.export_import_info,
                     )
                 # Fallback: re-extract if cache entry predates this feature
@@ -482,7 +494,15 @@ class WorkspaceIndexer:
                     info = extract_exports_imports_light(
                         source, filepath, token_stream=stream
                     )
-                return filepath, True, cached.symbols, cached.includes, source, reqs_writes, info
+                return (
+                    filepath,
+                    True,
+                    cached.symbols,
+                    cached.includes,
+                    source,
+                    reqs_writes,
+                    info,
+                )
 
             source = self._read_source(filepath)
             if source is None:
@@ -490,16 +510,12 @@ class WorkspaceIndexer:
 
             # Tokenize once for symbol scanning + requirement + export extraction
             stream = _try_tokenize(source, filepath)
-            symbols, _error_info = fallback_scan(
-                source, filepath, token_stream=stream
-            )
+            symbols, _error_info = fallback_scan(source, filepath, token_stream=stream)
             includes = self._extract_includes(source)
             reqs, writes = extract_requirements_light(
                 source, filepath, token_stream=stream
             )
-            info = extract_exports_imports_light(
-                source, filepath, token_stream=stream
-            )
+            info = extract_exports_imports_light(source, filepath, token_stream=stream)
             return filepath, False, symbols, includes, source, (reqs, writes), info
 
         # Collect results from thread pool
@@ -510,18 +526,28 @@ class WorkspaceIndexer:
                 results.append(future.result())
 
         # Merge on main thread (all shared-state mutations)
-        for filepath, from_cache, symbols, includes, _source, reqs_writes, info in results:
+        for (
+            filepath,
+            from_cache,
+            symbols,
+            includes,
+            _source,
+            reqs_writes,
+            info,
+        ) in results:
             if symbols is None and not from_cache:
-                logger.warning(
-                    "Cannot read %s; file will not be indexed", filepath
-                )
+                logger.warning("Cannot read %s; file will not be indexed", filepath)
                 continue
 
             if not from_cache and symbols is not None:
                 reqs_data = reqs_writes if reqs_writes is not None else ([], [])
                 self._cache.put(
-                    filepath, None, symbols, includes or [],
-                    requirements=reqs_data[0], writes=reqs_data[1],
+                    filepath,
+                    None,
+                    symbols,
+                    includes or [],
+                    requirements=reqs_data[0],
+                    writes=reqs_data[1],
                     export_import_info=info,
                 )
 
@@ -544,9 +570,7 @@ class WorkspaceIndexer:
 
             if reqs_writes is not None:
                 reqs, writes = reqs_writes
-                self._requirement_graph.add_file_requirements(
-                    filepath, reqs, writes
-                )
+                self._requirement_graph.add_file_requirements(filepath, reqs, writes)
 
             if info is not None:
                 with self._exports_lock:
@@ -600,19 +624,22 @@ class WorkspaceIndexer:
         """Inner implementation of deep indexing (separated for clean shutdown)."""
         with self._exports_lock:
             test_files = [
-                f
-                for f, info in self._file_export_imports.items()
-                if info.has_exports
+                f for f, info in self._file_export_imports.items() if info.has_exports
             ]
         slog.info(
             "Deep index: %d test entry points out of %d files",
             len(test_files),
             len(self._file_export_imports),
-            extra={"event": LogEvent(
-                LogCategory.MILESTONE, "deep_index",
-                {"test_files": len(test_files),
-                 "total_files": len(self._file_export_imports)},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.MILESTONE,
+                    "deep_index",
+                    {
+                        "test_files": len(test_files),
+                        "total_files": len(self._file_export_imports),
+                    },
+                )
+            },
         )
 
         with self._progress_lock:
@@ -640,9 +667,7 @@ class WorkspaceIndexer:
                 self._deep_index_parallel(test_files, num_workers)
             except RuntimeError as e:
                 if "shutdown" in str(e).lower():
-                    logger.debug(
-                        "Parallel indexer interrupted by interpreter shutdown"
-                    )
+                    logger.debug("Parallel indexer interrupted by interpreter shutdown")
                     return
                 raise
         else:
@@ -665,11 +690,16 @@ class WorkspaceIndexer:
         slog.info(
             "Deep index complete for %d test files",
             len(test_files),
-            extra={"event": LogEvent(
-                LogCategory.PERFORMANCE, "deep_index",
-                {"test_files": len(test_files),
-                 "duration_s": round(deep_duration, 3)},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.PERFORMANCE,
+                    "deep_index",
+                    {
+                        "test_files": len(test_files),
+                        "duration_s": round(deep_duration, 3),
+                    },
+                )
+            },
         )
 
         if self._done_callback is not None:
@@ -784,16 +814,20 @@ class WorkspaceIndexer:
 
                         err_msg = format_ivy_error(result.errors[0])
                         status.parse_error = err_msg
-                        self._index_errors.append({
-                            "uri": test_file,
-                            "error": err_msg,
-                        })
+                        self._index_errors.append(
+                            {
+                                "uri": test_file,
+                                "error": err_msg,
+                            }
+                        )
                 self._deep_index_progress.file_statuses[test_file] = status
                 self._deep_index_progress.completed_test_files += 1
             self._notify_progress()
 
     def _deep_index_parallel(
-        self, test_files: List[str], num_workers: int,
+        self,
+        test_files: List[str],
+        num_workers: int,
     ) -> None:
         """Parallel deep indexing using ProcessPoolExecutor."""
         if self._stop_requested.is_set():
@@ -901,10 +935,12 @@ class WorkspaceIndexer:
                 status.last_indexed_at = time.time()
                 if not worker_result.success and worker_result.errors:
                     status.parse_error = worker_result.errors[0]
-                    self._index_errors.append({
-                        "uri": filepath,
-                        "error": status.parse_error,
-                    })
+                    self._index_errors.append(
+                        {
+                            "uri": filepath,
+                            "error": status.parse_error,
+                        }
+                    )
                 self._deep_index_progress.file_statuses[filepath] = status
                 self._deep_index_progress.completed_test_files += 1
             self._notify_progress()
@@ -1128,9 +1164,7 @@ class WorkspaceIndexer:
             len(targets) for targets in list(self._include_graph._includes.values())
         )
 
-        test_scope_count = len(
-            getattr(self._requirement_graph, "_test_scopes", {})
-        )
+        test_scope_count = len(getattr(self._requirement_graph, "_test_scopes", {}))
 
         last_time_str = None
         if self._last_index_time is not None:
@@ -1159,14 +1193,10 @@ class WorkspaceIndexer:
         """Extract requirements from a single file and add to the graph."""
         try:
             if result.success:
-                reqs, writes = extract_requirements_full(
-                    result.ast, filepath, source
-                )
+                reqs, writes = extract_requirements_full(result.ast, filepath, source)
             else:
                 reqs, writes = extract_requirements_light(source, filepath)
-            self._requirement_graph.add_file_requirements(
-                filepath, reqs, writes
-            )
+            self._requirement_graph.add_file_requirements(filepath, reqs, writes)
         except Exception:
             logger.warning(
                 "Requirement extraction failed for %s", filepath, exc_info=True
@@ -1220,7 +1250,10 @@ class WorkspaceIndexer:
 
     def _load_requirement_manifests(self) -> None:
         """Load RFC requirement manifests from the workspace and add to the graph."""
-        from ivy_lsp.semantic.rfc_annotations import find_manifests, load_requirement_manifest
+        from ivy_lsp.semantic.rfc_annotations import (
+            find_manifests,
+            load_requirement_manifest,
+        )
 
         manifests = find_manifests(self._workspace_root)
         for path in manifests:

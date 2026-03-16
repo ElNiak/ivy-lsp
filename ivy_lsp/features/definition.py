@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -13,6 +14,12 @@ from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
 
 logger = logging.getLogger(__name__)
+
+
+_INCLUDE_RE = re.compile(r"^\s*include\s+(\w+)")
+_DECL_RE = re.compile(
+    r"^\s*(?:action|relation|function|individual|type|module|object|isolate)\s+(\w+)"
+)
 
 
 def goto_definition(
@@ -42,6 +49,25 @@ def goto_definition(
         a list of locations when multiple definitions match,
         or ``None`` when no definition can be located.
     """
+    # H5: Check if cursor is on an include line
+    if position.line < len(source_lines):
+        line_text = source_lines[position.line]
+        inc_match = _INCLUDE_RE.match(line_text)
+        if inc_match:
+            include_name = inc_match.group(1)
+            col_start = line_text.index(include_name)
+            col_end = col_start + len(include_name)
+            if col_start <= position.character < col_end:
+                resolved = indexer.resolver.resolve(include_name, filepath)
+                if resolved:
+                    uri = Path(resolved).as_uri()
+                    r = lsp.Range(
+                        start=lsp.Position(line=0, character=0),
+                        end=lsp.Position(line=0, character=0),
+                    )
+                    return lsp.Location(uri=uri, range=r)
+                return None
+
     word = word_at_position(source_lines, position)
     if not word:
         return None
@@ -52,6 +78,20 @@ def goto_definition(
         results = indexer.lookup_symbol(last)
 
     if not results:
+        # H6: If cursor is on a declaration keyword, return self-location
+        if position.line < len(source_lines):
+            line_text = source_lines[position.line]
+            decl_match = _DECL_RE.match(line_text)
+            if decl_match and decl_match.group(1) == word.split(".")[-1]:
+                uri = Path(filepath).as_uri()
+                col = line_text.index(decl_match.group(1))
+                r = lsp.Range(
+                    start=lsp.Position(line=position.line, character=col),
+                    end=lsp.Position(
+                        line=position.line, character=col + len(decl_match.group(1))
+                    ),
+                )
+                return lsp.Location(uri=uri, range=r)
         return None
 
     locations = []
@@ -86,8 +126,12 @@ def register(server) -> None:
             filepath = uri_to_path(uri)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, goto_definition,
-                server.indexer, filepath, params.position, lines,
+                None,
+                goto_definition,
+                server.indexer,
+                filepath,
+                params.position,
+                lines,
             )
         except Exception:
             logger.warning("definition handler failed", exc_info=True)

@@ -19,6 +19,7 @@ from ivy_lsp.utils import uri_to_path
 
 if TYPE_CHECKING:
     from ivy_lsp.compilation.compiler_manager import CompilerManager
+    from ivy_lsp.features.diagnostics import DiagnosticCache
     from ivy_lsp.indexer.include_resolver import IncludeResolver
     from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
     from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
@@ -44,9 +45,7 @@ def _patch_pygls_cancelled_future() -> None:
         try:
             _original(self, msg_id, result, error)
         except InvalidStateError:
-            logger.debug(
-                "Ignoring response to cancelled/completed request %s", msg_id
-            )
+            logger.debug("Ignoring response to cancelled/completed request %s", msg_id)
 
     JsonRPCProtocol._handle_response = _safe_handle_response  # type: ignore[assignment]
 
@@ -122,7 +121,9 @@ def _patch_pygls_closed_pipe() -> None:
                 try:
                     compiler.shutdown()
                 except Exception:
-                    logger.debug("compiler shutdown failed during pipe break", exc_info=True)
+                    logger.debug(
+                        "compiler shutdown failed during pipe break", exc_info=True
+                    )
 
         _original_set_writer(
             self,
@@ -134,12 +135,11 @@ def _patch_pygls_closed_pipe() -> None:
 
 
 try:
-    import pygls as _pygls_mod
     from importlib.metadata import version as _meta_version
 
-    _pygls_ver = getattr(
-        _pygls_mod, "__version__", None
-    ) or _meta_version("pygls")
+    import pygls as _pygls_mod
+
+    _pygls_ver = getattr(_pygls_mod, "__version__", None) or _meta_version("pygls")
     if _pygls_ver.startswith("2.0."):
         from pygls.protocol.json_rpc import JsonRPCProtocol as _JRP
 
@@ -225,9 +225,7 @@ class _LspLogHandler(logging.Handler):
                     min_interval = max(min_interval, 1.0)
                 if (now - self._last_emit) < min_interval:
                     cat_key = cat or "_untagged"
-                    self._drop_counts[cat_key] = (
-                        self._drop_counts.get(cat_key, 0) + 1
-                    )
+                    self._drop_counts[cat_key] = self._drop_counts.get(cat_key, 0) + 1
                     return
             else:
                 msg = self.format(record)
@@ -267,10 +265,12 @@ class IvyLanguageServer(LanguageServer):
     """Language server for Ivy formal specification files."""
 
     def __init__(self) -> None:
+        """Initialize the Ivy language server and register features."""
         super().__init__(
             name="ivy-language-server",
             version=__version__,
         )
+        self._install_audit_logging()
         self._indexer: "Optional[WorkspaceIndexer]" = None
         self._parser: "Optional[Any]" = None
         self._full_mode: bool = False
@@ -282,8 +282,125 @@ class IvyLanguageServer(LanguageServer):
         self._compiler_manager: "Optional[CompilerManager]" = None
         self._code_lens_enabled: bool = True
         self._rfc_coverage_enabled: bool = True
+        self._client_supports_work_done_progress: bool = False
         self._initializing: bool = True
+        from ivy_lsp.features.diagnostics import DiagnosticCache
+
+        self._diagnostic_cache: DiagnosticCache = DiagnosticCache()
         self.__init_features()
+
+    def _install_audit_logging(self) -> None:
+        """Wrap pygls dispatch to log every incoming LSP request/notification.
+
+        Also wraps ``text_document_publish_diagnostics`` to track diagnostic
+        pushes that Claude Code cannot consume (it only supports
+        request/response LSP operations, not push notifications).
+        """
+        self._request_counts: dict = {}
+        self._diagnostics_published_count: int = 0
+        self._diagnostic_pull_count: int = 0
+
+        protocol = self.protocol
+        _original_handle_request = protocol._handle_request
+        _original_handle_notification = protocol._handle_notification
+
+        server_ref = self
+
+        def _audited_handle_request(msg_id, method_name, params):
+            server_ref._request_counts[method_name] = (
+                server_ref._request_counts.get(method_name, 0) + 1
+            )
+            t0 = time.time()
+            try:
+                result = _original_handle_request(msg_id, method_name, params)
+                duration_ms = round((time.time() - t0) * 1000, 1)
+                slog.info(
+                    "LSP request",
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.ACTIVITY,
+                            "audit",
+                            {
+                                "method": method_name,
+                                "duration_ms": duration_ms,
+                            },
+                        )
+                    },
+                )
+                if method_name == "textDocument/diagnostic":
+                    server_ref._diagnostic_pull_count += 1
+                return result
+            except Exception:
+                duration_ms = round((time.time() - t0) * 1000, 1)
+                slog.warning(
+                    "LSP request failed",
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.ACTIVITY,
+                            "audit",
+                            {
+                                "method": method_name,
+                                "duration_ms": duration_ms,
+                                "error": True,
+                            },
+                        )
+                    },
+                )
+                raise
+
+        def _audited_handle_notification(method_name, params):
+            server_ref._request_counts[method_name] = (
+                server_ref._request_counts.get(method_name, 0) + 1
+            )
+            slog.debug(
+                "LSP notification",
+                extra={
+                    "event": LogEvent(
+                        LogCategory.ACTIVITY,
+                        "audit",
+                        {
+                            "method": method_name,
+                        },
+                    )
+                },
+            )
+            return _original_handle_notification(method_name, params)
+
+        protocol._handle_request = _audited_handle_request  # type: ignore[assignment]
+        protocol._handle_notification = _audited_handle_notification  # type: ignore[assignment]
+
+        # Wrap diagnostic publishing to track drops
+        _original_publish = self.text_document_publish_diagnostics
+
+        def _tracked_publish(params):
+            server_ref._diagnostics_published_count += 1
+            try:
+                diag_count = len(params.diagnostics) if params.diagnostics else 0
+                if diag_count > 0:
+                    error_count = sum(
+                        1
+                        for d in params.diagnostics
+                        if d.severity == lsp.DiagnosticSeverity.Error
+                    )
+                    slog.info(
+                        "Diagnostics published",
+                        extra={
+                            "event": LogEvent(
+                                LogCategory.DIAGNOSTIC,
+                                "publish",
+                                {
+                                    "uri": params.uri,
+                                    "count": diag_count,
+                                    "errors": error_count,
+                                },
+                            )
+                        },
+                    )
+            except Exception:
+                logger.debug("Audit logging failed in _tracked_publish", exc_info=True)
+            return _original_publish(params)
+
+        self.text_document_publish_diagnostics = _tracked_publish  # type: ignore[assignment]
 
     # -- Public property accessors ---
 
@@ -318,6 +435,11 @@ class IvyLanguageServer(LanguageServer):
         return self._compiler_manager
 
     @property
+    def diagnostic_cache(self) -> "DiagnosticCache":
+        """Public accessor for the pull-diagnostics cache."""
+        return self._diagnostic_cache
+
+    @property
     def initializing(self) -> bool:
         """Whether the server is currently initializing."""
         return self._initializing
@@ -330,6 +452,7 @@ class IvyLanguageServer(LanguageServer):
     def __init_features(self):
         # -- Feature registration (below) ---
         from ivy_lsp.features import (
+            call_hierarchy,
             code_action,
             code_lens,
             commands,
@@ -340,6 +463,7 @@ class IvyLanguageServer(LanguageServer):
             document_symbols,
             folding_range,
             hover,
+            implementation,
             monitoring,
             references,
             rename,
@@ -366,6 +490,8 @@ class IvyLanguageServer(LanguageServer):
         folding_range.register(self)
         monitoring.register(self)
         visualization.register(self)
+        implementation.register(self)
+        call_hierarchy.register(self)
 
         @self.feature(lsp.INITIALIZE)
         def on_initialize(params: lsp.InitializeParams) -> None:
@@ -373,17 +499,42 @@ class IvyLanguageServer(LanguageServer):
             if isinstance(opts, dict):
                 code_lens_opts = opts.get("codeLens", {})
                 if isinstance(code_lens_opts, dict):
-                    self._code_lens_enabled = code_lens_opts.get(
-                        "enabled", True
-                    )
-                    self._rfc_coverage_enabled = code_lens_opts.get(
-                        "rfcCoverage", True
-                    )
+                    self._code_lens_enabled = code_lens_opts.get("enabled", True)
+                    self._rfc_coverage_enabled = code_lens_opts.get("rfcCoverage", True)
+
+            # Check if the client supports work-done progress tokens.
+            # If not, the server won't attempt to create progress tokens
+            # (avoids JsonRpcMethodNotFound errors from clients like
+            # Claude Code / MCP that don't handle
+            # window/workDoneProgress/create).
+            try:
+                general = getattr(params.capabilities, "general", None)
+                if general is not None:
+                    # LSP 3.16+ client capabilities
+                    wdp = getattr(general, "work_done_progress", None)
+                    # Explicit check: if client has no work_done_progress
+                    # capability, we need to also check window capability
+                    if wdp is True:
+                        self._client_supports_work_done_progress = True
+                if not self._client_supports_work_done_progress:
+                    window = getattr(params.capabilities, "window", None)
+                    if window is not None:
+                        wdp = getattr(window, "work_done_progress", None)
+                        if wdp is True:
+                            self._client_supports_work_done_progress = True
+            except Exception:
+                logger.debug(
+                    "Failed to check client work-done progress capability",
+                    exc_info=True,
+                )
+
             logger.info(
                 "initializationOptions: codeLens.enabled=%s, "
-                "codeLens.rfcCoverage=%s",
+                "codeLens.rfcCoverage=%s, "
+                "client.workDoneProgress=%s",
                 self._code_lens_enabled,
                 self._rfc_coverage_enabled,
+                self._client_supports_work_done_progress,
             )
 
         @self.feature(lsp.INITIALIZED)
@@ -410,9 +561,13 @@ class IvyLanguageServer(LanguageServer):
                 slog.info(
                     "Running in %s mode",
                     mode,
-                    extra={"event": LogEvent(
-                        LogCategory.MILESTONE, "startup", {"mode": mode},
-                    )},
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.MILESTONE,
+                            "startup",
+                            {"mode": mode},
+                        )
+                    },
                 )
             except Exception:
                 logger.exception("on_initialized failed")
@@ -430,6 +585,24 @@ class IvyLanguageServer(LanguageServer):
 
         @self.feature(lsp.SHUTDOWN)
         def on_shutdown(params) -> None:
+            slog.info(
+                "Session audit summary",
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "summary",
+                        {
+                            "request_counts": dict(self._request_counts),
+                            "diagnostics_published": self._diagnostics_published_count,
+                            "diagnostic_pull_requests": self._diagnostic_pull_count,
+                            "diagnostic_gap": (
+                                self._diagnostics_published_count
+                                - self._diagnostic_pull_count
+                            ),
+                        },
+                    )
+                },
+            )
             self._shutdown_event.set()
             self._bulk_analysis_cancel.set()
             if self._indexer is not None:
@@ -466,15 +639,16 @@ class IvyLanguageServer(LanguageServer):
                 "Sent ivy/modelReady: %d actions, %d requirements",
                 action_count,
                 req_count,
-                extra={"event": LogEvent(
-                    LogCategory.MILESTONE, "model_ready",
-                    {"actions": action_count, "requirements": req_count},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.MILESTONE,
+                        "model_ready",
+                        {"actions": action_count, "requirements": req_count},
+                    )
+                },
             )
         except Exception:
-            logger.warning(
-                "Failed to send ivy/modelReady notification", exc_info=True
-            )
+            logger.warning("Failed to send ivy/modelReady notification", exc_info=True)
 
     def _send_server_ready_notification(self, init_start: float) -> None:
         """Send ``ivy/serverReady`` notification after initialization completes."""
@@ -491,15 +665,16 @@ class IvyLanguageServer(LanguageServer):
                 "Sent ivy/serverReady: mode=%s, duration=%.3fs",
                 mode,
                 init_duration,
-                extra={"event": LogEvent(
-                    LogCategory.MILESTONE, "server_ready",
-                    {"mode": mode, "duration_s": init_duration},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.MILESTONE,
+                        "server_ready",
+                        {"mode": mode, "duration_s": init_duration},
+                    )
+                },
             )
         except Exception:
-            logger.warning(
-                "Failed to send ivy/serverReady notification", exc_info=True
-            )
+            logger.warning("Failed to send ivy/serverReady notification", exc_info=True)
 
     def _make_progress_callback(
         self,
@@ -529,14 +704,21 @@ class IvyLanguageServer(LanguageServer):
         state_lock = threading.Lock()
         server = self
 
-        # Eagerly create the progress token (outside any callback)
-        try:
-            server.work_done_progress.create(token)
-        except Exception:
+        # Skip progress entirely if the client doesn't support it
+        if not getattr(self, "_client_supports_work_done_progress", False):
             state["disabled"] = True
             logger.debug(
-                "Client does not support work-done progress", exc_info=True
+                "Skipping work-done progress: client does not advertise support"
             )
+        else:
+            # Eagerly create the progress token (outside any callback)
+            try:
+                server.work_done_progress.create(token)
+            except Exception:
+                state["disabled"] = True
+                logger.debug(
+                    "Client does not support work-done progress", exc_info=True
+                )
 
         def _callback(completed: int, total: int, current_file):
             if server._shutdown_event.is_set():
@@ -579,9 +761,7 @@ class IvyLanguageServer(LanguageServer):
                     state["last_report"] = now
 
             pct = int(100 * completed / total) if total > 0 else 0
-            basename = (
-                os.path.basename(current_file) if current_file else ""
-            )
+            basename = os.path.basename(current_file) if current_file else ""
             try:
                 server.work_done_progress.report(
                     token,
@@ -638,14 +818,18 @@ class IvyLanguageServer(LanguageServer):
                     result.t2_completed,
                     len(result.errors),
                     result.cancelled,
-                    extra={"event": LogEvent(
-                        LogCategory.MILESTONE, "bulk_t1t2", {
-                            "t1": result.t1_completed,
-                            "t2": result.t2_completed,
-                            "errors": len(result.errors),
-                            "cancelled": result.cancelled,
-                        },
-                    )},
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.MILESTONE,
+                            "bulk_t1t2",
+                            {
+                                "t1": result.t1_completed,
+                                "t2": result.t2_completed,
+                                "errors": len(result.errors),
+                                "cancelled": result.cancelled,
+                            },
+                        )
+                    },
                 )
                 self._send_model_ready_notification()
                 self._start_bulk_compilation_via_pipeline()
@@ -670,7 +854,9 @@ class IvyLanguageServer(LanguageServer):
             pass
 
         thread = threading.Thread(
-            target=_run, daemon=True, name="ivy-bulk-analysis",
+            target=_run,
+            daemon=True,
+            name="ivy-bulk-analysis",
         )
         thread.start()
 
@@ -732,10 +918,13 @@ class IvyLanguageServer(LanguageServer):
         slog.info(
             "Starting bulk compilation for %d test files",
             len(test_files),
-            extra={"event": LogEvent(
-                LogCategory.MILESTONE, "compile_bulk",
-                {"test_files": len(test_files)},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.MILESTONE,
+                    "compile_bulk",
+                    {"test_files": len(test_files)},
+                )
+            },
         )
 
         progress_cb = self._make_progress_callback(
@@ -801,7 +990,8 @@ class IvyLanguageServer(LanguageServer):
             logging.getLogger("ivy_lsp").setLevel(logging.INFO)
 
     def _create_resolver(
-        self, ws_root: str,
+        self,
+        ws_root: str,
     ) -> Tuple[Optional["IncludeResolver"], str]:
         """Create include resolver with workspace detection and staging.
 
@@ -822,11 +1012,17 @@ class IvyLanguageServer(LanguageServer):
             ws_root,
             ws_config.detected_by,
             ws_config.project_type,
-            extra={"event": LogEvent(
-                LogCategory.DIAGNOSTIC, "workspace_detection",
-                {"root": ws_root, "detected_by": ws_config.detected_by,
-                 "project_type": ws_config.project_type},
-            )},
+            extra={
+                "event": LogEvent(
+                    LogCategory.DIAGNOSTIC,
+                    "workspace_detection",
+                    {
+                        "root": ws_root,
+                        "detected_by": ws_config.detected_by,
+                        "project_type": ws_config.project_type,
+                    },
+                )
+            },
         )
 
         # Read include/exclude paths from environment, merging with detected
@@ -842,19 +1038,25 @@ class IvyLanguageServer(LanguageServer):
             slog.info(
                 "Include paths: %s",
                 include_paths,
-                extra={"event": LogEvent(
-                    LogCategory.DIAGNOSTIC, "startup",
-                    {"include_paths": include_paths},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "startup",
+                        {"include_paths": include_paths},
+                    )
+                },
             )
         if exclude_paths:
             slog.info(
                 "Exclude paths: %s",
                 exclude_paths,
-                extra={"event": LogEvent(
-                    LogCategory.DIAGNOSTIC, "startup",
-                    {"exclude_paths": exclude_paths},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "startup",
+                        {"exclude_paths": exclude_paths},
+                    )
+                },
             )
 
         try:
@@ -880,10 +1082,13 @@ class IvyLanguageServer(LanguageServer):
             slog.info(
                 "Created staging directory: %s",
                 staging_dir,
-                extra={"event": LogEvent(
-                    LogCategory.DIAGNOSTIC, "staging",
-                    {"staging_dir": staging_dir},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "staging",
+                        {"staging_dir": staging_dir},
+                    )
+                },
             )
         except Exception:
             logger.exception("Failed to create staging, falling back to direct scan")
@@ -903,12 +1108,12 @@ class IvyLanguageServer(LanguageServer):
         Sets self._parser and self._full_mode.
         """
         try:
-            from ivy_lsp.parsing.parser_session import IvyParserWrapper
-
             # Eagerly verify z3 is actually available — IvyParserWrapper
             # defers ivy imports to method bodies, so the import above
             # succeeds even without z3.
             import ivy.ivy_utils  # noqa: F401 — triggers z3_shim
+
+            from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
             self._parser = IvyParserWrapper(resolve_callback=resolver.resolve)
             self._full_mode = True
@@ -924,9 +1129,13 @@ class IvyLanguageServer(LanguageServer):
             slog.info(
                 "z3 not available (%s); running in light mode",
                 e,
-                extra={"event": LogEvent(
-                    LogCategory.DIAGNOSTIC, "startup", {"reason": str(e)},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "startup",
+                        {"reason": str(e)},
+                    )
+                },
             )
 
     def _create_indexer(self, ws_root: str, resolver: "IncludeResolver") -> bool:
@@ -943,7 +1152,9 @@ class IvyLanguageServer(LanguageServer):
         )
         try:
             self._indexer = WorkspaceIndexer(
-                ws_root, self._parser, resolver,
+                ws_root,
+                self._parser,
+                resolver,
                 progress_callback=progress_cb,
                 done_callback=self._start_bulk_analysis,
             )
@@ -969,11 +1180,17 @@ class IvyLanguageServer(LanguageServer):
                 "Indexed %d files, %d symbols",
                 n_files,
                 n_symbols,
-                extra={"event": LogEvent(
-                    LogCategory.MILESTONE, "indexing",
-                    {"files": n_files, "symbols": n_symbols,
-                     "duration_s": round(index_duration, 3)},
-                )},
+                extra={
+                    "event": LogEvent(
+                        LogCategory.MILESTONE,
+                        "indexing",
+                        {
+                            "files": n_files,
+                            "symbols": n_symbols,
+                            "duration_s": round(index_duration, 3),
+                        },
+                    )
+                },
             )
             # Explicit notification bypasses the log-handler rate limiter
             # so clients always see this milestone in the Output channel.
@@ -1035,9 +1252,11 @@ class IvyLanguageServer(LanguageServer):
                                 "Cross-directory includes will fail. "
                                 "indexer=%s, has_resolver=%s",
                                 self._indexer is not None,
-                                self._indexer.resolver is not None if self._indexer else False
-                                if self._indexer
-                                else False,
+                                (
+                                    self._indexer.resolver is not None
+                                    if self._indexer
+                                    else False if self._indexer else False
+                                ),
                             )
                         else:
                             logger.info(
@@ -1101,9 +1320,7 @@ class IvyLanguageServer(LanguageServer):
 
                 return _find_enclosing_test(self, filepath)
 
-            requirement_graph = getattr(
-                self._indexer, "requirement_graph", None
-            )
+            requirement_graph = getattr(self._indexer, "requirement_graph", None)
             self._analysis_pipeline = AnalysisPipeline(
                 self._semantic_model,
                 self._parser,

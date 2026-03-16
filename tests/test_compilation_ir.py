@@ -4,6 +4,7 @@ Each test creates an instance with realistic QUIC protocol data,
 performs a pickle round-trip (dumps then loads), and asserts equality
 and key field values.
 """
+
 from __future__ import annotations
 
 import pickle
@@ -276,9 +277,7 @@ class TestLabeledFormulaIR:
         assert restored.lineno is None
 
     def test_defaults(self):
-        formula = LabeledFormulaIR(
-            label="inv", formula_str="true"
-        )
+        formula = LabeledFormulaIR(label="inv", formula_str="true")
         assert formula.lineno is None
         assert formula.temporal is False
         assert formula.is_assumed is False

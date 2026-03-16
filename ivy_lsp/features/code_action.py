@@ -93,11 +93,7 @@ def compute_code_actions(
             m = re.search(r"Action '(\w+)'", diag.message)
             action_name = m.group(1) if m else "action_name"
             insert_line = diag.range.end.line + 1
-            snippet = (
-                f"\nafter {action_name} {{\n"
-                f"    ensure ...\n"
-                f"}}\n"
-            )
+            snippet = f"\nafter {action_name} {{\n" f"    ensure ...\n" f"}}\n"
             actions.append(
                 lsp.CodeAction(
                     title=f"Add after monitor for '{action_name}'",
@@ -108,7 +104,10 @@ def compute_code_actions(
                             uri: [
                                 lsp.TextEdit(
                                     range=make_range(
-                                        insert_line, 0, insert_line, 0,
+                                        insert_line,
+                                        0,
+                                        insert_line,
+                                        0,
                                     ),
                                     new_text=snippet,
                                 )
@@ -134,7 +133,10 @@ def compute_code_actions(
                             uri: [
                                 lsp.TextEdit(
                                     range=make_range(
-                                        insert_line, 0, insert_line, 0,
+                                        insert_line,
+                                        0,
+                                        insert_line,
+                                        0,
                                     ),
                                     new_text=snippet,
                                 )
@@ -165,7 +167,11 @@ def register(server) -> None:
             source = doc.source or ""
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, compute_code_actions, uri, source, params.context.diagnostics,
+                None,
+                compute_code_actions,
+                uri,
+                source,
+                params.context.diagnostics,
             )
         except Exception:
             logger.warning("code_action handler failed", exc_info=True)

@@ -29,6 +29,7 @@ class SemanticModel:
     """
 
     def __init__(self) -> None:
+        """Initialize empty node/edge stores with a reentrant lock."""
         self._lock = threading.RLock()
 
         # Primary storage
@@ -250,3 +251,45 @@ class SemanticModel:
         """Return total number of edges."""
         with self._lock:
             return len(self._edges)
+
+    # -- Domain query methods (RequirementGraph compatibility) -----------------
+
+    def get_requirements_for_action(self, action_id: str) -> List[Any]:
+        """Get all requirement nodes constraining an action via CONSTRAINS edges."""
+        with self._lock:
+            incoming = self._incoming.get(action_id, [])
+            return [
+                self._nodes[src]
+                for et, src in incoming
+                if et == SemanticEdgeType.CONSTRAINS and src in self._nodes
+            ]
+
+    def get_state_vars_read_by(self, node_id: str) -> List[Any]:
+        """Get state variable nodes read by a requirement/property via READS edges."""
+        with self._lock:
+            outgoing = self._outgoing.get(node_id, [])
+            return [
+                self._nodes[tgt]
+                for et, tgt in outgoing
+                if et == SemanticEdgeType.READS and tgt in self._nodes
+            ]
+
+    def get_coverage_stats(self) -> Dict[str, Any]:
+        """Get RFC coverage statistics from the semantic graph."""
+        from ivy_lsp.analysis.requirement_graph import RequirementNode
+
+        with self._lock:
+            reqs = list(self._nodes_by_type.get(RequirementNode, {}).values())
+            covered = [
+                r
+                for r in reqs
+                if any(
+                    et == SemanticEdgeType.COVERS
+                    for et, _ in self._outgoing.get(r.id, [])
+                )
+            ]
+            return {
+                "total_requirements": len(reqs),
+                "covered": len(covered),
+                "uncovered": len(reqs) - len(covered),
+            }

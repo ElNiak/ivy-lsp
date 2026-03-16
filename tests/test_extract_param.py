@@ -18,7 +18,10 @@ class TestExtractParam:
         assert _extract_param(["quic.send"], "actionName") == "quic.send"
 
     def test_nested_list(self):
-        assert _extract_param([["quic.send", "file:///a.ivy"]], "actionName") == "quic.send"
+        assert (
+            _extract_param([["quic.send", "file:///a.ivy"]], "actionName")
+            == "quic.send"
+        )
 
     def test_dict(self):
         assert _extract_param({"actionName": "quic.send"}, "actionName") == "quic.send"

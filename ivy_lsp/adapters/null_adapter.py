@@ -16,6 +16,7 @@ class NullParserAdapter:
     """No-op parser that always returns a failed ParseResult."""
 
     def parse(self, source: str, filename: str) -> ParseResult:
+        """Return a failed ParseResult without parsing."""
         return ParseResult(ast=None, errors=[], success=False, filename=filename)
 
 
@@ -25,6 +26,7 @@ class NullAstEnrichmentAdapter:
     def extract_type_info(
         self, ast: Any, filename: str, source: str
     ) -> List[TypeAnnotation]:
+        """Return an empty list of type annotations."""
         return []
 
 
@@ -32,6 +34,7 @@ class NullCompilerAdapter:
     """No-op compiler adapter that returns a failed CompileResult."""
 
     def compile(self, source: str, filename: str) -> CompileResult:
+        """Return a failed CompileResult without compiling."""
         return CompileResult(success=False, errors=[])
 
     def compile_background(
@@ -40,5 +43,6 @@ class NullCompilerAdapter:
         filename: str,
         callback: Optional[Callable[[CompileResult], None]] = None,
     ) -> None:
+        """Invoke callback immediately with a failed result."""
         if callback is not None:
             callback(CompileResult(success=False, errors=[]))

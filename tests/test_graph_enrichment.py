@@ -1,4 +1,5 @@
 """Tests for graph enrichment from CompiledModuleIR."""
+
 from __future__ import annotations
 
 import pytest
@@ -277,13 +278,15 @@ class TestEnrichRequirementGraph:
 
         graph = ScopedRequirementModel()
         # Pre-populate with an existing action at line 42
-        graph.add_action(ActionNode(
-            id="ext:send",
-            name="send",
-            qualified_name="ext:send",
-            file="original.ivy",
-            line=42,
-        ))
+        graph.add_action(
+            ActionNode(
+                id="ext:send",
+                name="send",
+                qualified_name="ext:send",
+                file="original.ivy",
+                line=42,
+            )
+        )
         ir = CompiledModuleIR(
             actions={
                 "ext:send": ActionIR(name="ext:send", is_exported=True),

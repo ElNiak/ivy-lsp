@@ -144,8 +144,11 @@ class TestFallbackScannerDiagnostics:
     """Tests for surfacing fallback scanner lexer errors as diagnostics."""
 
     def test_lexer_error_produces_diagnostic(self):
-        """A file with illegal characters should produce an error diagnostic
-        when the parser fails and the fallback scanner encounters the error."""
+        """A file with illegal characters should produce an error diagnostic.
+
+        When the parser fails and the fallback scanner encounters the error,
+        a diagnostic is emitted.
+        """
         from ivy_lsp.features.diagnostics import compute_diagnostics
         from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
@@ -154,13 +157,11 @@ class TestFallbackScannerDiagnostics:
         source = "#lang ivy1.7\n\ntype cid\naction foo\u2019s_thing\n"
         diags = compute_diagnostics(parser, source, "smart_quote.ivy")
         lexer_errors = [
-            d
-            for d in diags
-            if d.source == "ivy-lsp" and "Lexer error" in d.message
+            d for d in diags if d.source == "ivy-lsp" and "Lexer error" in d.message
         ]
-        assert len(lexer_errors) > 0, (
-            "Expected a diagnostic for the illegal smart quote character"
-        )
+        assert (
+            len(lexer_errors) > 0
+        ), "Expected a diagnostic for the illegal smart quote character"
         assert lexer_errors[0].severity == DiagnosticSeverity.Error
 
 
@@ -197,7 +198,7 @@ class TestDidCloseHandler:
         # Collect registered features
         registered = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 registered[method] = fn
                 return fn
@@ -207,12 +208,12 @@ class TestDidCloseHandler:
         server.feature = fake_feature
 
         register(server)
-        assert lsp.TEXT_DOCUMENT_DID_CLOSE in registered, (
-            "register() must install a textDocument/didClose handler"
-        )
+        assert (
+            lsp.TEXT_DOCUMENT_DID_CLOSE in registered
+        ), "register() must install a textDocument/didClose handler"
 
     def test_did_close_publishes_empty_diagnostics(self):
-        """didClose should publish an empty diagnostics list to clear stale entries."""
+        """DidClose should publish an empty diagnostics list to clear stale entries."""
         from unittest.mock import MagicMock
 
         from lsprotocol import types as lsp
@@ -222,7 +223,7 @@ class TestDidCloseHandler:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -244,7 +245,7 @@ class TestDidCloseHandler:
         assert published.diagnostics == []
 
     def test_did_close_cancels_debounce_task(self):
-        """didClose should cancel any pending debounce task for the closed URI."""
+        """DidClose should cancel any pending debounce task for the closed URI."""
         import asyncio
         from unittest.mock import MagicMock
 
@@ -255,7 +256,7 @@ class TestDidCloseHandler:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -280,9 +281,9 @@ class TestDidCloseHandler:
                 _debounce_tasks = did_close.__closure__[i].cell_contents
                 break
 
-        assert _debounce_tasks is not None, (
-            "Could not find _debounce_tasks in did_close closure"
-        )
+        assert (
+            _debounce_tasks is not None
+        ), "Could not find _debounce_tasks in did_close closure"
 
         # Inject a mock pending task
         uri = "file:///tmp/test.ivy"
@@ -303,7 +304,7 @@ class TestDeepTaskTracking:
     """C2: Deep diagnostics tasks must be tracked and cancellable."""
 
     def test_did_close_cancels_deep_task(self):
-        """didClose should cancel any pending deep diagnostics task."""
+        """DidClose should cancel any pending deep diagnostics task."""
         import asyncio
         from unittest.mock import MagicMock
 
@@ -314,7 +315,7 @@ class TestDeepTaskTracking:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -364,7 +365,7 @@ class TestDeepTaskTracking:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -440,16 +441,19 @@ class TestDiagnosticEndPosition:
 
         source = "#lang ivy1.7\n\naction foo(x:cid)\n"
         diags = compute_diagnostics(
-            None, source, "/tmp/test.ivy",
-            indexer=indexer, parse_result=fake_result,
+            None,
+            source,
+            "/tmp/test.ivy",
+            indexer=indexer,
+            parse_result=fake_result,
         )
 
         coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
         assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
         for d in coverage_diags:
-            assert d.range.end.character != 999, (
-                "Coverage diagnostic uses magic 999 instead of actual line length"
-            )
+            assert (
+                d.range.end.character != 999
+            ), "Coverage diagnostic uses magic 999 instead of actual line length"
 
     def test_coverage_hint_end_matches_line_length(self):
         """Coverage hint end character should match the actual line length."""
@@ -480,8 +484,11 @@ class TestDiagnosticEndPosition:
         source = "#lang ivy1.7\n\naction foo(x:cid)\n"
         # Line 2 is "action foo(x:cid)" which has length 17
         diags = compute_diagnostics(
-            None, source, "/tmp/test.ivy",
-            indexer=indexer, parse_result=fake_result,
+            None,
+            source,
+            "/tmp/test.ivy",
+            indexer=indexer,
+            parse_result=fake_result,
         )
 
         coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
@@ -504,9 +511,7 @@ class TestDiagnosticEndPosition:
         diags = parse_ivy_check_output(output)
         assert len(diags) == 1, "Expected one diagnostic from ivy_check output"
         for d in diags:
-            assert d.range.end.character != 999, (
-                "ivy_check diagnostic uses magic 999"
-            )
+            assert d.range.end.character != 999, "ivy_check diagnostic uses magic 999"
 
     def test_ivy_check_output_uses_next_line_convention(self):
         """parse_ivy_check_output should use lineno+1, char=0 for full-line span."""
@@ -550,7 +555,7 @@ class TestDiagnosticVersion:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -582,16 +587,16 @@ class TestDiagnosticVersion:
         finally:
             loop.close()
 
-        assert server.text_document_publish_diagnostics.called, (
-            "Expected publish_diagnostics to be called"
-        )
+        assert (
+            server.text_document_publish_diagnostics.called
+        ), "Expected publish_diagnostics to be called"
         published = server.text_document_publish_diagnostics.call_args[0][0]
-        assert published.version == 42, (
-            f"Expected version=42, got version={published.version}"
-        )
+        assert (
+            published.version == 42
+        ), f"Expected version=42, got version={published.version}"
 
     def test_did_close_does_not_include_version(self):
-        """didClose publishes empty diagnostics without version (no doc available)."""
+        """DidClose publishes empty diagnostics without version (no doc available)."""
         from unittest.mock import MagicMock
 
         from lsprotocol import types as lsp
@@ -601,7 +606,7 @@ class TestDiagnosticVersion:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -618,9 +623,9 @@ class TestDiagnosticVersion:
         handler(params)
 
         published = server.text_document_publish_diagnostics.call_args[0][0]
-        assert published.version is None, (
-            f"didClose should not set version, got version={published.version}"
-        )
+        assert (
+            published.version is None
+        ), f"didClose should not set version, got version={published.version}"
 
     def test_did_save_publishes_with_version(self):
         """did_save should include doc.version in published diagnostics."""
@@ -634,7 +639,7 @@ class TestDiagnosticVersion:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
@@ -666,13 +671,13 @@ class TestDiagnosticVersion:
         finally:
             loop.close()
 
-        assert server.text_document_publish_diagnostics.called, (
-            "Expected publish_diagnostics to be called"
-        )
+        assert (
+            server.text_document_publish_diagnostics.called
+        ), "Expected publish_diagnostics to be called"
         published = server.text_document_publish_diagnostics.call_args[0][0]
-        assert published.version == 7, (
-            f"Expected version=7, got version={published.version}"
-        )
+        assert (
+            published.version == 7
+        ), f"Expected version=7, got version={published.version}"
 
 
 class TestHandlerConsistency:
@@ -690,19 +695,21 @@ class TestHandlerConsistency:
         server = MagicMock()
         handlers = {}
 
-        def fake_feature(method):
+        def fake_feature(method, options=None):
             def decorator(fn):
                 handlers[method] = fn
                 return fn
+
             return decorator
+
         server.feature = fake_feature
 
         register(server)
 
         handler = handlers[lsp.TEXT_DOCUMENT_DID_CHANGE]
-        assert asyncio.iscoroutinefunction(handler), (
-            "did_change handler must be async for pygls 2.x consistency"
-        )
+        assert asyncio.iscoroutinefunction(
+            handler
+        ), "did_change handler must be async for pygls 2.x consistency"
 
 
 class TestFallbackScanDeduplication:
@@ -720,9 +727,7 @@ class TestFallbackScanDeduplication:
         # Indicate the result already includes lexer diagnostics
         result.lexer_errors = [{"line": 1, "message": "bad char"}]
 
-        with patch(
-            "ivy_lsp.parsing.fallback_scanner.fallback_scan"
-        ) as mock_scan:
+        with patch("ivy_lsp.parsing.fallback_scanner.fallback_scan") as mock_scan:
             mock_scan.return_value = ([], None)
             compute_diagnostics(
                 parser=None,
@@ -744,9 +749,7 @@ class TestFallbackScanDeduplication:
         # No lexer_errors attribute (standard ParseResult)
         del result.lexer_errors
 
-        with patch(
-            "ivy_lsp.parsing.fallback_scanner.fallback_scan"
-        ) as mock_scan:
+        with patch("ivy_lsp.parsing.fallback_scanner.fallback_scan") as mock_scan:
             mock_scan.return_value = ([], None)
             compute_diagnostics(
                 parser=None,

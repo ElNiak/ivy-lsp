@@ -35,6 +35,7 @@ class IvySymbol:
     file_path: Optional[str] = None
 
     def to_dict(self) -> dict:
+        """Serialize to a plain dictionary for cross-process transfer."""
         return {
             "name": self.name,
             "kind": int(self.kind),
@@ -46,6 +47,7 @@ class IvySymbol:
 
     @classmethod
     def from_dict(cls, d: dict) -> "IvySymbol":
+        """Deserialize from a plain dictionary."""
         return cls(
             name=d["name"],
             kind=SymbolKind(d["kind"]),
@@ -81,6 +83,7 @@ class SymbolTable:
     """
 
     def __init__(self) -> None:
+        """Initialize empty name, file, and flat symbol indices."""
         self._by_name: Dict[str, List[IvySymbol]] = defaultdict(list)
         self._by_file: Dict[str, List[IvySymbol]] = defaultdict(list)
         self._all: List[IvySymbol] = []
@@ -139,6 +142,7 @@ class IncludeGraph:
     """
 
     def __init__(self) -> None:
+        """Initialize empty forward and reverse include mappings."""
         self._includes: Dict[str, Set[str]] = defaultdict(set)
         self._included_by: Dict[str, Set[str]] = defaultdict(set)
 

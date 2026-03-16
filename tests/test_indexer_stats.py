@@ -2,13 +2,13 @@
 
 import os
 import tempfile
-
-import pytest
 from unittest.mock import MagicMock
 
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer, IndexerStats
-from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable, IncludeGraph
+import pytest
 from lsprotocol.types import SymbolKind
+
+from ivy_lsp.indexer.workspace_indexer import IndexerStats, WorkspaceIndexer
+from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
 
 
 def _make_indexer(workspace_root="/tmp/test"):

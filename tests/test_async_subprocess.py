@@ -13,7 +13,6 @@ from ivy_lsp.utils.async_subprocess import (
     run_ivy_subprocess,
 )
 
-
 # ---------------------------------------------------------------------------
 # SubprocessResult dataclass
 # ---------------------------------------------------------------------------
@@ -46,6 +45,7 @@ class TestGetToolSemaphore:
         monkeypatch.delenv("IVY_LSP_MAX_CONCURRENT_TOOLS", raising=False)
         # Reset module-level state to force re-creation
         import ivy_lsp.utils.async_subprocess as mod
+
         mod._semaphores.clear()
         mod._semaphore_limit = None
 
@@ -56,6 +56,7 @@ class TestGetToolSemaphore:
     async def test_env_override(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         import ivy_lsp.utils.async_subprocess as mod
+
         mod._semaphores.clear()
         mod._semaphore_limit = None
 
@@ -65,6 +66,7 @@ class TestGetToolSemaphore:
     async def test_minimum_one(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "0")
         import ivy_lsp.utils.async_subprocess as mod
+
         mod._semaphores.clear()
         mod._semaphore_limit = None
 
@@ -103,7 +105,11 @@ class TestRunIvySubprocess:
 
     async def test_stderr_combined(self):
         result = await run_ivy_subprocess(
-            [sys.executable, "-c", "import sys; sys.stderr.write('err\\n'); print('out')"],
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('err\\n'); print('out')",
+            ],
             timeout=10.0,
             use_semaphore=False,
         )
@@ -159,6 +165,7 @@ class TestSemaphoreLimiting:
     async def test_bounds_concurrency(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         import ivy_lsp.utils.async_subprocess as mod
+
         mod._semaphores.clear()
         mod._semaphore_limit = None
 
@@ -167,7 +174,9 @@ class TestSemaphoreLimiting:
 
         async def _tracked_run():
             result = await run_ivy_subprocess(
-                cmd, timeout=10.0, use_semaphore=True,
+                cmd,
+                timeout=10.0,
+                use_semaphore=True,
             )
             return result
 

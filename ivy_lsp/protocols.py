@@ -1,4 +1,5 @@
 """Typed protocols for server interface contracts."""
+
 from __future__ import annotations
 
 import threading
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
 class IParserAdapter(Protocol):
     """Interface for Ivy parser adapters (full or fallback)."""
 
-    def parse(self, source: str, filename: str) -> Any: ...
+    def parse(self, source: str, filename: str) -> Any:
+        """Parse Ivy source text into an AST."""
+        ...
 
 
 @runtime_checkable
@@ -40,21 +43,44 @@ class IvyServerProtocol(Protocol):
     """
 
     @property
-    def indexer(self) -> Optional[WorkspaceIndexer]: ...
+    def indexer(self) -> Optional[WorkspaceIndexer]:
+        """Return the workspace indexer, if initialized."""
+        ...
+
     @property
-    def full_mode(self) -> bool: ...
+    def full_mode(self) -> bool:
+        """Return whether full (Ivy-backed) mode is active."""
+        ...
+
     @property
-    def initializing(self) -> bool: ...
+    def initializing(self) -> bool:
+        """Return whether the server is still initializing."""
+        ...
+
     @property
-    def semantic_model(self) -> Optional[SemanticModel]: ...
+    def semantic_model(self) -> Optional[SemanticModel]:
+        """Return the semantic model, if available."""
+        ...
+
     @property
-    def analysis_pipeline(self) -> Optional[AnalysisPipeline]: ...
+    def analysis_pipeline(self) -> Optional[AnalysisPipeline]:
+        """Return the analysis pipeline, if available."""
+        ...
+
     @property
-    def compiler_manager(self) -> Optional[CompilerManager]: ...
+    def compiler_manager(self) -> Optional[CompilerManager]:
+        """Return the compiler manager, if available."""
+        ...
+
     @property
-    def parser(self) -> Optional[IParserAdapter]: ...
+    def parser(self) -> Optional[IParserAdapter]:
+        """Return the parser adapter, if available."""
+        ...
+
     @property
-    def bulk_analysis_cancel(self) -> threading.Event: ...
+    def bulk_analysis_cancel(self) -> threading.Event:
+        """Return the cancellation event for bulk analysis."""
+        ...
 
     state_tracker: ServerStateTracker
     workspace: Any
@@ -67,21 +93,45 @@ class IIndexer(Protocol):
     """Public interface for the workspace indexer."""
 
     @property
-    def requirement_graph(self) -> Optional[RequirementGraph]: ...
-    @property
-    def include_graph(self) -> IncludeGraph: ...
-    @property
-    def resolver(self) -> IncludeResolver: ...
+    def requirement_graph(self) -> Optional[RequirementGraph]:
+        """Return the requirement graph, if built."""
+        ...
 
-    def lookup_all_symbols(self) -> List[IvySymbol]: ...
-    def lookup_qualified_symbols(self, name: str) -> List[IvySymbol]: ...
-    def get_deep_index_progress(self) -> Dict[str, Any]: ...
-    def get_file_export_imports(self) -> Dict[str, Any]: ...
-    def get_cached_file(self, filepath: str) -> Any: ...
+    @property
+    def include_graph(self) -> IncludeGraph:
+        """Return the include dependency graph."""
+        ...
+
+    @property
+    def resolver(self) -> IncludeResolver:
+        """Return the include path resolver."""
+        ...
+
+    def lookup_all_symbols(self) -> List[IvySymbol]:
+        """Return all symbols across the workspace."""
+        ...
+
+    def lookup_qualified_symbols(self, name: str) -> List[IvySymbol]:
+        """Return symbols matching a qualified name."""
+        ...
+
+    def get_deep_index_progress(self) -> Dict[str, Any]:
+        """Return progress info for the deep indexing pass."""
+        ...
+
+    def get_file_export_imports(self) -> Dict[str, Any]:
+        """Return export/import info for all indexed files."""
+        ...
+
+    def get_cached_file(self, filepath: str) -> Any:
+        """Return the cached parse result for a file."""
+        ...
 
 
 @runtime_checkable
 class IRequirementGraph(Protocol):
     """Public interface for the requirement graph."""
 
-    def get_outgoing_edges(self, node_id: str) -> List[Tuple[EdgeType, str]]: ...
+    def get_outgoing_edges(self, node_id: str) -> List[Tuple[EdgeType, str]]:
+        """Return outgoing edges for the given node."""
+        ...

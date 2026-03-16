@@ -14,6 +14,7 @@ if str(IVY_ROOT) not in sys.path:
 class TestRenameImport:
     def test_import(self):
         from ivy_lsp.features.rename import compute_rename
+
         assert compute_rename is not None
 
 
@@ -35,7 +36,9 @@ class TestComputeRename:
         lines = source.split("\n")
         filepath = str(tmp_path / "a.ivy")
         # Cursor on "cid" at line 1
-        edit = compute_rename(indexer, filepath, Position(line=1, character=5), lines, "conn_id")
+        edit = compute_rename(
+            indexer, filepath, Position(line=1, character=5), lines, "conn_id"
+        )
         assert edit is not None
         # Should have changes for the file
         changes = edit.changes
@@ -53,7 +56,9 @@ class TestComputeRename:
         from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
-        (tmp_path / "main.ivy").write_text("#lang ivy1.7\ninclude types\nrelation r(X:cid)\n")
+        (tmp_path / "main.ivy").write_text(
+            "#lang ivy1.7\ninclude types\nrelation r(X:cid)\n"
+        )
         parser = IvyParserWrapper()
         resolver = IncludeResolver(str(tmp_path))
         indexer = WorkspaceIndexer(str(tmp_path), parser, resolver)
@@ -62,7 +67,9 @@ class TestComputeRename:
         source = "#lang ivy1.7\ntype cid\n"
         lines = source.split("\n")
         filepath = str(tmp_path / "types.ivy")
-        edit = compute_rename(indexer, filepath, Position(line=1, character=5), lines, "conn_id")
+        edit = compute_rename(
+            indexer, filepath, Position(line=1, character=5), lines, "conn_id"
+        )
         assert edit is not None
         assert edit.changes is not None
         # Both files should have edits
@@ -111,7 +118,9 @@ class TestComputeRename:
 
         lines = source.split("\n")
         filepath = str(tmp_path / "a.ivy")
-        edit = compute_rename(indexer, filepath, Position(line=1, character=5), lines, "conn_id")
+        edit = compute_rename(
+            indexer, filepath, Position(line=1, character=5), lines, "conn_id"
+        )
         file_uri = Path(filepath).as_uri()
         for text_edit in edit.changes[file_uri]:
             assert text_edit.new_text == "conn_id"
@@ -178,6 +187,6 @@ class TestRenameNotBlocking:
         from ivy_lsp.features import rename as rename_mod
 
         source = inspect.getsource(rename_mod.register)
-        assert "run_in_executor" in source, (
-            "rename handler must use run_in_executor to avoid blocking event loop"
-        )
+        assert (
+            "run_in_executor" in source
+        ), "rename handler must use run_in_executor to avoid blocking event loop"

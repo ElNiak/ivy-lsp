@@ -1,17 +1,33 @@
 """Tests for ScopedRequirementModel scoped queries."""
+
 import pytest
+
 from ivy_lsp.analysis.requirement_graph import (
-    ActionNode, EdgeType, RequirementGraph, RequirementNode, StateVarNode,
+    ActionNode,
+    EdgeType,
+    RequirementGraph,
+    RequirementNode,
+    StateVarNode,
 )
 from ivy_lsp.analysis.test_scope import (
-    ExportImportInfo, ScopedRequirementModel, TestScope,
+    ExportImportInfo,
+    ScopedRequirementModel,
+    TestScope,
 )
 
 
-def _make_req(file, line, kind="require", formula="true", action="", mixin_kind="before"):
+def _make_req(
+    file, line, kind="require", formula="true", action="", mixin_kind="before"
+):
     return RequirementNode(
-        id=f"{file}:{line}", kind=kind, formula_text=formula,
-        line=line, col=0, file=file, monitor_action=action, mixin_kind=mixin_kind,
+        id=f"{file}:{line}",
+        kind=kind,
+        formula_text=formula,
+        line=line,
+        col=0,
+        file=file,
+        monitor_action=action,
+        mixin_kind=mixin_kind,
     )
 
 
@@ -42,14 +58,18 @@ def scoped_model():
 
     scope_a = TestScope(
         test_file="/test/test_a.ivy",
-        include_closure=frozenset({"/test/test_a.ivy", "/test/file_a.ivy", "/test/shared.ivy"}),
+        include_closure=frozenset(
+            {"/test/test_a.ivy", "/test/file_a.ivy", "/test/shared.ivy"}
+        ),
         exported_actions=frozenset({"quic.send"}),
         imported_actions=frozenset(),
         tester_role="client",
     )
     scope_b = TestScope(
         test_file="/test/test_b.ivy",
-        include_closure=frozenset({"/test/test_b.ivy", "/test/file_b.ivy", "/test/shared.ivy"}),
+        include_closure=frozenset(
+            {"/test/test_b.ivy", "/test/file_b.ivy", "/test/shared.ivy"}
+        ),
         exported_actions=frozenset({"quic.recv"}),
         imported_actions=frozenset(),
         tester_role="server",
@@ -152,10 +172,8 @@ class TestScopedNctCounts:
     """
 
     def test_exported_action_require_before_is_assumption(self, scoped_model):
-        """require + before mixin on exported action -> ASSUMPTION."""
-        entries = scoped_model.get_scoped_nct_counts(
-            "/test/test_a.ivy", "quic.send"
-        )
+        """Require + before mixin on exported action -> ASSUMPTION."""
+        entries = scoped_model.get_scoped_nct_counts("/test/test_a.ivy", "quic.send")
         assert len(entries) == 1
         assert entries[0] == {"kind": "require", "count": 2, "nct_tag": "ASSUMPTION"}
 
@@ -201,8 +219,10 @@ class TestScopedNctCounts:
         assert entries == []
 
     def test_multiple_kinds_same_action(self):
-        """An exported action with both require+before and ensure+before gets
-        per-requirement NCT tags: require+before=ASSUMPTION, ensure+before=GUARANTEE."""
+        """An exported action with both require+before and ensure+before gets separate NCT tags.
+
+        Per-requirement NCT tags: require+before=ASSUMPTION, ensure+before=GUARANTEE.
+        """
         model = ScopedRequirementModel()
         req1 = _make_req("/f.ivy", 10, "require", "x > 0", "quic.send")
         req2 = _make_req("/f.ivy", 20, "ensure", "y > 0", "quic.send")
@@ -230,7 +250,7 @@ class TestScopedNctCounts:
         assert by_kind["ensure"]["count"] == 1
 
     def test_after_mixin_require_is_guarantee(self):
-        """require + after mixin on exported action -> GUARANTEE."""
+        """Require + after mixin on exported action -> GUARANTEE."""
         model = ScopedRequirementModel()
         req = _make_req(
             "/f.ivy", 10, "require", "x > 0", "quic.send", mixin_kind="after"
@@ -283,9 +303,7 @@ class TestScopedNctCounts:
 
     def test_unknown_test_returns_empty(self, scoped_model):
         """Unregistered test file returns empty list."""
-        entries = scoped_model.get_scoped_nct_counts(
-            "/nonexistent.ivy", "quic.send"
-        )
+        entries = scoped_model.get_scoped_nct_counts("/nonexistent.ivy", "quic.send")
         assert entries == []
 
     def test_unknown_action_returns_empty(self, scoped_model):
@@ -316,9 +334,7 @@ class TestScopedNctCounts:
 
     def test_entries_have_required_keys(self, scoped_model):
         """Each entry dict has kind, count, nct_tag with correct types."""
-        entries = scoped_model.get_scoped_nct_counts(
-            "/test/test_a.ivy", "quic.send"
-        )
+        entries = scoped_model.get_scoped_nct_counts("/test/test_a.ivy", "quic.send")
         for entry in entries:
             assert "kind" in entry
             assert "count" in entry
@@ -390,9 +406,15 @@ class TestScopeCacheThreadSafety:
         model.register_test_scope(scope)
 
         for i in range(50):
-            model.add_requirement(_make_req(
-                "/a.ivy", i, kind="require", formula="true", action="act1",
-            ))
+            model.add_requirement(
+                _make_req(
+                    "/a.ivy",
+                    i,
+                    kind="require",
+                    formula="true",
+                    action="act1",
+                )
+            )
 
         errors = []
         stop = threading.Event()

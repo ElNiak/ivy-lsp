@@ -1,4 +1,5 @@
 """Tests for shared structural lint checks."""
+
 from ivy_lsp.utils.structural_lint import check_structural_issues_raw
 
 
