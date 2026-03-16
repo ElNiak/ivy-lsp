@@ -14,7 +14,6 @@ import asyncio
 import logging
 import os
 import re
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -171,11 +170,10 @@ def start_mcp(
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError:
-        logger.critical(
+        raise ImportError(
             "MCP mode requires the 'mcp' package. "
             "Install with: pip install ivy-lsp[mcp]"
         )
-        sys.exit(1)
 
     root = workspace_root or os.getcwd()
 
