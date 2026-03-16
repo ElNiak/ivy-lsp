@@ -309,7 +309,10 @@ def _convert_action(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    # Use the leaf name (after last dot) for source scanning, since nested
+    # actions have dotted names like "quic_packet_type.next".
+    leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
+    rng = _loc_to_tuple(loc, source, name=leaf_name, keyword="action")
     detail = _extract_action_detail(decl)
 
     return [
@@ -377,7 +380,9 @@ def _extract_constant_detail(atom: Any) -> Optional[str]:
         if args and len(args) > 0:
             param_strs = []
             for p in args:
-                p_name = getattr(p, "rep", None) or getattr(p, "relname", None) or str(p)
+                p_name = (
+                    getattr(p, "rep", None) or getattr(p, "relname", None) or str(p)
+                )
                 p_sort = getattr(p, "sort", None)
                 if p_sort:
                     param_strs.append(f"{p_name}:{p_sort}")
@@ -477,7 +482,7 @@ def _convert_alias(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword="alias")
 
     return [
         IvySymbol(
@@ -582,7 +587,8 @@ def _convert_definition(decl: Any, filename: str, source: str) -> List[IvySymbol
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
+    rng = _loc_to_tuple(loc, source, name=leaf_name, keyword="definition")
 
     return [
         IvySymbol(
@@ -725,13 +731,25 @@ def is_from_included_file(decl: Any, abs_filename: Optional[str]) -> bool:
     return False
 
 
-def _loc_to_tuple(loc: Any, source: str) -> Tuple[int, int, int, int]:
+def _loc_to_tuple(
+    loc: Any,
+    source: str,
+    name: Optional[str] = None,
+    keyword: Optional[str] = None,
+) -> Tuple[int, int, int, int]:
     """Convert an Ivy location to a 0-based 4-int tuple.
 
     Uses :func:`ivy_location_to_range` to handle the 1-based to 0-based
-    conversion and line-length computation.
+    conversion and line-length computation.  When the Ivy AST node has no
+    line info (returns line 0), falls back to scanning the source text for
+    the *keyword* + *name* pattern to determine the correct line.
     """
     rng = ivy_location_to_range(loc, source)
+    if rng.start.line == 0 and rng.end.line == 0 and name and keyword:
+        for i, line in enumerate(source.split("\n")):
+            if keyword in line and name in line:
+                line_len = len(line)
+                return (i, 0, i, line_len)
     return (
         rng.start.line,
         rng.start.character,

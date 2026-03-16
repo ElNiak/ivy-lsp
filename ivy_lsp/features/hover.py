@@ -105,7 +105,11 @@ def _enrich_with_semantic_model(
         n
         for n in semantic_model.get_nodes_by_type(RfcAnnotation)
         if n.file
-        and (n.file == abs_path or n.file == filepath or os.path.abspath(n.file) == abs_path)
+        and (
+            n.file == abs_path
+            or n.file == filepath
+            or os.path.abspath(n.file) == abs_path
+        )
         and n.line == line
     ]
     if annotations:
@@ -151,20 +155,23 @@ def _sort_by_proximity(results: list, current_filepath: str) -> list:
     """Sort symbol lookup results by proximity to current file.
 
     Same-file matches first, then same-directory, then by common path length.
+    Paths are normalized before comparison to handle symlinks and mixed
+    absolute/relative paths.
     """
     if len(results) <= 1:
         return results
 
-    current_dir = os.path.dirname(current_filepath)
+    current_norm = os.path.normpath(os.path.abspath(current_filepath))
+    current_dir = os.path.dirname(current_norm)
 
     def _score(r):
-        rpath = getattr(r, "filepath", "") or ""
-        if rpath == current_filepath:
+        rpath = os.path.normpath(os.path.abspath(getattr(r, "filepath", "") or ""))
+        if rpath == current_norm:
             return (0, 0)
         if os.path.dirname(rpath) == current_dir:
             return (1, 0)
         try:
-            common = os.path.commonpath([current_filepath, rpath])
+            common = os.path.commonpath([current_norm, rpath])
             return (2, -len(common))
         except (ValueError, TypeError):
             return (3, 0)
@@ -192,8 +199,7 @@ def _hover_from_semantic_model(
     # Search SymbolNode entries matching the word
     symbol_nodes = semantic_model.get_nodes_by_type(SymbolNode)
     matches = [
-        sn for sn in symbol_nodes
-        if sn.name == word or sn.qualified_name == word
+        sn for sn in symbol_nodes if sn.name == word or sn.qualified_name == word
     ]
     if not matches and "." in word:
         last = word.rsplit(".", 1)[-1]
@@ -203,7 +209,8 @@ def _hover_from_semantic_model(
 
     # Also check TypeNode
     type_matches = [
-        tn for tn in semantic_model.get_nodes_by_type(TypeNode)
+        tn
+        for tn in semantic_model.get_nodes_by_type(TypeNode)
         if tn.name == word or tn.qualified_name == word
     ]
 
@@ -314,8 +321,13 @@ def register(server) -> None:
             model = server.semantic_model
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, get_hover_info,
-                server.indexer, filepath, params.position, lines, model,
+                None,
+                get_hover_info,
+                server.indexer,
+                filepath,
+                params.position,
+                lines,
+                model,
             )
         except Exception:
             logger.warning("hover handler failed", exc_info=True)
