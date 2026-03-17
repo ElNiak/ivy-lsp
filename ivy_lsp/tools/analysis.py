@@ -6,15 +6,15 @@ import asyncio
 import json
 import logging
 import os
-import re
 import shutil
 from typing import Any
 
+from ivy_lsp.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.tools._helpers import error_response
 
 logger = logging.getLogger(__name__)
 
-_INCLUDE_PATTERN = re.compile(r"^include\s+(\w+)", re.MULTILINE)
+_extractor = TieredExtractor()
 
 
 def register_analysis_tools(mcp: Any, ctx: Any) -> None:
@@ -89,7 +89,9 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                         errors="replace",
                     ) as f:
                         source = f.read()
-                    graph[rel_path] = _INCLUDE_PATTERN.findall(source)
+                    abs_path = os.path.join(ctx.root, rel_path)
+                    result = _extractor.extract(source, abs_path)
+                    graph[rel_path] = result.includes
                 except OSError as exc:
                     logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
                     skipped_count += 1

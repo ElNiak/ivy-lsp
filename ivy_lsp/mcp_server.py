@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -28,26 +27,10 @@ from ivy_lsp.verification import run_ivy_show as shared_ivy_show
 
 logger = logging.getLogger(__name__)
 
-# Pre-compiled regex patterns for hot-path performance
-_INCLUDE_PATTERN = re.compile(r"^include\s+(\w+)", re.MULTILINE)
-
-# Symbol/type extraction patterns for lightweight semantic model
-_TYPE_DECL_RE = re.compile(r"^\s*type\s+([\w.]+)(?:\s*=\s*\{([^}]+)\})?", re.MULTILINE)
-_ACTION_DECL_RE = re.compile(
-    r"^\s*action\s+([\w.]+)\s*(?:\(([^)]*)\))?(?:\s*returns\s*\(([^)]*)\))?",
-    re.MULTILINE,
-)
-_RELATION_DECL_RE = re.compile(
-    r"^\s*relation\s+([\w.]+)\s*(?:\(([^)]*)\))?", re.MULTILINE
-)
-_FUNCTION_DECL_RE = re.compile(
-    r"^\s*function\s+([\w.]+)\s*(?:\(([^)]*)\))?(?:\s*:\s*(\w+))?",
-    re.MULTILINE,
-)
-_INDIVIDUAL_DECL_RE = re.compile(r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MULTILINE)
-_OBJECT_DECL_RE = re.compile(
-    r"^\s*(object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
-)
+# Note: Symbol/type extraction regex patterns formerly defined here have been
+# relocated to ivy_lsp.parsing.tiered_extractor (Tier 3 fallback).  The
+# _build_model() function now uses TieredExtractor for parser -> lexer -> regex
+# cascade.  Include extraction is also handled by TieredExtractor.
 
 
 def _validate_path(root: str, relative_path: str) -> str:
@@ -398,7 +381,18 @@ def start_mcp(
             for req in reqs.values():
                 model.add_node(req)
 
-        # Scan .ivy files for annotations, types, and symbols
+        # Scan .ivy files for annotations, types, and symbols using
+        # tiered extraction: parser -> lexer -> regex cascade.
+        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+
+        extractor = TieredExtractor()
+        # Cache includes per file for INCLUDES edge wiring later
+        file_includes: dict[str, list[str]] = {}
+        tier_counts: dict[int, int] = {1: 0, 2: 0, 3: 0}
+        total_symbols = 0
+        build_start = time.monotonic()
+
         for rel_path in _find_ivy_files(root):
             abs_path = os.path.join(root, rel_path)
             try:
@@ -408,120 +402,30 @@ def start_mcp(
                 logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
                 continue
 
-            # RFC annotations
+            # RFC annotations (operates on comments, not declarations)
             for ann in parse_file_rfc_annotations(source, abs_path):
                 model.add_node(ann)
 
-            # Type declarations
-            for m in _TYPE_DECL_RE.finditer(source):
-                name = m.group(1)
-                line = source[: m.start()].count("\n") + 1
-                variants_raw = m.group(2)
-                is_enum = variants_raw is not None
-                variants = (
-                    [v.strip() for v in variants_raw.split(",") if v.strip()]
-                    if variants_raw
-                    else []
+            # Extract symbols via tiered cascade
+            result = extractor.extract(source, abs_path)
+            if result.tier_used > 0:
+                count = populate_model_from_symbols(
+                    model, result.symbols, abs_path, tier_used=result.tier_used
                 )
-                model.add_node(
-                    TypeNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        file=abs_path,
-                        line=line,
-                        is_enum=is_enum,
-                        variants=variants,
-                    )
-                )
+                total_symbols += count
+                tier_counts[result.tier_used] = tier_counts.get(result.tier_used, 0) + 1
+                file_includes[abs_path] = result.includes
 
-            # Action declarations
-            for m in _ACTION_DECL_RE.finditer(source):
-                name = m.group(1)
-                line = source[: m.start()].count("\n") + 1
-                params = (
-                    [p.strip() for p in m.group(2).split(",") if p.strip()]
-                    if m.group(2)
-                    else []
-                )
-                ret = m.group(3).strip() if m.group(3) else None
-                model.add_node(
-                    SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="action",
-                        file=abs_path,
-                        line=line,
-                        params=params,
-                        return_sort=ret,
-                    )
-                )
-
-            # Relation declarations
-            for m in _RELATION_DECL_RE.finditer(source):
-                name = m.group(1)
-                line = source[: m.start()].count("\n") + 1
-                model.add_node(
-                    SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="relation",
-                        file=abs_path,
-                        line=line,
-                    )
-                )
-
-            # Function declarations
-            for m in _FUNCTION_DECL_RE.finditer(source):
-                name = m.group(1)
-                line = source[: m.start()].count("\n") + 1
-                ret_sort = m.group(3) if m.group(3) else None
-                model.add_node(
-                    SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="function",
-                        file=abs_path,
-                        line=line,
-                        return_sort=ret_sort,
-                    )
-                )
-
-            # Individual declarations
-            for m in _INDIVIDUAL_DECL_RE.finditer(source):
-                name = m.group(1)
-                line = source[: m.start()].count("\n") + 1
-                sort_name = m.group(2)
-                model.add_node(
-                    SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind="individual",
-                        file=abs_path,
-                        line=line,
-                        sort_name=sort_name,
-                    )
-                )
-
-            # Object/module/isolate declarations
-            for m in _OBJECT_DECL_RE.finditer(source):
-                keyword = m.group(1)  # "object", "module", or "isolate"
-                name = m.group(2)
-                line = source[: m.start()].count("\n") + 1
-                model.add_node(
-                    SymbolNode(
-                        id=f"{abs_path}:{line}:{name}",
-                        name=name,
-                        qualified_name=name,
-                        kind=keyword,  # type: ignore[arg-type]
-                        file=abs_path,
-                        line=line,
-                    )
-                )
+        build_elapsed = (time.monotonic() - build_start) * 1000
+        logger.info(
+            "Model built: %d files, tiers={1: %d, 2: %d, 3: %d}, %d symbols (%.1fms)",
+            sum(tier_counts.values()),
+            tier_counts.get(1, 0),
+            tier_counts.get(2, 0),
+            tier_counts.get(3, 0),
+            total_symbols,
+            build_elapsed,
+        )
 
         # -- Wire semantic edges --
         from ivy_lsp.semantic.edges import SemanticEdgeType
@@ -569,27 +473,19 @@ def start_mcp(
                 if target:
                     model.add_edge(sn.id, SemanticEdgeType.RETURNS_TYPE, target)
 
-        # 3. INCLUDES: file -> file (via include directives)
-        # Build basename -> abs_path map for resolution
+        # 3. INCLUDES: file -> file (via include directives extracted above)
         basename_to_path: dict[str, str] = {}
         for rel_path in _find_ivy_files(root):
             stem = os.path.splitext(os.path.basename(rel_path))[0]
             basename_to_path[stem] = os.path.join(root, rel_path)
 
-        for rel_path in _find_ivy_files(root):
-            abs_path = os.path.join(root, rel_path)
+        for abs_path, includes in file_includes.items():
             nodes_in_src = model.get_nodes_in_file(abs_path)
             if not nodes_in_src:
                 continue
             src_id = nodes_in_src[0].id
-            try:
-                with open(abs_path, encoding="utf-8", errors="replace") as f:
-                    src_text = f.read()
-            except OSError as exc:
-                logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
-                continue
-            for inc_match in _INCLUDE_PATTERN.findall(src_text):
-                target_path = basename_to_path.get(inc_match)
+            for inc_name in includes:
+                target_path = basename_to_path.get(inc_name)
                 if not target_path or target_path == abs_path:
                     continue
                 nodes_in_tgt = model.get_nodes_in_file(target_path)

@@ -22,15 +22,14 @@ logger = logging.getLogger(__name__)
 # Maximum number of entries in the verification cache (LRU eviction)
 _CACHE_MAX_SIZE = 100
 
-# Assertion/tag detection for ivy_diagnostics semantic layer
+# These patterns intentionally use regex — they perform semantic diagnostic
+# checks and tool output parsing, not symbol extraction.  See
+# ivy_lsp.parsing.tiered_extractor for the symbol extraction cascade.
 _ASSERTION_RE = re.compile(
     r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
 )
 _BRACKET_TAG_RE = re.compile(r"#\s*\[")
 
-
-# Pattern for per-isolate status in ivy_check output, e.g.:
-# "  isolate quic_server_test_stream: PASS" or "FAIL"
 _ISOLATE_STATUS_RE = re.compile(
     r"^\s*isolate\s+([\w.]+)\s*:\s*(PASS|FAIL|OK)\s*$", re.MULTILINE
 )

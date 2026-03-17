@@ -3,6 +3,10 @@
 Extracts ``<<< impl ... >>>`` embedded C++ blocks and analyses their
 content for pattern detection (serialization state machines, socket
 operations, class hierarchies).
+
+Regex patterns here intentionally stay as regex — they parse embedded C++,
+not Ivy declarations.  See ivy_lsp.parsing.tiered_extractor for the Ivy
+symbol extraction cascade.
 """
 
 from __future__ import annotations

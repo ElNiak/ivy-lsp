@@ -2,6 +2,10 @@
 
 Dispatches to the lexer-based extractor when the PLY lexer is available,
 falling back to regex-based extraction otherwise.
+
+Regex patterns here intentionally stay as regex — they already implement a
+lexer-to-regex cascade for requirement extraction, which is separate from the
+symbol extraction cascade in ivy_lsp.parsing.tiered_extractor.
 """
 
 from __future__ import annotations

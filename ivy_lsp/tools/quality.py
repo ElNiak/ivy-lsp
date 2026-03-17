@@ -108,16 +108,19 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         )
 
         # 2. Includes resolve
-        _inc_re = re.compile(r"^include\s+(\w+)", re.MULTILINE)
+        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+
+        _inc_extractor = TieredExtractor()
         basenames = {os.path.splitext(os.path.basename(f))[0] for f in prot_files}
         unresolved = []
         for f in prot_files:
             abs_f = os.path.join(ctx.root, f)
             try:
                 with open(abs_f, encoding="utf-8", errors="replace") as fh:
-                    for inc in _inc_re.findall(fh.read()):
-                        if inc not in basenames and inc not in ctx.stdlib_modules:
-                            unresolved.append({"file": f, "include": inc})
+                    source = fh.read()
+                for inc in _inc_extractor.extract(source, abs_f).includes:
+                    if inc not in basenames and inc not in ctx.stdlib_modules:
+                        unresolved.append({"file": f, "include": inc})
             except OSError as exc:
                 logger.warning("Skipping unreadable file %s: %s", f, exc)
                 skipped_files.append(f)
@@ -169,6 +172,9 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             )
 
             # 5. Behavior/monitor files exist
+            # Note: _monitor_re, _export_re, _tag_re below intentionally use regex
+            # for quality-gate counting — not symbol extraction.
+            # See ivy_lsp.parsing.tiered_extractor for the symbol extraction cascade.
             behavior_files = [
                 f for f in prot_files if "_behavior" in os.path.basename(f)
             ]

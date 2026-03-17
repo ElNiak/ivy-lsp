@@ -585,14 +585,29 @@ def detect_entities(source: str, filepath: str) -> List[PatternInstance]:
     return instances
 
 
-def detect_include_chain(source: str, filepath: str) -> List[PatternInstance]:
-    """Detect include chain patterns."""
+def detect_include_chain(
+    source: str,
+    filepath: str,
+    pre_extracted_includes: Optional[List[str]] = None,
+) -> List[PatternInstance]:
+    """Detect include chain patterns.
+
+    Args:
+        source: Ivy source text to scan.
+        filepath: Absolute path to the source file.
+        pre_extracted_includes: When provided (e.g. from TieredExtractor),
+            skips regex scanning and uses these names directly.
+    """
     instances = []
     includes = []
 
-    for m in INCLUDE_RE.finditer(source):
-        line = source[: m.start()].count("\n")
-        includes.append({"name": m.group(1), "line": line})
+    if pre_extracted_includes is not None:
+        for name in pre_extracted_includes:
+            includes.append({"name": name, "line": 0})
+    else:
+        for m in INCLUDE_RE.finditer(source):
+            line = source[: m.start()].count("\n")
+            includes.append({"name": m.group(1), "line": line})
 
     if includes:
         instances.append(
@@ -617,8 +632,19 @@ def detect_include_chain(source: str, filepath: str) -> List[PatternInstance]:
 # ---------------------------------------------------------------------------
 
 
-def detect_all_patterns(source: str, filepath: str) -> List[PatternInstance]:
-    """Run all pattern detectors on a single file."""
+def detect_all_patterns(
+    source: str,
+    filepath: str,
+    pre_extracted_includes: Optional[List[str]] = None,
+) -> List[PatternInstance]:
+    """Run all pattern detectors on a single file.
+
+    Args:
+        source: Ivy source text to scan.
+        filepath: Absolute path to the source file.
+        pre_extracted_includes: When provided (e.g. from TieredExtractor),
+            avoids re-scanning includes with regex.
+    """
     patterns = []
     patterns.extend(detect_serdes(source, filepath))
     patterns.extend(detect_variants(source, filepath))
@@ -626,7 +652,7 @@ def detect_all_patterns(source: str, filepath: str) -> List[PatternInstance]:
     patterns.extend(detect_shims(source, filepath))
     patterns.extend(detect_modules(source, filepath))
     patterns.extend(detect_entities(source, filepath))
-    patterns.extend(detect_include_chain(source, filepath))
+    patterns.extend(detect_include_chain(source, filepath, pre_extracted_includes))
     return patterns
 
 

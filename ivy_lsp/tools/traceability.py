@@ -196,22 +196,42 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             stats = json.loads(stats_raw)
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
             model = await ctx.get_model()
+
+            # Build req_map from the semantic model first
+            req_map: dict[str, Any] = {}
             if model is not None:
                 from ivy_lsp.semantic.nodes import RfcRequirement
 
                 requirements = model.get_nodes_by_type(RfcRequirement)
                 req_map = {r.id: r for r in requirements}
-                result["uncoveredRfcRequirements"] = [
-                    {
-                        "id": rid,
-                        "rfc": getattr(req_map.get(rid), "rfc", ""),
-                        "section": getattr(req_map.get(rid), "section", ""),
-                        "level": getattr(req_map.get(rid), "level", ""),
-                        "text": getattr(req_map.get(rid), "text", ""),
-                    }
-                    for rid in sorted(uncovered_ids)
-                    if rid in req_map
-                ]
+
+            # Fallback: when the semantic model has no RfcRequirement nodes
+            # (e.g. test mode with no .ivy files), use the requirement graph
+            if not req_map:
+                graph = await ctx.get_req_graph()
+                if graph is not None:
+                    for rid, rfc_req in getattr(graph, "rfc_requirements", {}).items():
+                        req_map[rid] = rfc_req
+                    # If _ivy_requirement_coverage returned empty uncovered_ids
+                    # because the model was empty, compute from graph directly
+                    if not uncovered_ids:
+                        uncovered_ids = set(
+                            graph.get_uncovered_requirements_ids()
+                            if hasattr(graph, "get_uncovered_requirements_ids")
+                            else [r.id for r in graph.get_uncovered_requirements()]
+                        )
+
+            result["uncoveredRfcRequirements"] = [
+                {
+                    "id": rid,
+                    "rfc": getattr(req_map.get(rid), "rfc", ""),
+                    "section": getattr(req_map.get(rid), "section", ""),
+                    "level": getattr(req_map.get(rid), "level", ""),
+                    "text": getattr(req_map.get(rid), "text", ""),
+                }
+                for rid in sorted(uncovered_ids)
+                if rid in req_map
+            ]
         except (json.JSONDecodeError, KeyError):
             pass  # Fall back to visualization handler result
 

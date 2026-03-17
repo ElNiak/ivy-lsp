@@ -7,8 +7,9 @@ convert to their own output types.
 from __future__ import annotations
 
 import os
-import re
 from typing import Any, Dict, List
+
+from ivy_lsp.parsing.tiered_extractor import INCLUDE_PATTERN
 
 
 def check_structural_issues_raw(
@@ -87,7 +88,7 @@ def check_unresolved_includes_raw(
     diags: List[Dict[str, Any]] = []
     parent_dir = os.path.dirname(filepath)
 
-    for match in re.finditer(r"^include\s+(\w+)", source, re.MULTILINE):
+    for match in INCLUDE_PATTERN.finditer(source):
         inc_name = match.group(1)
         if resolve_callback is not None:
             resolved = resolve_callback(inc_name, filepath)
