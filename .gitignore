@@ -9,6 +9,7 @@ build/
 .venv/
 .DS_Store
 pytest-of-elniak/
+tmp*/
 .pre-commit-cache/
 *.coverage*
 coverage.xml
