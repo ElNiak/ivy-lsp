@@ -186,6 +186,12 @@ def register(server) -> None:
 
             active_filepath = uri_to_path(last_uri)
 
+        logger.info(
+            "workspace/symbol: query=%r, active_uri=%r",
+            params.query,
+            last_uri,
+        )
+
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,

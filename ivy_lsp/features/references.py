@@ -95,6 +95,7 @@ def register(server) -> None:
     ) -> Optional[List[lsp.Location]]:
         """Handle textDocument/references requests."""
         uri = params.text_document.uri
+        server._last_active_uri = uri
         doc = server.workspace.get_text_document(uri)
         if server.indexer is None:
             return None

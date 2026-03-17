@@ -12,6 +12,7 @@ from lsprotocol import types as lsp
 from ivy_lsp.features.workspace_symbols import (
     MAX_RESULTS,
     FlatSymbol,
+    compute_workspace_symbols,
     flatten_symbols,
     search_symbols,
     to_workspace_symbol,
@@ -190,6 +191,98 @@ class TestToWorkspaceSymbol:
         )
         ws = to_workspace_symbol(fs)
         assert ws.location.uri == ""
+
+
+class TestComputeWorkspaceSymbols:
+    """Verify compute_workspace_symbols with scope-aware ranking."""
+
+    class _MockIndexer:
+        """Minimal indexer returning pre-defined symbols with optional scope."""
+
+        def __init__(self, symbols, scope_files=None):
+            self._symbols = symbols
+            self._scope_files = scope_files
+
+        def lookup_all_symbols(self):
+            return self._symbols
+
+        def get_scope_files_for_file(self, filepath):
+            return self._scope_files
+
+    def _make_sym(self, name, file_path):
+        return IvySymbol(
+            name=name,
+            kind=lsp.SymbolKind.Variable,
+            range=(0, 0, 0, len(name)),
+            file_path=file_path,
+        )
+
+    def test_empty_query_with_active_filepath_ranks_active_file_first(self):
+        """Empty query + active_filepath promotes active-file symbols."""
+        syms = [
+            self._make_sym("alpha", "/ws/apt/apt_entities/a.ivy"),
+            self._make_sym("beta", "/ws/apt/apt_entities/b.ivy"),
+            self._make_sym("cid", "/ws/quic_types.ivy"),
+            self._make_sym("delta", "/ws/apt/apt_entities/d.ivy"),
+        ]
+        scope_files = {"/ws/quic_types.ivy"}
+        indexer = self._MockIndexer(syms, scope_files)
+
+        results = compute_workspace_symbols(
+            indexer, query="", active_filepath="/ws/quic_types.ivy"
+        )
+
+        assert len(results) == 4
+        # cid from quic_types.ivy should be ranked first (in-scope)
+        assert results[0].name == "cid"
+
+    def test_empty_query_without_active_filepath_returns_insertion_order(self):
+        """Empty query without active_filepath returns symbols in flat order."""
+        syms = [
+            self._make_sym("alpha", "/ws/apt/a.ivy"),
+            self._make_sym("beta", "/ws/apt/b.ivy"),
+            self._make_sym("cid", "/ws/quic_types.ivy"),
+        ]
+        indexer = self._MockIndexer(syms, scope_files=None)
+
+        results = compute_workspace_symbols(indexer, query="")
+
+        assert len(results) == 3
+        # No scope ranking, original order preserved
+        assert results[0].name == "alpha"
+        assert results[1].name == "beta"
+        assert results[2].name == "cid"
+
+    def test_empty_query_scope_ranking_caps_at_max_results(self):
+        """Scope-ranked results still respect MAX_RESULTS limit."""
+        syms = [self._make_sym(f"sym_{i}", "/ws/other.ivy") for i in range(150)]
+        scope_files = {"/ws/active.ivy"}
+        indexer = self._MockIndexer(syms, scope_files)
+
+        results = compute_workspace_symbols(
+            indexer, query="", active_filepath="/ws/active.ivy"
+        )
+
+        assert len(results) == MAX_RESULTS
+
+    def test_nonempty_query_with_scope_still_filters(self):
+        """Non-empty query filters first, then scope-ranks."""
+        syms = [
+            self._make_sym("alpha", "/ws/other.ivy"),
+            self._make_sym("cid", "/ws/quic_types.ivy"),
+            self._make_sym("acid", "/ws/apt/apt_entities/a.ivy"),
+        ]
+        scope_files = {"/ws/quic_types.ivy"}
+        indexer = self._MockIndexer(syms, scope_files)
+
+        results = compute_workspace_symbols(
+            indexer, query="cid", active_filepath="/ws/quic_types.ivy"
+        )
+
+        assert len(results) == 2
+        # cid (in scope) should rank before acid (out of scope)
+        assert results[0].name == "cid"
+        assert results[1].name == "acid"
 
 
 class TestRegister:

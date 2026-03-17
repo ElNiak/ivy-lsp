@@ -347,6 +347,7 @@ def register(server) -> None:
     async def hover(params: lsp.HoverParams) -> Optional[lsp.Hover]:
         try:
             uri = params.text_document.uri
+            server._last_active_uri = uri
             doc = server.workspace.get_text_document(uri)
             if server.indexer is None:
                 return None

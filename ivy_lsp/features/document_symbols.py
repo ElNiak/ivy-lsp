@@ -131,6 +131,7 @@ def register(server) -> None:
         """Handle textDocument/documentSymbol requests."""
         try:
             uri = params.text_document.uri
+            server._last_active_uri = uri
             doc = server.workspace.get_text_document(uri)
             filepath = uri_to_path(uri)
             source = doc.source or ""
