@@ -177,10 +177,17 @@ def check_structural_issues(
 
     raw = check_structural_issues_raw(source, filepath)
 
-    # Include resolution using proper resolver if available
+    # Include resolution: use partition-aware resolver when available,
+    # falling back to the default resolver.
     resolve_cb = None
     if indexer:
-        resolve_cb = indexer.resolver.resolve
+        resolver = indexer.resolver
+        # Check for real IncludeResolver with active partition staging.
+        partition_staging = getattr(resolver, "_partition_staging", None)
+        if isinstance(partition_staging, dict) and partition_staging:
+            resolve_cb = resolver.resolve_partitioned
+        else:
+            resolve_cb = resolver.resolve
     raw.extend(
         check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
     )

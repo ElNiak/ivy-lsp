@@ -203,3 +203,89 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 "ivy_show": shutil.which("ivy_show") is not None,
             }
         )
+
+    @mcp.tool()
+    async def ivy_scope(relative_path: str) -> str:
+        """Return endpoint mirror scope info for an Ivy file.
+
+        Reports (all dynamically computed from the include graph):
+        - Endpoint mirror test(s) for the given file
+        - Tester role (client/server/mim)
+        - Scope partition (if partitioned staging is active)
+        - Full include closure
+        - Collision report (basenames with cross-partition conflicts)
+
+        Args:
+            relative_path: Relative path to the .ivy file.
+        """
+        logger.debug(
+            "[ivy_scope] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path},
+        )
+        try:
+            abs_path = ctx.validate_path(relative_path)
+        except ValueError as exc:
+            return error_response(str(exc))
+        if not os.path.isfile(abs_path):
+            return error_response(f"File not found: {relative_path}")
+
+        result: dict[str, Any] = {
+            "file": relative_path,
+            "abs_path": abs_path,
+        }
+
+        # Try to get scope info from the requirement graph
+        req_graph = ctx.get_req_graph()
+        if req_graph is not None and hasattr(req_graph, "get_tests_for_file"):
+            tests = sorted(req_graph.get_tests_for_file(abs_path))
+            result["endpoint_mirrors"] = [os.path.relpath(t, ctx.root) for t in tests]
+            result["endpoint_mirror_count"] = len(tests)
+
+            # Get scope details from the first mirror
+            if tests:
+                scope = req_graph.get_test_scope(tests[0])
+                if scope is not None:
+                    result["tester_role"] = scope.tester_role
+                    result["include_closure_size"] = len(scope.include_closure)
+                    result["include_closure"] = sorted(
+                        os.path.relpath(f, ctx.root) for f in scope.include_closure
+                    )
+                    result["exported_actions"] = sorted(scope.exported_actions)
+                    result["imported_actions"] = sorted(scope.imported_actions)
+
+            # Multiple mirrors — show all roles
+            if len(tests) > 1:
+                roles = {}
+                for t in tests:
+                    sc = req_graph.get_test_scope(t)
+                    if sc:
+                        roles[os.path.relpath(t, ctx.root)] = sc.tester_role
+                result["mirror_roles"] = roles
+        else:
+            result["endpoint_mirrors"] = []
+            result["endpoint_mirror_count"] = 0
+
+        # Partition info
+        if ctx.staging_dir:
+            resolve_cb = ctx.make_resolve_callback()
+            # Check if the resolver has partition info
+            if hasattr(resolve_cb, "__self__") and hasattr(
+                resolve_cb.__self__, "get_partition_for_file"
+            ):
+                resolver = resolve_cb.__self__
+                partition = resolver.get_partition_for_file(abs_path)
+                result["partition"] = partition
+                if resolver.collision_map:
+                    # Report collisions relevant to this file
+                    basename = os.path.basename(abs_path)
+                    if basename in resolver.collision_map:
+                        result["collision_report"] = {
+                            "basename": basename,
+                            "variants": [
+                                os.path.relpath(p, ctx.root)
+                                for p in resolver.collision_map[basename]
+                            ],
+                        }
+
+        return json.dumps(result, indent=2)

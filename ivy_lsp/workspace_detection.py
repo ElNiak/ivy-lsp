@@ -20,13 +20,23 @@ _IVYWORKSPACE_FILENAME = ".ivyworkspace"
 
 @dataclass
 class WorkspaceConfig:
-    """Result of workspace detection."""
+    """Result of workspace detection (v2 schema).
+
+    The ``scope_detection`` field controls how endpoint mirror scope
+    partitions are computed:
+
+    - ``"auto"`` (default): partitions are dynamically derived from the
+      include graph after indexing.  No manual configuration needed.
+    - ``"explicit"``: reserved for future manual partition hints.
+    """
 
     workspace_root: str
     include_paths: list[str] = field(default_factory=list)
     exclude_paths: list[str] = field(default_factory=list)
     detected_by: str = "fallback"  # explicit, marker, hint, heuristic, fallback
     project_type: Optional[str] = None  # panther, standalone, None
+    scope_detection: str = "auto"  # auto, explicit
+    standard_library: Optional[str] = None  # e.g. "ivy/include/1.7"
 
 
 def _read_marker(marker_path: str) -> Optional[dict]:
@@ -44,14 +54,23 @@ def _read_marker(marker_path: str) -> Optional[dict]:
 
 
 def _apply_marker(marker_path: str, data: dict) -> WorkspaceConfig:
-    """Build a WorkspaceConfig from a parsed marker file."""
+    """Build a WorkspaceConfig from a parsed marker file (v2 schema)."""
     marker_dir = os.path.dirname(os.path.abspath(marker_path))
+    version = data.get("version", 1)
+    if version < 2:
+        logger.info(
+            "Upgrading .ivyworkspace v%d to v2 semantics at %s",
+            version,
+            marker_path,
+        )
     return WorkspaceConfig(
         workspace_root=marker_dir,
         include_paths=data.get("include_paths", []),
         exclude_paths=data.get("exclude_paths", []),
         detected_by="marker",
         project_type=data.get("project_type"),
+        scope_detection=data.get("scope_detection", "auto"),
+        standard_library=data.get("standard_library"),
     )
 
 

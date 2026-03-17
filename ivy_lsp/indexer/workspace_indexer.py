@@ -159,6 +159,9 @@ class WorkspaceIndexer:
         # Cleared after the full pipeline completes.
         self._source_cache: Dict[str, Tuple[str, float]] = {}
         self._source_cache_lock = threading.Lock()
+        # Cache for mirror-scope symbol lookups (filepath → list of symbols).
+        # Cleared on every _compute_test_scopes call.
+        self._mirror_scope_cache: Dict[str, List[IvySymbol]] = {}
 
     # -- Public accessors (Phase 3.2) ----------------------------------------
 
@@ -285,6 +288,7 @@ class WorkspaceIndexer:
         self._include_graph = IncludeGraph()
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports = {}
+        self._mirror_scope_cache = {}
         with self._progress_lock:
             self._deep_index_running = False
 
@@ -1124,14 +1128,65 @@ class WorkspaceIndexer:
             for sym in symbols
         ]
 
-    def get_symbols_in_scope(self, filepath: str) -> List[IvySymbol]:
-        """Return own symbols plus transitive include symbols for *filepath*."""
+    def get_endpoint_mirrors_for_file(self, filepath: str) -> List[str]:
+        """Return sorted endpoint mirror test files whose scope includes *filepath*.
+
+        An endpoint mirror test is a test entry point (file with exports)
+        whose transitive include closure contains *filepath*.
+        """
         abs_path = os.path.abspath(filepath)
-        own_symbols = list(self._symbol_table.symbols_in_file(abs_path))
-        transitive = self._include_graph.get_transitive_includes(abs_path)
-        for included_file in transitive:
-            own_symbols.extend(self._symbol_table.symbols_in_file(included_file))
-        return own_symbols
+        return sorted(self._requirement_graph.get_tests_for_file(abs_path))
+
+    def get_scope_files_for_file(self, filepath: str) -> set:
+        """Return the union of all include closures that contain *filepath*.
+
+        For shared modules, this returns the full set of files visible from
+        any endpoint mirror test that includes this file.  For test entry
+        points, returns the test's own include closure.
+        """
+        abs_path = os.path.abspath(filepath)
+        mirrors = self._requirement_graph.get_tests_for_file(abs_path)
+        if not mirrors:
+            # Orphan file — fall back to forward-only scope.
+            result = {abs_path}
+            result |= self._include_graph.get_transitive_includes(abs_path)
+            return result
+
+        scope_files: set = set()
+        for test_file in mirrors:
+            scope = self._requirement_graph.get_test_scope(test_file)
+            if scope is not None:
+                scope_files |= scope.include_closure
+        return scope_files
+
+    def get_symbols_in_scope(self, filepath: str) -> List[IvySymbol]:
+        """Return symbols visible from *filepath*'s endpoint mirror scope.
+
+        Uses the mirror-scope-aware algorithm:
+        1. Find all endpoint mirror tests whose scope includes *filepath*.
+        2. Union their include closures.
+        3. Return symbols from all files in the union.
+
+        Falls back to forward-only traversal for orphan files (not in any
+        test scope).  Results are cached per filepath and invalidated when
+        ``_compute_test_scopes`` runs.
+        """
+        abs_path = os.path.abspath(filepath)
+
+        # Check cache first
+        cached = self._mirror_scope_cache.get(abs_path)
+        if cached is not None:
+            return list(cached)
+
+        scope_files = self.get_scope_files_for_file(abs_path)
+
+        symbols: List[IvySymbol] = []
+        for f in scope_files:
+            symbols.extend(self._symbol_table.symbols_in_file(f))
+
+        # Cache the result
+        self._mirror_scope_cache[abs_path] = symbols
+        return list(symbols)
 
     # ------------------------------------------------------------------
     # Full re-index and stats
@@ -1266,7 +1321,11 @@ class WorkspaceIndexer:
         self._requirement_graph.wire_coverage_edges()
 
     def _compute_test_scopes(self) -> None:
-        """Build a TestScope for each file that has exports and register it."""
+        """Build a TestScope for each file that has exports and register it.
+
+        After scope computation, triggers partitioned staging if basename
+        collisions were detected during initial staging.
+        """
         with self._exports_lock:
             export_items = list(self._file_export_imports.items())
         for filepath, info in export_items:
@@ -1293,3 +1352,14 @@ class WorkspaceIndexer:
                 tester_role=detect_test_role(frozen_closure),
             )
             self._requirement_graph.register_test_scope(scope)
+
+        # Invalidate mirror scope cache since scopes have been recomputed.
+        self._mirror_scope_cache.clear()
+
+        # Build partitioned staging if there are basename collisions.
+        if self._resolver.collision_map:
+            test_closures = {
+                scope.test_file: scope.include_closure
+                for _, scope in self._requirement_graph.iter_test_scopes()
+            }
+            self._resolver.build_partitioned_staging(test_closures)

@@ -111,20 +111,57 @@ def to_workspace_symbol(flat: FlatSymbol) -> lsp.WorkspaceSymbol:
 def compute_workspace_symbols(
     indexer,
     query: str,
+    active_filepath: Optional[str] = None,
 ) -> List[lsp.WorkspaceSymbol]:
-    """Query the workspace indexer and return matching LSP WorkspaceSymbols."""
+    """Query the workspace indexer and return matching LSP WorkspaceSymbols.
+
+    When *active_filepath* is provided and the indexer supports mirror
+    scoping, results from the active file's scope are ranked first.
+    """
     if indexer is None:
         return []
     all_syms = indexer.lookup_all_symbols()
     flat = flatten_symbols(all_syms)
     matches = search_symbols(flat, query)
+
+    # Scope-aware ranking: in-scope symbols sort before out-of-scope.
+    scope_files = None
+    if active_filepath and hasattr(indexer, "get_scope_files_for_file"):
+        scope_files = indexer.get_scope_files_for_file(active_filepath)
+
+    if scope_files is not None:
+        import os
+
+        def _scope_sort_key(fs: FlatSymbol):
+            fp = os.path.abspath(fs.file_path) if fs.file_path else ""
+            return (0 if fp in scope_files else 1, fs.qualified_name)
+
+        matches = sorted(matches, key=_scope_sort_key)[:MAX_RESULTS]
+
     logger.debug(
         "workspace_symbol: query=%r, %d flat symbols, %d matches",
         query,
         len(flat),
         len(matches),
     )
-    return [to_workspace_symbol(f) for f in matches]
+
+    results = []
+    for f in matches:
+        ws = to_workspace_symbol(f)
+        # Add container name from endpoint mirror scope.
+        if scope_files is not None and f.file_path:
+            import os
+
+            abs_fp = os.path.abspath(f.file_path)
+            if abs_fp in scope_files and hasattr(
+                indexer, "get_endpoint_mirrors_for_file"
+            ):
+                mirrors = indexer.get_endpoint_mirrors_for_file(f.file_path)
+                if mirrors:
+                    container = os.path.basename(mirrors[0]).replace(".ivy", "")
+                    ws.container_name = container
+        results.append(ws)
+    return results
 
 
 def register(server) -> None:

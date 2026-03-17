@@ -284,13 +284,25 @@ def _dot_access_completions(
 def _include_completions(
     indexer, filepath: str, prefix: str
 ) -> List[lsp.CompletionItem]:
-    """Complete include filenames."""
+    """Complete include filenames, scoped to the current file's mirror scope.
+
+    When the file belongs to an endpoint mirror test scope, only files
+    within that scope's include closure are offered.  Otherwise falls back
+    to all workspace files.
+    """
     abs_filepath = os.path.abspath(filepath)
+
+    # Scope filtering: prefer files within the current mirror scope.
+    scope_files = None
+    if hasattr(indexer, "get_scope_files_for_file"):
+        scope_files = indexer.get_scope_files_for_file(filepath)
+
     all_files = indexer.resolver.find_all_ivy_files()
     items: List[lsp.CompletionItem] = []
     seen: Set[str] = set()
     for fpath in all_files:
-        if os.path.abspath(fpath) == abs_filepath:
+        abs_fpath = os.path.abspath(fpath)
+        if abs_fpath == abs_filepath:
             continue
         name = os.path.splitext(os.path.basename(fpath))[0]
         if name in seen:
@@ -298,10 +310,18 @@ def _include_completions(
         if prefix and not name.lower().startswith(prefix.lower()):
             continue
         seen.add(name)
+
+        # Determine if this file is in scope
+        in_scope = scope_files is None or abs_fpath in scope_files
+        detail = None if in_scope else "out of scope"
+        sort_text = f"0{name}" if in_scope else f"1{name}"
+
         items.append(
             lsp.CompletionItem(
                 label=name,
                 kind=lsp.CompletionItemKind.File,
+                detail=detail,
+                sort_text=sort_text,
             )
         )
     return items[:MAX_COMPLETIONS]

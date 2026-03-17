@@ -267,6 +267,33 @@ def _hover_from_semantic_model(
     )
 
 
+def _enrich_with_mirror_context(
+    content: str,
+    symbol_name: str,
+    filepath: str,
+    indexer,
+) -> str:
+    """Add endpoint mirror test context to hover content.
+
+    Shows which mirror test scopes contain the symbol's defining file,
+    helping the user understand cross-scope visibility.
+    """
+    if not hasattr(indexer, "get_endpoint_mirrors_for_file"):
+        return content
+
+    # Find which mirrors contain the current file
+    mirrors = indexer.get_endpoint_mirrors_for_file(filepath)
+    if not mirrors:
+        return content
+
+    mirror_names = [os.path.basename(m).replace(".ivy", "") for m in mirrors[:5]]
+    if len(mirrors) > 5:
+        mirror_names.append(f"... +{len(mirrors) - 5} more")
+
+    content += f"\n\n*Endpoint mirrors:* {', '.join(mirror_names)}"
+    return content
+
+
 def get_hover_info(
     indexer,
     filepath: str,
@@ -301,6 +328,9 @@ def get_hover_info(
     content = _enrich_with_semantic_model(
         content, word, filepath, position, source_lines, semantic_model
     )
+
+    # Add endpoint mirror scope context
+    content = _enrich_with_mirror_context(content, word, filepath, indexer)
 
     return lsp.Hover(
         contents=lsp.MarkupContent(

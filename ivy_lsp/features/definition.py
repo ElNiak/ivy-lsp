@@ -94,6 +94,12 @@ def goto_definition(
                 return lsp.Location(uri=uri, range=r)
         return None
 
+    # Rank results by scope relevance: files in the same endpoint mirror
+    # scope as the requesting file rank first.
+    if len(results) > 1 and hasattr(indexer, "get_scope_files_for_file"):
+        scope_files = indexer.get_scope_files_for_file(filepath)
+        results = _rank_by_scope(results, filepath, scope_files)
+
     locations = []
     for sl in results:
         uri = Path(sl.filepath).as_uri() if sl.filepath else ""
@@ -103,6 +109,33 @@ def goto_definition(
     if len(locations) == 1:
         return locations[0]
     return locations
+
+
+def _rank_by_scope(results: list, current_filepath: str, scope_files: set) -> list:
+    """Rank definition results by scope relevance.
+
+    Files in the same include closure as *current_filepath* rank first,
+    then same-directory, then by common path length.
+    """
+    import os
+
+    current_norm = os.path.normpath(os.path.abspath(current_filepath))
+    current_dir = os.path.dirname(current_norm)
+
+    def _score(r):
+        rpath = os.path.normpath(os.path.abspath(getattr(r, "filepath", "") or ""))
+        in_scope = rpath in scope_files
+        if rpath == current_norm:
+            return (0, 0)
+        if in_scope and os.path.dirname(rpath) == current_dir:
+            return (1, 0)
+        if in_scope:
+            return (2, 0)
+        if os.path.dirname(rpath) == current_dir:
+            return (3, 0)
+        return (4, 0)
+
+    return sorted(results, key=_score)
 
 
 def register(server) -> None:
