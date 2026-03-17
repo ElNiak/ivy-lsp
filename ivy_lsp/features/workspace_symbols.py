@@ -177,10 +177,20 @@ def register(server) -> None:
     ) -> List[lsp.WorkspaceSymbol]:
         if server.indexer is None:
             return []
+
+        # Resolve active file path from last didOpen/didChange URI.
+        active_filepath = None
+        last_uri = getattr(server, "_last_active_uri", None)
+        if last_uri:
+            from ivy_lsp.utils import uri_to_path
+
+            active_filepath = uri_to_path(last_uri)
+
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             compute_workspace_symbols,
             server.indexer,
             params.query or "",
+            active_filepath,
         )

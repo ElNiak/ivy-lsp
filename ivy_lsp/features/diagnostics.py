@@ -713,6 +713,7 @@ def register(server) -> None:
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
     async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         uri = params.text_document.uri
+        server._last_active_uri = uri
         doc = server.workspace.get_text_document(uri)
         filepath = uri_to_path(uri)
         source = doc.source or ""
@@ -740,6 +741,7 @@ def register(server) -> None:
     @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
     async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
         uri = params.text_document.uri
+        server._last_active_uri = uri
         old_task = _debounce_tasks.pop(uri, None)
         if old_task and not old_task.done():
             old_task.cancel()

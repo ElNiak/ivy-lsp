@@ -14,7 +14,7 @@ import os
 import re
 from typing import Any, Literal
 
-from ivy_lsp.tools._helpers import error_response
+from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # Private helpers (former standalone tool bodies)
     # ------------------------------------------------------------------
 
-    async def _ivy_traceability_matrix(relative_path: str | None = None) -> str:
+    async def _ivy_traceability_matrix(
+        relative_path: str | None = None,
+        test_file: str | None = None,
+    ) -> str:
         """RFC requirement-to-annotation traceability matrix."""
         model = await ctx.get_model()
         if model is None:
@@ -47,7 +50,21 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
-        if relative_path:
+        if test_file:
+            # Endpoint-mirror scoping: filter to include closure of test file.
+            try:
+                abs_test = ctx.validate_path(test_file)
+            except ValueError as exc:
+                return error_response(str(exc))
+            graph = await ctx.get_req_graph()
+            if graph is not None:
+                scope = graph.get_test_scope(abs_test)
+                if scope is not None:
+                    scope_files = scope.include_closure
+                    annotations = [a for a in annotations if a.file in scope_files]
+                else:
+                    annotations = [a for a in annotations if a.file == abs_test]
+        elif relative_path:
             try:
                 abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
@@ -102,7 +119,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             result["warnings"] = warnings
         return json.dumps(result)
 
-    async def _ivy_requirement_coverage(relative_path: str | None = None) -> str:
+    async def _ivy_requirement_coverage(
+        relative_path: str | None = None,
+        test_file: str | None = None,
+    ) -> str:
         """RFC requirement coverage statistics by level and layer."""
         model = await ctx.get_model()
         if model is None:
@@ -114,7 +134,21 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
-        if relative_path:
+        if test_file:
+            # Endpoint-mirror scoping: filter to include closure of test file.
+            try:
+                abs_test = ctx.validate_path(test_file)
+            except ValueError as exc:
+                return error_response(str(exc))
+            graph = await ctx.get_req_graph()
+            if graph is not None:
+                scope = graph.get_test_scope(abs_test)
+                if scope is not None:
+                    scope_files = scope.include_closure
+                    annotations = [a for a in annotations if a.file in scope_files]
+                else:
+                    annotations = [a for a in annotations if a.file == abs_test]
+        elif relative_path:
             try:
                 abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
@@ -224,7 +258,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         # C4 fix: override RFC uncovered requirements using the same
         # logic as _ivy_requirement_coverage() so stats and gaps agree.
-        stats_raw = await _ivy_requirement_coverage(relative_path=None)
+        stats_raw = await _ivy_requirement_coverage(
+            relative_path=None, test_file=test_file
+        )
         try:
             stats = json.loads(stats_raw)
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
@@ -730,8 +766,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                   coverage, and overall delta.
             relative_path: Optional file to scope the analysis to
                 (used by "matrix", "stats", and "diff" modes).
-            test_file: Optional test file to scope the analysis to
-                (used by "gaps" mode).
+            test_file: Optional test entry point whose transitive include
+                closure defines the scope. Provides endpoint-mirror scoping
+                for NCT-aligned results (used by "matrix", "stats", and
+                "gaps" modes). Takes precedence over relative_path.
             protocol: Protocol name to scope results (used by "gaps" mode).
         """
         logger.debug(
@@ -750,13 +788,13 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
             )
         if mode == "matrix":
-            return await _ivy_traceability_matrix(relative_path)
+            return await _ivy_traceability_matrix(relative_path, test_file)
         elif mode == "gaps":
             return await _ivy_coverage_gaps(test_file, protocol)
         elif mode == "diff":
             return await _ivy_coverage_diff(relative_path)
         else:  # default: stats
-            return await _ivy_requirement_coverage(relative_path)
+            return await _ivy_requirement_coverage(relative_path, test_file)
 
     @mcp.tool()
     async def ivy_query(
@@ -1156,14 +1194,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # --- Individual tool aliases (backward compatibility) ---
 
     @mcp.tool()
-    async def ivy_requirement_coverage(relative_path: str | None = None) -> str:
+    async def ivy_requirement_coverage(
+        relative_path: str | None = None,
+        test_file: str | None = None,
+    ) -> str:
         """RFC requirement coverage statistics by level and layer."""
         logger.debug(
             "[ivy_requirement_coverage] workspace=%s, args=%r",
             ctx.root,
-            {"relative_path": relative_path},
+            {"relative_path": relative_path, "test_file": test_file},
         )
-        return await _ivy_requirement_coverage(relative_path)
+        return await _ivy_requirement_coverage(relative_path, test_file)
 
     @mcp.tool()
     async def ivy_coverage_gaps(
@@ -1178,14 +1219,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         return await _ivy_coverage_gaps(test_file, protocol)
 
     @mcp.tool()
-    async def ivy_traceability_matrix(relative_path: str | None = None) -> str:
+    async def ivy_traceability_matrix(
+        relative_path: str | None = None,
+        test_file: str | None = None,
+    ) -> str:
         """RFC requirement-to-annotation traceability matrix."""
         logger.debug(
             "[ivy_traceability_matrix] workspace=%s, args=%r",
             ctx.root,
-            {"relative_path": relative_path},
+            {"relative_path": relative_path, "test_file": test_file},
         )
-        return await _ivy_traceability_matrix(relative_path)
+        return await _ivy_traceability_matrix(relative_path, test_file)
 
     @mcp.tool()
     async def ivy_query_symbol(symbol_name: str, protocol: str = "") -> str:
