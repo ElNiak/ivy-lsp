@@ -216,9 +216,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     # because the model was empty, compute from graph directly
                     if not uncovered_ids:
                         uncovered_ids = set(
-                            graph.get_uncovered_requirements_ids()
-                            if hasattr(graph, "get_uncovered_requirements_ids")
-                            else [r.id for r in graph.get_uncovered_requirements()]
+                            r.id for r in graph.get_uncovered_requirements()
                         )
 
             result["uncoveredRfcRequirements"] = [

@@ -105,21 +105,22 @@ def populate_model_from_symbols(
     tier = _tier_label(tier_used)
     count = 0
 
-    for sym in symbols:
-        count += _add_symbol_node(model, sym, filepath, tier, SymbolNode, TypeNode)
-        # Recurse into children (for nested object/module scopes)
-        for child in sym.children:
-            qualified_name = f"{sym.name}.{child.name}"
+    def _walk(syms: List[IvySymbol], prefix: str) -> None:
+        nonlocal count
+        for sym in syms:
+            qname = f"{prefix}.{sym.name}" if prefix else sym.name
             count += _add_symbol_node(
                 model,
-                child,
+                sym,
                 filepath,
                 tier,
                 SymbolNode,
                 TypeNode,
-                qualified_name_override=qualified_name,
+                qualified_name_override=qname if prefix else None,
             )
+            _walk(sym.children, qname)
 
+    _walk(symbols, "")
     return count
 
 
