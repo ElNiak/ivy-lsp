@@ -1,8 +1,9 @@
 """Tests for ivy_lsp.workspace_detection module."""
 
 import json
-import os
+import shutil
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,20 @@ from ivy_lsp.workspace_detection import (
 def tmp_workspace(tmp_path):
     """Create a temporary directory for workspace detection tests."""
     return tmp_path
+
+
+@pytest.fixture
+def isolated_tmp():
+    """Temp dir outside the workspace tree (avoids TMPDIR leakage).
+
+    When TMPDIR points inside the ivy-lsp directory (e.g. Claude Code sandbox),
+    pytest tmp_path creates dirs inside the workspace tree. The walk-up marker
+    search then finds the real .ivyworkspace marker, breaking isolation.
+    This fixture explicitly uses /tmp to escape that.
+    """
+    d = Path(tempfile.mkdtemp(prefix="ivy-ws-test-", dir="/tmp"))
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture
@@ -128,8 +143,8 @@ class TestPantherHeuristic:
         assert config is not None
         assert config.project_type == "panther"
 
-    def test_no_panther_structure(self, tmp_workspace):
-        config = _panther_heuristic(str(tmp_workspace))
+    def test_no_panther_structure(self, isolated_tmp):
+        config = _panther_heuristic(str(isolated_tmp))
         assert config is None
 
 
@@ -169,13 +184,12 @@ class TestDetectIvyWorkspace:
         assert config.detected_by == "marker"
         assert config.workspace_root == str(tmp_workspace)
 
-    def test_fallback_to_start_dir(self, monkeypatch):
+    def test_fallback_to_start_dir(self, isolated_tmp, monkeypatch):
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
-        with tempfile.TemporaryDirectory() as td:
-            config = detect_ivy_workspace(start_dir=td)
-            assert config.detected_by == "fallback"
-            assert config.workspace_root == os.path.abspath(td)
+        config = detect_ivy_workspace(start_dir=str(isolated_tmp))
+        assert config.detected_by == "fallback"
+        assert config.workspace_root == str(isolated_tmp)
 
     def test_explicit_include_exclude_paths(self, tmp_workspace):
         config = detect_ivy_workspace(
@@ -187,11 +201,11 @@ class TestDetectIvyWorkspace:
         assert config.include_paths == ["src"]
         assert config.exclude_paths == ["vendor"]
 
-    def test_panther_heuristic_detected(self, tmp_workspace, monkeypatch):
+    def test_panther_heuristic_detected(self, isolated_tmp, monkeypatch):
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
         panther_ivy = (
-            tmp_workspace
+            isolated_tmp
             / "panther"
             / "plugins"
             / "services"
@@ -199,7 +213,7 @@ class TestDetectIvyWorkspace:
             / "panther_ivy"
         )
         (panther_ivy / "protocol-testing").mkdir(parents=True)
-        config = detect_ivy_workspace(start_dir=str(tmp_workspace))
+        config = detect_ivy_workspace(start_dir=str(isolated_tmp))
         assert config.detected_by == "heuristic"
         assert config.project_type == "panther"
 
@@ -238,13 +252,13 @@ class TestResolveGitWorktree:
 
 
 class TestWorktreeWorkspaceDetection:
-    def test_worktree_detects_panther_via_main_tree(self, tmp_workspace, monkeypatch):
+    def test_worktree_detects_panther_via_main_tree(self, isolated_tmp, monkeypatch):
         """detect_ivy_workspace should follow worktree link to find PANTHER structure."""
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
 
         # Main repo with panther_ivy
-        main_repo = tmp_workspace / "main"
+        main_repo = isolated_tmp / "main"
         main_git = main_repo / ".git"
         main_git.mkdir(parents=True)
         panther_ivy = (
@@ -253,7 +267,7 @@ class TestWorktreeWorkspaceDetection:
         (panther_ivy / "protocol-testing").mkdir(parents=True)
 
         # Worktree with empty panther_ivy (simulates uninitialized submodule)
-        worktree = tmp_workspace / "worktree"
+        worktree = isolated_tmp / "worktree"
         worktree.mkdir()
         (
             worktree / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
