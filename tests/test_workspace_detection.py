@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ivy_lsp.config import reset_config
 from ivy_lsp.workspace_detection import (
     WorkspaceConfig,
     _panther_heuristic,
@@ -159,6 +160,7 @@ class TestDetectIvyWorkspace:
 
     def test_env_workspace_overrides(self, tmp_workspace, monkeypatch):
         monkeypatch.setenv("IVY_LSP_WORKSPACE", str(tmp_workspace / "env_ws"))
+        reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "explicit"
         assert config.workspace_root == str(tmp_workspace / "env_ws")
@@ -171,6 +173,7 @@ class TestDetectIvyWorkspace:
         marker = {"version": 1, "include_paths": ["models"]}
         (sub / ".ivyworkspace").write_text(json.dumps(marker))
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", "ivy-project")
+        reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "hint"
         assert config.workspace_root == str(sub)
@@ -291,6 +294,7 @@ class TestHintWithHeuristic:
         (panther_ivy / "protocol-testing").mkdir(parents=True)
         (panther_ivy / "panther_ivy.py").write_text("# marker")
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", str(panther_ivy))
+        reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "hint"
         assert config.project_type == "panther"

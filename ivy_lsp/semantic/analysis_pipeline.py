@@ -8,7 +8,6 @@ Tier 3 (compiler, background): full compiler analysis (background thread)
 from __future__ import annotations
 
 import logging
-import os
 import re
 import threading
 import time
@@ -22,6 +21,7 @@ from ivy_lsp.adapters.protocols import (
     ICompilerAdapter,
     IParserAdapter,
 )
+from ivy_lsp.config import get_config
 from ivy_lsp.semantic.edges import SemanticEdgeType
 from ivy_lsp.semantic.model import SemanticModel
 from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
@@ -105,6 +105,47 @@ class AnalysisPipeline:
         # Bulk compilation state (workspace-wide T3)
         self._bulk_compile = _TierState()
         self._file_generation: Dict[str, int] = {}
+
+    # -- Convenience factory ---------------------------------------------------
+
+    @staticmethod
+    def build_model_from_files(
+        root: str,
+        find_files_fn: Callable[[str], List[str]],
+        include_resolver: Any = None,
+        stdlib_modules: Optional[frozenset] = None,
+    ) -> Optional[SemanticModel]:
+        """Build a pre-populated SemanticModel from workspace files.
+
+        Delegates to :func:`ivy_lsp.semantic.model_builder.build_semantic_model`,
+        providing a single entry point shared with the MCP server's
+        standalone model builder.
+
+        This is useful for pre-populating a model before constructing an
+        ``AnalysisPipeline``, or for batch re-indexing.
+
+        Parameters
+        ----------
+        root:
+            Workspace root directory.
+        find_files_fn:
+            Callable returning relative ``.ivy`` file paths.
+        include_resolver:
+            Optional resolve callback for parser include resolution.
+        stdlib_modules:
+            Known Ivy stdlib module names (forwarded to the builder).
+
+        Returns:
+            SemanticModel or ``None`` when dependencies are missing.
+        """
+        from ivy_lsp.semantic.model_builder import build_semantic_model
+
+        return build_semantic_model(
+            root=root,
+            find_files_fn=find_files_fn,
+            include_resolver=include_resolver,
+            stdlib_modules=stdlib_modules,
+        )
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -395,7 +436,7 @@ class AnalysisPipeline:
 
         result = BulkAnalysisResult(total=len(remaining))
 
-        num_workers = int(os.environ.get("IVY_LSP_BULK_WORKERS", "4"))
+        num_workers = get_config().bulk_workers
         try:
             if num_workers > 1 and len(remaining) > 3:
                 self._run_bulk_parallel_t1(
@@ -509,7 +550,7 @@ class AnalysisPipeline:
         T2 (Ivy parser) runs sequentially afterwards because the parser
         may have global state.
         """
-        num_workers = int(os.environ.get("IVY_LSP_BULK_WORKERS", "4"))
+        num_workers = get_config().bulk_workers
 
         # Phase A: thread-parallel T1
         sources: Dict[str, str] = {}

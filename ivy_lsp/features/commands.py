@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.config import get_config
 from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
@@ -19,22 +20,6 @@ from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
-
-
-def _float_env(name: str, fallback: float, floor: float = 5.0) -> float:
-    """Read a float from an environment variable with a safety floor."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return fallback
-    try:
-        return max(floor, float(raw))
-    except (ValueError, TypeError):
-        return fallback
-
-
-DEFAULT_VERIFY_TIMEOUT = _float_env("IVY_LSP_VERIFY_TIMEOUT", 120.0)
-DEFAULT_COMPILE_TIMEOUT = _float_env("IVY_LSP_TOOL_COMPILE_TIMEOUT", 300.0, floor=10.0)
-DEFAULT_SHOW_MODEL_TIMEOUT = _float_env("IVY_LSP_SHOW_MODEL_TIMEOUT", 30.0)
 
 
 def _find_tool(name: str) -> Optional[str]:
@@ -257,7 +242,7 @@ async def _run_tool(
     """
     if token is not None:
         # Skip progress if the client doesn't support work-done progress
-        client_supports = getattr(server, "_client_supports_work_done_progress", False)
+        client_supports = server._client_supports_work_done_progress
         if not client_supports:
             token = None
         else:
@@ -462,7 +447,7 @@ def register(server: Any) -> None:
         try:
             result = await _run_tool(
                 cmd,
-                DEFAULT_VERIFY_TIMEOUT,
+                get_config().verify_timeout,
                 server,
                 token,
                 cwd=os.path.dirname(staged_filepath),
@@ -530,7 +515,7 @@ def register(server: Any) -> None:
         try:
             result = await _run_tool(
                 cmd,
-                DEFAULT_COMPILE_TIMEOUT,
+                get_config().tool_compile_timeout,
                 server,
                 token,
                 cwd=os.path.dirname(staged_filepath),
@@ -583,7 +568,7 @@ def register(server: Any) -> None:
         try:
             result = await _run_tool(
                 cmd,
-                DEFAULT_SHOW_MODEL_TIMEOUT,
+                get_config().show_model_timeout,
                 server,
                 token,
                 cwd=os.path.dirname(staged_filepath),
@@ -772,7 +757,7 @@ def register(server: Any) -> None:
         try:
             result = await _run_tool(
                 cmd,
-                DEFAULT_COMPILE_TIMEOUT,
+                get_config().tool_compile_timeout,
                 server,
                 token,
                 env=_get_compile_env(),

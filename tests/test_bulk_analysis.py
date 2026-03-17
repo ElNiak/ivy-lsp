@@ -10,6 +10,7 @@ from ivy_lsp.adapters.null_adapter import (
     NullCompilerAdapter,
     NullParserAdapter,
 )
+from ivy_lsp.config import reset_config
 from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
 from ivy_lsp.semantic.model import SemanticModel
 
@@ -245,6 +246,7 @@ class TestBulkAnalysisEnvVars:
         server._bulk_analysis_cancel = threading.Event()
 
         with patch.dict(os.environ, {"IVY_LSP_BULK_ANALYSIS": "0"}):
+            reset_config()
             # Should return early without spawning a thread
             server._start_bulk_analysis()
 

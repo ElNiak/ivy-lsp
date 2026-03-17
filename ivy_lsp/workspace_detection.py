@@ -13,6 +13,8 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from ivy_lsp.config import get_config
+
 logger = logging.getLogger(__name__)
 
 _IVYWORKSPACE_FILENAME = ".ivyworkspace"
@@ -237,7 +239,7 @@ def detect_ivy_workspace(
         A WorkspaceConfig with the detected workspace root and paths.
     """
     # 1. Explicit workspace
-    ws = explicit_workspace or os.environ.get("IVY_LSP_WORKSPACE")
+    ws = explicit_workspace or get_config().workspace
     if ws:
         ws = os.path.abspath(ws)
         logger.info("Using explicit workspace: %s", ws)
@@ -251,7 +253,7 @@ def detect_ivy_workspace(
     abs_start = os.path.abspath(start_dir)
 
     # 2. Workspace hint env var
-    hint = os.environ.get("IVY_LSP_WORKSPACE_HINT")
+    hint = get_config().workspace_hint
     if hint:
         hint_path = os.path.join(abs_start, hint) if not os.path.isabs(hint) else hint
         marker_path = os.path.join(hint_path, _IVYWORKSPACE_FILENAME)

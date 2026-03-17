@@ -4,6 +4,21 @@ from pathlib import Path
 
 import pytest
 
+from ivy_lsp.config import reset_config
+
+
+@pytest.fixture(autouse=True)
+def _reset_server_config():
+    """Ensure the ServerConfig singleton is fresh for every test.
+
+    Tests that set ``IVY_LSP_*`` env vars via ``monkeypatch`` or
+    ``patch.dict`` would otherwise leak cached values to subsequent tests.
+    """
+    reset_config()
+    yield
+    reset_config()
+
+
 # Try to resolve QUIC_STACK_DIR from the ivy package (if installed),
 # otherwise fall back to a sibling layout (panther_ivy checkout).
 try:

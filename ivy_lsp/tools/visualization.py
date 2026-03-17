@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any, Literal
 
-from ivy_lsp.tools._helpers import error_response
+from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
 

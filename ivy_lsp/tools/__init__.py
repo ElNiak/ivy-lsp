@@ -7,7 +7,14 @@ Each sub-module registers a logical group of ``@mcp.tool()`` handlers.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
+
+
+def error_response(message: str) -> str:
+    """Return a JSON error response string."""
+    return json.dumps({"success": False, "message": message})
+
 
 from ivy_lsp.tools.analysis import register_analysis_tools
 from ivy_lsp.tools.patterns import register_pattern_tools
@@ -30,4 +37,4 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_quality_tools(mcp, ctx)
 
 
-__all__ = ["register_all_tools"]
+__all__ = ["error_response", "register_all_tools"]

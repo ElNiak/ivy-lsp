@@ -207,6 +207,7 @@ def get_completions(
     position: lsp.Position,
     source_lines: List[str],
     requirement_graph: Any = None,
+    semantic_model: Any = None,
 ) -> List[lsp.CompletionItem]:
     """Compute completion items for the given position."""
     if position.line < 0 or position.line >= len(source_lines):
@@ -216,7 +217,10 @@ def get_completions(
     ctx, prefix, scope_name = detect_context(line_text, position.character)
 
     if ctx == CompletionContext.DOT_ACCESS:
-        return _dot_access_completions(indexer, filepath, scope_name, prefix)
+        items = _dot_access_completions(indexer, filepath, scope_name, prefix)
+        if semantic_model is not None:
+            _enrich_items_from_semantic_model(items, semantic_model)
+        return items
     elif ctx == CompletionContext.INCLUDE:
         return _include_completions(indexer, filepath, prefix)
     elif ctx == CompletionContext.AFTER_KEYWORD:
@@ -251,6 +255,8 @@ def get_completions(
                         sort_text=d.get("sortText"),
                     )
                 )
+        if semantic_model is not None:
+            _enrich_items_from_semantic_model(items, semantic_model)
         return items
 
 
@@ -519,6 +525,39 @@ def _find_enclosing_action(graph: Any, filepath: str, line: int) -> Optional[str
     return None
 
 
+def _enrich_items_from_semantic_model(
+    items: List[lsp.CompletionItem],
+    semantic_model: Any,
+) -> None:
+    """Enrich CompletionItems with type details from the SemanticModel.
+
+    For each item, if a matching SymbolNode exists in the model, its
+    params and return_sort are added to the detail string.
+    """
+    if semantic_model is None or not items:
+        return
+    try:
+        from ivy_lsp.semantic.nodes import SymbolNode
+
+        symbol_nodes = {
+            sn.name: sn for sn in semantic_model.get_nodes_by_type(SymbolNode)
+        }
+        for item in items:
+            sn = symbol_nodes.get(item.label)
+            if sn is None:
+                continue
+            parts = []
+            if sn.params:
+                parts.append(f"({', '.join(sn.params)})")
+            if sn.return_sort:
+                parts.append(f"-> {sn.return_sort}")
+            if parts:
+                extra = " ".join(parts)
+                item.detail = f"{item.detail}  {extra}" if item.detail else extra
+    except Exception:
+        logger.debug("Failed to enrich completions from semantic model", exc_info=True)
+
+
 def register(server) -> None:
     """Register the textDocument/completion feature handler."""
 
@@ -536,6 +575,7 @@ def register(server) -> None:
         lines = doc.source.split("\n") if doc.source else []
         filepath = uri_to_path(uri)
         graph = server.indexer.requirement_graph
+        model = server.semantic_model
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
@@ -545,5 +585,6 @@ def register(server) -> None:
                 params.position,
                 lines,
                 requirement_graph=graph,
+                semantic_model=model,
             ),
         )

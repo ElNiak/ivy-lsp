@@ -19,6 +19,7 @@ import types
 from unittest.mock import MagicMock, patch
 
 from ivy_lsp.compilation.ir import ActionIR, CompiledModuleIR
+from ivy_lsp.config import reset_config
 from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
 from ivy_lsp.semantic.model import SemanticModel
 
@@ -104,6 +105,7 @@ class TestBulkCompilationViaPipeline:
         server._semantic_model = model
         server._bulk_analysis_cancel = threading.Event()
         server._shutdown_event = threading.Event()
+        server._client_supports_work_done_progress = False
 
         # Mock protocol for notification tests
         server.protocol = MagicMock()
@@ -199,6 +201,7 @@ class TestBulkCompilationViaPipeline:
 
     def test_env_var_disables_bulk_compile(self, tmp_path, monkeypatch):
         monkeypatch.setenv("IVY_LSP_BULK_COMPILE", "0")
+        reset_config()
         f1 = tmp_path / "test1.ivy"
         f1.write_text("#lang ivy1.8\n")
 

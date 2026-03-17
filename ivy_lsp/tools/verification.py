@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any
 
-from ivy_lsp.tools._helpers import error_response
+from ivy_lsp.tools import error_response
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check

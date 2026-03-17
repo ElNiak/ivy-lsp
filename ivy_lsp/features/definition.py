@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from lsprotocol import types as lsp
 
@@ -27,6 +27,7 @@ def goto_definition(
     filepath: str,
     position: lsp.Position,
     source_lines: List[str],
+    semantic_model: Any = None,
 ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
     """Find definition(s) of the symbol at the given position.
 
@@ -43,6 +44,7 @@ def goto_definition(
         filepath: Absolute path to the file being edited.
         position: The cursor position (0-based line and character).
         source_lines: The source file split into lines.
+        semantic_model: Optional SemanticModel for fallback lookups.
 
     Returns:
         A single :class:`lsp.Location` when exactly one definition is found,
@@ -76,6 +78,9 @@ def goto_definition(
     if not results and "." in word:
         last = word.rsplit(".", 1)[1]
         results = indexer.lookup_symbol(last)
+
+    if not results and semantic_model is not None:
+        results = _lookup_via_semantic_model(word, semantic_model)
 
     if not results:
         # H6: If cursor is on a declaration keyword, return self-location
@@ -138,6 +143,39 @@ def _rank_by_scope(results: list, current_filepath: str, scope_files: set) -> li
     return sorted(results, key=_score)
 
 
+class _SemanticSymbolLoc:
+    """Lightweight stand-in for an indexer symbol result."""
+
+    __slots__ = ("filepath", "range")
+
+    def __init__(self, filepath: str, line: int):
+        self.filepath = filepath
+        self.range = (line - 1, 0, line - 1, 0)
+
+
+def _lookup_via_semantic_model(word: str, semantic_model: Any) -> list:
+    """Query the SemanticModel for symbol locations when the indexer misses.
+
+    Returns a list of ``_SemanticSymbolLoc`` objects (matching the shape
+    expected by the calling code in ``goto_definition``).
+    """
+    # TODO: add a by-name index to SemanticModel to avoid O(N) scans here
+    # and in hover.py (_enrich_with_semantic_model).
+    try:
+        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+
+        results = []
+        for node_type in (SymbolNode, TypeNode):
+            for node in semantic_model.get_nodes_by_type(node_type):
+                if node.name == word or getattr(node, "qualified_name", None) == word:
+                    if node.file and node.line:
+                        results.append(_SemanticSymbolLoc(node.file, node.line))
+        return results
+    except Exception:
+        logger.debug("semantic model lookup failed", exc_info=True)
+        return []
+
+
 def register(server) -> None:
     """Register the ``textDocument/definition`` feature handler.
 
@@ -157,14 +195,17 @@ def register(server) -> None:
                 return None
             lines = doc.source.split("\n") if doc.source else []
             filepath = uri_to_path(uri)
+            model = server.semantic_model
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None,
-                goto_definition,
-                server.indexer,
-                filepath,
-                params.position,
-                lines,
+                lambda: goto_definition(
+                    server.indexer,
+                    filepath,
+                    params.position,
+                    lines,
+                    semantic_model=model,
+                ),
             )
         except Exception:
             logger.warning("definition handler failed", exc_info=True)

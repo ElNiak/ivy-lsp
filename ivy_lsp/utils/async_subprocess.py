@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
+
+from ivy_lsp.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def get_tool_semaphore() -> asyncio.Semaphore:
     the same concurrency limit.
     """
     global _semaphore_limit
-    limit = max(1, int(os.environ.get("IVY_LSP_MAX_CONCURRENT_TOOLS", "4")))
+    limit = get_config().max_concurrent_tools
 
     loop = asyncio.get_running_loop()
 

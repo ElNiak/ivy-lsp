@@ -21,6 +21,7 @@ from typing import Any, Callable
 # Re-export verification functions so that external code and tests that patch
 # ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.tools.*``.
+from ivy_lsp.config import get_config
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
 from ivy_lsp.verification import run_ivy_show as shared_ivy_show
@@ -161,16 +162,9 @@ def start_mcp(
     root = workspace_root or os.getcwd()
 
     # --- Workspace scoping: respect include/exclude paths from detection ---
-    _include_paths = [
-        p.strip()
-        for p in os.environ.get("IVY_LSP_INCLUDE_PATHS", "").split(",")
-        if p.strip()
-    ]
-    _extra_exclude_dirs = frozenset(
-        p.strip()
-        for p in os.environ.get("IVY_LSP_EXCLUDE_PATHS", "").split(",")
-        if p.strip()
-    )
+    _cfg = get_config()
+    _include_paths = _cfg.include_paths
+    _extra_exclude_dirs = frozenset(_cfg.exclude_paths)
     _effective_exclude_dirs = DEFAULT_EXCLUDE_DIRS | _extra_exclude_dirs
 
     def _find_ivy_files(search_root: str) -> list[str]:
@@ -236,22 +230,6 @@ def start_mcp(
 
     # --- Workspace-aware include resolution cache ---
 
-    # Known Ivy standard library modules that should never be flagged
-    # as unresolved by lint (they live in ivy/include/ or ivy2/).
-    _STDLIB_MODULES = frozenset(
-        {
-            "order",
-            "collections",
-            "ip",
-            "ipv6",
-            "tcp",
-            "udp",
-            "byte_stream",
-            "timeout",
-            "net",
-        }
-    )
-
     _basename_cache: dict[str, list[str]] | None = None
     _basename_cache_lock = threading.Lock()
 
@@ -277,7 +255,7 @@ def start_mcp(
 
         def _resolve(inc_name: str, from_file: str) -> str | None:
             # Accept known stdlib modules
-            if inc_name in _STDLIB_MODULES:
+            if inc_name in ctx.stdlib_modules:
                 return f"<stdlib>/{inc_name}.ivy"
             # Check workspace file index
             candidates = cache.get(inc_name)
@@ -345,156 +323,20 @@ def start_mcp(
     def _build_model():
         """Build a lightweight semantic model from workspace files.
 
+        Delegates to the shared ``build_semantic_model`` function in
+        ``ivy_lsp.semantic.model_builder``.
+
         Returns the model on success, or ``None`` when a required
         dependency is missing (logged at WARNING).  The caller
         (``_get_model``) is responsible for caching the result and
         assigning the ``semantic_model`` nonlocal under the lock.
         """
-        # Import required modules — narrow ImportError to just these imports
-        try:
-            from ivy_lsp.semantic.model import SemanticModel
-            from ivy_lsp.semantic.nodes import (
-                RfcAnnotation,
-                RfcRequirement,
-                SymbolNode,
-                TypeNode,
-            )
-            from ivy_lsp.semantic.rfc_annotations import (
-                find_manifests,
-                load_requirement_manifest,
-                parse_file_rfc_annotations,
-            )
-        except ImportError:
-            logger.warning(
-                "Semantic model unavailable: required modules "
-                "(ivy_lsp.semantic.model or ivy_lsp.semantic.rfc_annotations) "
-                "could not be imported. Install ivy-lsp[semantic] to enable "
-                "traceability tools.",
-                exc_info=True,
-            )
-            return None
+        from ivy_lsp.semantic.model_builder import build_semantic_model
 
-        model = SemanticModel()
-        # Load manifests
-        for manifest_path in find_manifests(root):
-            reqs = load_requirement_manifest(manifest_path)
-            for req in reqs.values():
-                model.add_node(req)
-
-        # Scan .ivy files for annotations, types, and symbols using
-        # tiered extraction: parser -> lexer -> regex cascade.
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
-
-        extractor = TieredExtractor()
-        # Cache includes per file for INCLUDES edge wiring later
-        file_includes: dict[str, list[str]] = {}
-        tier_counts: dict[int, int] = {1: 0, 2: 0, 3: 0}
-        total_symbols = 0
-        build_start = time.monotonic()
-
-        for rel_path in _find_ivy_files(root):
-            abs_path = os.path.join(root, rel_path)
-            try:
-                with open(abs_path, encoding="utf-8", errors="replace") as f:
-                    source = f.read()
-            except OSError as exc:
-                logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
-                continue
-
-            # RFC annotations (operates on comments, not declarations)
-            for ann in parse_file_rfc_annotations(source, abs_path):
-                model.add_node(ann)
-
-            # Extract symbols via tiered cascade
-            result = extractor.extract(source, abs_path)
-            if result.tier_used > 0:
-                count = populate_model_from_symbols(
-                    model, result.symbols, abs_path, tier_used=result.tier_used
-                )
-                total_symbols += count
-                tier_counts[result.tier_used] = tier_counts.get(result.tier_used, 0) + 1
-                file_includes[abs_path] = result.includes
-
-        build_elapsed = (time.monotonic() - build_start) * 1000
-        logger.info(
-            "Model built: %d files, tiers={1: %d, 2: %d, 3: %d}, %d symbols (%.1fms)",
-            sum(tier_counts.values()),
-            tier_counts.get(1, 0),
-            tier_counts.get(2, 0),
-            tier_counts.get(3, 0),
-            total_symbols,
-            build_elapsed,
+        return build_semantic_model(
+            root=root,
+            find_files_fn=_find_ivy_files,
         )
-
-        # -- Wire semantic edges --
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-
-        # 1. COVERS: RfcAnnotation -> RfcRequirement
-        # Use normalize_tag_to_manifest_ids for proper tag resolution:
-        # bare numbers like "4" match "rfc9000:4.*", section refs like
-        # "4.1" match "rfc9000:4.1", and qualified tags match exactly.
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
-
-        req_by_id: dict[str, object] = {
-            n.id: n for n in model.get_nodes_by_type(RfcRequirement)
-        }
-        req_id_set = set(req_by_id.keys())
-        for ann in model.get_nodes_by_type(RfcAnnotation):
-            for tag in ann.tags:
-                matched_ids = normalize_tag_to_manifest_ids(tag, req_id_set)
-                for req_id in matched_ids:
-                    model.add_edge(ann.id, SemanticEdgeType.COVERS, req_id)
-
-        # 2. HAS_PARAM / RETURNS_TYPE: SymbolNode -> TypeNode
-        type_by_name: dict[str, str] = {}
-        for tn in model.get_nodes_by_type(TypeNode):
-            if tn.name not in type_by_name:
-                type_by_name[tn.name] = tn.id
-
-        for sn in model.get_nodes_by_type(SymbolNode):
-            # HAS_PARAM: parse "var : type" from params
-            if sn.params:
-                for param in sn.params:
-                    parts = param.split(":")
-                    if len(parts) < 2:
-                        continue
-                    type_ref = parts[-1].strip()
-                    base = type_ref.split(".")[-1]
-                    target = type_by_name.get(base) or type_by_name.get(type_ref)
-                    if target:
-                        model.add_edge(sn.id, SemanticEdgeType.HAS_PARAM, target)
-
-            # RETURNS_TYPE
-            ret = getattr(sn, "return_sort", None)
-            if ret:
-                base = ret.split(".")[-1]
-                target = type_by_name.get(base) or type_by_name.get(ret)
-                if target:
-                    model.add_edge(sn.id, SemanticEdgeType.RETURNS_TYPE, target)
-
-        # 3. INCLUDES: file -> file (via include directives extracted above)
-        basename_to_path: dict[str, str] = {}
-        for rel_path in _find_ivy_files(root):
-            stem = os.path.splitext(os.path.basename(rel_path))[0]
-            basename_to_path[stem] = os.path.join(root, rel_path)
-
-        for abs_path, includes in file_includes.items():
-            nodes_in_src = model.get_nodes_in_file(abs_path)
-            if not nodes_in_src:
-                continue
-            src_id = nodes_in_src[0].id
-            for inc_name in includes:
-                target_path = basename_to_path.get(inc_name)
-                if not target_path or target_path == abs_path:
-                    continue
-                nodes_in_tgt = model.get_nodes_in_file(target_path)
-                if nodes_in_tgt:
-                    model.add_edge(
-                        src_id, SemanticEdgeType.INCLUDES, nodes_in_tgt[0].id
-                    )
-
-        return model
 
     # --- Lazy RequirementGraph construction ---
 

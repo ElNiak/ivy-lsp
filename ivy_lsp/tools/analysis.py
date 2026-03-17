@@ -10,7 +10,7 @@ import shutil
 from typing import Any
 
 from ivy_lsp.parsing.tiered_extractor import TieredExtractor
-from ivy_lsp.tools._helpers import error_response
+from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
 

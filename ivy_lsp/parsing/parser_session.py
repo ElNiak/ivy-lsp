@@ -6,13 +6,15 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
+from ivy_lsp.config import get_config
+
 logger = logging.getLogger(__name__)
 
 # Serializes access to Ivy's module-level globals across threads.
 # Without this, a background CompilerSession can clobber state mid-parse.
 _ivy_state_lock = threading.Lock()
 
-_DEFAULT_LOCK_TIMEOUT = float(os.environ.get("IVY_LSP_LOCK_TIMEOUT", "30"))
+_DEFAULT_LOCK_TIMEOUT = get_config().lock_timeout
 
 
 @dataclass

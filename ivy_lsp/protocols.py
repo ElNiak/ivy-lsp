@@ -15,6 +15,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
+    from ivy_lsp.adapters.protocols import IParserAdapter
     from ivy_lsp.analysis.requirement_graph import EdgeType, RequirementGraph
     from ivy_lsp.compilation.compiler_manager import CompilerManager
     from ivy_lsp.features.status import ServerStateTracker
@@ -23,15 +24,6 @@ if TYPE_CHECKING:
     from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol
     from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
     from ivy_lsp.semantic.model import SemanticModel
-
-
-@runtime_checkable
-class IParserAdapter(Protocol):
-    """Interface for Ivy parser adapters (full or fallback)."""
-
-    def parse(self, source: str, filename: str) -> Any:
-        """Parse Ivy source text into an AST."""
-        ...
 
 
 @runtime_checkable
@@ -82,6 +74,7 @@ class IvyServerProtocol(Protocol):
         """Return the cancellation event for bulk analysis."""
         ...
 
+    _client_supports_work_done_progress: bool
     state_tracker: ServerStateTracker
     workspace: Any
     work_done_progress: Any

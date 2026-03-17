@@ -27,6 +27,7 @@ from ivy_lsp.analysis.test_scope import (
     TestScope,
     detect_test_role,
 )
+from ivy_lsp.config import get_config
 from ivy_lsp.indexer.file_cache import FileCache
 from ivy_lsp.indexer.include_resolver import IncludeResolver
 from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
@@ -337,7 +338,7 @@ class WorkspaceIndexer:
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         files = self._resolver.find_all_ivy_files()
-        num_workers = int(os.environ.get("IVY_LSP_FAST_INDEX_WORKERS", "4"))
+        num_workers = get_config().fast_index_workers
 
         if num_workers > 1 and len(files) > 5:
             self._fast_index_parallel(files, num_workers, fallback_scan)
@@ -653,7 +654,7 @@ class WorkspaceIndexer:
         # Signal progress start (0/total)
         self._notify_progress()
 
-        num_workers = int(os.environ.get("IVY_LSP_PARSE_WORKERS", "0"))
+        num_workers = get_config().parse_workers
         use_parallel = num_workers != 1 and len(test_files) > 3
 
         if self._stop_requested.is_set():
