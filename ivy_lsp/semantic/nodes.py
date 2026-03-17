@@ -30,6 +30,7 @@ __all__ = [
     "MonitorNode",
     "RfcRequirement",
     "RfcAnnotation",
+    "ManifestMetadata",
 ]
 
 Tier = Literal["tier1", "tier2", "tier3"]
@@ -105,6 +106,23 @@ class RfcRequirement:
     level: Literal["MUST", "SHOULD", "MAY", "MUST NOT", "SHOULD NOT"]
     layer: str = ""  # e.g. "frame", "connection", "transport"
     testable: bool = True
+
+
+@dataclass
+class ManifestMetadata:
+    """Metadata for a requirement manifest, enabling staleness detection."""
+
+    generated_at: str = ""  # ISO 8601 timestamp
+    generator_version: str = ""
+    source: str = ""  # URL or file path of the source RFC
+    content_hash: str = ""  # SHA-256 of the source text
+    last_checked: str = ""  # ISO 8601 timestamp of last staleness check
+    obsoleted_by: str = ""  # RFC number that obsoletes this one
+    updated_by: str = ""  # Comma-separated RFC numbers
+    errata_ids: str = ""  # Comma-separated errata IDs
+    is_draft: bool = False
+    draft_name: str = ""
+    draft_version: str = ""
 
 
 @dataclass

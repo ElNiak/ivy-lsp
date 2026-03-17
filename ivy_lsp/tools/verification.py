@@ -422,6 +422,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 model = await ctx.get_model()
                 if model is not None:
                     from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+                    from ivy_lsp.semantic.rfc_annotations import is_tag_covered
 
                     rfc_reqs = model.get_nodes_by_type(RfcRequirement)
                     annotations = [
@@ -433,7 +434,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         req_ids = {r.id for r in rfc_reqs}
                         for ann in annotations:
                             for tag in ann.tags:
-                                if tag not in req_ids:
+                                if not is_tag_covered(tag, req_ids):
                                     all_diags.append(
                                         {
                                             "line": ann.line + 1,

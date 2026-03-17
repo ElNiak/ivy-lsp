@@ -399,6 +399,7 @@ def compute_semantic_diagnostics(
     import os
 
     from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+    from ivy_lsp.semantic.rfc_annotations import is_tag_covered
 
     diags: List[lsp.Diagnostic] = []
     abs_path = os.path.abspath(filepath)
@@ -416,7 +417,7 @@ def compute_semantic_diagnostics(
         # Orphaned RFC tags: bracket tags that don't match any manifest requirement
         for ann in annotations:
             for tag in ann.tags:
-                if tag not in req_ids:
+                if not is_tag_covered(tag, req_ids):
                     line = ann.line
                     line_len = len(lines[line]) if line < len(lines) else 0
                     diags.append(
