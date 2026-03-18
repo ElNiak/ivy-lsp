@@ -80,6 +80,8 @@ def build_semantic_model(
     extractor = TieredExtractor(resolve_callback=include_resolver)
     # Cache includes per file for INCLUDES edge wiring later
     file_includes: dict[str, list[str]] = {}
+    # Cache references per file for CALLS/USES/MONITORS edge wiring later
+    file_references: dict[str, list] = {}
     # Map basename (stem) -> abs_path for INCLUDES edge wiring (avoids
     # a second find_files_fn call).
     basename_to_path: dict[str, str] = {}
@@ -111,6 +113,8 @@ def build_semantic_model(
             total_symbols += count
             tier_counts[result.tier_used] = tier_counts.get(result.tier_used, 0) + 1
             file_includes[abs_path] = result.includes
+            if result.references:
+                file_references[abs_path] = result.references
 
     build_elapsed = (time.monotonic() - build_start) * 1000
     logger.info(
@@ -124,7 +128,7 @@ def build_semantic_model(
     )
 
     # -- Wire semantic edges --
-    _wire_semantic_edges(model, basename_to_path, file_includes)
+    _wire_semantic_edges(model, basename_to_path, file_includes, file_references)
 
     return model
 
@@ -133,8 +137,9 @@ def _wire_semantic_edges(
     model: Any,
     basename_to_path: dict[str, str],
     file_includes: dict[str, list[str]],
+    file_references: dict[str, list] | None = None,
 ) -> None:
-    """Wire COVERS, HAS_PARAM, RETURNS_TYPE, and INCLUDES edges.
+    """Wire COVERS, HAS_PARAM, RETURNS_TYPE, INCLUDES, CALLS, USES, MONITORS, and CONTAINS edges.
 
     Extracted as a helper to keep ``build_semantic_model`` readable.
     """
@@ -201,3 +206,52 @@ def _wire_semantic_edges(
             nodes_in_tgt = model.get_nodes_in_file(target_path)
             if nodes_in_tgt:
                 model.add_edge(src_id, SemanticEdgeType.INCLUDES, nodes_in_tgt[0].id)
+
+    # 4. CALLS / USES / MONITORS edges from extracted references
+    if file_references:
+        # Build name->node_id indices for resolution
+        symbol_by_name: dict[str, str] = {}
+        symbol_by_qname: dict[str, str] = {}
+        for sn in model.get_nodes_by_type(SymbolNode):
+            symbol_by_name.setdefault(sn.name, sn.id)
+            symbol_by_qname[sn.qualified_name] = sn.id
+        # Also index TypeNodes (for USES edges targeting modules/types)
+        for tn in model.get_nodes_by_type(TypeNode):
+            symbol_by_name.setdefault(tn.name, tn.id)
+            symbol_by_qname[tn.qualified_name] = tn.id
+
+        def _resolve_name(name: str) -> str | None:
+            """Resolve a symbol name to a node ID."""
+            return symbol_by_qname.get(name) or symbol_by_name.get(
+                name.rsplit(".", 1)[-1] if "." in name else name
+            )
+
+        for refs in file_references.values():
+            for ref in refs:
+                source_id = _resolve_name(ref.source_name)
+                target_id = _resolve_name(ref.target_name)
+                if not source_id or not target_id:
+                    continue
+                if source_id == target_id:
+                    continue  # Skip self-edges
+
+                if ref.kind == "call":
+                    model.add_edge(source_id, SemanticEdgeType.CALLS, target_id)
+                elif ref.kind == "instance":
+                    model.add_edge(source_id, SemanticEdgeType.USES, target_id)
+                elif ref.kind == "monitor":
+                    model.add_edge(source_id, SemanticEdgeType.MONITORS, target_id)
+
+    # 5. CONTAINS edges from qualified names
+    all_node_ids: dict[str, str] = {}
+    for sn in model.get_nodes_by_type(SymbolNode):
+        all_node_ids[sn.qualified_name] = sn.id
+    for tn in model.get_nodes_by_type(TypeNode):
+        all_node_ids[tn.qualified_name] = tn.id
+
+    for qname, node_id in all_node_ids.items():
+        if "." in qname:
+            parent_qname = qname.rsplit(".", 1)[0]
+            parent_id = all_node_ids.get(parent_qname)
+            if parent_id:
+                model.add_edge(parent_id, SemanticEdgeType.CONTAINS, node_id)

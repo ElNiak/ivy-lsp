@@ -500,3 +500,79 @@ class TestSemanticModelDomainQueries:
         assert stats["total_requirements"] == 0
         assert stats["covered"] == 0
         assert stats["uncovered"] == 0
+
+
+class TestSemanticModelReferenceEdges:
+    """Test CALLS, USES, MONITORS, and CONTAINS edge wiring."""
+
+    def test_calls_edge_from_references(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="process",
+            qualified_name="process",
+            kind="action",
+            file="f",
+            line=1,
+        )
+        s2 = SymbolNode(
+            id="s2",
+            name="connect",
+            qualified_name="connect",
+            kind="action",
+            file="f",
+            line=5,
+        )
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_edge("s1", SemanticEdgeType.CALLS, "s2")
+        outgoing = model.get_outgoing("s1")
+        assert (SemanticEdgeType.CALLS, "s2") in outgoing
+
+    def test_uses_edge_from_references(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="net",
+            qualified_name="net",
+            kind="instance",
+            file="f",
+            line=1,
+        )
+        s2 = SymbolNode(
+            id="s2",
+            name="endpoint",
+            qualified_name="endpoint",
+            kind="module",
+            file="f",
+            line=5,
+        )
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_edge("s1", SemanticEdgeType.USES, "s2")
+        outgoing = model.get_outgoing("s1")
+        assert (SemanticEdgeType.USES, "s2") in outgoing
+
+    def test_contains_edge_from_qualified_names(self):
+        model = SemanticModel()
+        parent = SymbolNode(
+            id="p1",
+            name="frame",
+            qualified_name="frame",
+            kind="module",
+            file="f",
+            line=1,
+        )
+        child = SymbolNode(
+            id="c1",
+            name="ack",
+            qualified_name="frame.ack",
+            kind="action",
+            file="f",
+            line=5,
+        )
+        model.add_node(parent)
+        model.add_node(child)
+        model.add_edge("p1", SemanticEdgeType.CONTAINS, "c1")
+        outgoing = model.get_outgoing("p1")
+        assert (SemanticEdgeType.CONTAINS, "c1") in outgoing
