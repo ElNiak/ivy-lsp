@@ -483,3 +483,110 @@ class TestIncludePaths:
         assert len(files) == 1
         assert "quic" in files[0]
         resolver.cleanup_staging()
+
+
+class TestPartitionedStagingIdempotent:
+    """Step 1.1/1.2: Calling build_partitioned_staging() twice must not raise Errno 17."""
+
+    def test_partitioned_staging_idempotent(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        # Create workspace with basename collisions (quic/types.ivy vs apt/types.ivy)
+        quic = tmp_path / "quic"
+        quic.mkdir()
+        (quic / "types.ivy").write_text("# quic types")
+        (quic / "model.ivy").write_text("# quic model")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "types.ivy").write_text("# apt types")
+        (apt / "model.ivy").write_text("# apt model")
+
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+
+        # Verify collision was detected
+        assert "types.ivy" in resolver.collision_map
+
+        # Build test scopes: two tests that need different types.ivy variants
+        test_scopes = {
+            str(quic / "model.ivy"): frozenset(
+                {str(quic / "types.ivy"), str(quic / "model.ivy")}
+            ),
+            str(apt / "model.ivy"): frozenset(
+                {str(apt / "types.ivy"), str(apt / "model.ivy")}
+            ),
+        }
+
+        # First call — should succeed
+        resolver.build_partitioned_staging(test_scopes)
+
+        # Second call — must NOT raise [Errno 17] File exists
+        resolver.build_partitioned_staging(test_scopes)
+
+        # Verify partitions are still valid after double-call
+        assert len(resolver._partition_staging) > 0
+        for part_id, part_dir in resolver._partition_staging.items():
+            assert os.path.isdir(part_dir)
+            # Verify symlinks exist and are valid
+            for entry in os.scandir(part_dir):
+                if entry.is_symlink():
+                    assert os.path.exists(
+                        entry.path
+                    ), f"Dangling symlink in {part_id}: {entry.name}"
+
+        resolver.cleanup_staging()
+
+
+class TestPartitionStaleSymlinkCleanup:
+    """Step 1.2: Pre-existing symlinks in partition dirs are cleaned before repopulation."""
+
+    def test_partition_stale_symlink_cleanup(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        # Create workspace with collisions
+        quic = tmp_path / "quic"
+        quic.mkdir()
+        (quic / "types.ivy").write_text("# quic types")
+        (quic / "driver.ivy").write_text("# quic driver")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "types.ivy").write_text("# apt types")
+        (apt / "driver.ivy").write_text("# apt driver")
+
+        resolver = IncludeResolver(str(tmp_path))
+        staging = resolver.create_staging_directory()
+
+        test_scopes = {
+            str(quic / "driver.ivy"): frozenset(
+                {str(quic / "types.ivy"), str(quic / "driver.ivy")}
+            ),
+            str(apt / "driver.ivy"): frozenset(
+                {str(apt / "types.ivy"), str(apt / "driver.ivy")}
+            ),
+        }
+
+        # Build partitioned staging once
+        resolver.build_partitioned_staging(test_scopes)
+
+        # Manually inject a stale symlink into one of the partition dirs
+        some_part_dir = list(resolver._partition_staging.values())[0]
+        stale_link = os.path.join(some_part_dir, "stale_leftover.ivy")
+        os.symlink("/nonexistent/path/stale.ivy", stale_link)
+        assert os.path.lexists(stale_link), "Stale symlink should exist before cleanup"
+
+        # Rebuild partitioned staging — should clean the stale symlink
+        resolver.build_partitioned_staging(test_scopes)
+
+        # The stale symlink should have been removed
+        assert not os.path.lexists(
+            stale_link
+        ), "Stale symlink should have been cleaned by rebuild"
+
+        # Valid symlinks should still exist
+        for part_dir in resolver._partition_staging.values():
+            entries = list(os.scandir(part_dir))
+            assert len(entries) > 0, f"Partition dir {part_dir} should have symlinks"
+            for entry in entries:
+                assert entry.is_symlink(), f"{entry.name} should be a symlink"
+
+        resolver.cleanup_staging()

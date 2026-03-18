@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ _EXCLUDED_DIR_PATTERNS = [
     "pytest-of-*",
     "pytest-*",
 ]
+
+_STALE_THRESHOLD_SECS = 3600  # 1 hour
 
 
 class IncludeResolver:
@@ -233,6 +236,20 @@ class IncludeResolver:
         Returns:
             Absolute path to the staging directory.
         """
+        # Cleanup stale staging directories
+        tmpdir = tempfile.gettempdir()
+        now = time.time()
+        for entry in os.scandir(tmpdir):
+            if entry.name.startswith("ivy-lsp-stage-") and entry.is_dir(
+                follow_symlinks=False
+            ):
+                try:
+                    if now - entry.stat().st_mtime > _STALE_THRESHOLD_SECS:
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                        logger.debug("Cleaned stale staging dir: %s", entry.name)
+                except OSError:
+                    pass
+
         staging = tempfile.mkdtemp(prefix="ivy-lsp-stage-")
         atexit.register(lambda d=staging: shutil.rmtree(d, ignore_errors=True))
         self._staging_dir = staging
@@ -262,7 +279,7 @@ class IncludeResolver:
         for filepath in source_files:
             basename = os.path.basename(filepath)
             link_path = os.path.join(staging, basename)
-            if os.path.exists(link_path):
+            if os.path.lexists(link_path):
                 collisions += 1
                 logger.warning(
                     "Staging collision: %s (keeping %s, skipping %s)",
@@ -429,6 +446,10 @@ class IncludeResolver:
         # Populate per-partition staging with correct symlinks
         for partition_id in unique_partitions:
             part_dir = self._partition_staging[partition_id]
+            # Clean stale symlinks before repopulating
+            for entry in os.scandir(part_dir):
+                if entry.is_symlink():
+                    os.unlink(entry.path)
             # Gather all files in scopes belonging to this partition
             partition_files: set = set()
             for test_file, pid in test_to_partition.items():
@@ -442,6 +463,8 @@ class IncludeResolver:
                 link_path = os.path.join(part_dir, basename)
                 if basename in staged_in_partition:
                     continue  # Already staged in this partition
+                if os.path.lexists(link_path):
+                    os.unlink(link_path)
                 try:
                     os.symlink(filepath, link_path)
                     staged_in_partition[basename] = filepath
