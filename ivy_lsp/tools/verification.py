@@ -155,6 +155,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 workspace_root=ctx.root,
                 isolate=isolate,
                 staging_dir=ctx.staging_dir,
+                resolver=ctx.include_resolver,
             )
 
             # Parse counterexample if verification failed
@@ -299,6 +300,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             target=target,
             isolate=isolate,
             staging_dir=ctx.staging_dir,
+            resolver=ctx.include_resolver,
         )
 
         if _docker_fallback_reason:
@@ -341,6 +343,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             workspace_root=ctx.root,
             isolate=isolate,
             staging_dir=ctx.staging_dir,
+            resolver=ctx.include_resolver,
         )
         return json.dumps(result)
 

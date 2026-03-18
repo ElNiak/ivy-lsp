@@ -76,13 +76,14 @@ async def run_ivy_check(
     isolate: str | None = None,
     staging_dir: str | None = None,
     timeout: float = 120.0,
+    resolver: Any | None = None,
 ) -> dict[str, Any]:
     """Run ivy_check and return structured diagnostics.
 
     If staging_dir is provided, resolves the filepath through it
     so that include resolution works correctly.
     """
-    resolved = resolve_staging_path(filepath, staging_dir)
+    resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
     cmd = ["ivy_check"]
     if isolate:
         cmd.append(f"isolate={isolate}")
@@ -114,9 +115,10 @@ async def run_ivy_compile(
     isolate: str | None = None,
     staging_dir: str | None = None,
     timeout: float = 300.0,
+    resolver: Any | None = None,
 ) -> dict[str, Any]:
     """Run ivyc and return compilation result with structured diagnostics."""
-    resolved = resolve_staging_path(filepath, staging_dir)
+    resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
     cmd = ["ivyc", f"target={target}"]
     if isolate:
         cmd.append(f"isolate={isolate}")
@@ -146,9 +148,10 @@ async def run_ivy_show(
     isolate: str | None = None,
     staging_dir: str | None = None,
     timeout: float = 30.0,
+    resolver: Any | None = None,
 ) -> dict[str, Any]:
     """Run ivy_show and return model info with structured diagnostics."""
-    resolved = resolve_staging_path(filepath, staging_dir)
+    resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
     cmd = ["ivy_show"]
     if isolate:
         cmd.append(f"isolate={isolate}")
