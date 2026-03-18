@@ -9,6 +9,10 @@ In Ivy:
   reference ``foo``, plus ``before foo`` / ``after foo`` monitor blocks.
 * **Outgoing calls** from action ``foo`` are: action names referenced in
   ``foo``'s body and in its associated ``before``/``after`` blocks.
+
+When a :class:`~ivy_lsp.semantic.model.SemanticModel` is available the
+handlers first query ``CALLS`` / ``MONITORS`` edges and only fall back to
+the brute-force regex scanning when the model path yields no results.
 """
 
 from __future__ import annotations
@@ -19,12 +23,15 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
+
+if TYPE_CHECKING:
+    from ivy_lsp.semantic.model import SemanticModel
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +88,61 @@ def _get_action_symbols(indexer) -> Dict[str, List]:
 
 
 # ---------------------------------------------------------------------------
+# Semantic-model helpers
+# ---------------------------------------------------------------------------
+
+
+def _find_symbol_node_id(
+    model: SemanticModel, name: str, filepath: str
+) -> Optional[str]:
+    """Find a :class:`SymbolNode` ID in *model* matching *name* and *file*."""
+    from ivy_lsp.semantic.nodes import SymbolNode
+
+    last = name.rsplit(".", 1)[-1] if "." in name else name
+    # Prefer match scoped to the file.
+    for sn in model.get_nodes_by_type(SymbolNode):
+        if (sn.name == last or sn.qualified_name == name) and (
+            not filepath or sn.file == filepath
+        ):
+            return sn.id
+    # Fallback: match by name only.
+    for sn in model.get_nodes_by_type(SymbolNode):
+        if sn.name == last or sn.qualified_name == name:
+            return sn.id
+    return None
+
+
+def _node_to_call_hierarchy_item(
+    model: SemanticModel, node_id: str
+) -> Optional[lsp.CallHierarchyItem]:
+    """Convert a :class:`SymbolNode` to a :class:`CallHierarchyItem`."""
+    node = model.get_node(node_id)
+    if node is None:
+        return None
+
+    from lsprotocol.types import SymbolKind
+
+    filepath = getattr(node, "file", "")
+    if filepath:
+        p = Path(filepath)
+        uri = p.as_uri() if p.is_absolute() else ""
+    else:
+        uri = ""
+    line = getattr(node, "line", 0)
+    name = getattr(node, "name", node_id.split(":")[-1])
+
+    r = make_range(line, 0, line, len(name))
+    return lsp.CallHierarchyItem(
+        name=name,
+        kind=SymbolKind.Function,
+        uri=uri,
+        range=r,
+        selection_range=r,
+        detail=getattr(node, "kind", ""),
+    )
+
+
+# ---------------------------------------------------------------------------
 # prepareCallHierarchy
 # ---------------------------------------------------------------------------
 
@@ -104,7 +166,13 @@ def prepare_call_hierarchy(
     if not results:
         return None
 
-    # Pick the best match (first result; proximity sorting could be added).
+    # Rank results — prefer same-layer matches
+    if len(results) > 1 and hasattr(indexer, "get_scope_files_for_file"):
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        scope_files = indexer.get_scope_files_for_file(filepath)
+        resolver = getattr(indexer, "resolver", None)
+        results = rank_by_scope(results, filepath, scope_files, resolver=resolver)
     sl = results[0]
     sym = sl.symbol
 
@@ -139,8 +207,58 @@ def get_incoming_calls(
     indexer,
     item_name: str,
     item_filepath: str,
+    model: Optional[SemanticModel] = None,
 ) -> List[lsp.CallHierarchyIncomingCall]:
-    """Find all actions/monitors that reference *item_name*."""
+    """Find all actions/monitors that reference *item_name*.
+
+    When *model* is provided the semantic graph is queried first; the
+    regex-based scanner is used as a fallback.
+    """
+    # Try semantic model first.
+    if model is not None:
+        node_id = _find_symbol_node_id(model, item_name, item_filepath)
+        if node_id is not None:
+            from ivy_lsp.semantic.edges import SemanticEdgeType
+
+            results: List[lsp.CallHierarchyIncomingCall] = []
+
+            # CALLS edges (callers).
+            for etype, src_id in model.get_incoming(node_id):
+                if etype == SemanticEdgeType.CALLS:
+                    item = _node_to_call_hierarchy_item(model, src_id)
+                    if item:
+                        results.append(
+                            lsp.CallHierarchyIncomingCall(
+                                from_=item,
+                                from_ranges=[item.range],
+                            )
+                        )
+
+            # MONITORS edges (monitors of this action).
+            for etype, src_id in model.get_incoming(node_id):
+                if etype == SemanticEdgeType.MONITORS:
+                    item = _node_to_call_hierarchy_item(model, src_id)
+                    if item:
+                        results.append(
+                            lsp.CallHierarchyIncomingCall(
+                                from_=item,
+                                from_ranges=[item.range],
+                            )
+                        )
+
+            if results:
+                return results
+
+    # Fallback to regex scanning.
+    return _get_incoming_calls_regex(indexer, item_name, item_filepath)
+
+
+def _get_incoming_calls_regex(
+    indexer,
+    item_name: str,
+    item_filepath: str,
+) -> List[lsp.CallHierarchyIncomingCall]:
+    """Regex-based incoming-call scanner (brute-force fallback)."""
     # Search for references across the workspace (same approach as references.py).
     last_component = item_name.rsplit(".", 1)[-1] if "." in item_name else item_name
     pattern = re.compile(r"\b" + re.escape(last_component) + r"\b")
@@ -226,8 +344,45 @@ def get_outgoing_calls(
     indexer,
     item_name: str,
     item_filepath: str,
+    model: Optional[SemanticModel] = None,
 ) -> List[lsp.CallHierarchyOutgoingCall]:
-    """Find all actions referenced in the body of *item_name*."""
+    """Find all actions referenced in the body of *item_name*.
+
+    When *model* is provided the semantic graph is queried first; the
+    regex-based scanner is used as a fallback.
+    """
+    # Try semantic model first.
+    if model is not None:
+        node_id = _find_symbol_node_id(model, item_name, item_filepath)
+        if node_id is not None:
+            from ivy_lsp.semantic.edges import SemanticEdgeType
+
+            results: List[lsp.CallHierarchyOutgoingCall] = []
+
+            for etype, tgt_id in model.get_outgoing(node_id):
+                if etype == SemanticEdgeType.CALLS:
+                    item = _node_to_call_hierarchy_item(model, tgt_id)
+                    if item:
+                        results.append(
+                            lsp.CallHierarchyOutgoingCall(
+                                to=item,
+                                from_ranges=[item.range],
+                            )
+                        )
+
+            if results:
+                return results
+
+    # Fallback to regex scanning.
+    return _get_outgoing_calls_regex(indexer, item_name, item_filepath)
+
+
+def _get_outgoing_calls_regex(
+    indexer,
+    item_name: str,
+    item_filepath: str,
+) -> List[lsp.CallHierarchyOutgoingCall]:
+    """Regex-based outgoing-call scanner (brute-force fallback)."""
     # Get the body text: lines after the declaration up to the next declaration.
     try:
         source = Path(item_filepath).read_text(encoding="utf-8", errors="replace")
@@ -355,6 +510,7 @@ def register(server) -> None:
             )
             name = data.get("name", item.name)
             filepath = data.get("filepath", uri_to_path(item.uri))
+            sem_model = getattr(server, "semantic_model", None)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None,
@@ -362,6 +518,7 @@ def register(server) -> None:
                 server.indexer,
                 name,
                 filepath,
+                sem_model,
             )
         except Exception:
             logger.warning("incomingCalls handler failed", exc_info=True)
@@ -383,6 +540,7 @@ def register(server) -> None:
             )
             name = data.get("name", item.name)
             filepath = data.get("filepath", uri_to_path(item.uri))
+            sem_model = getattr(server, "semantic_model", None)
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None,
@@ -390,6 +548,7 @@ def register(server) -> None:
                 server.indexer,
                 name,
                 filepath,
+                sem_model,
             )
         except Exception:
             logger.warning("outgoingCalls handler failed", exc_info=True)

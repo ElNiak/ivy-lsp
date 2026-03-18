@@ -186,3 +186,166 @@ class TestOutgoingCalls:
         indexer = _index(ws)
         result = get_outgoing_calls(indexer, "connect", "/nonexistent/file.ivy")
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Model-based call hierarchy tests
+# ---------------------------------------------------------------------------
+
+
+class TestModelBasedIncomingCalls:
+    """Test incoming calls via semantic model."""
+
+    @pytest.mark.unit
+    def test_model_based_incoming_calls(self):
+        """When model has CALLS edges, use them instead of regex."""
+        from unittest.mock import MagicMock
+
+        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.semantic.nodes import SymbolNode
+
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="process",
+            qualified_name="process",
+            kind="action",
+            file="test.ivy",
+            line=3,
+        )
+        s2 = SymbolNode(
+            id="s2",
+            name="connect",
+            qualified_name="connect",
+            kind="action",
+            file="test.ivy",
+            line=1,
+        )
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_edge("s1", SemanticEdgeType.CALLS, "s2")
+
+        # The model path doesn't use the indexer, so a mock is sufficient.
+        indexer = MagicMock()
+        result = get_incoming_calls(indexer, "connect", "test.ivy", model=model)
+        assert len(result) >= 1
+        assert any(c.from_.name == "process" for c in result)
+
+    @pytest.mark.unit
+    def test_model_based_incoming_monitors(self):
+        """MONITORS edges should also appear as incoming callers."""
+        from unittest.mock import MagicMock
+
+        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.semantic.nodes import MonitorNode, SymbolNode
+
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="connect",
+            qualified_name="connect",
+            kind="action",
+            file="test.ivy",
+            line=1,
+        )
+        m1 = MonitorNode(
+            id="m1",
+            action_name="connect",
+            mixin_kind="before",
+            file="test.ivy",
+            line=3,
+        )
+        model.add_node(s1)
+        model.add_node(m1)
+        model.add_edge("m1", SemanticEdgeType.MONITORS, "s1")
+
+        indexer = MagicMock()
+        result = get_incoming_calls(indexer, "connect", "test.ivy", model=model)
+        assert len(result) >= 1
+
+    @pytest.mark.unit
+    def test_fallback_to_regex_when_model_is_none(self, tmp_path):
+        """model=None should fall back to the regex scanner."""
+        ws = _make_workspace(tmp_path, {"proto.ivy": SAMPLE_SOURCE})
+        indexer = _index(ws)
+        filepath = str(tmp_path / "proto.ivy")
+        result = get_incoming_calls(indexer, "connect", filepath, model=None)
+        assert len(result) >= 1
+
+    @pytest.mark.unit
+    def test_fallback_to_regex_when_model_empty(self, tmp_path):
+        """Empty model (no matching node) falls back to regex."""
+        from ivy_lsp.semantic.model import SemanticModel
+
+        model = SemanticModel()  # no nodes
+
+        ws = _make_workspace(tmp_path, {"proto.ivy": SAMPLE_SOURCE})
+        indexer = _index(ws)
+        filepath = str(tmp_path / "proto.ivy")
+        result = get_incoming_calls(indexer, "connect", filepath, model=model)
+        # Should still find callers via regex fallback
+        assert len(result) >= 1
+
+
+class TestModelBasedOutgoingCalls:
+    """Test outgoing calls via semantic model."""
+
+    @pytest.mark.unit
+    def test_model_based_outgoing_calls(self):
+        """When model has CALLS edges, use them instead of regex."""
+        from unittest.mock import MagicMock
+
+        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.semantic.nodes import SymbolNode
+
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="process",
+            qualified_name="process",
+            kind="action",
+            file="test.ivy",
+            line=3,
+        )
+        s2 = SymbolNode(
+            id="s2",
+            name="connect",
+            qualified_name="connect",
+            kind="action",
+            file="test.ivy",
+            line=1,
+        )
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_edge("s1", SemanticEdgeType.CALLS, "s2")
+
+        indexer = MagicMock()
+        result = get_outgoing_calls(indexer, "process", "test.ivy", model=model)
+        assert len(result) >= 1
+        assert any(c.to.name == "connect" for c in result)
+
+    @pytest.mark.unit
+    def test_fallback_to_regex_when_model_is_none(self, tmp_path):
+        """model=None should fall back to the regex scanner."""
+        ws = _make_workspace(tmp_path, {"proto.ivy": SAMPLE_SOURCE})
+        indexer = _index(ws)
+        filepath = str(tmp_path / "proto.ivy")
+        result = get_outgoing_calls(indexer, "process", filepath, model=None)
+        assert len(result) >= 1
+
+    @pytest.mark.unit
+    def test_fallback_to_regex_when_model_empty(self, tmp_path):
+        """Empty model (no matching node) falls back to regex."""
+        from ivy_lsp.semantic.model import SemanticModel
+
+        model = SemanticModel()  # no nodes
+
+        ws = _make_workspace(tmp_path, {"proto.ivy": SAMPLE_SOURCE})
+        indexer = _index(ws)
+        filepath = str(tmp_path / "proto.ivy")
+        result = get_outgoing_calls(indexer, "process", filepath, model=model)
+        # Should still find callees via regex fallback
+        assert len(result) >= 1
