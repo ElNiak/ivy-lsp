@@ -26,6 +26,7 @@ dependencies = [
     "pygls>=2.0",
     "lsprotocol",
     "panther_ms_ivy",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

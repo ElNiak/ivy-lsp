@@ -112,10 +112,14 @@ class ServerSetupMixin:
             },
         )
 
-        # Read include/exclude paths from environment, merging with detected
-        cfg = get_config()
-        include_paths = cfg.include_paths or ws_config.include_paths
-        exclude_paths = cfg.exclude_paths or ws_config.exclude_paths
+        # Workspace marker (.ivyworkspace) takes precedence over env vars;
+        # fall back to env-based config only when detection returned nothing.
+        include_paths = ws_config.include_paths
+        exclude_paths = ws_config.exclude_paths
+        if not include_paths:
+            include_paths = get_config().include_paths
+        if not exclude_paths:
+            exclude_paths = get_config().exclude_paths
         if include_paths:
             slog.info(
                 "Include paths: %s",
@@ -141,9 +145,14 @@ class ServerSetupMixin:
                 },
             )
 
+        _stdlib_path = None
+        if ws_config.standard_library:
+            _stdlib_path = os.path.join(ws_root, ws_config.standard_library)
+
         try:
             resolver = IncludeResolver(
                 ws_root,
+                ivy_include_path=_stdlib_path,
                 exclude_paths=exclude_paths,
                 include_paths=include_paths,
                 workspace_layers=ws_config.workspace_layers,

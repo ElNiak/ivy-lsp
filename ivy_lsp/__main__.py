@@ -10,8 +10,6 @@ import os
 import sys
 from typing import Any
 
-from ivy_lsp.config import reset_config
-
 
 def _fixed_params_hook(obj: dict, cls: type) -> Any:
     """Structure hook that handles optional ``params`` per JSON-RPC 2.0.
@@ -82,18 +80,9 @@ def main():
                 ws_config.detected_by,
                 ws_config.project_type,
             )
-            # Propagate detected paths via env for _setup_indexer() downstream.
-            # .ivyworkspace is the source of truth — always override env vars
-            # when the workspace marker provides paths.
-            if ws_config.include_paths:
-                os.environ["IVY_LSP_INCLUDE_PATHS"] = ",".join(ws_config.include_paths)
-            if ws_config.exclude_paths:
-                os.environ["IVY_LSP_EXCLUDE_PATHS"] = ",".join(ws_config.exclude_paths)
-            # Re-init config singleton so downstream get_config() sees updated paths
-            reset_config()
-
             start_mcp(
                 workspace_root=ws_config.workspace_root,
+                ws_config=ws_config,
                 docker_image=docker_image,
                 base_path=base_path,
                 staging_dir=staging_dir,

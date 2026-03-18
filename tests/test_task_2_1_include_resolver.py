@@ -864,3 +864,473 @@ class TestLayerAwareFileDiscovery:
         ]
         assert len(error_msgs) >= 1, "Intra-layer collision should be logged at ERROR"
         resolver.cleanup_staging()
+
+
+class TestDiagnosticLogging:
+    """Tests for Phase 2.6 diagnostic logging in resolve() and build_layered_staging()."""
+
+    def _make_two_layer_workspace(self, tmp_path):
+        """Create a workspace with two layers sharing a colliding basename."""
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
+        quic.mkdir(parents=True)
+        (quic / "types.ivy").write_text("# quic types")
+        (quic / "frame.ivy").write_text("# quic frame")
+
+        apt = tmp_path / "protocol-testing" / "apt" / "apt_protocols" / "quic"
+        apt.mkdir(parents=True)
+        (apt / "types.ivy").write_text("# apt types")
+        (apt / "attack.ivy").write_text("# apt attack")
+
+        layers = [
+            WorkspaceLayer(
+                id="quic",
+                include_paths=["protocol-testing/quic"],
+                priority=1,
+            ),
+            WorkspaceLayer(
+                id="apt",
+                include_paths=["protocol-testing/apt"],
+                priority=2,
+            ),
+        ]
+        return layers
+
+    def test_resolve_layer_routing_miss_logged(self, tmp_path, caplog):
+        """Layer staging active, from_file NOT in _file_to_partition → WARNING logged."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_two_layer_workspace(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        # An outsider file that is NOT in any layer's _file_to_partition
+        outsider = str(tmp_path / "outsider.ivy")
+
+        with caplog.at_level(
+            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+        ):
+            resolver.resolve("types", outsider)
+
+        routing_miss = [
+            r.message
+            for r in caplog.records
+            if "Layer routing miss" in r.message and r.levelno >= logging.WARNING
+        ]
+        assert len(routing_miss) >= 1, (
+            f"Expected 'Layer routing miss' WARNING, got: "
+            f"{[r.message for r in caplog.records]}"
+        )
+        resolver.cleanup_staging()
+
+    def test_resolve_layer_staging_miss_logged(self, tmp_path, caplog):
+        """Layer staging active, from_file in partition but included file not in layer dir → WARNING."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_two_layer_workspace(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        # frame.ivy is in the quic layer partition
+        quic_frame = str(
+            tmp_path / "protocol-testing" / "quic" / "quic_stack" / "frame.ivy"
+        )
+
+        with caplog.at_level(
+            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+        ):
+            # Try to resolve a name that does NOT exist in quic layer staging
+            resolver.resolve("nonexistent_module", quic_frame)
+
+        staging_miss = [
+            r.message
+            for r in caplog.records
+            if "Layer staging miss" in r.message and r.levelno >= logging.WARNING
+        ]
+        assert len(staging_miss) >= 1, (
+            f"Expected 'Layer staging miss' WARNING, got: "
+            f"{[r.message for r in caplog.records]}"
+        )
+        resolver.cleanup_staging()
+
+    def test_stdlib_staged_into_layers_no_warning(self, tmp_path, caplog):
+        """Stdlib files are symlinked into each layer dir; resolving them produces no WARNING."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        # Create workspace with one layer and a stdlib directory
+        quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
+        quic.mkdir(parents=True)
+        (quic / "frame.ivy").write_text("# quic frame\ninclude order")
+
+        stdlib = tmp_path / "ivy" / "include" / "1.7"
+        stdlib.mkdir(parents=True)
+        (stdlib / "order.ivy").write_text("# stdlib order")
+        (stdlib / "collections.ivy").write_text("# stdlib collections")
+
+        layers = [
+            WorkspaceLayer(
+                id="quic",
+                include_paths=["protocol-testing/quic"],
+                priority=1,
+            ),
+        ]
+
+        resolver = IncludeResolver(
+            str(tmp_path),
+            ivy_include_path=str(stdlib),
+            workspace_layers=layers,
+        )
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        quic_frame = str(quic / "frame.ivy")
+
+        with caplog.at_level(
+            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+        ):
+            result = resolver.resolve("order", quic_frame)
+
+        # Should resolve successfully
+        assert result is not None, "stdlib 'order' should be found in layer staging"
+        assert result.endswith("order.ivy")
+
+        # No WARNING should fire
+        staging_warnings = [
+            r.message
+            for r in caplog.records
+            if "Layer staging miss" in r.message and r.levelno >= logging.WARNING
+        ]
+        assert len(staging_warnings) == 0, (
+            f"Expected no 'Layer staging miss' WARNING after stdlib staging, "
+            f"got: {staging_warnings}"
+        )
+        resolver.cleanup_staging()
+
+    def test_build_layered_staging_summary_logged(self, tmp_path, caplog):
+        """After build_layered_staging(), a WARNING-level summary message appears."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_two_layer_workspace(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+
+        with caplog.at_level(
+            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+        ):
+            resolver.build_layered_staging()
+
+        summary = [
+            r.message
+            for r in caplog.records
+            if "Layered staging active" in r.message and r.levelno >= logging.WARNING
+        ]
+        assert len(summary) >= 1, (
+            f"Expected 'Layered staging active' WARNING, got: "
+            f"{[r.message for r in caplog.records]}"
+        )
+        # Verify content includes counts
+        assert "2 layers" in summary[0]
+        assert "files mapped to partitions" in summary[0]
+        resolver.cleanup_staging()
+
+
+class TestDefinitionLayerAwareRanking:
+    """Phase 2.8: goToDefinition should prefer same-layer results."""
+
+    def test_same_layer_ranks_higher_than_different_layer(self, tmp_path):
+        """When two symbols share a name, the one in the same layer ranks first."""
+        from ivy_lsp.features.definition import _rank_by_scope
+
+        # Simulate two symbol results in different layers
+        quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
+        apt_file = str(tmp_path / "apt" / "quic_types.ivy")
+        current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        results = [FakeResult(apt_file), FakeResult(quic_file)]
+
+        # Simulate a resolver with _file_to_layer mapping
+        class FakeResolver:
+            _file_to_layer = {
+                os.path.normpath(os.path.abspath(quic_file)): "standard",
+                os.path.normpath(os.path.abspath(apt_file)): "apt",
+                os.path.normpath(os.path.abspath(current_file)): "standard",
+            }
+
+        # No scope files (neither result is in scope)
+        ranked = _rank_by_scope(results, current_file, set(), resolver=FakeResolver())
+        # Same-layer result (quic_stack) should rank before different-layer (apt)
+        assert ranked[0].filepath == quic_file
+        assert ranked[1].filepath == apt_file
+
+    def test_scope_still_beats_layer(self, tmp_path):
+        """In-scope results should rank higher than same-layer out-of-scope results."""
+        from ivy_lsp.features.definition import _rank_by_scope
+
+        in_scope_file = str(tmp_path / "apt" / "quic_types.ivy")
+        same_layer_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
+        current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        results = [FakeResult(same_layer_file), FakeResult(in_scope_file)]
+
+        class FakeResolver:
+            _file_to_layer = {
+                os.path.normpath(os.path.abspath(same_layer_file)): "standard",
+                os.path.normpath(os.path.abspath(in_scope_file)): "apt",
+                os.path.normpath(os.path.abspath(current_file)): "standard",
+            }
+
+        scope_files = {os.path.normpath(os.path.abspath(in_scope_file))}
+        ranked = _rank_by_scope(
+            results, current_file, scope_files, resolver=FakeResolver()
+        )
+        # In-scope (apt) should rank first, even though same-layer (quic_stack) is closer
+        assert ranked[0].filepath == in_scope_file
+
+    def test_no_resolver_falls_back(self, tmp_path):
+        """Without a resolver, ranking falls through to default (4, 0) for all out-of-scope."""
+        from ivy_lsp.features.definition import _rank_by_scope
+
+        file_a = str(tmp_path / "a" / "types.ivy")
+        file_b = str(tmp_path / "b" / "types.ivy")
+        current_file = str(tmp_path / "c" / "frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        results = [FakeResult(file_a), FakeResult(file_b)]
+        # No resolver — should not crash, both get same score
+        ranked = _rank_by_scope(results, current_file, set(), resolver=None)
+        assert len(ranked) == 2
+
+
+class TestLayerGuardPreventsPartitionOverwrite:
+    """Phase 2.7: build_partitioned_staging() must not overwrite layer partitions."""
+
+    def _make_two_layer_workspace(self, tmp_path):
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
+        quic.mkdir(parents=True)
+        (quic / "types.ivy").write_text("# quic types")
+        (quic / "frame.ivy").write_text("# quic frame")
+
+        apt = tmp_path / "protocol-testing" / "apt" / "apt_protocols" / "quic"
+        apt.mkdir(parents=True)
+        (apt / "types.ivy").write_text("# apt types")
+        (apt / "attack.ivy").write_text("# apt attack")
+
+        layers = [
+            WorkspaceLayer(
+                id="quic",
+                include_paths=["protocol-testing/quic"],
+                priority=1,
+            ),
+            WorkspaceLayer(
+                id="apt",
+                include_paths=["protocol-testing/apt"],
+                priority=2,
+            ),
+        ]
+        return layers
+
+    def test_build_partitioned_staging_skipped_when_layers_active(self, tmp_path):
+        """build_partitioned_staging() must not overwrite layer partitions."""
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_two_layer_workspace(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        # Record state after layer staging
+        layer_partition_count = len(resolver._file_to_partition)
+        assert layer_partition_count > 0
+
+        # Simulate workspace_indexer calling build_partitioned_staging
+        quic_frame = str(
+            tmp_path / "protocol-testing" / "quic" / "quic_stack" / "frame.ivy"
+        )
+        quic_types = str(
+            tmp_path / "protocol-testing" / "quic" / "quic_stack" / "types.ivy"
+        )
+        test_scopes = {
+            quic_frame: frozenset({quic_types, quic_frame}),
+        }
+        resolver.build_partitioned_staging(test_scopes)
+
+        # Layer partitions must NOT be overwritten
+        assert len(resolver._file_to_partition) == layer_partition_count
+        # Layer IDs must still be in _partition_staging (not "partition_0" etc.)
+        assert (
+            "quic" in resolver._partition_staging
+            or "apt" in resolver._partition_staging
+        )
+
+        resolver.cleanup_staging()
+
+    def test_build_partitioned_staging_works_without_layers(self, tmp_path):
+        """Without layers, build_partitioned_staging() should work normally."""
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        # Create workspace with collisions but NO layers
+        quic = tmp_path / "quic"
+        quic.mkdir()
+        (quic / "types.ivy").write_text("# quic types")
+        (quic / "model.ivy").write_text("# quic model")
+        apt = tmp_path / "apt"
+        apt.mkdir()
+        (apt / "types.ivy").write_text("# apt types")
+        (apt / "model.ivy").write_text("# apt model")
+
+        resolver = IncludeResolver(str(tmp_path))  # No workspace_layers
+        resolver.create_staging_directory()
+
+        assert "types.ivy" in resolver.collision_map
+
+        test_scopes = {
+            str(quic / "model.ivy"): frozenset(
+                {str(quic / "types.ivy"), str(quic / "model.ivy")}
+            ),
+            str(apt / "model.ivy"): frozenset(
+                {str(apt / "types.ivy"), str(apt / "model.ivy")}
+            ),
+        }
+
+        # Without layers, build_partitioned_staging should proceed normally
+        resolver.build_partitioned_staging(test_scopes)
+
+        # Partitions should be created (scope-based)
+        assert len(resolver._partition_staging) > 0
+        # Should have partition_N keys, not layer IDs
+        partition_keys = list(resolver._partition_staging.keys())
+        assert any(k.startswith("partition_") for k in partition_keys)
+
+        resolver.cleanup_staging()
+
+
+class TestSharedRankByScope:
+    """Phase 2.9: rank_by_scope shared utility works standalone."""
+
+    def test_import_from_shared_module(self, tmp_path):
+        """rank_by_scope is importable from ivy_lsp.utils.scope_ranking."""
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
+        apt_file = str(tmp_path / "apt" / "quic_types.ivy")
+        current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        results = [FakeResult(apt_file), FakeResult(quic_file)]
+
+        class FakeResolver:
+            _file_to_layer = {
+                os.path.normpath(os.path.abspath(quic_file)): "standard",
+                os.path.normpath(os.path.abspath(apt_file)): "apt",
+                os.path.normpath(os.path.abspath(current_file)): "standard",
+            }
+
+        ranked = rank_by_scope(results, current_file, set(), resolver=FakeResolver())
+        assert ranked[0].filepath == quic_file
+        assert ranked[1].filepath == apt_file
+
+    def test_handles_file_path_attribute(self, tmp_path):
+        """rank_by_scope works with objects that have file_path instead of filepath."""
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        file_a = str(tmp_path / "a" / "types.ivy")
+        file_b = str(tmp_path / "b" / "types.ivy")
+        current_file = str(tmp_path / "a" / "frame.ivy")
+
+        class FakeSymbol:
+            def __init__(self, file_path):
+                self.file_path = file_path
+
+        results = [FakeSymbol(file_b), FakeSymbol(file_a)]
+        ranked = rank_by_scope(results, current_file, set(), resolver=None)
+        # file_a is in same dir as current_file, should rank first
+        assert ranked[0].file_path == file_a
+
+    def test_definition_delegation_still_works(self, tmp_path):
+        """definition._rank_by_scope delegates to shared module."""
+        from ivy_lsp.features.definition import _rank_by_scope
+
+        file_a = str(tmp_path / "a" / "types.ivy")
+        current_file = str(tmp_path / "a" / "frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        results = [FakeResult(file_a)]
+        ranked = _rank_by_scope(results, current_file, set(), resolver=None)
+        assert len(ranked) == 1
+
+
+class TestDiscoverStdlibModules:
+    """Phase 2.9: Auto-discover stdlib modules from installed ivy package."""
+
+    def test_discover_from_installed_ivy(self):
+        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+
+        mods = discover_stdlib_modules()
+        # Must include at least the core modules
+        assert "order" in mods
+        assert "collections" in mods
+        assert "ip" in mods
+
+    def test_discover_fallback_nonexistent(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+
+        # Non-existent path falls back to hardcoded minimum
+        mods = discover_stdlib_modules(ivy_include_path=str(tmp_path / "nonexistent"))
+        assert "order" in mods
+        assert len(mods) == 9  # hardcoded fallback size
+
+    def test_discover_custom_path(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+
+        (tmp_path / "custom.ivy").write_text("")
+        (tmp_path / "other.ivy").write_text("")
+        mods = discover_stdlib_modules(ivy_include_path=str(tmp_path))
+        assert mods == frozenset({"custom", "other"})
+
+    def test_discover_empty_dir_uses_fallback(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+
+        # Empty directory has no .ivy files — should fallback
+        mods = discover_stdlib_modules(ivy_include_path=str(tmp_path))
+        assert "order" in mods
+        assert len(mods) == 9
+
+    def test_discover_ignores_non_ivy_files(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+
+        (tmp_path / "valid.ivy").write_text("")
+        (tmp_path / "readme.txt").write_text("")
+        (tmp_path / "notes.md").write_text("")
+        mods = discover_stdlib_modules(ivy_include_path=str(tmp_path))
+        assert mods == frozenset({"valid"})

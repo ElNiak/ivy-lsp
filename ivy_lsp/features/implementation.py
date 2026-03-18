@@ -53,7 +53,7 @@ def goto_implementation(
 
     if on_monitor:
         # Reverse: cursor is on ``before foo`` → find action ``foo`` declaration.
-        return _find_action_declaration(indexer, word)
+        return _find_action_declaration(indexer, word, filepath=filepath)
     else:
         # Forward: cursor is on ``action foo`` → find before/after blocks.
         monitors = _find_monitors_for_action(indexer, word)
@@ -101,6 +101,7 @@ def _find_monitors_for_action(
 def _find_action_declaration(
     indexer,
     action_name: str,
+    filepath: str = None,
 ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
     """Find the declaration of an action by name (excluding monitors)."""
     results = indexer.lookup_symbol(action_name)
@@ -122,6 +123,14 @@ def _find_action_declaration(
 
     if not filtered:
         return None
+
+    # Rank by scope + layer awareness when multiple results
+    if filepath and len(filtered) > 1 and hasattr(indexer, "get_scope_files_for_file"):
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        scope_files = indexer.get_scope_files_for_file(filepath)
+        resolver = getattr(indexer, "resolver", None)
+        filtered = rank_by_scope(filtered, filepath, scope_files, resolver=resolver)
 
     locations = []
     for sl in filtered:

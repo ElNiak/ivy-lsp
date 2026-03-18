@@ -194,15 +194,22 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     async def ivy_capabilities() -> str:
-        """Report which Ivy CLI tools are available on PATH."""
-        return json.dumps(
-            {
-                "success": True,
-                "ivy_check": shutil.which("ivy_check") is not None,
-                "ivyc": shutil.which("ivyc") is not None,
-                "ivy_show": shutil.which("ivy_show") is not None,
-            }
-        )
+        """Report which Ivy CLI tools are available on PATH and staging health."""
+        result: dict[str, Any] = {
+            "success": True,
+            "ivy_check": shutil.which("ivy_check") is not None,
+            "ivyc": shutil.which("ivyc") is not None,
+            "ivy_show": shutil.which("ivy_show") is not None,
+        }
+        # Include staging health when resolver is available
+        if ctx.include_resolver is not None and hasattr(
+            ctx.include_resolver, "staging_health"
+        ):
+            try:
+                result["staging_health"] = ctx.include_resolver.staging_health()
+            except Exception:
+                pass  # staging health is optional
+        return json.dumps(result)
 
     @mcp.tool()
     async def ivy_scope(relative_path: str) -> str:

@@ -188,9 +188,10 @@ def check_structural_issues(
             resolve_cb = resolver.resolve_partitioned
         else:
             resolve_cb = resolver.resolve
-    raw.extend(
-        check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
-    )
+    if resolve_cb is not None:
+        raw.extend(
+            check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
+        )
 
     lines = source.split("\n")
     diags: List[lsp.Diagnostic] = []

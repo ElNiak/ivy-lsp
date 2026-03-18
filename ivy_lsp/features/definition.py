@@ -107,7 +107,8 @@ def goto_definition(
     # scope as the requesting file rank first.
     if len(results) > 1 and hasattr(indexer, "get_scope_files_for_file"):
         scope_files = indexer.get_scope_files_for_file(filepath)
-        results = _rank_by_scope(results, filepath, scope_files)
+        resolver = getattr(indexer, "resolver", None)
+        results = _rank_by_scope(results, filepath, scope_files, resolver=resolver)
 
     locations = []
     for sl in results:
@@ -120,31 +121,16 @@ def goto_definition(
     return locations
 
 
-def _rank_by_scope(results: list, current_filepath: str, scope_files: set) -> list:
+def _rank_by_scope(
+    results: list, current_filepath: str, scope_files: set, resolver=None
+) -> list:
     """Rank definition results by scope relevance.
 
-    Files in the same include closure as *current_filepath* rank first,
-    then same-directory, then by common path length.
+    Delegates to the shared :func:`ivy_lsp.utils.scope_ranking.rank_by_scope`.
     """
-    import os
+    from ivy_lsp.utils.scope_ranking import rank_by_scope
 
-    current_norm = os.path.normpath(os.path.abspath(current_filepath))
-    current_dir = os.path.dirname(current_norm)
-
-    def _score(r):
-        rpath = os.path.normpath(os.path.abspath(getattr(r, "filepath", "") or ""))
-        in_scope = rpath in scope_files
-        if rpath == current_norm:
-            return (0, 0)
-        if in_scope and os.path.dirname(rpath) == current_dir:
-            return (1, 0)
-        if in_scope:
-            return (2, 0)
-        if os.path.dirname(rpath) == current_dir:
-            return (3, 0)
-        return (4, 0)
-
-    return sorted(results, key=_score)
+    return rank_by_scope(results, current_filepath, scope_files, resolver=resolver)
 
 
 class _SemanticSymbolLoc:

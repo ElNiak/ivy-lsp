@@ -323,7 +323,13 @@ def get_hover_info(
             word, filepath, position, source_lines, semantic_model
         )
 
-    results = _sort_by_proximity(results, filepath)
+    from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+    scope_files = set()
+    if hasattr(indexer, "get_scope_files_for_file"):
+        scope_files = indexer.get_scope_files_for_file(filepath)
+    resolver = getattr(indexer, "resolver", None)
+    results = rank_by_scope(results, filepath, scope_files, resolver=resolver)
     sym = results[0].symbol
     content = format_hover_content(sym)
     if content is None:

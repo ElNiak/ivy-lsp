@@ -27,6 +27,7 @@ class WorkspaceLayer:
     id: str
     include_paths: list[str]
     priority: int = 1
+    depends_on: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -65,17 +66,22 @@ def _read_marker(marker_path: str) -> Optional[dict]:
         return None
 
 
-def _apply_marker(marker_path: str, data: dict) -> WorkspaceConfig:
-    """Build a WorkspaceConfig from a parsed marker file (v3 schema)."""
+def _apply_marker(marker_path: str, data: dict) -> Optional[WorkspaceConfig]:
+    """Build a WorkspaceConfig from a parsed marker file (v3 schema).
+
+    Returns ``None`` for unsupported v1/v2 markers instead of crashing.
+    """
     marker_dir = os.path.dirname(os.path.abspath(marker_path))
     version = data.get("version", 1)
 
     if version < 3:
-        raise ValueError(
-            f".ivyworkspace v{version} is no longer supported. "
-            "Upgrade to v3 with workspace_layers. "
-            "See docs/superpowers/specs/2026-03-18-ivy-lsp-indexing-improvements-design.md section 3.1."
+        logger.warning(
+            ".ivyworkspace v%d at %s is no longer supported; ignoring. "
+            "Upgrade to v3 with workspace_layers.",
+            version,
+            marker_path,
         )
+        return None
 
     # Parse workspace_layers
     raw_layers = data.get("workspace_layers", [])
@@ -84,6 +90,7 @@ def _apply_marker(marker_path: str, data: dict) -> WorkspaceConfig:
             id=layer["id"],
             include_paths=layer.get("include_paths", []),
             priority=layer.get("priority", 1),
+            depends_on=layer.get("depends_on", []),
         )
         for layer in raw_layers
     ]
@@ -115,7 +122,9 @@ def _walk_up_for_marker(
         if os.path.isfile(candidate):
             data = _read_marker(candidate)
             if data is not None:
-                return _apply_marker(candidate, data)
+                config = _apply_marker(candidate, data)
+                if config is not None:
+                    return config
         parent = os.path.dirname(current)
         if parent == current:
             break
@@ -140,7 +149,9 @@ def _walk_down_for_marker(
             candidate = os.path.join(dirpath, _IVYWORKSPACE_FILENAME)
             data = _read_marker(candidate)
             if data is not None:
-                return _apply_marker(candidate, data)
+                config = _apply_marker(candidate, data)
+                if config is not None:
+                    return config
     return None
 
 
@@ -306,6 +317,25 @@ def detect_ivy_workspace(
     if ws:
         ws = os.path.abspath(ws)
         logger.info("Using explicit workspace: %s", ws)
+        # Still honour .ivyworkspace marker if present at the explicit root
+        marker_path = os.path.join(ws, _IVYWORKSPACE_FILENAME)
+        logger.debug(
+            "Checking explicit workspace marker: %s (exists=%s)",
+            marker_path,
+            os.path.isfile(marker_path),
+        )
+        if os.path.isfile(marker_path):
+            data = _read_marker(marker_path)
+            if data is not None:
+                config = _apply_marker(marker_path, data)
+                if config is not None:
+                    config.detected_by = "explicit+marker"
+                    # Explicit CLI paths take precedence over marker
+                    if explicit_include_paths:
+                        config.include_paths = explicit_include_paths
+                    if explicit_exclude_paths:
+                        config.exclude_paths = explicit_exclude_paths
+                    return config
         return WorkspaceConfig(
             workspace_root=ws,
             include_paths=explicit_include_paths or [],
@@ -324,9 +354,12 @@ def detect_ivy_workspace(
             data = _read_marker(marker_path)
             if data is not None:
                 config = _apply_marker(marker_path, data)
-                config.detected_by = "hint"
-                logger.info("Workspace detected via hint: %s", config.workspace_root)
-                return config
+                if config is not None:
+                    config.detected_by = "hint"
+                    logger.info(
+                        "Workspace detected via hint: %s", config.workspace_root
+                    )
+                    return config
         elif os.path.isdir(hint_path):
             config = _panther_heuristic(hint_path)
             if config is not None:

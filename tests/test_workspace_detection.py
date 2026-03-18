@@ -309,6 +309,67 @@ class TestHintWithHeuristic:
         assert config.project_type == "panther"
 
 
+class TestExplicitWorkspaceWithMarker:
+    def test_explicit_workspace_reads_marker(self, tmp_workspace):
+        """Explicit workspace with .ivyworkspace should read marker (MCP mode fix)."""
+        marker = {
+            "version": 3,
+            "workspace_layers": [
+                {
+                    "id": "standard",
+                    "include_paths": [
+                        "protocol-testing/quic",
+                        "protocol-testing/minip",
+                    ],
+                },
+                {"id": "apt", "include_paths": ["protocol-testing/apt"], "priority": 2},
+            ],
+            "exclude_paths": ["test", "doc"],
+        }
+        (tmp_workspace / ".ivyworkspace").write_text(json.dumps(marker))
+        config = detect_ivy_workspace(
+            start_dir="/tmp",
+            explicit_workspace=str(tmp_workspace),
+        )
+        assert config.detected_by == "explicit+marker"
+        assert "protocol-testing/quic" in config.include_paths
+        assert "protocol-testing/minip" in config.include_paths
+        assert "protocol-testing/apt" in config.include_paths
+        assert config.exclude_paths == ["test", "doc"]
+        assert len(config.workspace_layers) == 2
+        assert config.workspace_layers[0].id == "standard"
+
+    def test_explicit_workspace_no_marker_falls_back(self, tmp_workspace):
+        """Explicit workspace without .ivyworkspace should return empty paths (existing behavior)."""
+        config = detect_ivy_workspace(
+            start_dir="/tmp",
+            explicit_workspace=str(tmp_workspace),
+        )
+        assert config.detected_by == "explicit"
+        assert config.include_paths == []
+        assert config.exclude_paths == []
+
+    def test_explicit_cli_paths_override_marker(self, tmp_workspace):
+        """Explicit CLI include/exclude paths should override marker-derived ones."""
+        marker = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["from-marker"]}],
+            "exclude_paths": ["marker-exclude"],
+        }
+        (tmp_workspace / ".ivyworkspace").write_text(json.dumps(marker))
+        config = detect_ivy_workspace(
+            start_dir="/tmp",
+            explicit_workspace=str(tmp_workspace),
+            explicit_include_paths=["cli-include"],
+            explicit_exclude_paths=["cli-exclude"],
+        )
+        assert config.detected_by == "explicit+marker"
+        assert config.include_paths == ["cli-include"]
+        assert config.exclude_paths == ["cli-exclude"]
+        # Layers should still be populated from marker
+        assert len(config.workspace_layers) == 1
+
+
 class TestWorkspaceConfig:
     def test_defaults(self):
         config = WorkspaceConfig(workspace_root="/tmp/test")
@@ -319,21 +380,21 @@ class TestWorkspaceConfig:
 
 
 class TestV2Rejection:
-    def test_v2_marker_raises_error(self, tmp_workspace):
-        """v2 .ivyworkspace should raise ValueError with migration message."""
+    def test_v2_marker_returns_none(self, tmp_workspace):
+        """v2 .ivyworkspace should be gracefully ignored (return None)."""
         marker = {"version": 2, "include_paths": ["protocol-testing"]}
         marker_path = tmp_workspace / ".ivyworkspace"
         marker_path.write_text(json.dumps(marker))
-        with pytest.raises(ValueError, match="no longer supported"):
-            _walk_up_for_marker(str(tmp_workspace))
+        result = _walk_up_for_marker(str(tmp_workspace))
+        assert result is None
 
-    def test_v1_marker_raises_error(self, tmp_workspace):
-        """v1 .ivyworkspace should raise ValueError with migration message."""
+    def test_v1_marker_returns_none(self, tmp_workspace):
+        """v1 .ivyworkspace should be gracefully ignored (return None)."""
         marker = {"version": 1}
         marker_path = tmp_workspace / ".ivyworkspace"
         marker_path.write_text(json.dumps(marker))
-        with pytest.raises(ValueError, match="no longer supported"):
-            _walk_up_for_marker(str(tmp_workspace))
+        result = _walk_up_for_marker(str(tmp_workspace))
+        assert result is None
 
 
 class TestV3LayerParsing:

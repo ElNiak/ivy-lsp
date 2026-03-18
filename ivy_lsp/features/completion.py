@@ -268,6 +268,14 @@ def _dot_access_completions(
     if not symbols:
         return []
 
+    # Rank parent symbols by layer when duplicates exist across layers
+    if len(symbols) > 1 and hasattr(indexer, "get_scope_files_for_file"):
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        scope_files = indexer.get_scope_files_for_file(filepath)
+        resolver = getattr(indexer, "resolver", None)
+        symbols = rank_by_scope(symbols, filepath, scope_files, resolver=resolver)
+
     items: List[lsp.CompletionItem] = []
     seen: Set[str] = set()
     for parent in symbols:

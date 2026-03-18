@@ -18,6 +18,29 @@ from ivy_lsp.utils.position_utils import make_range
 
 logger = logging.getLogger(__name__)
 
+_ZERO_RANGE = (0, 0, 0, 0)
+
+
+def _filter_zero_range(symbols: List[IvySymbol]) -> List[IvySymbol]:
+    """Remove symbols with (0,0,0,0) range — included-file leaks.
+
+    When the Ivy parser merges ``include``d modules into the AST, their
+    declarations often lack location data.  ``_loc_to_tuple()`` falls back
+    to ``(0, 0, 0, 0)`` for these, which renders as "Line 1" in the LSP
+    client.  Filtering them out keeps documentSymbol results scoped to
+    symbols actually defined in the requested file.
+
+    Applies recursively to children so nested leaks are also removed.
+    """
+    result: List[IvySymbol] = []
+    for s in symbols:
+        if s.range == _ZERO_RANGE:
+            continue
+        if s.children:
+            s.children = _filter_zero_range(s.children)
+        result.append(s)
+    return result
+
 
 def ivy_symbol_to_document_symbol(sym: IvySymbol) -> lsp.DocumentSymbol:
     """Convert an IvySymbol to an LSP DocumentSymbol.
@@ -106,7 +129,9 @@ def compute_document_symbols(
         try:
             result = parser.parse(source, filepath, timeout=0.5)
             if result.success and result.ast is not None:
-                symbols = ast_to_symbols(result.ast, filepath, source)
+                symbols = _filter_zero_range(
+                    ast_to_symbols(result.ast, filepath, source)
+                )
             else:
                 symbols, _error_info = fallback_scan(source, filepath)
         except TimeoutError:

@@ -9,6 +9,7 @@ reading ``os.environ`` directly.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import List
 
@@ -54,6 +55,7 @@ class ServerConfig:
 
     # Workspace
     workspace: str | None = None
+    workspace_root: str | None = None
     workspace_hint: str | None = None
     include_paths: List[str] = field(default_factory=list)
     exclude_paths: List[str] = field(default_factory=list)
@@ -85,6 +87,7 @@ class ServerConfig:
             log_level=os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper(),
             activity_level=os.environ.get("IVY_LSP_ACTIVITY_LEVEL", "phase"),
             workspace=os.environ.get("IVY_LSP_WORKSPACE"),
+            workspace_root=os.environ.get("IVY_WORKSPACE_ROOT"),
             workspace_hint=os.environ.get("IVY_LSP_WORKSPACE_HINT"),
             include_paths=_csv_env("IVY_LSP_INCLUDE_PATHS"),
             exclude_paths=_csv_env("IVY_LSP_EXCLUDE_PATHS"),
@@ -111,17 +114,30 @@ class ServerConfig:
 
 # Module-level singleton, lazily initialised.
 _config: ServerConfig | None = None
+_config_lock = threading.Lock()
+_config_session_id: str | None = None
 
 
 def get_config() -> ServerConfig:
     """Return the global :class:`ServerConfig` singleton.
 
     On first call, reads environment variables via :meth:`ServerConfig.from_env`.
+    If ``IVY_SESSION_ID`` changes (e.g. a new Claude session starts), the config
+    is automatically rebuilt so fresh environment variables are picked up.
+    Thread-safe via a double-checked locking pattern.
     """
-    global _config
-    if _config is None:
+    global _config, _config_session_id
+    current_session = os.environ.get("IVY_SESSION_ID")
+    # Fast path: config exists and session unchanged
+    if _config is not None and current_session == _config_session_id:
+        return _config
+    with _config_lock:
+        # Double-check after acquiring lock
+        if _config is not None and current_session == _config_session_id:
+            return _config
         _config = ServerConfig.from_env()
-    return _config
+        _config_session_id = current_session
+        return _config
 
 
 def reset_config() -> None:
@@ -129,5 +145,7 @@ def reset_config() -> None:
 
     Intended for testing only.
     """
-    global _config
-    _config = None
+    global _config, _config_session_id
+    with _config_lock:
+        _config = None
+        _config_session_id = None

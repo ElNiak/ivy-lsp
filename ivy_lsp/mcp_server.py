@@ -95,6 +95,7 @@ class ToolContext:
     make_viz_server_proxy: Callable[..., Any] = field(default=lambda: None)
     get_basename_cache: Callable[..., dict[str, list[str]]] = field(default=lambda: {})
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
+    include_resolver: Any = None
 
     # Known Ivy standard library modules
     stdlib_modules: frozenset[str] = frozenset(
@@ -133,6 +134,7 @@ def start_mcp(
     base_path: str | None = None,
     staging_dir: str | None = None,
     _return_app: bool = False,
+    ws_config: Any = None,
 ) -> Any:
     """Start the MCP server exposing Ivy tools.
 
@@ -151,6 +153,7 @@ def start_mcp(
             through this directory (flat symlinks for CWD-relative includes).
         _return_app: Internal flag for testing. When True, returns the FastMCP
             instance without starting the server.
+        ws_config: Optional workspace configuration object.
     """
     try:
         from mcp.server.fastmcp import FastMCP
@@ -163,29 +166,79 @@ def start_mcp(
     root = workspace_root or os.getcwd()
 
     # --- Workspace scoping: respect include/exclude paths from detection ---
-    _cfg = get_config()
-    _include_paths = _cfg.include_paths
-    _extra_exclude_dirs = frozenset(_cfg.exclude_paths)
+    if ws_config is not None:
+        _include_paths = ws_config.include_paths
+        _extra_exclude_dirs = frozenset(ws_config.exclude_paths)
+    else:
+        _cfg = get_config()
+        _include_paths = _cfg.include_paths
+        _extra_exclude_dirs = frozenset(_cfg.exclude_paths)
     _effective_exclude_dirs = DEFAULT_EXCLUDE_DIRS | _extra_exclude_dirs
 
     def _find_ivy_files(search_root: str) -> list[str]:
-        """Find .ivy files respecting workspace include/exclude paths."""
-        all_files = _find_ivy_files_raw(search_root, _effective_exclude_dirs)
-        if not _include_paths:
-            return all_files
-        return [
-            f
-            for f in all_files
-            if any(
-                f == ip or f.startswith(ip + "/") or f.startswith(ip + os.sep)
-                for ip in _include_paths
-            )
-        ]
+        """Find .ivy files respecting workspace include/exclude paths.
+
+        When include_paths is set, walks only those subdirectories instead
+        of scanning the entire workspace tree and post-filtering.
+        """
+        if _include_paths:
+            results: list[str] = []
+            for ip in _include_paths:
+                sub = os.path.join(search_root, ip)
+                if os.path.isdir(sub):
+                    for rel in _find_ivy_files_raw(sub, _effective_exclude_dirs):
+                        results.append(os.path.join(ip, rel))
+            return sorted(set(results))
+        return _find_ivy_files_raw(search_root, _effective_exclude_dirs)
 
     if _include_paths:
         logger.info("Workspace include paths: %s", _include_paths)
     if _extra_exclude_dirs:
         logger.info("Workspace extra exclude dirs: %s", _extra_exclude_dirs)
+
+    # --- Include resolver for cross-directory includes ---
+    _resolver = None
+    try:
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        # Use passed-in ws_config; only re-detect if not provided
+        if ws_config is None:
+            from ivy_lsp.workspace_detection import detect_ivy_workspace
+
+            ws_config = detect_ivy_workspace(start_dir=root)
+            logger.info(
+                "MCP fallback workspace detection: root=%s, detected_by=%s",
+                ws_config.workspace_root,
+                ws_config.detected_by,
+            )
+
+        _stdlib_path = None
+        if ws_config.standard_library:
+            _stdlib_path = os.path.join(root, ws_config.standard_library)
+
+        _resolver = IncludeResolver(
+            root,
+            ivy_include_path=_stdlib_path,
+            exclude_paths=list(_extra_exclude_dirs),
+            include_paths=_include_paths or [],
+            workspace_layers=ws_config.workspace_layers,
+        )
+        _staging = _resolver.create_staging_directory()
+        logger.info("MCP staging directory: %s", _staging)
+        if ws_config.workspace_layers:
+            _resolver.build_layered_staging()
+            logger.info(
+                "Built layered staging for %d layers",
+                len(ws_config.workspace_layers),
+            )
+        # Use resolver's staging dir if none was explicitly passed
+        if _resolver._staging_dir and not staging_dir:
+            staging_dir = _resolver._staging_dir
+    except Exception:
+        logger.warning(
+            "IncludeResolver init failed; tier-1 parsing will be limited",
+            exc_info=True,
+        )
 
     # Create executor for Docker-aware compilation
     executor = None
@@ -221,7 +274,9 @@ def start_mcp(
     _model_lock = asyncio.Lock()
     _model_build_attempted: float = 0.0  # timestamp of last failed attempt
     _model_build_error: str | None = None
+    _model_building: bool = False  # True while a build is in progress
     _MODEL_RETRY_COOLDOWN = 30.0  # seconds before retry after failure
+    _MODEL_BUILD_TIMEOUT = 600.0  # generous timeout for large workspaces (666+ files)
 
     _req_graph_lock = asyncio.Lock()
     _req_graph: Any = requirement_graph  # may be pre-populated or None
@@ -270,7 +325,7 @@ def start_mcp(
 
     async def _get_model():
         """Return the semantic model, building one if needed."""
-        nonlocal semantic_model, _model_build_attempted, _model_build_error
+        nonlocal semantic_model, _model_build_attempted, _model_build_error, _model_building
         # Fast path: model already built
         if semantic_model is not None:
             return semantic_model
@@ -279,6 +334,9 @@ def start_mcp(
             _model_build_attempted
             and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN
         ):
+            return None
+        # Early return if another coroutine is already building the model
+        if _model_building:
             return None
 
         async with _model_lock:
@@ -291,13 +349,26 @@ def start_mcp(
             ):
                 return None
 
+            _model_building = True
             try:
-                model = await asyncio.to_thread(_build_model)
+                model = await asyncio.wait_for(
+                    asyncio.to_thread(_build_model),
+                    timeout=_MODEL_BUILD_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.error("Model build timed out after %.0fs", _MODEL_BUILD_TIMEOUT)
+                _model_build_attempted = time.monotonic()
+                _model_build_error = (
+                    f"Build timed out after {_MODEL_BUILD_TIMEOUT:.0f}s"
+                )
+                return None
             except Exception as exc:
                 logger.error("Model build failed: %s", exc, exc_info=True)
                 _model_build_attempted = time.monotonic()
                 _model_build_error = str(exc)
                 return None
+            finally:
+                _model_building = False
             if model is not None:
                 semantic_model = model
             else:
@@ -311,6 +382,8 @@ def start_mcp(
         """Return the current model build status for error surfacing."""
         if semantic_model is not None:
             return {"state": "ready"}
+        if _model_building:
+            return {"state": "building"}
         if _model_build_error:
             elapsed = time.monotonic() - _model_build_attempted
             remaining = max(0, _MODEL_RETRY_COOLDOWN - elapsed)
@@ -337,6 +410,10 @@ def start_mcp(
         return build_semantic_model(
             root=root,
             find_files_fn=_find_ivy_files,
+            include_resolver=(
+                _resolver.resolve if _resolver else _make_resolve_callback()
+            ),
+            stdlib_modules=discovered_stdlib,
         )
 
     # --- Lazy RequirementGraph construction ---
@@ -366,6 +443,9 @@ def start_mcp(
                 return None
 
             try:
+                logger.info(
+                    "Building requirement graph (first call, may take 1-2 min)..."
+                )
                 graph = await asyncio.to_thread(_build_requirement_graph)
             except ImportError as exc:
                 logger.warning(
@@ -473,10 +553,12 @@ def start_mcp(
                 StateVarNode,
             )
 
+            t0 = time.monotonic()
             graph = RequirementGraph()
             all_writes: list[tuple[str, str, int]] = []
             known_vars: set[str] = set()
 
+            files_scanned = 0
             for rel_path in _find_ivy_files(root):
                 abs_path = os.path.join(root, rel_path)
                 try:
@@ -486,6 +568,7 @@ def start_mcp(
                     logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
                     continue
 
+                files_scanned += 1
                 reqs, writes = extract_requirements_light(source, abs_path)
                 if not reqs and not writes:
                     continue
@@ -497,6 +580,13 @@ def start_mcp(
                 for var_name, _fp, _line in writes:
                     known_vars.add(var_name)
                 all_writes.extend(writes)
+
+            t1 = time.monotonic()
+            logger.info(
+                "Requirement graph: file indexing done — %d files in %.1fs",
+                files_scanned,
+                t1 - t0,
+            )
 
             # Create ActionNodes from monitor_action references
             for req in graph.requirements.values():
@@ -533,6 +623,13 @@ def start_mcp(
                         "formula_analyzer unavailable; skipping READS edge wiring"
                     )
 
+            t2 = time.monotonic()
+            logger.info(
+                "Requirement graph: edge wiring done — %d vars in %.1fs",
+                len(known_vars),
+                t2 - t1,
+            )
+
             # Load RFC requirement manifests and wire COVERS edges
             try:
                 from ivy_lsp.semantic.rfc_annotations import (
@@ -550,14 +647,20 @@ def start_mcp(
             except ImportError:
                 logger.debug("rfc_annotations unavailable; skipping manifest loading")
 
+            t3 = time.monotonic()
             total = len(graph.requirements) + len(graph.actions) + len(graph.state_vars)
             logger.info(
-                "Built requirement graph: %d requirements, %d actions, "
-                "%d state vars, %d edges",
+                "Built requirement graph in %.1fs: %d requirements, %d actions, "
+                "%d state vars, %d edges "
+                "(indexing=%.1fs, wiring=%.1fs, manifests=%.1fs)",
+                t3 - t0,
                 len(graph.requirements),
                 len(graph.actions),
                 len(graph.state_vars),
                 len(graph.edges),
+                t1 - t0,
+                t2 - t1,
+                t3 - t2,
             )
 
             # --- Populate SemanticModel with the same data (compatibility bridge) ---
@@ -605,11 +708,16 @@ def start_mcp(
 
     # --- Build ToolContext and register tools from sub-modules ---
 
+    from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+
+    discovered_stdlib = discover_stdlib_modules()
+
     ctx = ToolContext(
         root=root,
         staging_dir=staging_dir,
         executor=executor,
         base_path=base_path,
+        stdlib_modules=discovered_stdlib,
     )
     # Wire up callables that close over start_mcp's local state
     ctx.find_ivy_files = _find_ivy_files
@@ -619,6 +727,7 @@ def start_mcp(
     ctx.make_viz_server_proxy = _make_viz_server_proxy
     ctx.get_basename_cache = _get_basename_cache
     ctx.make_resolve_callback = _make_resolve_callback
+    ctx.include_resolver = _resolver
 
     from ivy_lsp.tools import register_all_tools
 
@@ -630,4 +739,5 @@ def start_mcp(
         return mcp
 
     logger.info("Starting ivy-lsp MCP server (workspace: %s)", root)
+    logger.info("[MCP-READY] Server initialized, tools registered")
     mcp.run(transport="stdio")

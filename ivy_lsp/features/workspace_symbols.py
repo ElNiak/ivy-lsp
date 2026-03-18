@@ -166,10 +166,29 @@ def compute_workspace_symbols(
 
         q_lower = query.lower()
 
+        resolver = getattr(indexer, "resolver", None)
+        current_layer = None
+        if active_filepath and resolver and hasattr(resolver, "_file_to_layer"):
+            current_layer = resolver._file_to_layer.get(
+                os.path.normpath(os.path.abspath(active_filepath))
+            )
+
         def _scope_sort_key(fs: FlatSymbol):
             fp = os.path.abspath(fs.file_path) if fs.file_path else ""
             scope_priority = 0 if fp in scope_files else 1
-            return (_def_boost(fs, q_lower), scope_priority, fs.qualified_name)
+            layer_priority = 0
+            if scope_priority == 1 and current_layer and resolver:
+                r_layer = resolver._file_to_layer.get(os.path.normpath(fp))
+                if r_layer == current_layer:
+                    layer_priority = 0  # same layer
+                else:
+                    layer_priority = 1  # different layer or unknown
+            return (
+                _def_boost(fs, q_lower),
+                scope_priority,
+                layer_priority,
+                fs.qualified_name,
+            )
 
         matches = sorted(matches, key=_scope_sort_key)[:MAX_RESULTS]
     elif query:

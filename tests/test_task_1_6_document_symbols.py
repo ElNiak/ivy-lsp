@@ -300,6 +300,79 @@ class TestMultipleKinds:
         assert ivy_symbol_to_document_symbol(sym).kind == SymbolKind.Namespace
 
 
+class TestZeroRangeFilter:
+    """Verify that symbols with (0,0,0,0) range (included-file leaks) are filtered."""
+
+    def test_zero_range_symbols_removed(self):
+        """Top-level symbols with range (0,0,0,0) are removed."""
+        from ivy_lsp.features.document_symbols import _filter_zero_range
+        from ivy_lsp.parsing.symbols import IvySymbol
+
+        symbols = [
+            IvySymbol(name="real", kind=SymbolKind.Class, range=(5, 0, 10, 1)),
+            IvySymbol(name="leaked", kind=SymbolKind.Class, range=(0, 0, 0, 0)),
+            IvySymbol(name="also_real", kind=SymbolKind.Function, range=(12, 0, 15, 1)),
+        ]
+        result = _filter_zero_range(symbols)
+
+        assert len(result) == 2
+        assert [s.name for s in result] == ["real", "also_real"]
+
+    def test_zero_range_children_removed(self):
+        """Nested children with range (0,0,0,0) are removed recursively."""
+        from ivy_lsp.features.document_symbols import _filter_zero_range
+        from ivy_lsp.parsing.symbols import IvySymbol
+
+        parent = IvySymbol(
+            name="parent",
+            kind=SymbolKind.Module,
+            range=(2, 0, 20, 1),
+            children=[
+                IvySymbol(
+                    name="good_child", kind=SymbolKind.Variable, range=(3, 4, 3, 20)
+                ),
+                IvySymbol(
+                    name="leaked_child", kind=SymbolKind.Variable, range=(0, 0, 0, 0)
+                ),
+            ],
+        )
+        result = _filter_zero_range([parent])
+
+        assert len(result) == 1
+        assert len(result[0].children) == 1
+        assert result[0].children[0].name == "good_child"
+
+    def test_all_zero_range_returns_empty(self):
+        """If all symbols have (0,0,0,0) range, result is empty."""
+        from ivy_lsp.features.document_symbols import _filter_zero_range
+        from ivy_lsp.parsing.symbols import IvySymbol
+
+        symbols = [
+            IvySymbol(name="a", kind=SymbolKind.Class, range=(0, 0, 0, 0)),
+            IvySymbol(name="b", kind=SymbolKind.Class, range=(0, 0, 0, 0)),
+        ]
+        assert _filter_zero_range(symbols) == []
+
+    def test_empty_input_returns_empty(self):
+        """Empty input produces empty output."""
+        from ivy_lsp.features.document_symbols import _filter_zero_range
+
+        assert _filter_zero_range([]) == []
+
+    def test_no_zero_range_passes_through(self):
+        """Symbols with non-zero ranges pass through unchanged."""
+        from ivy_lsp.features.document_symbols import _filter_zero_range
+        from ivy_lsp.parsing.symbols import IvySymbol
+
+        symbols = [
+            IvySymbol(name="a", kind=SymbolKind.Class, range=(1, 0, 5, 1)),
+            IvySymbol(name="b", kind=SymbolKind.Function, range=(6, 0, 10, 1)),
+        ]
+        result = _filter_zero_range(symbols)
+        assert len(result) == 2
+        assert [s.name for s in result] == ["a", "b"]
+
+
 class TestRegisterFeature:
     """Verify that the register function can be imported and called."""
 

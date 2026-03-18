@@ -9,7 +9,7 @@ import os
 import shutil
 import tempfile
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,70 @@ _EXCLUDED_DIR_PATTERNS = [
 ]
 
 _STALE_THRESHOLD_SECS = 3600  # 1 hour
+
+# Hardcoded fallback when stdlib directory cannot be discovered from disk.
+_STDLIB_FALLBACK = frozenset(
+    {
+        "order",
+        "collections",
+        "ip",
+        "ipv6",
+        "tcp",
+        "udp",
+        "byte_stream",
+        "timeout",
+        "net",
+    }
+)
+
+
+def discover_stdlib_modules(
+    ivy_include_path: Optional[str] = None, preferred_version: str = "1.7"
+) -> frozenset:
+    """Scan the Ivy stdlib directory and return all module basenames.
+
+    Args:
+        ivy_include_path: Explicit path to stdlib directory.  If *None*,
+            auto-discovers from the installed ``ivy`` package.
+        preferred_version: Preferred version subdirectory (default ``"1.7"``).
+            Falls back to the highest version if preferred version is absent.
+
+    Returns:
+        frozenset of module basenames (e.g. ``{"order", "collections", "tls", ...}``).
+    """
+    std_dir = ivy_include_path
+    if std_dir is None:
+        try:
+            import ivy as ivy_mod
+
+            ivy_dir = os.path.dirname(os.path.abspath(ivy_mod.__file__))
+            inc_base = os.path.join(ivy_dir, "include")
+            if not os.path.isdir(inc_base):
+                return _STDLIB_FALLBACK
+            # Prefer specified version, fall back to highest
+            preferred = os.path.join(inc_base, preferred_version)
+            if os.path.isdir(preferred):
+                std_dir = preferred
+            else:
+                best = None
+                for d in os.listdir(inc_base):
+                    full = os.path.join(inc_base, d)
+                    if os.path.isdir(full) and d.replace(".", "").isdigit():
+                        if best is None or d > best:
+                            best = d
+                if best:
+                    std_dir = os.path.join(inc_base, best)
+        except (ImportError, AttributeError, OSError):
+            return _STDLIB_FALLBACK
+
+    if not std_dir or not os.path.isdir(std_dir):
+        return _STDLIB_FALLBACK
+
+    modules = set()
+    for f in os.listdir(std_dir):
+        if f.endswith(".ivy"):
+            modules.add(f[:-4])
+    return frozenset(modules) if modules else _STDLIB_FALLBACK
 
 
 class IncludeResolver:
@@ -98,7 +162,12 @@ class IncludeResolver:
             "include_paths": list(self._include_paths),
             "staging_dir": self._staging_dir,
             "workspace_layers": [
-                {"id": l.id, "include_paths": l.include_paths, "priority": l.priority}
+                {
+                    "id": l.id,
+                    "include_paths": l.include_paths,
+                    "priority": l.priority,
+                    "depends_on": l.depends_on,
+                }
                 for l in self._workspace_layers
             ],
         }
@@ -113,6 +182,7 @@ class IncludeResolver:
                 id=l["id"],
                 include_paths=l.get("include_paths", []),
                 priority=l.get("priority", 1),
+                depends_on=l.get("depends_on", []),
             )
             for l in d.get("workspace_layers", [])
         ]
@@ -153,6 +223,23 @@ class IncludeResolver:
                 candidate = os.path.join(self._partition_staging[layer_id], fname)
                 if os.path.isfile(candidate):
                     return os.path.realpath(candidate)
+                # Layer found but file not in layer staging dir
+                logger.warning(
+                    "Layer staging miss: '%s' not found in layer '%s' dir %s (from %s)",
+                    fname,
+                    layer_id,
+                    self._partition_staging[layer_id],
+                    os.path.relpath(from_file, self._workspace_root),
+                )
+            elif not layer_id and self._file_to_layer:
+                # File should be in a layer but isn't in _file_to_partition
+                logger.warning(
+                    "Layer routing miss: %s not in _file_to_partition (%d entries). "
+                    "abs_from=%s",
+                    os.path.relpath(from_file, self._workspace_root),
+                    len(self._file_to_partition),
+                    abs_from[-80:],
+                )
 
         # 3. Flat staging directory
         if self._staging_dir:
@@ -382,7 +469,7 @@ class IncludeResolver:
                 logger.warning("Failed to create symlink for %s: %s", filepath, exc)
                 continue
             self._staged_files[basename] = filepath
-        logger.info(
+        logger.warning(
             "Staged %d files in %s (%d collisions, %d unique basenames affected)",
             len(self._staged_files),
             staging,
@@ -449,6 +536,17 @@ class IncludeResolver:
             test_scopes: Mapping of test_file → include_closure (frozenset of
                 absolute file paths).
         """
+        # Layer staging takes precedence — do not overwrite layer partitions
+        # with scope-based partitions (the two systems are incompatible).
+        if self._workspace_layers and self._partition_staging:
+            logger.info(
+                "Skipping scope-based partitioned staging: layer staging active "
+                "(%d layers, %d files)",
+                len(self._partition_staging),
+                len(self._file_to_partition),
+            )
+            return
+
         if not self._collision_map:
             # No collisions — every file can use the default staging.
             logger.info("No basename collisions — partitioned staging not needed")
@@ -676,6 +774,48 @@ class IncludeResolver:
             layer_files[layer.id] = sorted(files)
         return layer_files
 
+    def _validate_layer_deps(self) -> bool:
+        """Check workspace layer dependencies for cycles using DFS.
+
+        Returns:
+            True if no cycles detected, False otherwise.
+        """
+        layer_ids = {l.id for l in self._workspace_layers}
+        # WHITE=0, GRAY=1, BLACK=2
+        color: Dict[str, int] = {lid: 0 for lid in layer_ids}
+        dep_map: Dict[str, List[str]] = {
+            l.id: l.depends_on for l in self._workspace_layers
+        }
+
+        def _dfs(node: str, path: List[str]) -> bool:
+            color[node] = 1  # GRAY — visiting
+            for dep in dep_map.get(node, []):
+                if dep not in layer_ids:
+                    logger.warning(
+                        "Layer '%s' depends_on unknown layer '%s' — skipping",
+                        node,
+                        dep,
+                    )
+                    continue
+                if color[dep] == 1:  # Back edge → cycle
+                    cycle = path[path.index(dep) :] + [dep]
+                    logger.error(
+                        "Cycle detected in layer dependencies: %s",
+                        " -> ".join(cycle),
+                    )
+                    return False
+                if color[dep] == 0:
+                    if not _dfs(dep, path + [dep]):
+                        return False
+            color[node] = 2  # BLACK — done
+            return True
+
+        for lid in layer_ids:
+            if color[lid] == 0:
+                if not _dfs(lid, [lid]):
+                    return False
+        return True
+
     def build_layered_staging(self) -> None:
         """Build per-layer staging directories when workspace layers are configured.
 
@@ -683,6 +823,10 @@ class IncludeResolver:
         use first-wins semantics. Collisions across layers are expected (e.g.,
         APT and standard both have types.ivy) and don't conflict because they're
         in separate staging dirs.
+
+        When a layer declares ``depends_on``, files from the dependency layers
+        are injected as symlinks into the dependent layer's staging directory.
+        The layer's own files take precedence over injected files.
         """
         if not self._workspace_layers:
             logger.info("No workspace layers -- layered staging not needed")
@@ -691,6 +835,17 @@ class IncludeResolver:
         if not self._staging_dir:
             logger.warning("Cannot build layered staging: no staging dir active")
             return
+
+        # Validate dependency graph before proceeding
+        has_deps = any(l.depends_on for l in self._workspace_layers)
+        deps_valid = True
+        if has_deps:
+            deps_valid = self._validate_layer_deps()
+            if not deps_valid:
+                logger.error(
+                    "Layer dependency cycle detected — "
+                    "dependency injection will be skipped"
+                )
 
         layer_files = self._find_source_files_by_layer()
 
@@ -726,15 +881,108 @@ class IncludeResolver:
                     )
 
             logger.info(
-                "Layer '%s' staging: %d files in %s",
+                "Layer '%s' staging: %d own files in %s",
                 layer_id,
                 len(staged),
                 layer_dir,
             )
 
+        # Inject dependency files from depends_on layers.
+        # Own files (already symlinked above) take precedence.
+        if has_deps and deps_valid:
+            layer_id_map = {l.id: l for l in self._workspace_layers}
+            for layer in self._workspace_layers:
+                if not layer.depends_on:
+                    continue
+                layer_dir = self._partition_staging[layer.id]
+                injected_count = 0
+                for dep_id in layer.depends_on:
+                    if dep_id not in layer_id_map:
+                        continue  # Already warned in _validate_layer_deps
+                    for filepath in layer_files.get(dep_id, []):
+                        basename = os.path.basename(filepath)
+                        link_path = os.path.join(layer_dir, basename)
+                        if os.path.lexists(link_path):
+                            continue  # Own files or earlier dep takes precedence
+                        try:
+                            os.symlink(filepath, link_path)
+                            injected_count += 1
+                        except OSError as exc:
+                            logger.warning(
+                                "Layer %s: dep injection symlink failed "
+                                "for %s (from %s): %s",
+                                layer.id,
+                                basename,
+                                dep_id,
+                                exc,
+                            )
+                if injected_count:
+                    logger.info(
+                        "Layer '%s' dependency injection: %d files from %s",
+                        layer.id,
+                        injected_count,
+                        layer.depends_on,
+                    )
+
+        # Stage stdlib modules as shared symlinks in all layer dirs.
+        # Layer's own files take precedence (symlink already exists → skip).
+        std_dir = self._get_std_include_dir()
+        stdlib_staged = 0
+        if std_dir and os.path.isdir(std_dir):
+            for fn in os.listdir(std_dir):
+                if not fn.endswith(".ivy"):
+                    continue
+                src = os.path.join(std_dir, fn)
+                for layer in self._workspace_layers:
+                    link_path = os.path.join(self._partition_staging[layer.id], fn)
+                    if os.path.lexists(link_path):
+                        continue  # Layer's own file takes precedence
+                    try:
+                        os.symlink(src, link_path)
+                        stdlib_staged += 1
+                    except OSError:
+                        pass
+            if stdlib_staged:
+                logger.info(
+                    "Stdlib staging: %d symlinks across %d layers (from %s)",
+                    stdlib_staged,
+                    len(self._workspace_layers),
+                    std_dir,
+                )
+
         # Map files to their layer for resolve_partitioned
         for filepath, layer_id in self._file_to_layer.items():
             self._file_to_partition[filepath] = layer_id
+
+        logger.warning(
+            "Layered staging active: %d layers, %d files mapped to partitions",
+            len(self._partition_staging),
+            len(self._file_to_partition),
+        )
+
+    def staging_health(self) -> Dict[str, Any]:
+        """Return a summary of staging directory health.
+
+        Returns:
+            Dict with keys: total_staged, collisions, symlink_failures,
+            layers_active, layer_count, files_mapped_to_layers.
+        """
+        result: Dict[str, Any] = {
+            "total_staged": len(self._staged_files),
+            "collisions": len(self._collision_map),
+            "collision_basenames": sorted(self._collision_map.keys())[:20],
+            "layers_active": bool(self._partition_staging),
+            "layer_count": len(self._partition_staging),
+            "files_mapped_to_layers": len(self._file_to_partition),
+        }
+        # Check for broken symlinks in staging dir
+        symlink_failures = 0
+        if self._staging_dir and os.path.isdir(self._staging_dir):
+            for entry in os.scandir(self._staging_dir):
+                if entry.is_symlink() and not os.path.exists(entry.path):
+                    symlink_failures += 1
+        result["symlink_failures"] = symlink_failures
+        return result
 
     def _get_std_include_dir(self) -> Optional[str]:
         """Locate the Ivy standard library include directory.
@@ -756,6 +1004,10 @@ class IncludeResolver:
             inc_base = os.path.join(ivy_dir, "include")
             if not os.path.isdir(inc_base):
                 return None
+            # Prefer 1.7 (matching #lang ivy1.7), fall back to highest
+            preferred = os.path.join(inc_base, "1.7")
+            if os.path.isdir(preferred):
+                return preferred
             best: Optional[str] = None
             for d in os.listdir(inc_base):
                 full = os.path.join(inc_base, d)

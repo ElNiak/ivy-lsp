@@ -89,7 +89,10 @@ def build_semantic_model(
     total_symbols = 0
     build_start = time.monotonic()
 
-    for rel_path in find_files_fn(root):
+    all_files = find_files_fn(root)
+    for i, rel_path in enumerate(all_files):
+        if i > 0 and i % 100 == 0:
+            logger.info("Model build progress: %d/%d files", i, len(all_files))
         abs_path = os.path.join(root, rel_path)
         stem = os.path.splitext(os.path.basename(rel_path))[0]
         basename_to_path.setdefault(stem, abs_path)

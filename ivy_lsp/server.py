@@ -263,6 +263,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
 
         @self.feature(lsp.INITIALIZE)
         def on_initialize(params: lsp.InitializeParams) -> None:
+            logger.info("initialize request received (process startup complete)")
             opts = params.initialization_options or {}
             if isinstance(opts, dict):
                 code_lens_opts = opts.get("codeLens", {})
