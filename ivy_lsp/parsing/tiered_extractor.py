@@ -22,7 +22,7 @@ from typing import Callable, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.parsing.symbols import IvySymbol, SymbolReference
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ class ExtractionResult:
 
     symbols: List[IvySymbol] = field(default_factory=list)
     includes: List[str] = field(default_factory=list)
+    references: List[SymbolReference] = field(default_factory=list)
     tier_used: int = 0
     timing_ms: float = 0.0
     errors: List[TierError] = field(default_factory=list)
@@ -87,6 +88,14 @@ _INDIVIDUAL_DECL_RE = re.compile(r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MU
 _OBJECT_DECL_RE = re.compile(
     r"^\s*(object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
 )
+
+# ---------------------------------------------------------------------------
+# Tier 2/3: Reference extraction patterns
+# ---------------------------------------------------------------------------
+
+_CALL_STMT_RE = re.compile(r"(?:call\s+)([\w.]+)\s*(?:\(|;|$)", re.MULTILINE)
+_INSTANCE_RE = re.compile(r"^\s*instance\s+([\w.]+)\s*:\s*([\w.]+)", re.MULTILINE)
+_MONITOR_RE = re.compile(r"^\s*(before|after|around)\s+([\w.]+)", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +153,7 @@ class TieredExtractor:
         if self._parser_available is not False:
             t0 = time.monotonic()
             try:
-                symbols, includes = self._try_parser(source, filepath)
+                symbols, includes, references = self._try_parser(source, filepath)
                 elapsed = (time.monotonic() - t0) * 1000
                 logger.debug(
                     "%s: tier=1 (parser) succeeded, %d symbols, %d includes (%.1fms)",
@@ -156,6 +165,7 @@ class TieredExtractor:
                 return ExtractionResult(
                     symbols=symbols,
                     includes=includes,
+                    references=references,
                     tier_used=1,
                     timing_ms=elapsed,
                     errors=errors,
@@ -187,7 +197,7 @@ class TieredExtractor:
         if self._lexer_available is not False:
             t0 = time.monotonic()
             try:
-                symbols, includes = self._try_lexer(source, filepath)
+                symbols, includes, references = self._try_lexer(source, filepath)
                 elapsed = (time.monotonic() - t0) * 1000
                 logger.debug(
                     "%s: tier=2 (lexer) succeeded, %d symbols, %d includes (%.1fms)",
@@ -199,6 +209,7 @@ class TieredExtractor:
                 return ExtractionResult(
                     symbols=symbols,
                     includes=includes,
+                    references=references,
                     tier_used=2,
                     timing_ms=elapsed,
                     errors=errors,
@@ -228,7 +239,7 @@ class TieredExtractor:
 
         # -- Tier 3: Regex (always succeeds) --------------------------------
         t0 = time.monotonic()
-        symbols, includes = self._try_regex(source, filepath)
+        symbols, includes, references = self._try_regex(source, filepath)
         elapsed = (time.monotonic() - t0) * 1000
         logger.debug(
             "%s: tier=3 (regex) succeeded, %d symbols, %d includes (%.1fms)",
@@ -240,6 +251,7 @@ class TieredExtractor:
         return ExtractionResult(
             symbols=symbols,
             includes=includes,
+            references=references,
             tier_used=3,
             timing_ms=elapsed,
             errors=errors,
@@ -249,7 +261,7 @@ class TieredExtractor:
 
     def _try_parser(
         self, source: str, filepath: str
-    ) -> Tuple[List[IvySymbol], List[str]]:
+    ) -> Tuple[List[IvySymbol], List[str], List[SymbolReference]]:
         """Tier 1: Full PLY parser via IvyParserWrapper + ast_to_symbols.
 
         Raises ImportError if ivy package is unavailable.
@@ -273,11 +285,12 @@ class TieredExtractor:
         # Extract includes from AST declarations
         includes = _extract_includes_from_ast(result.ast)
 
-        return symbols, includes
+        # AST-based reference extraction will be added in Task 3
+        return symbols, includes, []
 
     def _try_lexer(
         self, source: str, filepath: str
-    ) -> Tuple[List[IvySymbol], List[str]]:
+    ) -> Tuple[List[IvySymbol], List[str], List[SymbolReference]]:
         """Tier 2: PLY lexer via fallback_scan.
 
         Raises ImportError if PLY is unavailable.
@@ -308,11 +321,63 @@ class TieredExtractor:
             if not (sym.kind == SymbolKind.File and sym.detail == "include")
         ]
 
-        return declaration_symbols, includes
+        # Extract references using same regex patterns as Tier 3
+        references: List[SymbolReference] = []
+
+        for m in _CALL_STMT_RE.finditer(source):
+            target = m.group(1)
+            call_line = source[: m.start()].count("\n")
+            # Find enclosing action from extracted symbols
+            best_name: Optional[str] = None
+            best_line = -1
+            for sym in declaration_symbols:
+                if (
+                    sym.kind == SymbolKind.Function
+                    and sym.range[0] <= call_line
+                    and sym.range[0] > best_line
+                ):
+                    best_name = sym.name
+                    best_line = sym.range[0]
+            if best_name:
+                references.append(
+                    SymbolReference(
+                        source_name=best_name,
+                        target_name=target,
+                        kind="call",
+                        line=call_line,
+                        file_path=filepath,
+                    )
+                )
+
+        for m in _INSTANCE_RE.finditer(source):
+            references.append(
+                SymbolReference(
+                    source_name=m.group(1),
+                    target_name=m.group(2),
+                    kind="instance",
+                    line=source[: m.start()].count("\n"),
+                    file_path=filepath,
+                )
+            )
+
+        for m in _MONITOR_RE.finditer(source):
+            mk = m.group(1)
+            an = m.group(2)
+            references.append(
+                SymbolReference(
+                    source_name=f"{mk} {an}",
+                    target_name=an,
+                    kind="monitor",
+                    line=source[: m.start()].count("\n"),
+                    file_path=filepath,
+                )
+            )
+
+        return declaration_symbols, includes, references
 
     def _try_regex(
         self, source: str, filepath: str
-    ) -> Tuple[List[IvySymbol], List[str]]:
+    ) -> Tuple[List[IvySymbol], List[str], List[SymbolReference]]:
         """Tier 3: Regex-based extraction (always succeeds)."""
         symbols: List[IvySymbol] = []
         lines = source.split("\n")
@@ -438,7 +503,71 @@ class TieredExtractor:
         # Includes
         includes = INCLUDE_PATTERN.findall(source)
 
-        return symbols, includes
+        # --- Reference extraction ---
+        references: List[SymbolReference] = []
+
+        # Helper: find enclosing action for a given line
+        def _find_enclosing_action(line_idx: int) -> Optional[str]:
+            """Find which action's range contains this line."""
+            best_name: Optional[str] = None
+            best_line = -1
+            for sym in symbols:
+                if (
+                    sym.kind == SymbolKind.Function
+                    and sym.range[0] <= line_idx
+                    and sym.range[0] > best_line
+                ):
+                    best_name = sym.name
+                    best_line = sym.range[0]
+            return best_name
+
+        # CALLS: call X(...)
+        for m in _CALL_STMT_RE.finditer(source):
+            target = m.group(1)
+            call_line = source[: m.start()].count("\n")
+            enclosing = _find_enclosing_action(call_line)
+            if enclosing:
+                references.append(
+                    SymbolReference(
+                        source_name=enclosing,
+                        target_name=target,
+                        kind="call",
+                        line=call_line,
+                        file_path=filepath,
+                    )
+                )
+
+        # USES: instance X : Y(...)
+        for m in _INSTANCE_RE.finditer(source):
+            inst_name = m.group(1)
+            module_name = m.group(2)
+            inst_line = source[: m.start()].count("\n")
+            references.append(
+                SymbolReference(
+                    source_name=inst_name,
+                    target_name=module_name,
+                    kind="instance",
+                    line=inst_line,
+                    file_path=filepath,
+                )
+            )
+
+        # MONITORS: before/after/around X
+        for m in _MONITOR_RE.finditer(source):
+            mixin_kind = m.group(1)  # "before", "after", "around"
+            action_name = m.group(2)
+            mon_line = source[: m.start()].count("\n")
+            references.append(
+                SymbolReference(
+                    source_name=f"{mixin_kind} {action_name}",
+                    target_name=action_name,
+                    kind="monitor",
+                    line=mon_line,
+                    file_path=filepath,
+                )
+            )
+
+        return symbols, includes, references
 
 
 # ---------------------------------------------------------------------------
