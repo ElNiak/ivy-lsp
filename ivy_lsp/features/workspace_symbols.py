@@ -23,6 +23,29 @@ logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 100
 
+# Internal limit to prevent memory issues on huge workspaces.
+# Final MAX_RESULTS cap is applied after relevance sorting in
+# compute_workspace_symbols().
+_SEARCH_INTERNAL_LIMIT = 1000
+
+# Definition kinds that should rank above references in search results.
+_DEFINITION_KINDS = frozenset(
+    {
+        lsp.SymbolKind.Class,
+        lsp.SymbolKind.Module,
+        lsp.SymbolKind.Function,
+        lsp.SymbolKind.Variable,
+        lsp.SymbolKind.Namespace,
+        lsp.SymbolKind.Property,
+    }
+)
+
+
+def _def_boost(fs: "FlatSymbol", q_lower: str) -> int:
+    """Return 0 if the symbol's leaf name exactly matches the query, else 1."""
+    leaf = fs.qualified_name.rsplit(".", 1)[-1].lower()
+    return 0 if (leaf == q_lower and fs.kind in _DEFINITION_KINDS) else 1
+
 
 @dataclass
 class FlatSymbol:
@@ -75,19 +98,15 @@ def flatten_symbols(symbols: List[IvySymbol], prefix: str = "") -> List[FlatSymb
 def search_symbols(flat: List[FlatSymbol], query: str) -> List[FlatSymbol]:
     """Case-insensitive substring search over flattened symbols.
 
-    Args:
-        flat: Pre-flattened symbol list to search.
-        query: Substring to match against ``qualified_name``.
-            An empty string matches everything.
-
-    Returns:
-        Matching symbols, capped at :data:`MAX_RESULTS`.
+    Returns matching symbols capped at an internal limit. The caller
+    is responsible for relevance sorting and applying the final
+    ``MAX_RESULTS`` cap.
     """
     if not query:
         return flat[:MAX_RESULTS]
     q = query.lower()
     matches = [s for s in flat if q in s.qualified_name.lower()]
-    return matches[:MAX_RESULTS]
+    return matches[:_SEARCH_INTERNAL_LIMIT]
 
 
 def to_workspace_symbol(flat: FlatSymbol) -> lsp.WorkspaceSymbol:
@@ -132,11 +151,19 @@ def compute_workspace_symbols(
     if scope_files is not None:
         import os
 
+        q_lower = query.lower()
+
         def _scope_sort_key(fs: FlatSymbol):
             fp = os.path.abspath(fs.file_path) if fs.file_path else ""
-            return (0 if fp in scope_files else 1, fs.qualified_name)
+            scope_priority = 0 if fp in scope_files else 1
+            return (_def_boost(fs, q_lower), scope_priority, fs.qualified_name)
 
         matches = sorted(matches, key=_scope_sort_key)[:MAX_RESULTS]
+    elif query:
+        q_lower = query.lower()
+        matches = sorted(
+            matches, key=lambda fs: (_def_boost(fs, q_lower), fs.qualified_name)
+        )[:MAX_RESULTS]
 
     logger.debug(
         "workspace_symbol: query=%r, %d flat symbols, %d matches",
@@ -176,6 +203,20 @@ def register(server) -> None:
         params: lsp.WorkspaceSymbolParams,
     ) -> List[lsp.WorkspaceSymbol]:
         if server.indexer is None:
+            if getattr(server, "initializing", False):
+                return [
+                    lsp.WorkspaceSymbol(
+                        name="[Ivy LSP is still indexing...]",
+                        kind=lsp.SymbolKind.Null,
+                        location=lsp.Location(
+                            uri="",
+                            range=lsp.Range(
+                                start=lsp.Position(line=0, character=0),
+                                end=lsp.Position(line=0, character=0),
+                            ),
+                        ),
+                    )
+                ]
             return []
 
         # Resolve active file path from last didOpen/didChange URI.

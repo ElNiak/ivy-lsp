@@ -133,10 +133,12 @@ class TestSearchSymbols:
         assert result == []
 
     def test_result_limit(self):
-        """Results are capped at MAX_RESULTS when more symbols match."""
-        flat = [self._make_flat(f"sym_{i}") for i in range(150)]
+        """Results are capped at _SEARCH_INTERNAL_LIMIT, not MAX_RESULTS."""
+        from ivy_lsp.features.workspace_symbols import _SEARCH_INTERNAL_LIMIT
+
+        flat = [self._make_flat(f"sym_{i}") for i in range(1500)]
         result = search_symbols(flat, "sym")
-        assert len(result) == MAX_RESULTS
+        assert len(result) == _SEARCH_INTERNAL_LIMIT
 
     def test_substring_match(self):
         """Substring matching works: 'ack' matches 'frame.ack.range'."""
@@ -283,6 +285,60 @@ class TestComputeWorkspaceSymbols:
         # cid (in scope) should rank before acid (out of scope)
         assert results[0].name == "cid"
         assert results[1].name == "acid"
+
+
+class TestSearchSymbolsRanking:
+    """Verify that exact-name definitions rank above substring matches."""
+
+    def _make_flat(
+        self, name: str, kind=lsp.SymbolKind.Variable, file_path="/tmp/test.ivy"
+    ) -> FlatSymbol:
+        return FlatSymbol(
+            qualified_name=name,
+            kind=kind,
+            file_path=file_path,
+            range=(0, 0, 0, 0),
+        )
+
+    def test_exact_match_not_lost_when_many_substring_matches(self):
+        """Exact match 'cid' must survive when >100 substring matches exist."""
+        # 150 APT entity symbols with "cid" in their qualified name
+        noise = [self._make_flat(f"apt.entity{i}.acidic_thing") for i in range(150)]
+        # The actual cid type definition
+        target = self._make_flat(
+            "cid", kind=lsp.SymbolKind.Class, file_path="/tmp/quic_types.ivy"
+        )
+        flat = noise + [target]
+
+        # Use compute_workspace_symbols to test the full pipeline
+        class _FakeIndexer:
+            def __init__(self, syms):
+                self._syms = syms
+
+            def lookup_all_symbols(self):
+                return self._syms
+
+            def get_scope_files_for_file(self, path):
+                return None
+
+        # Build IvySymbol objects for the indexer
+        ivy_syms = []
+        for f in flat:
+            ivy_syms.append(
+                IvySymbol(
+                    name=f.qualified_name,
+                    kind=f.kind,
+                    range=f.range,
+                    file_path=f.file_path,
+                )
+            )
+
+        indexer = _FakeIndexer(ivy_syms)
+        results = compute_workspace_symbols(indexer, "cid")
+        names = [r.name for r in results]
+        assert "cid" in names, "Exact match 'cid' must not be lost to substring matches"
+        # It should be ranked first (definition boost)
+        assert names[0] == "cid"
 
 
 class TestRegister:
