@@ -836,10 +836,13 @@ def _extract_refs_from_decl(decl: Any, filename: str) -> List[SymbolReference]:
         defs = decl.defines()
         if defs:
             action_name = defs[0][0]
-            # ActionDecl.args[0] is ActionDef, which has a .body attribute
+            # ActionDecl.args[0] is ActionDef.  The body is either
+            # in ActionDef.body (newer Ivy) or ActionDef.args[1] (the RHS).
             try:
                 action_def = decl.args[0]
                 body = getattr(action_def, "body", None)
+                if body is None and len(getattr(action_def, "args", [])) >= 2:
+                    body = action_def.args[1]
                 if body is not None:
                     _extract_calls_from_body(body, action_name, filename, refs)
             except (IndexError, AttributeError):
@@ -870,37 +873,32 @@ def _extract_refs_from_decl(decl: Any, filename: str) -> List[SymbolReference]:
                 pass
 
     # 3c: MONITORS from MixinDecl
+    # MixinDecl.args[0] is MixinBeforeDef/MixinAfterDef, which has:
+    #   args[0] = mixer Atom (e.g. connect[before2])
+    #   args[1] = mixee Atom (e.g. connect)
     if isinstance(decl, ia.MixinDecl):
         try:
-            # MixinDecl has two parts: the mixer (the before/after block)
-            # and the mixee (the target action)
-            mixer_def = decl.args[0] if decl.args else None
-            mixee_def = decl.args[1] if len(decl.args) > 1 else None
+            mixin_def = decl.args[0] if decl.args else None
+            if mixin_def is not None:
+                mixin_args = getattr(mixin_def, "args", [])
+                mixer_atom = mixin_args[0] if len(mixin_args) >= 1 else None
+                mixee_atom = mixin_args[1] if len(mixin_args) >= 2 else None
 
-            mixer_name = None
-            mixee_name = None
+                mixer_name = _atom_name(mixer_atom) if mixer_atom else None
+                mixee_name = _atom_name(mixee_atom) if mixee_atom else None
 
-            if mixer_def:
-                mixer_name = _atom_name(mixer_def) or getattr(
-                    mixer_def, "relname", None
-                )
-            if mixee_def:
-                mixee_name = _atom_name(mixee_def) or getattr(
-                    mixee_def, "relname", None
-                )
-
-            if mixer_name and mixee_name:
-                lineno = getattr(decl, "lineno", None)
-                line = _get_line_number(lineno)
-                refs.append(
-                    SymbolReference(
-                        source_name=str(mixer_name),
-                        target_name=str(mixee_name),
-                        kind="monitor",
-                        line=line,
-                        file_path=filename,
+                if mixer_name and mixee_name:
+                    lineno = getattr(decl, "lineno", None)
+                    line = _get_line_number(lineno)
+                    refs.append(
+                        SymbolReference(
+                            source_name=str(mixer_name),
+                            target_name=str(mixee_name),
+                            kind="monitor",
+                            line=line,
+                            file_path=filename,
+                        )
                     )
-                )
         except (IndexError, AttributeError):
             pass
 
