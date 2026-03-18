@@ -241,3 +241,31 @@ class TestTraceabilityMatrix:
         assert covered[0].id == "rfc9000:4.1"
         assert len(uncovered) == 1
         assert uncovered[0].id == "rfc9000:8.1"
+
+
+# ---------------------------------------------------------------------------
+# Coverage stats scoping — RfcRequirement has no .file attribute
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageStatsScoping:
+    def test_requirement_has_no_file_attribute(self):
+        """RfcRequirement has no .file attr — scoping must not filter requirements."""
+        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+
+        req = RfcRequirement(
+            id="rfc9000:4.1",
+            rfc="RFC9000",
+            section="4.1",
+            text="...",
+            level="MUST",
+        )
+        ann = RfcAnnotation(
+            id="f:10:0",
+            file="/tmp/quic/quic_types.ivy",
+            line=10,
+            tags=["rfc9000:4.1"],
+        )
+
+        assert not hasattr(req, "file"), "RfcRequirement should not have .file"
+        assert hasattr(ann, "file"), "RfcAnnotation should have .file"

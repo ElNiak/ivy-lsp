@@ -35,6 +35,28 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # Private helpers (former standalone tool bodies)
     # ------------------------------------------------------------------
 
+    def _model_unavailable_response() -> str:
+        """Error response with indexing status note."""
+        status = ctx.get_model_status()
+        if status.get("state") == "not_built":
+            return json.dumps(
+                {
+                    "success": False,
+                    "message": "Semantic model unavailable",
+                    "note": "LSP is still indexing. Results may be incomplete. Try again shortly.",
+                }
+            )
+        if status.get("state") == "failed":
+            return json.dumps(
+                {
+                    "success": False,
+                    "message": "Semantic model unavailable",
+                    "note": f"Model build failed: {status.get('error', 'unknown')}. "
+                    f"Retry in {status.get('retry_in_seconds', '?')}s.",
+                }
+            )
+        return error_response("Semantic model unavailable")
+
     async def _ivy_traceability_matrix(
         relative_path: str | None = None,
         test_file: str | None = None,
@@ -42,7 +64,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """RFC requirement-to-annotation traceability matrix."""
         model = await ctx.get_model()
         if model is None:
-            return error_response("Semantic model unavailable")
+            return _model_unavailable_response()
 
         from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
         from ivy_lsp.semantic.rfc_annotations import normalize_tag_with_diagnostics
@@ -126,7 +148,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """RFC requirement coverage statistics by level and layer."""
         model = await ctx.get_model()
         if model is None:
-            return error_response("Semantic model unavailable")
+            return _model_unavailable_response()
 
         from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
         from ivy_lsp.semantic.rfc_annotations import normalize_tag_with_diagnostics
@@ -135,7 +157,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
         if test_file:
-            # Endpoint-mirror scoping: filter to include closure of test file.
+            # Endpoint-mirror scoping: filter annotations to include closure
+            # of test file.  Requirements are manifest-level (RfcRequirement
+            # has no .file attribute) so they must NOT be filtered by path.
             try:
                 abs_test = ctx.validate_path(test_file)
             except ValueError as exc:
@@ -217,6 +241,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             "uncovered_ids": uncovered_ids[:50],
             "_uncovered_ids_full": uncovered_ids,
             "_covered_ids": covered_ids,
+            "counting_method": "manifest_annotations",
         }
         if coverage_warnings:
             result["warnings"] = coverage_warnings
@@ -302,6 +327,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         except (json.JSONDecodeError, KeyError):
             pass  # Fall back to visualization handler result
 
+        result["counting_method"] = "requirement_graph_with_stats_overlay"
         return json.dumps(result)
 
     async def _ivy_coverage_diff(relative_path: str | None = None) -> str:
@@ -380,7 +406,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Analyze incoming and outgoing edges for a symbol."""
         model = await ctx.get_model()
         if model is None:
-            return error_response("Semantic model unavailable")
+            return _model_unavailable_response()
 
         from ivy_lsp.semantic.nodes import SymbolNode
 
@@ -412,29 +438,38 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         incoming = model.get_incoming(sn.id)
         outgoing = model.get_outgoing(sn.id)
 
-        return json.dumps(
-            {
-                "symbol": symbol_name,
-                "found": True,
-                "qualified_name": sn.qualified_name,
-                "kind": sn.kind,
-                "file": sn.file,
-                "line": sn.line,
-                "incoming_edges": [
-                    {"type": etype.value, "source": src} for etype, src in incoming
-                ],
-                "outgoing_edges": [
-                    {"type": etype.value, "target": tgt} for etype, tgt in outgoing
-                ],
-                "total_references": len(incoming) + len(outgoing),
-            }
-        )
+        result: dict[str, Any] = {
+            "symbol": symbol_name,
+            "found": True,
+            "qualified_name": sn.qualified_name,
+            "kind": sn.kind,
+            "file": sn.file,
+            "line": sn.line,
+            "incoming_edges": [
+                {"type": etype.value, "source": src} for etype, src in incoming
+            ],
+            "outgoing_edges": [
+                {"type": etype.value, "target": tgt} for etype, tgt in outgoing
+            ],
+            "total_references": len(incoming) + len(outgoing),
+        }
+
+        # Note when symbol found but no edges and deep indexing still running
+        if not incoming and not outgoing:
+            status = ctx.get_model_status()
+            if status.get("state") != "ready":
+                result["note"] = (
+                    "Semantic model is still being built. "
+                    "Edge data may be incomplete."
+                )
+
+        return json.dumps(result)
 
     async def _ivy_cross_references(node_id: str) -> str:
         """Query cross-reference graph neighborhood of a node."""
         model = await ctx.get_model()
         if model is None:
-            return error_response("Semantic model unavailable")
+            return _model_unavailable_response()
 
         node = model.get_node(node_id)
         # H7: Fuzzy node_id matching — handle path format mismatches
@@ -526,7 +561,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Query rich semantic info about a symbol: type, references, requirements."""
         model = await ctx.get_model()
         if model is None:
-            return error_response("Semantic model unavailable")
+            return _model_unavailable_response()
 
         from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
 
