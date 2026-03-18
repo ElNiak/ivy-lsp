@@ -46,6 +46,14 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     "note": "LSP is still indexing. Results may be incomplete. Try again shortly.",
                 }
             )
+        if status.get("state") == "building":
+            return json.dumps(
+                {
+                    "success": False,
+                    "message": "Semantic model is currently building",
+                    "note": "The model is being built (this can take 2-4 minutes on first use). Try again shortly.",
+                }
+            )
         if status.get("state") == "failed":
             return json.dumps(
                 {
@@ -91,7 +99,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
                 return error_response(str(exc))
-            annotations = [a for a in annotations if a.file == abs_path]
+            if os.path.isdir(abs_path):
+                prefix = abs_path.rstrip(os.sep) + os.sep
+                annotations = [a for a in annotations if a.file.startswith(prefix)]
+            else:
+                annotations = [a for a in annotations if a.file == abs_path]
 
         req_ids = {r.id for r in requirements}
         covered_tags: dict[str, list[dict]] = {}
@@ -177,7 +189,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
                 return error_response(str(exc))
-            annotations = [a for a in annotations if a.file == abs_path]
+            if os.path.isdir(abs_path):
+                prefix = abs_path.rstrip(os.sep) + os.sep
+                annotations = [a for a in annotations if a.file.startswith(prefix)]
+            else:
+                annotations = [a for a in annotations if a.file == abs_path]
 
         # FX2 fix: when relative_path scoping yields no annotations,
         # return zero coverage instead of counting global requirements.
@@ -454,14 +470,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     async def _ivy_impact_analysis(symbol_name: str) -> str:
         """Analyze incoming and outgoing edges for a symbol.
 
-        .. note::
-            Currently returns edges from the semantic model graph.
-            Only COVERS (RFC annotation→requirement), HAS_PARAM,
-            RETURNS_TYPE, and INCLUDES edges are populated.
-            Symbol-to-symbol cross-reference edges (USES, CALLS)
-            are not yet implemented — impact results for types and
-            actions will show 0 edges until cross-reference analysis
-            is added to the model builder.
+        Returns incoming and outgoing edges from the semantic model graph,
+        including COVERS, HAS_PARAM, RETURNS_TYPE, INCLUDES, CALLS, USES,
+        MONITORS, and CONTAINS edges.
         """
         model = await ctx.get_model()
         if model is None:
@@ -522,10 +533,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     "Edge data may be incomplete."
                 )
             else:
-                result["note"] = (
-                    "Symbol found but no cross-reference edges available. "
-                    "USES/CALLS edge analysis is not yet implemented."
-                )
+                result["note"] = "No cross-reference edges found for this symbol."
 
         return json.dumps(result)
 

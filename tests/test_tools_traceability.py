@@ -278,14 +278,14 @@ class TestSummaryCountAlignment:
 
 
 # ---------------------------------------------------------------------------
-# FX5: Impact analysis known limitation
+# FX5: Impact analysis edge availability
 # ---------------------------------------------------------------------------
 
 
 class TestImpactAnalysisNote:
-    def test_impact_analysis_has_fx5_note_code(self):
-        """The FX5 documentation note should exist in _ivy_impact_analysis."""
+    def test_impact_analysis_no_edges_message(self):
+        """The impact analysis fallback note should reflect edge availability."""
         from ivy_lsp.tools import traceability
 
         source = Path(traceability.__file__).read_text()
-        assert "USES/CALLS edge analysis is not yet implemented" in source
+        assert "No cross-reference edges found for this symbol" in source
