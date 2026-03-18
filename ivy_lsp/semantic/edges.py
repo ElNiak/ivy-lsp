@@ -34,3 +34,5 @@ class SemanticEdgeType(Enum):
     CONTAINS = "contains"
     INCLUDES = "includes"
     COVERS = "covers"  # RFC coverage: assertion -> RfcRequirement
+    CALLS = "calls"  # action A invokes action B
+    USES = "uses"  # instance X instantiates module Y

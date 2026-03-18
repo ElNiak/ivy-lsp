@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 
 from lsprotocol.types import SymbolKind
 
@@ -56,6 +56,18 @@ class IvySymbol:
             detail=d.get("detail"),
             file_path=d.get("file_path"),
         )
+
+
+@dataclass
+class SymbolReference:
+    """A reference from one symbol's scope to another symbol."""
+
+    source_name: str  # Qualified name of the containing symbol
+    target_name: str  # Name of the referenced symbol (may be unqualified)
+    kind: Literal["call", "instance", "monitor"]
+    line: int  # 0-based line number
+    col: int = 0
+    file_path: Optional[str] = None
 
 
 @dataclass
