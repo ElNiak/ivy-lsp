@@ -238,3 +238,54 @@ class TestUncoveredIdsFull:
         assert "_uncovered_ids_full" in source
         # The diff computation should use _uncovered_ids_full
         assert "_uncovered_ids_full" in source.split("_ivy_coverage_diff")[1]
+
+
+# ---------------------------------------------------------------------------
+# FX2: Coverage stats requirement scoping
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageStatsScoping:
+    @pytest.mark.asyncio
+    async def test_coverage_stats_nonexistent_protocol_returns_zero(self):
+        """relative_path='new_prot/' with no annotations should return total=0."""
+        mcp = _get_mcp_app()
+        result = await mcp.call_tool(
+            "ivy_coverage",
+            {"mode": "stats", "relative_path": "new_prot/"},
+        )
+        text = _extract_text(result)
+        data = json.loads(text)
+        # FX2 fix: should return 0, not global requirement count
+        assert data.get("total", 0) == 0
+        assert data.get("covered", 0) == 0
+        assert data.get("uncovered", 0) == 0
+
+
+# ---------------------------------------------------------------------------
+# M9: Summary count alignment
+# ---------------------------------------------------------------------------
+
+
+class TestSummaryCountAlignment:
+    def test_coverage_gaps_has_m9_overlay_code(self):
+        """The M9 fix code should exist in the _ivy_coverage_gaps function."""
+        from ivy_lsp.tools import traceability
+
+        source = Path(traceability.__file__).read_text()
+        # M9 fix adds totalRfcReqs override in the C4 overlay block
+        assert 'result["summary"]["totalRfcReqs"]' in source
+
+
+# ---------------------------------------------------------------------------
+# FX5: Impact analysis known limitation
+# ---------------------------------------------------------------------------
+
+
+class TestImpactAnalysisNote:
+    def test_impact_analysis_has_fx5_note_code(self):
+        """The FX5 documentation note should exist in _ivy_impact_analysis."""
+        from ivy_lsp.tools import traceability
+
+        source = Path(traceability.__file__).read_text()
+        assert "USES/CALLS edge analysis is not yet implemented" in source

@@ -341,6 +341,55 @@ class TestSearchSymbolsRanking:
         assert names[0] == "cid"
 
 
+class TestSearchSymbolsRelevanceSorting:
+    """Verify relevance sorting in search_symbols (L6 fix)."""
+
+    def _make_flat(
+        self, name: str, kind=lsp.SymbolKind.Variable, file_path="/tmp/test.ivy"
+    ) -> FlatSymbol:
+        return FlatSymbol(
+            qualified_name=name,
+            kind=kind,
+            file_path=file_path,
+            range=(0, 0, 0, 0),
+        )
+
+    def test_exact_match_first(self):
+        """Query 'cid' returns exact leaf match before substring matches."""
+        flat = [
+            self._make_flat("acid_test"),
+            self._make_flat("apt.entity.acidic"),
+            self._make_flat("cid"),
+            self._make_flat("cid_generator"),
+        ]
+        result = search_symbols(flat, "cid")
+        assert result[0].qualified_name == "cid"
+
+    def test_prefix_before_substring(self):
+        """Query 'frame' returns 'frame_type' (prefix) before 'quic_frame' (substring)."""
+        flat = [
+            self._make_flat("quic_frame"),
+            self._make_flat("frame_type"),
+            self._make_flat("frame"),
+            self._make_flat("quic.sub.frame_handler"),
+        ]
+        result = search_symbols(flat, "frame")
+        names = [r.qualified_name for r in result]
+        # Exact match first
+        assert names[0] == "frame"
+        # Prefix match before substring
+        frame_type_idx = names.index("frame_type")
+        quic_frame_idx = names.index("quic_frame")
+        assert frame_type_idx < quic_frame_idx
+
+    def test_relevance_sorting_does_not_drop_results(self):
+        """All matches are preserved after sorting."""
+        flat = [self._make_flat(f"x_{i}_cid") for i in range(50)]
+        flat.append(self._make_flat("cid"))
+        result = search_symbols(flat, "cid")
+        assert len(result) == 51
+
+
 class TestRegister:
     """Verify that the register function is importable."""
 

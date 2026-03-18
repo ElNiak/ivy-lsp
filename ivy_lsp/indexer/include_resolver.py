@@ -144,18 +144,41 @@ class IncludeResolver:
         if os.path.isfile(candidate):
             return os.path.abspath(candidate)
 
-        # 2. Staging directory (flat, unique per basename)
+        # 2. Layer-aware staging (when active, replaces flat staging for
+        #    colliding basenames)
+        if self._partition_staging and self._file_to_partition:
+            abs_from = os.path.abspath(from_file)
+            layer_id = self._file_to_partition.get(abs_from)
+            if layer_id and layer_id in self._partition_staging:
+                candidate = os.path.join(self._partition_staging[layer_id], fname)
+                if os.path.isfile(candidate):
+                    return os.path.realpath(candidate)
+
+        # 3. Flat staging directory
         if self._staging_dir:
             candidate = os.path.join(self._staging_dir, fname)
             if os.path.isfile(candidate):
+                basename = os.path.basename(fname)
+                # Refuse to resolve colliding basenames via flat staging
+                # when layers are active — the correct variant can only be
+                # determined through layer routing (step 2).
+                if self._file_to_layer and basename in self._collision_map:
+                    logger.error(
+                        "Ambiguous include '%s' from %s: basename has %d variants "
+                        "across layers — cannot resolve safely via flat staging",
+                        include_name,
+                        os.path.relpath(from_file, self._workspace_root),
+                        len(self._collision_map[basename]),
+                    )
+                    return None
                 return os.path.realpath(candidate)
 
-        # 3. Workspace root
+        # 4. Workspace root
         candidate = os.path.join(self._workspace_root, fname)
         if os.path.isfile(candidate):
             return os.path.abspath(candidate)
 
-        # 4. Standard library
+        # 5. Standard library
         std_dir = self._get_std_include_dir()
         if std_dir is not None:
             candidate = os.path.join(std_dir, fname)
@@ -179,6 +202,14 @@ class IncludeResolver:
         Returns:
             Sorted list of absolute paths to .ivy files.
         """
+        # Layer-aware discovery when v3 workspace layers are configured.
+        if self._workspace_layers and search_root is None:
+            layer_files = self._find_source_files_by_layer()
+            all_files = []
+            for files in layer_files.values():
+                all_files.extend(files)
+            return sorted(set(all_files))
+
         # Determine which root(s) to walk.
         if search_root:
             roots = [search_root]
@@ -284,8 +315,31 @@ class IncludeResolver:
 
         # Record only actual collisions (2+ files sharing a basename).
         for basename, paths in basename_to_paths.items():
-            if len(paths) > 1:
-                self._collision_map[basename] = list(paths)
+            if len(paths) <= 1:
+                continue
+            self._collision_map[basename] = list(paths)
+            # Classify: intra-layer (real problem) vs cross-layer (expected)
+            if self._file_to_layer:
+                layers_involved = {
+                    self._file_to_layer.get(os.path.abspath(p), "unknown")
+                    for p in paths
+                }
+                if len(layers_involved) <= 1:
+                    logger.error(
+                        "Intra-layer collision: %s has %d variants in layer '%s': %s "
+                        "— this MUST be fixed (duplicate basenames within same protocol)",
+                        basename,
+                        len(paths),
+                        next(iter(layers_involved)),
+                        [os.path.relpath(p, self._workspace_root) for p in paths],
+                    )
+                else:
+                    logger.debug(
+                        "Cross-layer collision (expected): %s spans layers %s",
+                        basename,
+                        sorted(layers_involved),
+                    )
+            else:
                 logger.warning(
                     "Basename collision: %s has %d variants: %s",
                     basename,
@@ -300,12 +354,27 @@ class IncludeResolver:
             link_path = os.path.join(staging, basename)
             if os.path.lexists(link_path):
                 collisions += 1
-                logger.warning(
-                    "Staging collision: %s (keeping %s, skipping %s)",
-                    basename,
-                    os.path.relpath(self._staged_files[basename], self._workspace_root),
-                    os.path.relpath(filepath, self._workspace_root),
-                )
+                if self._file_to_layer:
+                    # Cross-layer collisions handled by layer staging — audit only
+                    logger.debug(
+                        "Staging collision (layer-handled): %s (keeping %s, skipping %s)",
+                        basename,
+                        os.path.relpath(
+                            self._staged_files[basename], self._workspace_root
+                        ),
+                        os.path.relpath(filepath, self._workspace_root),
+                    )
+                else:
+                    # No layers → collision is a real ambiguity problem
+                    logger.error(
+                        "Staging collision (ambiguous): %s (keeping %s, skipping %s) "
+                        "— include resolution for this basename may be wrong",
+                        basename,
+                        os.path.relpath(
+                            self._staged_files[basename], self._workspace_root
+                        ),
+                        os.path.relpath(filepath, self._workspace_root),
+                    )
                 continue
             try:
                 os.symlink(filepath, link_path)

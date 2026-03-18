@@ -173,6 +173,13 @@ class ServerSetupMixin:
                     )
                 },
             )
+            # Activate per-layer staging if workspace layers are configured
+            if ws_config.workspace_layers:
+                resolver.build_layered_staging()
+                slog.info(
+                    "Built layered staging for %d layers",
+                    len(ws_config.workspace_layers),
+                )
         except Exception:
             logger.exception("Failed to create staging, falling back to direct scan")
             self.window_show_message(

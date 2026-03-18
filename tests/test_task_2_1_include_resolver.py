@@ -554,7 +554,7 @@ class TestPartitionStaleSymlinkCleanup:
         (apt / "driver.ivy").write_text("# apt driver")
 
         resolver = IncludeResolver(str(tmp_path))
-        staging = resolver.create_staging_directory()
+        resolver.create_staging_directory()
 
         test_scopes = {
             str(quic / "driver.ivy"): frozenset(
@@ -589,4 +589,278 @@ class TestPartitionStaleSymlinkCleanup:
             for entry in entries:
                 assert entry.is_symlink(), f"{entry.name} should be a symlink"
 
+        resolver.cleanup_staging()
+
+
+class TestLayerAwareFileDiscovery:
+    """Tests for v3 layer-aware file discovery and collision classification."""
+
+    def _make_workspace_with_layers(self, tmp_path):
+        """Create a workspace with two layers (standard + apt) sharing basenames."""
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
+        quic.mkdir(parents=True)
+        (quic / "types.ivy").write_text("# standard types")
+        (quic / "frame.ivy").write_text("# standard frame")
+
+        apt = tmp_path / "protocol-testing" / "apt" / "apt_protocols" / "quic"
+        apt.mkdir(parents=True)
+        (apt / "types.ivy").write_text("# apt types")
+        (apt / "attack.ivy").write_text("# apt attack")
+
+        layers = [
+            WorkspaceLayer(
+                id="standard",
+                include_paths=["protocol-testing/quic"],
+                priority=1,
+            ),
+            WorkspaceLayer(
+                id="apt",
+                include_paths=["protocol-testing/apt"],
+                priority=2,
+            ),
+        ]
+        return layers
+
+    def test_find_source_files_populates_file_to_layer(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_workspace_with_layers(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        files = resolver._find_source_files()
+
+        # _file_to_layer should be populated by the layered path
+        assert len(resolver._file_to_layer) > 0
+        layer_ids = set(resolver._file_to_layer.values())
+        assert "standard" in layer_ids
+        assert "apt" in layer_ids
+        # Should find files from both layers
+        assert len(files) == 4
+
+    def test_cross_layer_collision_no_warning(self, tmp_path, caplog):
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_workspace_with_layers(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+
+        with caplog.at_level(
+            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+        ):
+            resolver.create_staging_directory()
+
+        # types.ivy exists in both layers — should NOT produce a WARNING
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        intra_layer_warnings = [
+            m for m in warning_messages if "Intra-layer collision" in m
+        ]
+        assert (
+            len(intra_layer_warnings) == 0
+        ), f"Cross-layer collision should not produce WARNING, got: {intra_layer_warnings}"
+        resolver.cleanup_staging()
+
+    def test_intra_layer_collision_warning(self, tmp_path, caplog):
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        # Create a single layer with duplicate basenames
+        sub1 = tmp_path / "proto" / "dir1"
+        sub1.mkdir(parents=True)
+        (sub1 / "dup.ivy").write_text("# version 1")
+        sub2 = tmp_path / "proto" / "dir2"
+        sub2.mkdir(parents=True)
+        (sub2 / "dup.ivy").write_text("# version 2")
+
+        layers = [
+            WorkspaceLayer(id="single", include_paths=["proto"], priority=1),
+        ]
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+
+        with caplog.at_level(
+            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+        ):
+            resolver.create_staging_directory()
+
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        intra_layer_warnings = [
+            m for m in warning_messages if "Intra-layer collision" in m
+        ]
+        assert (
+            len(intra_layer_warnings) >= 1
+        ), "Intra-layer collision should produce a WARNING"
+        resolver.cleanup_staging()
+
+    def test_build_layered_staging_creates_layer_dirs(self, tmp_path):
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_workspace_with_layers(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        # Should have per-layer staging directories
+        assert "standard" in resolver._partition_staging
+        assert "apt" in resolver._partition_staging
+
+        # Each layer dir should exist and contain symlinks
+        for layer_id, layer_dir in resolver._partition_staging.items():
+            assert os.path.isdir(layer_dir), f"Layer dir {layer_id} should exist"
+            entries = list(os.scandir(layer_dir))
+            assert len(entries) > 0, f"Layer dir {layer_id} should have symlinks"
+
+        # Files should be mapped to their layer partition
+        assert len(resolver._file_to_partition) > 0
+        resolver.cleanup_staging()
+
+    def test_resolve_uses_layer_staging_not_flat(self, tmp_path):
+        """resolve() from a QUIC file returns QUIC types, from APT returns APT types."""
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_workspace_with_layers(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        quic_frame = str(
+            tmp_path / "protocol-testing" / "quic" / "quic_stack" / "frame.ivy"
+        )
+        apt_attack = str(
+            tmp_path
+            / "protocol-testing"
+            / "apt"
+            / "apt_protocols"
+            / "quic"
+            / "attack.ivy"
+        )
+
+        # Resolve types from QUIC file → should get QUIC types
+        result_quic = resolver.resolve("types", quic_frame)
+        assert result_quic is not None
+        assert (
+            "quic" in result_quic.lower() and "apt" not in result_quic.lower()
+        ), f"Expected QUIC types.ivy, got {result_quic}"
+
+        # Resolve types from APT file → should get APT types
+        result_apt = resolver.resolve("types", apt_attack)
+        assert result_apt is not None
+        assert "apt" in result_apt.lower(), f"Expected APT types.ivy, got {result_apt}"
+
+        # The two should be different files
+        assert result_quic != result_apt
+        resolver.cleanup_staging()
+
+    def test_resolve_collision_returns_none_without_layer_context(self, tmp_path):
+        """Colliding basenames return None when from_file is outside all layers.
+
+        When layers are active but from_file is NOT in any layer,
+        colliding basenames must return None (not silently serve wrong file).
+        """
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_workspace_with_layers(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+
+        # A file not in any layer's scope
+        outsider = str(tmp_path / "outsider.ivy")
+
+        # types.ivy is in the collision map — should refuse to resolve via flat staging
+        result = resolver.resolve("types", outsider)
+        assert result is None, f"Should return None for ambiguous include, got {result}"
+        resolver.cleanup_staging()
+
+    def test_staging_collision_debug_with_layers(self, tmp_path, caplog):
+        """With layers, flat staging collision logged at DEBUG (not WARNING/ERROR)."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        layers = self._make_workspace_with_layers(tmp_path)
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+
+        with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
+            resolver.create_staging_directory()
+
+        # Should have DEBUG "layer-handled" messages, NOT WARNING or ERROR
+        debug_msgs = [
+            r
+            for r in caplog.records
+            if "Staging collision" in r.message and r.levelno == logging.DEBUG
+        ]
+        warn_or_error_msgs = [
+            r
+            for r in caplog.records
+            if "Staging collision" in r.message and r.levelno >= logging.WARNING
+        ]
+        assert len(debug_msgs) >= 1, "Expected DEBUG staging collision messages"
+        assert len(warn_or_error_msgs) == 0, (
+            f"Expected no WARNING/ERROR staging collisions with layers, got: "
+            f"{[r.message for r in warn_or_error_msgs]}"
+        )
+        resolver.cleanup_staging()
+
+    def test_staging_collision_error_without_layers(self, tmp_path, caplog):
+        """Without layers, flat staging collision logged at ERROR."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+
+        # No layers — two dirs with same basename
+        d1 = tmp_path / "aa"
+        d1.mkdir()
+        (d1 / "dup.ivy").write_text("# first")
+        d2 = tmp_path / "bb"
+        d2.mkdir()
+        (d2 / "dup.ivy").write_text("# second")
+
+        resolver = IncludeResolver(str(tmp_path))
+
+        with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
+            resolver.create_staging_directory()
+
+        error_msgs = [
+            r
+            for r in caplog.records
+            if "Staging collision" in r.message and r.levelno == logging.ERROR
+        ]
+        assert len(error_msgs) >= 1, "Expected ERROR staging collision without layers"
+        resolver.cleanup_staging()
+
+    def test_intra_layer_collision_is_error(self, tmp_path, caplog):
+        """Single layer with two same-name files → logged at ERROR."""
+        import logging
+
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        sub1 = tmp_path / "proto" / "dir1"
+        sub1.mkdir(parents=True)
+        (sub1 / "dup.ivy").write_text("# version 1")
+        sub2 = tmp_path / "proto" / "dir2"
+        sub2.mkdir(parents=True)
+        (sub2 / "dup.ivy").write_text("# version 2")
+
+        layers = [
+            WorkspaceLayer(id="single", include_paths=["proto"], priority=1),
+        ]
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+
+        with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
+            resolver.create_staging_directory()
+
+        error_msgs = [
+            r
+            for r in caplog.records
+            if "Intra-layer collision" in r.message and r.levelno == logging.ERROR
+        ]
+        assert len(error_msgs) >= 1, "Intra-layer collision should be logged at ERROR"
         resolver.cleanup_staging()

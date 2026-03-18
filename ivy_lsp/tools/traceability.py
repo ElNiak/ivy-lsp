@@ -179,6 +179,25 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 return error_response(str(exc))
             annotations = [a for a in annotations if a.file == abs_path]
 
+        # FX2 fix: when relative_path scoping yields no annotations,
+        # return zero coverage instead of counting global requirements.
+        if relative_path and not annotations:
+            return json.dumps(
+                {
+                    "total": 0,
+                    "covered": 0,
+                    "uncovered": 0,
+                    "coverage_percent": 0,
+                    "by_level": {},
+                    "by_layer": {},
+                    "uncovered_ids": [],
+                    "_uncovered_ids_full": [],
+                    "_covered_ids": [],
+                    "counting_method": "manifest_annotations",
+                    "scope": relative_path,
+                }
+            )
+
         req_ids = {r.id for r in requirements}
         covered_tags: set[str] = set()
         coverage_warnings: list[str] = []
@@ -324,8 +343,38 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 for rid in sorted(uncovered_ids)
                 if rid in req_map
             ]
+            # M9 fix: align summary counts with stats overlay.
+            # Use stats total when available; fall back to req_map size
+            # (covers graph-only mode where semantic model is empty).
+            stats_total = stats.get("total", 0)
+            result["summary"]["totalRfcReqs"] = stats_total or len(req_map)
+            result["summary"]["uncoveredRfcCount"] = len(
+                result.get("uncoveredRfcRequirements", [])
+            )
         except (json.JSONDecodeError, KeyError):
             pass  # Fall back to visualization handler result
+
+        # Apply protocol filter to uncovered requirements
+        protocol_filter = params.get("protocolFilter", "")
+        if protocol_filter:
+            result["uncoveredRfcRequirements"] = [
+                r
+                for r in result.get("uncoveredRfcRequirements", [])
+                if protocol_filter in r.get("id", "")
+                or protocol_filter in r.get("rfc", "").lower()
+            ]
+            result["unguardedStateVars"] = [
+                v
+                for v in result.get("unguardedStateVars", [])
+                if not v.get("file") or protocol_filter in v.get("file", "")
+            ]
+            if "summary" in result:
+                result["summary"]["uncoveredRfcCount"] = len(
+                    result.get("uncoveredRfcRequirements", [])
+                )
+                result["summary"]["unguardedCount"] = len(
+                    result.get("unguardedStateVars", [])
+                )
 
         result["counting_method"] = "requirement_graph_with_stats_overlay"
         return json.dumps(result)
@@ -464,13 +513,18 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             "total_references": len(incoming) + len(outgoing),
         }
 
-        # Note when symbol found but no edges and deep indexing still running
+        # Note when symbol found but no edges
         if not incoming and not outgoing:
             status = ctx.get_model_status()
             if status.get("state") != "ready":
                 result["note"] = (
                     "Semantic model is still being built. "
                     "Edge data may be incomplete."
+                )
+            else:
+                result["note"] = (
+                    "Symbol found but no cross-reference edges available. "
+                    "USES/CALLS edge analysis is not yet implemented."
                 )
 
         return json.dumps(result)

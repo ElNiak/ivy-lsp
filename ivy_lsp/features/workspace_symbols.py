@@ -106,6 +106,19 @@ def search_symbols(flat: List[FlatSymbol], query: str) -> List[FlatSymbol]:
         return flat[:MAX_RESULTS]
     q = query.lower()
     matches = [s for s in flat if q in s.qualified_name.lower()]
+
+    # Sort by relevance before truncation: exact leaf > prefix > substring
+    def _relevance(fs: FlatSymbol) -> tuple:
+        leaf = fs.qualified_name.rsplit(".", 1)[-1].lower()
+        if leaf == q:
+            return (0, fs.qualified_name)
+        if leaf.startswith(q):
+            return (1, fs.qualified_name)
+        if fs.qualified_name.lower().startswith(q):
+            return (2, fs.qualified_name)
+        return (3, fs.qualified_name)
+
+    matches.sort(key=_relevance)
     return matches[:_SEARCH_INTERNAL_LIMIT]
 
 

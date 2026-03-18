@@ -610,6 +610,24 @@ def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
                 "scoped": scope_info.get("scoped", False),
             },
         }
+        # Apply protocol filter if specified
+        protocol_filter = params.get("protocolFilter", "")
+        if protocol_filter:
+            result["uncoveredRfcRequirements"] = [
+                r
+                for r in result["uncoveredRfcRequirements"]
+                if not r.get("file") or protocol_filter in r.get("file", "")
+            ]
+            result["unguardedStateVars"] = [
+                v
+                for v in result["unguardedStateVars"]
+                if not v.get("file") or protocol_filter in v.get("file", "")
+            ]
+            # Update summary counts after filtering
+            result["summary"]["uncoveredRfcCount"] = len(
+                result["uncoveredRfcRequirements"]
+            )
+            result["summary"]["unguardedCount"] = len(result["unguardedStateVars"])
         logger.info(
             "handle_coverage_gaps: total %.1fms (snapshot %.1fms)",
             (time.monotonic() - t0) * 1000,
