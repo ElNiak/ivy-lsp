@@ -2,7 +2,7 @@
 
 Detects recurring patterns (serdes, variants, monitors, shims, modules) in
 Ivy protocol models, and validates cross-references between them.  Used by
-``ivy_pattern_analysis`` MCP tool and ``/nct-add-pattern`` plugin command.
+``ivy_patterns`` MCP tool and ``/nct-add-pattern`` plugin command.
 """
 
 from __future__ import annotations

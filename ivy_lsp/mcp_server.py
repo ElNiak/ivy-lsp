@@ -140,8 +140,9 @@ def start_mcp(
         workspace_root: Root directory for the workspace.
         semantic_model: Optional SemanticModel for shared-process mode.
         requirement_graph: Optional RequirementGraph (or ScopedRequirementModel)
-            for visualization tools. When provided, enables ivy_action_requirements,
-            ivy_model_summary, and ivy_coverage_gaps MCP tools.
+            for visualization tools. When provided, enables ivy_model_summary
+            (detail="requirements"), ivy_model_summary, and ivy_coverage (mode="gaps")
+            MCP tools.
         docker_image: Docker image for Ivy compilation (e.g. "panther_ivy:latest").
             When set, compilation tools use Docker instead of native subprocess.
         base_path: Base protocol-testing path for compile command generation.

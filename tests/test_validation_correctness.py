@@ -234,7 +234,9 @@ class TestCoverageCorrectness:
     def test_stats_and_gaps_agree(self, mcp_app):
         """Stats uncovered count should match gaps uncovered count."""
         stats = _call_and_parse(mcp_app, "ivy_coverage", {"mode": "stats"})
-        gaps = _call_and_parse(mcp_app, "ivy_coverage_gaps", {"protocol": "quic"})
+        gaps = _call_and_parse(
+            mcp_app, "ivy_coverage", {"mode": "gaps", "protocol": "quic"}
+        )
         stats_uncovered = stats["uncovered"]
         gaps_uncovered = len(gaps.get("uncoveredRfcRequirements", []))
         assert (
@@ -250,14 +252,18 @@ class TestCoverageCorrectness:
 class TestSymbolQueryCorrectness:
     def test_cid_found_in_correct_file(self, mcp_app):
         data = _call_and_parse(
-            mcp_app, "ivy_query_symbol", {"symbol_name": "cid", "protocol": "quic"}
+            mcp_app,
+            "ivy_query",
+            {"mode": "info", "symbol_name": "cid", "protocol": "quic"},
         )
         assert data["found"] is True
         assert "quic_types.ivy" in data.get("type_info", {}).get("file", "")
 
     def test_cid_correct_line(self, mcp_app):
         data = _call_and_parse(
-            mcp_app, "ivy_query_symbol", {"symbol_name": "cid", "protocol": "quic"}
+            mcp_app,
+            "ivy_query",
+            {"mode": "info", "symbol_name": "cid", "protocol": "quic"},
         )
         line = data.get("type_info", {}).get("line", -1)
         assert line in (29, 30), f"Expected line 29 or 30, got {line}"
@@ -265,8 +271,8 @@ class TestSymbolQueryCorrectness:
     def test_quic_packet_type_kind(self, mcp_app):
         data = _call_and_parse(
             mcp_app,
-            "ivy_query_symbol",
-            {"symbol_name": "quic_packet_type", "protocol": "quic"},
+            "ivy_query",
+            {"mode": "info", "symbol_name": "quic_packet_type", "protocol": "quic"},
         )
         kind = data.get("symbol_info", {}).get("kind", "")
         assert kind == "object", f"Expected 'object', got '{kind}'"
@@ -276,8 +282,8 @@ class TestSymbolQueryCorrectness:
         """Cid has 1404 LSP references — MCP should find some too."""
         data = _call_and_parse(
             mcp_app,
-            "ivy_cross_references",
-            {"node_id": "cid"},
+            "ivy_query",
+            {"mode": "xrefs", "node_id": "cid"},
         )
         if not data.get("found", False):
             pytest.skip("Node not found with plain name")
@@ -295,8 +301,8 @@ class TestDependencyGraph:
     def test_dependency_edges_not_empty(self, mcp_app):
         data = _call_and_parse(
             mcp_app,
-            "ivy_action_dependency_graph",
-            {"protocol": "quic"},
+            "ivy_visualize",
+            {"view": "dependencies", "protocol": "quic"},
         )
         assert len(data["edges"]) > 0, "Dependency graph has nodes but no edges"
 
@@ -308,17 +314,23 @@ class TestDependencyGraph:
 
 class TestScaffoldCorrectness:
     def test_recovery_layer_detected(self, mcp_app):
-        data = _call_and_parse(mcp_app, "ivy_scaffold_check", {"protocol": "quic"})
+        data = _call_and_parse(
+            mcp_app, "ivy_patterns", {"mode": "check", "protocol": "quic"}
+        )
         present_layers = {l["layer"] for l in data["layers_present"]}
         assert "recovery" in present_layers
 
     def test_extensions_layer_detected(self, mcp_app):
-        data = _call_and_parse(mcp_app, "ivy_scaffold_check", {"protocol": "quic"})
+        data = _call_and_parse(
+            mcp_app, "ivy_patterns", {"mode": "check", "protocol": "quic"}
+        )
         present_layers = {l["layer"] for l in data["layers_present"]}
         assert "extensions" in present_layers
 
     def test_manifest_detected(self, mcp_app):
-        data = _call_and_parse(mcp_app, "ivy_scaffold_check", {"protocol": "quic"})
+        data = _call_and_parse(
+            mcp_app, "ivy_patterns", {"mode": "check", "protocol": "quic"}
+        )
         assert data["has_manifest"] is True
 
 
@@ -326,8 +338,8 @@ class TestQualityGate:
     def test_standard_gate_file_count(self, mcp_app):
         data = _call_and_parse(
             mcp_app,
-            "ivy_quality_gate",
-            {"protocol": "quic", "gate_level": "standard"},
+            "ivy_quality",
+            {"mode": "gate", "protocol": "quic", "gate_level": "standard"},
         )
         for check in data["checks"]:
             if check["check"] == "minimum_files":
@@ -337,8 +349,8 @@ class TestQualityGate:
     def test_standard_gate_monitors_exist(self, mcp_app):
         data = _call_and_parse(
             mcp_app,
-            "ivy_quality_gate",
-            {"protocol": "quic", "gate_level": "standard"},
+            "ivy_quality",
+            {"mode": "gate", "protocol": "quic", "gate_level": "standard"},
         )
         for check in data["checks"]:
             if check["check"] == "monitors_exist":

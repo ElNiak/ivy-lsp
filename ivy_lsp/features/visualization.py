@@ -1234,7 +1234,7 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                             "type": "pattern_hint",
                             "message": (
                                 "This is a serialization file. Ensure enum states "
-                                "match variant tags 1:1 (use ivy_pattern_analysis "
+                                'match variant tags 1:1 (use ivy_patterns(mode="validate") '
                                 "to validate)."
                             ),
                             "priority": "low",
@@ -1247,7 +1247,7 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                             "message": (
                                 "This is a behavior specification. Verify all "
                                 "exported actions have before/after monitors "
-                                "(use ivy_pattern_analysis mode=validate)."
+                                '(use ivy_patterns(mode="validate")).'
                             ),
                             "priority": "low",
                         }
@@ -1258,8 +1258,8 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                             "type": "pattern_hint",
                             "message": (
                                 "This is a shim file. Ensure all entity roles "
-                                "have dispatch branches (use ivy_pattern_analysis "
-                                "mode=validate)."
+                                "have dispatch branches (use ivy_patterns"
+                                '(mode="validate")).'
                             ),
                             "priority": "low",
                         }

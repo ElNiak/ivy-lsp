@@ -362,30 +362,3 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             return await _ivy_smart_suggestions(
                 file_path, line, context, protocol, max_items
             )
-
-    # --- Individual tool aliases (backward compatibility) ---
-
-    @mcp.tool()
-    async def ivy_smart_suggestions(
-        file_path: str | None = None,
-        line: int | None = None,
-        context: str | None = None,
-        protocol: str | None = None,
-    ) -> str:
-        """Get context-aware suggestions for improving the Ivy specification."""
-        logger.debug(
-            "[ivy_smart_suggestions] workspace=%s, args=%r",
-            ctx.root,
-            {"file_path": file_path, "line": line, "protocol": protocol},
-        )
-        return await _ivy_smart_suggestions(file_path, line, context, protocol)
-
-    @mcp.tool()
-    async def ivy_quality_gate(protocol: str, gate_level: str = "minimal") -> str:
-        """Validate a protocol model against quality gates."""
-        logger.debug(
-            "[ivy_quality_gate] workspace=%s, args=%r",
-            ctx.root,
-            {"protocol": protocol, "gate_level": gate_level},
-        )
-        return await _ivy_quality_gate(protocol, gate_level)

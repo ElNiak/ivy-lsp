@@ -276,30 +276,3 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         if roles:
             params["roles"] = roles
         return json.dumps(handle_pattern_scaffold(ctx.root, params))
-
-    # --- Individual tool aliases (backward compatibility) ---
-
-    @mcp.tool()
-    async def ivy_pattern_analysis(
-        protocol: str,
-        mode: str = "detect",
-        pattern: str | None = None,
-        reference_protocol: str | None = None,
-    ) -> str:
-        """Analyze formal model patterns in a protocol specification."""
-        logger.debug(
-            "[ivy_pattern_analysis] workspace=%s, args=%r",
-            ctx.root,
-            {"protocol": protocol, "mode": mode, "pattern": pattern},
-        )
-        return await _ivy_pattern_analysis(protocol, mode, pattern, reference_protocol)
-
-    @mcp.tool()
-    async def ivy_scaffold_check(protocol: str) -> str:
-        """Check which layers/patterns are present or missing."""
-        logger.debug(
-            "[ivy_scaffold_check] workspace=%s, args=%r",
-            ctx.root,
-            {"protocol": protocol},
-        )
-        return await _ivy_scaffold_check(protocol)
