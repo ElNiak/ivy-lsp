@@ -403,7 +403,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         )
 
     async def _ivy_impact_analysis(symbol_name: str) -> str:
-        """Analyze incoming and outgoing edges for a symbol."""
+        """Analyze incoming and outgoing edges for a symbol.
+
+        .. note::
+            Currently returns edges from the semantic model graph.
+            Only COVERS (RFC annotation→requirement), HAS_PARAM,
+            RETURNS_TYPE, and INCLUDES edges are populated.
+            Symbol-to-symbol cross-reference edges (USES, CALLS)
+            are not yet implemented — impact results for types and
+            actions will show 0 edges until cross-reference analysis
+            is added to the model builder.
+        """
         model = await ctx.get_model()
         if model is None:
             return _model_unavailable_response()
