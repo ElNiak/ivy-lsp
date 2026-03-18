@@ -85,17 +85,26 @@ def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGra
 
 
 def _resolve_scope(graph: Any, params: dict) -> dict:
-    """Determine active scope from params or active test."""
+    """Determine active scope from params or active test or filePath."""
     from ivy_lsp.analysis.test_scope import ScopedRequirementModel
 
     test_file = params.get("testFile")
+    file_path = params.get("filePath", "")
     scope = None
     if isinstance(graph, ScopedRequirementModel):
         if test_file is None:
-            active = graph.get_active_scope()
-            if active:
-                test_file = active.test_file
-                scope = active
+            # Try to derive scope from filePath
+            if file_path:
+                tests = graph.get_tests_for_file(file_path)
+                if tests:
+                    test_file = next(iter(tests))  # Use first matching endpoint mirror
+                    scope = graph.get_test_scope(test_file)
+            # Fall back to active scope
+            if scope is None:
+                active = graph.get_active_scope()
+                if active:
+                    test_file = active.test_file
+                    scope = active
         else:
             scope = graph.get_test_scope(test_file)
     return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
