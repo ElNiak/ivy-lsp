@@ -267,7 +267,10 @@ class TieredExtractor:
         Raises ImportError if ivy package is unavailable.
         Raises RuntimeError if parsing fails.
         """
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.parsing.ast_to_symbols import (
+            ast_to_symbols,
+            extract_references_from_ast,
+        )
         from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         wrapper = IvyParserWrapper(resolve_callback=self._resolve_callback)
@@ -285,8 +288,16 @@ class TieredExtractor:
         # Extract includes from AST declarations
         includes = _extract_includes_from_ast(result.ast)
 
-        # AST-based reference extraction will be added in Task 3
-        return symbols, includes, []
+        # Extract references from AST
+        try:
+            references = extract_references_from_ast(result.ast, filepath, source)
+        except Exception:
+            logger.debug(
+                "AST reference extraction failed for %s", filepath, exc_info=True
+            )
+            references = []
+
+        return symbols, includes, references
 
     def _try_lexer(
         self, source: str, filepath: str

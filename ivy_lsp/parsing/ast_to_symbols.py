@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.parsing.symbols import IvySymbol, SymbolReference
 from ivy_lsp.utils.position_utils import ivy_location_to_range
 
 logger = logging.getLogger(__name__)
@@ -782,3 +782,197 @@ def _atom_name(atom: Any) -> Optional[str]:
     if rep:
         return rep
     return None
+
+
+# ---------------------------------------------------------------------------
+# Reference extraction (Tier 1 — AST-based)
+# ---------------------------------------------------------------------------
+
+
+def extract_references_from_ast(
+    ivy_obj: Any, filename: str, source: str
+) -> List[SymbolReference]:
+    """Extract symbol references (calls, instances, monitors) from a parsed Ivy AST.
+
+    Args:
+        ivy_obj: The result of ``ivy_parser.parse()`` (has ``.decls``).
+        filename: The originating file path.
+        source: The full source text.
+
+    Returns:
+        A list of ``SymbolReference`` instances.
+    """
+    if ivy_obj is None or not hasattr(ivy_obj, "decls"):
+        return []
+
+    references: List[SymbolReference] = []
+    abs_filename = os.path.abspath(filename) if filename else filename
+
+    for decl in ivy_obj.decls:
+        try:
+            if is_from_included_file(decl, abs_filename):
+                continue
+            refs = _extract_refs_from_decl(decl, filename)
+            references.extend(refs)
+        except Exception:
+            logger.debug(
+                "Failed to extract references from %s in %s",
+                type(decl).__name__,
+                filename,
+                exc_info=True,
+            )
+
+    return references
+
+
+def _extract_refs_from_decl(decl: Any, filename: str) -> List[SymbolReference]:
+    """Extract references from a single AST declaration."""
+    import ivy.ivy_ast as ia
+
+    refs: List[SymbolReference] = []
+
+    # 3a: CALLS from ActionDecl bodies
+    if isinstance(decl, ia.ActionDecl):
+        defs = decl.defines()
+        if defs:
+            action_name = defs[0][0]
+            # ActionDecl.args[0] is ActionDef, which has a .body attribute
+            try:
+                action_def = decl.args[0]
+                body = getattr(action_def, "body", None)
+                if body is not None:
+                    _extract_calls_from_body(body, action_name, filename, refs)
+            except (IndexError, AttributeError):
+                pass
+
+    # 3b: USES from InstantiateDecl
+    if isinstance(decl, ia.InstantiateDecl):
+        defs = decl.defines()
+        if defs:
+            inst_name = defs[0][0]
+            try:
+                # args[0] is the instantiation expression (AppExpr or similar)
+                app = decl.args[0]
+                module_name = _atom_name(app) or getattr(app, "relname", None)
+                if module_name:
+                    lineno = getattr(decl, "lineno", None)
+                    line = _get_line_number(lineno)
+                    refs.append(
+                        SymbolReference(
+                            source_name=inst_name,
+                            target_name=str(module_name),
+                            kind="instance",
+                            line=line,
+                            file_path=filename,
+                        )
+                    )
+            except (IndexError, AttributeError):
+                pass
+
+    # 3c: MONITORS from MixinDecl
+    if isinstance(decl, ia.MixinDecl):
+        try:
+            # MixinDecl has two parts: the mixer (the before/after block)
+            # and the mixee (the target action)
+            mixer_def = decl.args[0] if decl.args else None
+            mixee_def = decl.args[1] if len(decl.args) > 1 else None
+
+            mixer_name = None
+            mixee_name = None
+
+            if mixer_def:
+                mixer_name = _atom_name(mixer_def) or getattr(
+                    mixer_def, "relname", None
+                )
+            if mixee_def:
+                mixee_name = _atom_name(mixee_def) or getattr(
+                    mixee_def, "relname", None
+                )
+
+            if mixer_name and mixee_name:
+                lineno = getattr(decl, "lineno", None)
+                line = _get_line_number(lineno)
+                refs.append(
+                    SymbolReference(
+                        source_name=str(mixer_name),
+                        target_name=str(mixee_name),
+                        kind="monitor",
+                        line=line,
+                        file_path=filename,
+                    )
+                )
+        except (IndexError, AttributeError):
+            pass
+
+    return refs
+
+
+def _get_line_number(lineno: Any) -> int:
+    """Extract 0-based line number from an Ivy lineno object."""
+    if lineno is None:
+        return 0
+    if isinstance(lineno, int):
+        return max(0, lineno - 1)  # Ivy uses 1-based
+    line = getattr(lineno, "line", None)
+    if line is not None:
+        return max(0, int(line) - 1)
+    return 0
+
+
+def _extract_calls_from_body(
+    body: Any, action_name: str, filename: str, refs: List[SymbolReference]
+) -> None:
+    """Recursively extract call references from an action body AST node."""
+    if body is None:
+        return
+
+    try:
+        import ivy.ivy_actions as iact
+    except ImportError:
+        return
+
+    # CallAction: explicit call
+    if isinstance(body, getattr(iact, "CallAction", type(None))):
+        try:
+            callee = body.args[0]
+            callee_name = _atom_name(callee) or getattr(callee, "relname", None)
+            if callee_name:
+                lineno = getattr(body, "lineno", None)
+                line = _get_line_number(lineno)
+                refs.append(
+                    SymbolReference(
+                        source_name=action_name,
+                        target_name=str(callee_name),
+                        kind="call",
+                        line=line,
+                        file_path=filename,
+                    )
+                )
+        except (IndexError, AttributeError):
+            pass
+
+    # AssignAction: check RHS for applications (function calls)
+    if isinstance(body, getattr(iact, "AssignAction", type(None))):
+        try:
+            # RHS is args[1] typically
+            if len(body.args) >= 2:
+                rhs = body.args[1]
+                rhs_name = _atom_name(rhs) or getattr(rhs, "relname", None)
+                if rhs_name and hasattr(rhs, "args") and rhs.args:
+                    lineno = getattr(body, "lineno", None)
+                    line = _get_line_number(lineno)
+                    refs.append(
+                        SymbolReference(
+                            source_name=action_name,
+                            target_name=str(rhs_name),
+                            kind="call",
+                            line=line,
+                            file_path=filename,
+                        )
+                    )
+        except (IndexError, AttributeError):
+            pass
+
+    # Recurse into compound actions (Sequence, IfAction, WhileAction, etc.)
+    for arg in getattr(body, "args", []):
+        _extract_calls_from_body(arg, action_name, filename, refs)
