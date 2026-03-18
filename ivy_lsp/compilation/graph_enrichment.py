@@ -106,6 +106,20 @@ def enrich_semantic_model(
             )
         )
 
+    # --- Mixins -> MONITORS edges ---
+    for action_name, mixin_tuple in ir.mixins.items():
+        for mixin in mixin_tuple:
+            mixer_id = f"compiled:{filepath}:{mixin.mixer}"
+            mixee_id = f"compiled:{filepath}:{mixin.mixee}"
+            edges.append((mixer_id, SemanticEdgeType.MONITORS, mixee_id))
+
+    # --- Hierarchy -> CONTAINS edges ---
+    for parent_name, children in ir.hierarchy.items():
+        parent_id = f"compiled:{filepath}:{parent_name}"
+        for child_name in children:
+            child_id = f"compiled:{filepath}:{child_name}"
+            edges.append((parent_id, SemanticEdgeType.CONTAINS, child_id))
+
     model.update_file(filepath, nodes, edges, "tier3")
     logger.debug(
         "Enriched semantic model for %s: %d nodes, %d edges",

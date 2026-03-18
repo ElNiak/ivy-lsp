@@ -222,6 +222,56 @@ class TestEnrichSemanticModel:
         assert action_nodes[0].return_sort is None
         assert action_nodes[0].arity == 0
 
+    def test_creates_monitors_edges_from_mixins(self):
+        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.semantic.model import SemanticModel
+
+        model = SemanticModel()
+        ir = CompiledModuleIR(
+            actions={
+                "connect": ActionIR(name="connect"),
+                "connect[before1]": ActionIR(name="connect[before1]"),
+            },
+            mixins={
+                "connect": (
+                    MixinIR(mixer="connect[before1]", mixee="connect", kind="before"),
+                ),
+            },
+            success=True,
+            source_file="test.ivy",
+        )
+        enrich_semantic_model(model, ir, "test.ivy")
+        outgoing = model.get_outgoing("compiled:test.ivy:connect[before1]")
+        monitors_edges = [
+            (t, tgt) for t, tgt in outgoing if t == SemanticEdgeType.MONITORS
+        ]
+        assert len(monitors_edges) == 1
+        assert monitors_edges[0][1] == "compiled:test.ivy:connect"
+
+    def test_creates_contains_edges_from_hierarchy(self):
+        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.semantic.model import SemanticModel
+
+        model = SemanticModel()
+        ir = CompiledModuleIR(
+            actions={
+                "frame": ActionIR(name="frame"),
+                "frame.ack": ActionIR(name="frame.ack"),
+            },
+            hierarchy={"frame": frozenset(["frame.ack"])},
+            success=True,
+            source_file="test.ivy",
+        )
+        enrich_semantic_model(model, ir, "test.ivy")
+        outgoing = model.get_outgoing("compiled:test.ivy:frame")
+        contains_edges = [
+            (t, tgt) for t, tgt in outgoing if t == SemanticEdgeType.CONTAINS
+        ]
+        assert len(contains_edges) == 1
+        assert contains_edges[0][1] == "compiled:test.ivy:frame.ack"
+
 
 class TestEnrichRequirementGraph:
     def test_adds_action_nodes_from_ir(self):
