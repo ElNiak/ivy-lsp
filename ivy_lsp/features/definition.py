@@ -51,6 +51,10 @@ def goto_definition(
         a list of locations when multiple definitions match,
         or ``None`` when no definition can be located.
     """
+    # Demand-driven deep parse for shared modules
+    if indexer is not None and hasattr(indexer, "deep_parse_on_demand"):
+        indexer.deep_parse_on_demand(filepath)
+
     # H5: Check if cursor is on an include line
     if position.line < len(source_lines):
         line_text = source_lines[position.line]

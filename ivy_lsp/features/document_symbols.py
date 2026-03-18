@@ -93,6 +93,10 @@ def compute_document_symbols(
     4. If no parser but indexer available: use cached indexed symbols
     5. If neither: return empty list
     """
+    # Demand-driven deep parse for shared modules
+    if indexer is not None and hasattr(indexer, "deep_parse_on_demand"):
+        indexer.deep_parse_on_demand(filepath)
+
     symbols: List[IvySymbol] = []
 
     if parser is not None and source:

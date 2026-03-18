@@ -1023,6 +1023,43 @@ class WorkspaceIndexer:
 
         return symbols
 
+    def deep_parse_on_demand(self, filepath: str) -> bool:
+        """Parse a file with the full AST parser if it was only shallow-indexed.
+
+        Returns True if the file was upgraded, False if already deep-parsed
+        or not eligible.
+        """
+        abs_path = os.path.abspath(filepath)
+        status = self._deep_index_progress.file_statuses.get(abs_path)
+        if status is None:
+            return False
+        if status.deep_parse_attempted:
+            return False
+
+        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+
+        try:
+            with open(abs_path) as f:
+                source = f.read()
+        except OSError:
+            return False
+
+        result = self._parser.parse(source, abs_path)
+        status.deep_parse_attempted = True
+        if not result.success:
+            status.deep_parse_succeeded = False
+            return False
+
+        symbols = ast_to_symbols(result.ast, abs_path, source)
+        status.deep_parse_succeeded = True
+        self._upgrade_file_symbols(abs_path, symbols, result)
+
+        slog.info(
+            "On-demand deep parse: %s",
+            os.path.basename(abs_path),
+        )
+        return True
+
     # ------------------------------------------------------------------
     # Include extraction
     # ------------------------------------------------------------------

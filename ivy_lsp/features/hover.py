@@ -302,6 +302,10 @@ def get_hover_info(
     semantic_model=None,
 ) -> Optional[lsp.Hover]:
     """Look up symbol at cursor and return formatted Hover."""
+    # Demand-driven deep parse for shared modules
+    if indexer is not None and hasattr(indexer, "deep_parse_on_demand"):
+        indexer.deep_parse_on_demand(filepath)
+
     word = word_at_position(source_lines, position)
     if not word:
         return None
