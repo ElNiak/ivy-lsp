@@ -146,6 +146,7 @@ class ServerSetupMixin:
                 ws_root,
                 exclude_paths=exclude_paths,
                 include_paths=include_paths,
+                workspace_layers=ws_config.workspace_layers,
             )
         except Exception:
             logger.exception("IncludeResolver construction failed")

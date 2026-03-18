@@ -21,8 +21,17 @@ _IVYWORKSPACE_FILENAME = ".ivyworkspace"
 
 
 @dataclass
+class WorkspaceLayer:
+    """A named layer of include paths with a priority."""
+
+    id: str
+    include_paths: list[str]
+    priority: int = 1
+
+
+@dataclass
 class WorkspaceConfig:
-    """Result of workspace detection (v2 schema).
+    """Result of workspace detection (v3 schema).
 
     The ``scope_detection`` field controls how endpoint mirror scope
     partitions are computed:
@@ -39,6 +48,7 @@ class WorkspaceConfig:
     project_type: Optional[str] = None  # panther, standalone, None
     scope_detection: str = "auto"  # auto, explicit
     standard_library: Optional[str] = None  # e.g. "ivy/include/1.7"
+    workspace_layers: list[WorkspaceLayer] = field(default_factory=list)
 
 
 def _read_marker(marker_path: str) -> Optional[dict]:
@@ -56,23 +66,42 @@ def _read_marker(marker_path: str) -> Optional[dict]:
 
 
 def _apply_marker(marker_path: str, data: dict) -> WorkspaceConfig:
-    """Build a WorkspaceConfig from a parsed marker file (v2 schema)."""
+    """Build a WorkspaceConfig from a parsed marker file (v3 schema)."""
     marker_dir = os.path.dirname(os.path.abspath(marker_path))
     version = data.get("version", 1)
-    if version < 2:
-        logger.info(
-            "Upgrading .ivyworkspace v%d to v2 semantics at %s",
-            version,
-            marker_path,
+
+    if version < 3:
+        raise ValueError(
+            f".ivyworkspace v{version} is no longer supported. "
+            "Upgrade to v3 with workspace_layers. "
+            "See docs/superpowers/specs/2026-03-18-ivy-lsp-indexing-improvements-design.md section 3.1."
         )
+
+    # Parse workspace_layers
+    raw_layers = data.get("workspace_layers", [])
+    layers = [
+        WorkspaceLayer(
+            id=layer["id"],
+            include_paths=layer.get("include_paths", []),
+            priority=layer.get("priority", 1),
+        )
+        for layer in raw_layers
+    ]
+
+    # Flatten all layer include_paths for backward-compat with _find_source_files
+    flat_include_paths = []
+    for layer in layers:
+        flat_include_paths.extend(layer.include_paths)
+
     return WorkspaceConfig(
         workspace_root=marker_dir,
-        include_paths=data.get("include_paths", []),
+        include_paths=flat_include_paths or data.get("include_paths", []),
         exclude_paths=data.get("exclude_paths", []),
         detected_by="marker",
         project_type=data.get("project_type"),
         scope_detection=data.get("scope_detection", "auto"),
         standard_library=data.get("standard_library"),
+        workspace_layers=layers,
     )
 
 
@@ -175,7 +204,24 @@ def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
         if os.path.isdir(os.path.join(candidate, "protocol-testing")):
             return WorkspaceConfig(
                 workspace_root=candidate,
-                include_paths=["protocol-testing"],
+                workspace_layers=[
+                    WorkspaceLayer(
+                        id="standard",
+                        include_paths=[
+                            "protocol-testing/quic",
+                            "protocol-testing/minip",
+                        ],
+                        priority=1,
+                    ),
+                    WorkspaceLayer(
+                        id="apt", include_paths=["protocol-testing/apt"], priority=2
+                    ),
+                ],
+                include_paths=[
+                    "protocol-testing/quic",
+                    "protocol-testing/minip",
+                    "protocol-testing/apt",
+                ],
                 exclude_paths=[
                     "submodules",
                     "test",
@@ -193,7 +239,24 @@ def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
         ):
             return WorkspaceConfig(
                 workspace_root=current,
-                include_paths=["protocol-testing"],
+                workspace_layers=[
+                    WorkspaceLayer(
+                        id="standard",
+                        include_paths=[
+                            "protocol-testing/quic",
+                            "protocol-testing/minip",
+                        ],
+                        priority=1,
+                    ),
+                    WorkspaceLayer(
+                        id="apt", include_paths=["protocol-testing/apt"], priority=2
+                    ),
+                ],
+                include_paths=[
+                    "protocol-testing/quic",
+                    "protocol-testing/minip",
+                    "protocol-testing/apt",
+                ],
                 exclude_paths=[
                     "submodules",
                     "test",

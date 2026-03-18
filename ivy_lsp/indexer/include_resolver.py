@@ -65,6 +65,7 @@ class IncludeResolver:
         ivy_include_path: Optional[str] = None,
         exclude_paths: Optional[List[str]] = None,
         include_paths: Optional[List[str]] = None,
+        workspace_layers: Optional[List] = None,
     ) -> None:
         """Initialize resolver with workspace root and search paths."""
         self._workspace_root = os.path.abspath(workspace_root)
@@ -79,6 +80,9 @@ class IncludeResolver:
         self._partition_staging: Dict[str, str] = {}
         # File → partition ID mapping (populated by build_partitioned_staging).
         self._file_to_partition: Dict[str, str] = {}
+        self._workspace_layers = workspace_layers or []
+        # File → layer ID mapping (populated when workspace_layers is set)
+        self._file_to_layer: Dict[str, str] = {}
 
     @property
     def collision_map(self) -> Dict[str, List[str]]:
@@ -93,16 +97,31 @@ class IncludeResolver:
             "exclude_paths": list(self._exclude_paths),
             "include_paths": list(self._include_paths),
             "staging_dir": self._staging_dir,
+            "workspace_layers": [
+                {"id": l.id, "include_paths": l.include_paths, "priority": l.priority}
+                for l in self._workspace_layers
+            ],
         }
 
     @classmethod
     def from_config(cls, d: dict) -> "IncludeResolver":
         """Restore an IncludeResolver from a config dict."""
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        layers = [
+            WorkspaceLayer(
+                id=l["id"],
+                include_paths=l.get("include_paths", []),
+                priority=l.get("priority", 1),
+            )
+            for l in d.get("workspace_layers", [])
+        ]
         instance = cls(
             d["workspace_root"],
             ivy_include_path=d.get("ivy_include_path"),
             exclude_paths=d.get("exclude_paths", []),
             include_paths=d.get("include_paths", []),
+            workspace_layers=layers,
         )
         instance._staging_dir = d.get("staging_dir")
         return instance
@@ -538,6 +557,115 @@ class IncludeResolver:
         return sorted(
             f for f, pid in self._file_to_partition.items() if pid == partition_id
         )
+
+    # ------------------------------------------------------------------
+    # Layer-aware staging (v3 workspace layers)
+    # ------------------------------------------------------------------
+
+    def _find_source_files_by_layer(self) -> Dict[str, List[str]]:
+        """Walk each layer's include paths independently and return files grouped by layer.
+
+        Returns:
+            Mapping of layer_id -> list of absolute .ivy file paths.
+        """
+        layer_files: Dict[str, List[str]] = {}
+        for layer in self._workspace_layers:
+            roots = [
+                os.path.join(self._workspace_root, ip) for ip in layer.include_paths
+            ]
+            files: List[str] = []
+            for root in roots:
+                if not os.path.isdir(root):
+                    logger.warning(
+                        "Layer '%s' include path does not exist: %s",
+                        layer.id,
+                        root,
+                    )
+                    continue
+                for dirpath, dirnames, filenames in os.walk(root):
+                    dirnames[:] = [
+                        d
+                        for d in dirnames
+                        if d not in _EXCLUDED_DIR_BASENAMES
+                        and not any(
+                            fnmatch.fnmatch(d, pat) for pat in _EXCLUDED_DIR_PATTERNS
+                        )
+                    ]
+                    if self._exclude_paths:
+                        rel_dir = os.path.relpath(dirpath, self._workspace_root)
+                        if any(
+                            rel_dir == ep or rel_dir.startswith(ep + os.sep)
+                            for ep in self._exclude_paths
+                        ):
+                            dirnames.clear()
+                            continue
+                    for fn in filenames:
+                        if fn.endswith(".ivy"):
+                            filepath = os.path.join(dirpath, fn)
+                            files.append(filepath)
+                            self._file_to_layer[os.path.abspath(filepath)] = layer.id
+            layer_files[layer.id] = sorted(files)
+        return layer_files
+
+    def build_layered_staging(self) -> None:
+        """Build per-layer staging directories when workspace layers are configured.
+
+        Each layer gets its own staging subdirectory. Collisions within a layer
+        use first-wins semantics. Collisions across layers are expected (e.g.,
+        APT and standard both have types.ivy) and don't conflict because they're
+        in separate staging dirs.
+        """
+        if not self._workspace_layers:
+            logger.info("No workspace layers -- layered staging not needed")
+            return
+
+        if not self._staging_dir:
+            logger.warning("Cannot build layered staging: no staging dir active")
+            return
+
+        layer_files = self._find_source_files_by_layer()
+
+        for layer in self._workspace_layers:
+            layer_id = layer.id
+            layer_dir = os.path.join(self._staging_dir, f"layer_{layer_id}")
+            os.makedirs(layer_dir, exist_ok=True)
+            self._partition_staging[layer_id] = layer_dir
+
+            # Clean stale symlinks
+            for entry in os.scandir(layer_dir):
+                if entry.is_symlink():
+                    os.unlink(entry.path)
+
+            # Create symlinks (first-wins within layer)
+            staged: Dict[str, str] = {}
+            for filepath in layer_files.get(layer_id, []):
+                basename = os.path.basename(filepath)
+                link_path = os.path.join(layer_dir, basename)
+                if basename in staged:
+                    continue
+                if os.path.lexists(link_path):
+                    os.unlink(link_path)
+                try:
+                    os.symlink(filepath, link_path)
+                    staged[basename] = filepath
+                except OSError as exc:
+                    logger.warning(
+                        "Layer %s: symlink failed for %s: %s",
+                        layer_id,
+                        filepath,
+                        exc,
+                    )
+
+            logger.info(
+                "Layer '%s' staging: %d files in %s",
+                layer_id,
+                len(staged),
+                layer_dir,
+            )
+
+        # Map files to their layer for resolve_partitioned
+        for filepath, layer_id in self._file_to_layer.items():
+            self._file_to_partition[filepath] = layer_id
 
     def _get_std_include_dir(self) -> Optional[str]:
         """Locate the Ivy standard library include directory.

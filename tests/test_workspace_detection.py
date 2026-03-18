@@ -10,6 +10,7 @@ import pytest
 from ivy_lsp.config import reset_config
 from ivy_lsp.workspace_detection import (
     WorkspaceConfig,
+    WorkspaceLayer,
     _panther_heuristic,
     _read_marker,
     _resolve_git_worktree,
@@ -41,10 +42,10 @@ def isolated_tmp():
 
 @pytest.fixture
 def ivyworkspace_marker(tmp_workspace):
-    """Create a .ivyworkspace marker file in the tmp workspace."""
+    """Create a v3 .ivyworkspace marker file in the tmp workspace."""
     marker = {
-        "version": 1,
-        "include_paths": ["protocol-testing"],
+        "version": 3,
+        "workspace_layers": [{"id": "default", "include_paths": ["protocol-testing"]}],
         "exclude_paths": ["test", "doc"],
     }
     marker_path = tmp_workspace / ".ivyworkspace"
@@ -56,8 +57,8 @@ class TestReadMarker:
     def test_valid_marker(self, ivyworkspace_marker):
         data = _read_marker(str(ivyworkspace_marker))
         assert data is not None
-        assert data["version"] == 1
-        assert data["include_paths"] == ["protocol-testing"]
+        assert data["version"] == 3
+        assert len(data["workspace_layers"]) == 1
 
     def test_missing_file(self, tmp_workspace):
         data = _read_marker(str(tmp_workspace / "nonexistent"))
@@ -100,7 +101,10 @@ class TestWalkDownForMarker:
     def test_marker_in_subdirectory(self, tmp_workspace):
         sub = tmp_workspace / "project" / "ivy"
         sub.mkdir(parents=True)
-        marker = {"version": 1, "include_paths": ["src"]}
+        marker = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["src"]}],
+        }
         (sub / ".ivyworkspace").write_text(json.dumps(marker))
         config = _walk_down_for_marker(str(tmp_workspace))
         assert config is not None
@@ -110,7 +114,9 @@ class TestWalkDownForMarker:
     def test_marker_too_deep(self, tmp_workspace):
         deep = tmp_workspace / "a" / "b" / "c" / "d"
         deep.mkdir(parents=True)
-        (deep / ".ivyworkspace").write_text('{"version": 1}')
+        (deep / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_layers": []})
+        )
         config = _walk_down_for_marker(str(tmp_workspace), max_depth=2)
         assert config is None
 
@@ -134,7 +140,7 @@ class TestPantherHeuristic:
         assert config is not None
         assert config.project_type == "panther"
         assert config.detected_by == "heuristic"
-        assert "protocol-testing" in config.include_paths
+        assert any("protocol-testing" in p for p in config.include_paths)
 
     def test_inside_panther_ivy(self, tmp_workspace):
         # Simulate CWD being panther_ivy itself
@@ -170,7 +176,10 @@ class TestDetectIvyWorkspace:
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         sub = tmp_workspace / "ivy-project"
         sub.mkdir()
-        marker = {"version": 1, "include_paths": ["models"]}
+        marker = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["models"]}],
+        }
         (sub / ".ivyworkspace").write_text(json.dumps(marker))
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", "ivy-project")
         reset_config()
@@ -307,3 +316,76 @@ class TestWorkspaceConfig:
         assert config.exclude_paths == []
         assert config.detected_by == "fallback"
         assert config.project_type is None
+
+
+class TestV2Rejection:
+    def test_v2_marker_raises_error(self, tmp_workspace):
+        """v2 .ivyworkspace should raise ValueError with migration message."""
+        marker = {"version": 2, "include_paths": ["protocol-testing"]}
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        with pytest.raises(ValueError, match="no longer supported"):
+            _walk_up_for_marker(str(tmp_workspace))
+
+    def test_v1_marker_raises_error(self, tmp_workspace):
+        """v1 .ivyworkspace should raise ValueError with migration message."""
+        marker = {"version": 1}
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        with pytest.raises(ValueError, match="no longer supported"):
+            _walk_up_for_marker(str(tmp_workspace))
+
+
+class TestV3LayerParsing:
+    def test_v3_layers_parsed(self, tmp_workspace):
+        """v3 .ivyworkspace should parse workspace_layers correctly."""
+        marker = {
+            "version": 3,
+            "workspace_layers": [
+                {"id": "standard", "include_paths": ["quic", "minip"], "priority": 1},
+                {"id": "apt", "include_paths": ["apt"], "priority": 2},
+            ],
+            "exclude_paths": ["test"],
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        config = _walk_up_for_marker(str(tmp_workspace))
+        assert config is not None
+        assert len(config.workspace_layers) == 2
+        assert config.workspace_layers[0].id == "standard"
+        assert config.workspace_layers[0].include_paths == ["quic", "minip"]
+        assert config.workspace_layers[1].id == "apt"
+        assert config.workspace_layers[1].priority == 2
+        # Flattened include_paths for backward compat
+        assert "quic" in config.include_paths
+        assert "minip" in config.include_paths
+        assert "apt" in config.include_paths
+
+    def test_v3_empty_layers(self, tmp_workspace):
+        """v3 with empty workspace_layers should still work."""
+        marker = {"version": 3, "workspace_layers": []}
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        config = _walk_up_for_marker(str(tmp_workspace))
+        assert config is not None
+        assert config.workspace_layers == []
+
+
+class TestPantherHeuristicV3:
+    def test_heuristic_returns_layers(self, tmp_workspace):
+        """PANTHER heuristic should return v3-compatible WorkspaceConfig with layers."""
+        panther_ivy = (
+            tmp_workspace
+            / "panther"
+            / "plugins"
+            / "services"
+            / "testers"
+            / "panther_ivy"
+        )
+        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        config = _panther_heuristic(str(tmp_workspace))
+        assert config is not None
+        assert len(config.workspace_layers) == 2
+        assert config.workspace_layers[0].id == "standard"
+        assert config.workspace_layers[1].id == "apt"
+        assert config.project_type == "panther"
