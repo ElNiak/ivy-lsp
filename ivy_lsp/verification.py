@@ -21,20 +21,39 @@ log = logging.getLogger(__name__)
 def resolve_staging_path(
     filepath: str,
     staging_dir: str | None = None,
+    resolver: Any | None = None,
 ) -> str:
     """Resolve a filepath through the staging directory if available.
 
     Ivy's include resolution is CWD-relative. The staging directory
     contains flat symlinks so that ivy_check can resolve includes
     correctly regardless of the original file layout.
-    """
-    if staging_dir is None:
-        return filepath
 
+    When a *resolver* with layered staging is available, prefer the
+    file's own layer staging directory over flat staging.  This ensures
+    the Ivy compiler's CWD-relative resolution picks the correct
+    variant for colliding basenames (e.g., ``ivy_quic_server.ivy``
+    exists in both quic and apt layers).
+    """
     basename = os.path.basename(filepath)
-    staged = os.path.join(staging_dir, basename)
-    if os.path.exists(staged):
-        return staged
+
+    # 1. Try layer-specific staging (when resolver knows the file's layer)
+    if resolver is not None:
+        file_to_layer = getattr(resolver, "_file_to_layer", None)
+        partition_staging = getattr(resolver, "_partition_staging", None)
+        if file_to_layer and partition_staging:
+            layer_id = file_to_layer.get(os.path.abspath(filepath))
+            if layer_id and layer_id in partition_staging:
+                candidate = os.path.join(partition_staging[layer_id], basename)
+                if os.path.exists(candidate):
+                    return candidate
+
+    # 2. Fall back to flat staging
+    if staging_dir is not None:
+        staged = os.path.join(staging_dir, basename)
+        if os.path.exists(staged):
+            return staged
+
     return filepath
 
 

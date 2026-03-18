@@ -382,3 +382,60 @@ async def test_run_ivy_show_with_error():
         assert result["diagnostic_count"] == 1
         assert result["diagnostics"][0]["line"] == 3
         assert "unknown type" in result["error_summary"]
+
+
+def test_resolve_staging_path_prefers_layer_staging(tmp_path):
+    """When resolver has layer staging, prefer layer-specific dir over flat."""
+    flat = tmp_path / "staging"
+    flat.mkdir()
+    layer_dir = tmp_path / "staging" / "layer_apt"
+    layer_dir.mkdir()
+
+    src = tmp_path / "workspace" / "apt" / "model.ivy"
+    src.parent.mkdir(parents=True)
+    src.write_text("#lang ivy1.7\n")
+
+    # Flat staging has the file
+    (flat / "model.ivy").symlink_to(src)
+    # Layer staging also has it
+    (layer_dir / "model.ivy").symlink_to(src)
+
+    class MockResolver:
+        _file_to_layer = {str(src.resolve()): "apt"}
+        _partition_staging = {"apt": str(layer_dir)}
+
+    result = resolve_staging_path(
+        str(src), staging_dir=str(flat), resolver=MockResolver()
+    )
+    assert result == str(layer_dir / "model.ivy")
+
+
+def test_resolve_staging_path_falls_back_to_flat_when_no_layer(tmp_path):
+    """When resolver exists but file not in any layer, use flat staging."""
+    flat = tmp_path / "staging"
+    flat.mkdir()
+
+    src = tmp_path / "model.ivy"
+    src.write_text("#lang ivy1.7\n")
+    (flat / "model.ivy").symlink_to(src)
+
+    class MockResolver:
+        _file_to_layer = {}
+        _partition_staging = {"apt": str(tmp_path / "nonexistent")}
+
+    result = resolve_staging_path(
+        str(src), staging_dir=str(flat), resolver=MockResolver()
+    )
+    assert result == str(flat / "model.ivy")
+
+
+def test_resolve_staging_path_no_resolver_unchanged(tmp_path):
+    """When no resolver passed, behaves exactly as before (backward compat)."""
+    flat = tmp_path / "staging"
+    flat.mkdir()
+    src = tmp_path / "model.ivy"
+    src.write_text("#lang ivy1.7\n")
+    (flat / "model.ivy").symlink_to(src)
+
+    result = resolve_staging_path(str(src), staging_dir=str(flat), resolver=None)
+    assert result == str(flat / "model.ivy")

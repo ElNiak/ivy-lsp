@@ -249,16 +249,17 @@ class IncludeResolver:
                 # Refuse to resolve colliding basenames via flat staging
                 # when layers are active — the correct variant can only be
                 # determined through layer routing (step 2).
+                # Fall through to workspace root / stdlib as last resort.
                 if self._file_to_layer and basename in self._collision_map:
-                    logger.error(
+                    logger.warning(
                         "Ambiguous include '%s' from %s: basename has %d variants "
-                        "across layers — cannot resolve safely via flat staging",
+                        "across layers — skipping flat staging, trying workspace root",
                         include_name,
                         os.path.relpath(from_file, self._workspace_root),
                         len(self._collision_map[basename]),
                     )
-                    return None
-                return os.path.realpath(candidate)
+                else:
+                    return os.path.realpath(candidate)
 
         # 4. Workspace root
         candidate = os.path.join(self._workspace_root, fname)
