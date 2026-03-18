@@ -1,14 +1,19 @@
 """Tests for mirror-scope selective cache invalidation."""
 
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo, TestScope
+from ivy_lsp.analysis.test_scope import ExportImportInfo
 from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
 from ivy_lsp.parsing.symbols import IvySymbol
+
+
+def _dummy_sym(name: str, filepath: str = "/fake/dummy.ivy") -> IvySymbol:
+    """Create a minimal IvySymbol for cache population tests."""
+    return IvySymbol(
+        name=name, kind=SymbolKind.Variable, range=(0, 0, 1, 0), file_path=filepath
+    )
 
 
 def _make_indexer(workspace_root="/fake/workspace"):
@@ -70,7 +75,7 @@ class TestSelectiveInvalidation:
     def test_compute_test_scopes_full_clear_without_dirty_files(self):
         """Without dirty_files, full cache clear (backward compatible)."""
         indexer = _make_indexer()
-        indexer._mirror_scope_cache["some_key"] = ["value"]
+        indexer._mirror_scope_cache["some_key"] = [_dummy_sym("x")]
         indexer._compute_test_scopes()
         assert len(indexer._mirror_scope_cache) == 0
 
@@ -90,9 +95,9 @@ class TestSelectiveInvalidation:
         indexer._include_graph.add_edge("/fake/test.ivy", "/fake/lib2.ivy")
         indexer._compute_test_scopes()
         # Populate cache for all scope members
-        indexer._mirror_scope_cache["/fake/test.ivy"] = ["t"]
-        indexer._mirror_scope_cache["/fake/lib1.ivy"] = ["l1"]
-        indexer._mirror_scope_cache["/fake/lib2.ivy"] = ["l2"]
+        indexer._mirror_scope_cache["/fake/test.ivy"] = [_dummy_sym("t")]
+        indexer._mirror_scope_cache["/fake/lib1.ivy"] = [_dummy_sym("l1")]
+        indexer._mirror_scope_cache["/fake/lib2.ivy"] = [_dummy_sym("l2")]
         # Dirty only lib1 -> entire scope containing lib1 is cleared
         indexer._compute_test_scopes(dirty_files={"/fake/lib1.ivy"})
         assert "/fake/test.ivy" not in indexer._mirror_scope_cache
@@ -102,8 +107,8 @@ class TestSelectiveInvalidation:
     def test_empty_dirty_files_preserves_all_cache(self):
         """An empty dirty_files set should not clear any cache entries."""
         indexer = _make_indexer()
-        indexer._mirror_scope_cache["a"] = ["val_a"]
-        indexer._mirror_scope_cache["b"] = ["val_b"]
+        indexer._mirror_scope_cache["a"] = [_dummy_sym("a")]
+        indexer._mirror_scope_cache["b"] = [_dummy_sym("b")]
         indexer._compute_test_scopes(dirty_files=set())
         assert "a" in indexer._mirror_scope_cache
         assert "b" in indexer._mirror_scope_cache

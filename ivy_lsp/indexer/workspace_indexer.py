@@ -1391,9 +1391,14 @@ class WorkspaceIndexer:
 
         # Selective or full cache invalidation
         if dirty_files is not None:
+            # Use reverse index for O(|dirty|) instead of O(|all_scopes|)
+            affected_tests: set = set()
+            for df in dirty_files:
+                affected_tests |= self._requirement_graph.get_tests_for_file(df)
             affected_files: set = set()
-            for _, scope in self._requirement_graph.iter_test_scopes():
-                if dirty_files & scope.include_closure:
+            for tf in affected_tests:
+                scope = self._requirement_graph.get_test_scope(tf)
+                if scope:
                     affected_files |= scope.include_closure
             for f in affected_files:
                 self._mirror_scope_cache.pop(f, None)
