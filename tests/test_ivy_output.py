@@ -187,6 +187,87 @@ def test_parse_ivy_output_full_traceback():
     assert "milliseconds to microseconds" in result[0]["message"]
 
 
+# --- FM-D: absolute path / MCP staging mode tests ---
+
+
+def test_parse_ivy_output_absolute_path_standard():
+    """Standard format with absolute staging path is parsed correctly."""
+    output = (
+        "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy:42: error: type mismatch"
+    )
+    result = parse_ivy_output(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy"
+    assert result[0]["line"] == 42
+    assert result[0]["severity"] == "error"
+    assert result[0]["source"] == "ivy_check"
+
+
+def test_parse_ivy_output_absolute_path_verbose():
+    """Verbose format with absolute staging path (FM-D scenario)."""
+    output = (
+        "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy: "
+        "line 42: error: type mismatch"
+    )
+    result = parse_ivy_output(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy"
+    assert result[0]["line"] == 42
+    assert result[0]["severity"] == "error"
+    assert result[0]["source"] == "ivy_check"
+
+
+def test_parse_ivy_output_staging_mixed_formats():
+    """Multiple errors from staging dir in different formats."""
+    output = (
+        "Checking quic_client_test.ivy...\n"
+        "/tmp/ivy-lsp-stage-x1/quic_types.ivy:10: error: undeclared\n"
+        "/tmp/ivy-lsp-stage-x1/quic_frame.ivy: line 25: warning: shadowed\n"
+        "ivy.ivy_utils.IvyError: "
+        "/tmp/ivy-lsp-stage-x1/quic_packet.ivy: line 33: "
+        "error: cannot convert\n"
+        "OK\n"
+    )
+    result = parse_ivy_output(output)
+    assert len(result) == 3
+    sources = [d["source"] for d in result]
+    assert "ivy_check" in sources
+    assert "ivy_error" in sources
+    files = [d["file"] for d in result]
+    assert any("quic_types.ivy" in f for f in files)
+    assert any("quic_frame.ivy" in f for f in files)
+    assert any("quic_packet.ivy" in f for f in files)
+
+
+def test_parse_ivy_check_lines_verbose_format():
+    """parse_ivy_check_lines now handles verbose format via delegation."""
+    output = "/tmp/ivy-lsp-stage-abc/quic_types.ivy: " "line 42: error: type mismatch"
+    result = parse_ivy_check_lines(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/tmp/ivy-lsp-stage-abc/quic_types.ivy"
+    assert result[0]["line"] == 42
+    assert result[0]["severity"] == "error"
+    # parse_ivy_check_lines strips the 'source' key
+    assert "source" not in result[0]
+
+
+def test_parse_ivy_check_lines_absolute_path():
+    """parse_ivy_check_lines handles absolute staging paths."""
+    output = "/var/folders/T5/xyz/ivy-lsp-stage-abc/test.ivy:10: error: bad"
+    result = parse_ivy_check_lines(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/var/folders/T5/xyz/ivy-lsp-stage-abc/test.ivy"
+    assert result[0]["line"] == 10
+
+
+def test_parse_ivy_check_lines_backward_compat():
+    """Existing callers get the same schema (no 'source' key)."""
+    output = "test.ivy:10: error: type mismatch"
+    result = parse_ivy_check_lines(output)
+    assert len(result) == 1
+    assert set(result[0].keys()) == {"file", "line", "severity", "message"}
+
+
 # --- extract_error_summary tests ---
 
 

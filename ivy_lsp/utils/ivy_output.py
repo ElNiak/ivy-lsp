@@ -59,20 +59,16 @@ def parse_ivy_check_lines(output: str) -> List[Dict[str, Any]]:
 
     Each dict has keys: file (str), line (int), severity (str), message (str).
     Non-matching lines are silently skipped.
+
+    Delegates to :func:`parse_ivy_output` so that all error formats are
+    handled consistently (standard, verbose with absolute paths, IvyError
+    tracebacks, and C++ compiler errors).  The ``source`` key added by
+    ``parse_ivy_output`` is stripped to preserve the original return schema.
     """
-    results: List[Dict[str, Any]] = []
-    for line in output.splitlines():
-        m = _IVY_CHECK_LINE.match(line)
-        if m:
-            results.append(
-                {
-                    "file": m.group(1),
-                    "line": int(m.group(2)),
-                    "severity": m.group(3),
-                    "message": m.group(4),
-                }
-            )
-    return results
+    return [
+        {k: v for k, v in entry.items() if k != "source"}
+        for entry in parse_ivy_output(output)
+    ]
 
 
 def parse_ivy_output(output: str) -> List[Dict[str, Any]]:
