@@ -133,6 +133,24 @@ class SymbolTable:
         """Return symbols whose ``file_path`` equals *path*."""
         return list(self._by_file.get(path, []))
 
+    def remove_file(self, filepath: str) -> int:
+        """Remove all symbols originating from *filepath* in place.
+
+        Returns the number of symbols removed.
+        """
+        old = self._by_file.pop(filepath, [])
+        if not old:
+            return 0
+        old_set = set(id(s) for s in old)
+        for sym in old:
+            name_list = self._by_name.get(sym.name)
+            if name_list is not None:
+                self._by_name[sym.name] = [s for s in name_list if id(s) not in old_set]
+                if not self._by_name[sym.name]:
+                    del self._by_name[sym.name]
+        self._all = [s for s in self._all if id(s) not in old_set]
+        return len(old)
+
 
 class IncludeGraph:
     """Directed graph of Ivy ``include`` relationships between files.

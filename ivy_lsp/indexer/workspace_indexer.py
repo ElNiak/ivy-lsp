@@ -1089,14 +1089,9 @@ class WorkspaceIndexer:
         self._compute_test_scopes()
 
     def _remove_file_symbols(self, filepath: str) -> None:
-        """Rebuild the symbol table excluding all symbols from *filepath*."""
+        """Remove all symbols from *filepath* from the symbol table."""
         with self._table_lock:
-            old_symbols = list(self._symbol_table.all_symbols())
-            new_table = SymbolTable()
-            for sym in old_symbols:
-                if sym.file_path != filepath:
-                    new_table.add_symbol(sym)
-            self._symbol_table = new_table
+            self._symbol_table.remove_file(filepath)
 
     # ------------------------------------------------------------------
     # Querying
