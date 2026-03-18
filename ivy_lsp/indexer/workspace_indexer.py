@@ -161,7 +161,8 @@ class WorkspaceIndexer:
         self._source_cache: Dict[str, Tuple[str, float]] = {}
         self._source_cache_lock = threading.Lock()
         # Cache for mirror-scope symbol lookups (filepath → list of symbols).
-        # Cleared on every _compute_test_scopes call.
+        # Selectively invalidated when dirty_files is provided to
+        # _compute_test_scopes; fully cleared on initial/full rebuilds.
         self._mirror_scope_cache: Dict[str, List[IvySymbol]] = {}
 
     # -- Public accessors (Phase 3.2) ----------------------------------------
@@ -1058,7 +1059,7 @@ class WorkspaceIndexer:
             compiler_mgr.invalidate_dependents(abs_path, self._include_graph)
         self._index_single_file(abs_path)
         self._wire_requirement_graph()
-        self._compute_test_scopes()
+        self._compute_test_scopes(dirty_files={abs_path})
 
     def reindex_file_with_dependents(self, filepath: str) -> None:
         """Re-index a file and all files that transitively depend on it."""
@@ -1086,7 +1087,7 @@ class WorkspaceIndexer:
             self._index_single_file(f)
 
         self._wire_requirement_graph()
-        self._compute_test_scopes()
+        self._compute_test_scopes(dirty_files=dirty)
 
     def _remove_file_symbols(self, filepath: str) -> None:
         """Remove all symbols from *filepath* from the symbol table."""
@@ -1316,11 +1317,13 @@ class WorkspaceIndexer:
         """Wire COVERS edges from requirement bracket tags to RFC requirements."""
         self._requirement_graph.wire_coverage_edges()
 
-    def _compute_test_scopes(self) -> None:
+    def _compute_test_scopes(self, dirty_files: Optional[set] = None) -> None:
         """Build a TestScope for each file that has exports and register it.
 
-        After scope computation, triggers partitioned staging if basename
-        collisions were detected during initial staging.
+        Args:
+            dirty_files: If provided, only invalidate mirror-scope cache
+                entries for files in the transitive scope of dirty files'
+                test scopes. If None, clear the entire cache (full rebuild).
         """
         with self._exports_lock:
             export_items = list(self._file_export_imports.items())
@@ -1349,8 +1352,16 @@ class WorkspaceIndexer:
             )
             self._requirement_graph.register_test_scope(scope)
 
-        # Invalidate mirror scope cache since scopes have been recomputed.
-        self._mirror_scope_cache.clear()
+        # Selective or full cache invalidation
+        if dirty_files is not None:
+            affected_files: set = set()
+            for _, scope in self._requirement_graph.iter_test_scopes():
+                if dirty_files & scope.include_closure:
+                    affected_files |= scope.include_closure
+            for f in affected_files:
+                self._mirror_scope_cache.pop(f, None)
+        else:
+            self._mirror_scope_cache.clear()
 
         # Build partitioned staging if there are basename collisions.
         if self._resolver.collision_map:
