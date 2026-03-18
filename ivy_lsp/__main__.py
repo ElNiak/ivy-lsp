@@ -82,10 +82,12 @@ def main():
                 ws_config.detected_by,
                 ws_config.project_type,
             )
-            # Propagate detected paths via env for _setup_indexer() downstream
-            if ws_config.include_paths and not os.environ.get("IVY_LSP_INCLUDE_PATHS"):
+            # Propagate detected paths via env for _setup_indexer() downstream.
+            # .ivyworkspace is the source of truth — always override env vars
+            # when the workspace marker provides paths.
+            if ws_config.include_paths:
                 os.environ["IVY_LSP_INCLUDE_PATHS"] = ",".join(ws_config.include_paths)
-            if ws_config.exclude_paths and not os.environ.get("IVY_LSP_EXCLUDE_PATHS"):
+            if ws_config.exclude_paths:
                 os.environ["IVY_LSP_EXCLUDE_PATHS"] = ",".join(ws_config.exclude_paths)
             # Re-init config singleton so downstream get_config() sees updated paths
             reset_config()
