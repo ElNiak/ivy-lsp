@@ -17,7 +17,7 @@ import re
 from typing import Any, Literal
 
 from ivy_lsp.debug_trace import ToolTraceContext
-from ivy_lsp.tools import error_response
+from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -567,6 +567,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # ------------------------------------------------------------------
 
     @mcp.tool()
+    @safe_tool
     async def ivy_coverage(
         mode: Literal["matrix", "stats", "gaps", "diff"] = "stats",
         relative_path: str | None = None,
@@ -635,6 +636,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             return _tc.finish(await _ivy_requirement_coverage(relative_path, test_file))
 
     @mcp.tool()
+    @safe_tool
     async def ivy_extract_requirements(
         rfc_text: str = "",
         output: str = "structured",
@@ -755,6 +757,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # --- ivy_manifest tool ---
 
     @mcp.tool()
+    @safe_tool
     async def ivy_manifest(
         mode: Literal["info", "validate", "staleness", "refresh"] = "info",
         protocol: str = "",

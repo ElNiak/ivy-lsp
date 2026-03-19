@@ -11,7 +11,7 @@ from typing import Any
 
 from ivy_lsp.debug_trace import ToolTraceContext
 from ivy_lsp.parsing.tiered_extractor import TieredExtractor
-from ivy_lsp.tools import error_response
+from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     """Register analysis-related MCP tools."""
 
     @mcp.tool()
+    @safe_tool
     async def ivy_include_graph(relative_path: str | None = None) -> str:
         """Return the include dependency graph for Ivy files.
 
@@ -160,6 +161,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             )
 
     @mcp.tool()
+    @safe_tool
     async def ivy_capabilities() -> str:
         """Report which Ivy CLI tools are available on PATH and staging health."""
         _tc = ToolTraceContext("ivy_capabilities", {})
@@ -179,6 +181,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         return _tc.finish(json.dumps(result))
 
     @mcp.tool()
+    @safe_tool
     async def ivy_scope(relative_path: str) -> str:
         """Return endpoint mirror scope info for an Ivy file.
 

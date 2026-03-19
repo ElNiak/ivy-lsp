@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from ivy_lsp.debug_trace import ToolTraceContext, trace_tool
-from ivy_lsp.tools import error_response
+from ivy_lsp.tools import error_response, safe_tool
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check
@@ -81,6 +81,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 _evict_oldest_if_needed()
 
     @mcp.tool()
+    @safe_tool
     async def ivy_verify(
         relative_path: str,
         isolate: str | None = None,
@@ -205,6 +206,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             return _tt[0]
 
     @mcp.tool()
+    @safe_tool
     async def ivy_compile(
         relative_path: str,
         target: str = "test",
@@ -337,6 +339,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             return _tt[0]
 
     @mcp.tool()
+    @safe_tool
     async def ivy_model_info(
         relative_path: str,
         isolate: str | None = None,
@@ -382,6 +385,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             return _tt[0]
 
     @mcp.tool()
+    @safe_tool
     async def ivy_diagnostics(
         relative_path: str,
         mode: str = "full",
@@ -717,6 +721,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
     ctx.get_verify_cache_summary = _get_cache_summary
 
     @mcp.tool()
+    @safe_tool
     async def ivy_verification_dashboard() -> str:
         """Workspace-level verification status: files verified, failed, pending.
 

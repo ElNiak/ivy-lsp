@@ -7,13 +7,59 @@ Each sub-module registers a logical group of ``@mcp.tool()`` handlers.
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
+import types
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 
 def error_response(message: str) -> str:
     """Return a JSON error response string."""
     return json.dumps({"success": False, "message": message})
+
+
+def safe_tool(fn):
+    """Decorator that catches unhandled exceptions in MCP tool handlers.
+
+    Returns an ``error_response(...)`` JSON string instead of letting the
+    exception propagate through FastMCP/uvicorn and kill the sidecar.
+
+    The wrapper is rebuilt with the original function's ``__globals__`` so
+    that FastMCP can resolve ``ForwardRef`` type annotations (``Literal``,
+    etc.) that result from ``from __future__ import annotations``.
+    """
+
+    @functools.wraps(fn)
+    async def _wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as exc:
+            logger.error(
+                "Unhandled exception in MCP tool %s: %s",
+                fn.__name__,
+                exc,
+                exc_info=True,
+            )
+            return error_response(f"Internal error in {fn.__name__}: {exc}")
+
+    # FastMCP resolves ForwardRef type annotations using func.__globals__.
+    # The wrapper lives in tools/__init__.py whose globals lack Literal and
+    # other imports from tool modules.  Rebuild the wrapper with fn's
+    # __globals__ — all names the wrapper body references (logger,
+    # error_response) are also available there via each tool module's own
+    # imports.
+    wrapper = types.FunctionType(
+        _wrapper.__code__,
+        fn.__globals__,
+        _wrapper.__name__,
+        _wrapper.__defaults__,
+        _wrapper.__closure__,
+    )
+    functools.update_wrapper(wrapper, fn)
+    return wrapper
 
 
 from ivy_lsp.tools.analysis import register_analysis_tools
@@ -37,4 +83,4 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_quality_tools(mcp, ctx)
 
 
-__all__ = ["error_response", "register_all_tools"]
+__all__ = ["error_response", "register_all_tools", "safe_tool"]

@@ -13,7 +13,7 @@ import os
 from typing import Any
 
 from ivy_lsp.debug_trace import ToolTraceContext
-from ivy_lsp.tools import error_response
+from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +176,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
     # ------------------------------------------------------------------
 
     @mcp.tool()
+    @safe_tool
     async def ivy_patterns(
         protocol: str,
         mode: str = "analyze",
@@ -237,6 +238,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             )
 
     @mcp.tool()
+    @safe_tool
     async def ivy_pattern_scaffold(
         protocol: str,
         pattern: str,

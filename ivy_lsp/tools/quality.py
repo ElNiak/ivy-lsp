@@ -13,7 +13,7 @@ import re
 from typing import Any, Literal
 
 from ivy_lsp.debug_trace import ToolTraceContext
-from ivy_lsp.tools import error_response
+from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +299,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
     # ------------------------------------------------------------------
 
     @mcp.tool()
+    @safe_tool
     async def ivy_quality(
         mode: Literal["suggestions", "gate"] = "suggestions",
         file_path: str | None = None,

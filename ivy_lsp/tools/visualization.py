@@ -14,7 +14,7 @@ import logging
 from typing import Any, Literal
 
 from ivy_lsp.debug_trace import ToolTraceContext
-from ivy_lsp.tools import error_response
+from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         return result
 
     @mcp.tool()
+    @safe_tool
     async def ivy_visualize(
         view: Literal["dependencies", "state_machine", "layers"] = "dependencies",
         test_file: str | None = None,
@@ -253,6 +254,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             return _tc.finish(json.dumps(result))
 
     @mcp.tool()
+    @safe_tool
     async def ivy_model_summary(
         detail: Literal["summary", "requirements"] = "summary",
         test_file: str | None = None,

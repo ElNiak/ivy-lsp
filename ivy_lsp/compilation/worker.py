@@ -8,8 +8,10 @@ a :class:`CompiledModuleIR`, and sends it back via a
 
 from __future__ import annotations
 
+import io
 import logging
 import os
+import sys
 import time
 from multiprocessing.connection import Connection
 from typing import Optional
@@ -17,6 +19,46 @@ from typing import Optional
 from ivy_lsp.compilation.ir import CompiledModuleIR
 
 logger = logging.getLogger(__name__)
+
+
+class _LimitedWriter(io.TextIOBase):
+    """Captures the first *limit* lines written, then silently discards the rest.
+
+    Used to replace sys.stderr in worker subprocesses so that the Ivy
+    compiler's "redefining" warnings (2500+ lines per file) don't flood
+    the log while still preserving the first *limit* lines for diagnostics.
+    """
+
+    def __init__(self, limit: int = 50) -> None:
+        self._limit = limit
+        self._lines: list[str] = []
+        self._count = 0
+        self._buf = ""
+
+    def write(self, s: str) -> int:
+        if self._count >= self._limit:
+            return len(s)
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if self._count < self._limit:
+                self._lines.append(line)
+                self._count += 1
+        return len(s)
+
+    def flush(self) -> None:
+        pass
+
+    def getvalue(self) -> str:
+        """Return captured lines joined by newlines."""
+        lines = list(self._lines)
+        if self._buf and self._count < self._limit:
+            lines.append(self._buf)
+        return "\n".join(lines)
+
+    @property
+    def truncated(self) -> bool:
+        return self._count >= self._limit
 
 
 def compiler_worker(
@@ -35,6 +77,13 @@ def compiler_worker(
 
     Never raises -- sends a failed IR on any exception.
     """
+    # --- FD isolation ---
+    # stdout is the JSON-RPC pipe back to the parent; any write corrupts it.
+    # stderr inherits the parent's stderr and floods it with "redefining" warnings.
+    _captured_stderr = _LimitedWriter(50)
+    sys.stdout = open(os.devnull, "w")  # noqa: SIM115 — intentional devnull redirect
+    sys.stderr = _captured_stderr  # type: ignore[assignment]
+
     start = time.monotonic()
     try:
         if staging_dir:
@@ -208,7 +257,12 @@ def compiler_worker(
     except Exception as exc:
         logger.warning("Compilation failed for %s: %s", filename, exc, exc_info=True)
         duration = time.monotonic() - start
-        ir = CompiledModuleIR.empty(filename, errors=[str(exc)], duration=duration)
+        errors = [str(exc)]
+        # Include captured compiler stderr for diagnostics
+        captured = _captured_stderr.getvalue()
+        if captured:
+            errors.append(f"compiler stderr (first 50 lines):\n{captured}")
+        ir = CompiledModuleIR.empty(filename, errors=errors, duration=duration)
         try:
             result_conn.send(ir)
         except OSError:
