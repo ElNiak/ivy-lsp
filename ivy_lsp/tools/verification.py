@@ -38,11 +38,56 @@ _ISOLATE_STATUS_RE = re.compile(
 
 def register_verification_tools(mcp: Any, ctx: Any) -> None:
     """Register verification-related MCP tools."""
-    # Per-isolate verification cache: (abs_path, isolate|None) -> result_dict
+    from dataclasses import dataclass as _dataclass
+
+    @_dataclass
+    class _CacheEntry:
+        result: dict
+        file_mtime: float
+        include_mtimes: dict[str, float]  # transitive includes -> mtime
+
+    # Per-isolate verification cache: (abs_path, isolate|None) -> _CacheEntry
     # Moved into closure scope so each MCP server instance has its own cache.
-    _verify_cache: dict[tuple[str, str | None], dict] = {}
+    _verify_cache: dict[tuple[str, str | None], _CacheEntry] = {}
     _verify_cache_lock = asyncio.Lock()
     _verify_in_flight: set[tuple[str, str | None]] = set()
+
+    def _get_file_mtime(abs_path: str) -> float:
+        """Get file mtime, returning 0.0 if file doesn't exist."""
+        try:
+            return os.path.getmtime(abs_path)
+        except OSError:
+            return 0.0
+
+    def _get_include_mtimes(abs_path: str) -> dict[str, float]:
+        """Get mtimes for the file's transitive include closure."""
+        mtimes: dict[str, float] = {}
+        try:
+            with open(abs_path, encoding="utf-8", errors="replace") as f:
+                source = f.read()
+            # Use a simple regex to find includes (lightweight, no full parse)
+            for m in re.finditer(r"^\s*include\s+(\w+)", source, re.MULTILINE):
+                inc_name = m.group(1)
+                # Try to resolve via basename cache
+                cache = ctx.get_basename_cache()
+                candidates = cache.get(inc_name, [])
+                if candidates:
+                    inc_path = os.path.join(ctx.root, candidates[0])
+                    mtimes[inc_path] = _get_file_mtime(inc_path)
+        except OSError:
+            pass
+        return mtimes
+
+    def _cache_is_fresh(entry: _CacheEntry, abs_path: str) -> bool:
+        """Check if cached result is still fresh (no files changed)."""
+        # Check main file
+        if _get_file_mtime(abs_path) != entry.file_mtime:
+            return False
+        # Check includes
+        for inc_path, cached_mtime in entry.include_mtimes.items():
+            if _get_file_mtime(inc_path) != cached_mtime:
+                return False
+        return True
 
     def _evict_oldest_if_needed() -> None:
         """Evict oldest cache entries when cache exceeds _CACHE_MAX_SIZE."""
@@ -67,17 +112,23 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     for d in full_result.get("diagnostics", [])
                     if iso_name in d.get("message", "") or iso_name in d.get("file", "")
                 ]
-                _verify_cache[iso_key] = {
-                    "success": iso_success,
-                    "diagnostics": iso_diags,
-                    "diagnostic_count": len(iso_diags),
-                    "error_summary": (
-                        full_result.get("error_summary", "") if not iso_success else ""
-                    ),
-                    "duration_seconds": full_result.get("duration_seconds", 0),
-                    "cached": False,
-                    "isolate": iso_name,
-                }
+                _verify_cache[iso_key] = _CacheEntry(
+                    result={
+                        "success": iso_success,
+                        "diagnostics": iso_diags,
+                        "diagnostic_count": len(iso_diags),
+                        "error_summary": (
+                            full_result.get("error_summary", "")
+                            if not iso_success
+                            else ""
+                        ),
+                        "duration_seconds": full_result.get("duration_seconds", 0),
+                        "cached": False,
+                        "isolate": iso_name,
+                    },
+                    file_mtime=_get_file_mtime(abs_path),
+                    include_mtimes=_get_include_mtimes(abs_path),
+                )
                 _evict_oldest_if_needed()
 
     @mcp.tool()
@@ -86,6 +137,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         relative_path: str,
         isolate: str | None = None,
         use_cache: bool = False,
+        compact: bool = True,
     ) -> str:
         """Run ivy_check on an Ivy file to verify formal properties.
 
@@ -95,6 +147,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             relative_path: Relative path to the .ivy file to check.
             isolate: Optional isolate name to check in isolation.
             use_cache: When True, return cached result if available.
+            compact: When True (default), strip raw_output and full
+                counterexample from the result to reduce context window usage.
+                Only counterexample_trace (formatted summary) is kept.
         """
         logger.debug(
             "[ivy_verify] workspace=%s, args=%r",
@@ -134,10 +189,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             # Phase 1: Acquire lock, check cache / in-flight
             async with _verify_cache_lock:
                 if use_cache and cache_key in _verify_cache:
-                    cached_result = dict(_verify_cache[cache_key])
-                    cached_result["cached"] = True
-                    _tt[0] = json.dumps(cached_result)
-                    return _tt[0]
+                    entry = _verify_cache[cache_key]
+                    if _cache_is_fresh(entry, abs_path):
+                        cached_result = dict(entry.result)
+                        cached_result["cached"] = True
+                        _tt[0] = json.dumps(cached_result)
+                        return _tt[0]
+                    else:
+                        # Stale — remove from cache
+                        del _verify_cache[cache_key]
 
                 if cache_key in _verify_in_flight:
                     need_wait = True
@@ -151,10 +211,12 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     await asyncio.sleep(0.1)
                     async with _verify_cache_lock:
                         if cache_key in _verify_cache:
-                            cached_result = dict(_verify_cache[cache_key])
-                            cached_result["cached"] = True
-                            _tt[0] = json.dumps(cached_result)
-                            return _tt[0]
+                            entry = _verify_cache[cache_key]
+                            if _cache_is_fresh(entry, abs_path):
+                                cached_result = dict(entry.result)
+                                cached_result["cached"] = True
+                                _tt[0] = json.dumps(cached_result)
+                                return _tt[0]
                         if cache_key not in _verify_in_flight:
                             _verify_in_flight.add(cache_key)
                             break
@@ -189,7 +251,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
 
                 # Phase 3: Write to cache under lock
                 async with _verify_cache_lock:
-                    _verify_cache[cache_key] = dict(result)
+                    _verify_cache[cache_key] = _CacheEntry(
+                        result=dict(result),
+                        file_mtime=_get_file_mtime(abs_path),
+                        include_mtimes=_get_include_mtimes(abs_path),
+                    )
                     _evict_oldest_if_needed()
 
                     if isolate is None:
@@ -201,6 +267,23 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 async with _verify_cache_lock:
                     _verify_in_flight.discard(cache_key)
                 raise
+
+            # Task 4.1: Strip verbose fields in compact mode
+            if compact:
+                result.pop("raw_output", None)
+                result.pop("counterexample", None)
+
+            # Task 4.2: Trim raw output regardless of compact mode
+            from ivy_lsp.config import get_config
+
+            max_raw = get_config().max_raw_output_length
+            if max_raw > 0 and "raw_output" in result:
+                raw = result["raw_output"]
+                if len(raw) > max_raw:
+                    result["raw_output"] = (
+                        raw[:max_raw] + f"\n... [truncated at {max_raw} chars,"
+                        " full output in /tmp/ivy-lsp-latest.log]"
+                    )
 
             _tt[0] = json.dumps(result)
             return _tt[0]
@@ -701,12 +784,12 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         verified: list[str] = []
         failed: list[str] = []
         seen: set[str] = set()
-        for key, result in _verify_cache.items():
+        for key, entry in _verify_cache.items():
             path = key[0] if isinstance(key, tuple) else str(key)
             if path in seen:
                 continue
             seen.add(path)
-            if result.get("success"):
+            if entry.result.get("success"):
                 verified.append(path)
             else:
                 failed.append(path)

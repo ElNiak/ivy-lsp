@@ -573,6 +573,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         relative_path: str | None = None,
         test_file: str | None = None,
         protocol: str | None = None,
+        compact: bool = True,
+        max_items: int = 50,
     ) -> str:
         """Unified RFC coverage analysis tool.
 
@@ -599,6 +601,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 for NCT-aligned results (used by "matrix", "stats", and
                 "gaps" modes). Takes precedence over relative_path.
             protocol: Protocol name to scope results (used by "gaps" mode).
+            compact: When True (default), strip internal fields
+                (_uncovered_ids_full, _covered_ids) from stats results
+                to reduce context window usage.
+            max_items: Maximum number of list items to return (default 50).
+                Truncates matrix rows and uncovered_ids lists.  Set to 0
+                to disable truncation.
         """
         logger.debug(
             "[ivy_coverage] workspace=%s, args=%r",
@@ -627,13 +635,39 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 )
             )
         if mode == "matrix":
-            return _tc.finish(await _ivy_traceability_matrix(relative_path, test_file))
+            raw = await _ivy_traceability_matrix(relative_path, test_file)
+            if max_items > 0:
+                try:
+                    result_dict = json.loads(raw)
+                    matrix = result_dict.get("matrix", [])
+                    if len(matrix) > max_items:
+                        result_dict["matrix"] = matrix[:max_items]
+                        result_dict["matrix_truncated"] = True
+                        result_dict["matrix_total"] = len(matrix)
+                    raw = json.dumps(result_dict)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return _tc.finish(raw)
         elif mode == "gaps":
             return _tc.finish(await _ivy_coverage_gaps(test_file, protocol))
         elif mode == "diff":
             return _tc.finish(await _ivy_coverage_diff(relative_path))
         else:  # default: stats
-            return _tc.finish(await _ivy_requirement_coverage(relative_path, test_file))
+            raw = await _ivy_requirement_coverage(relative_path, test_file)
+            if compact:
+                try:
+                    result_dict = json.loads(raw)
+                    result_dict.pop("_uncovered_ids_full", None)
+                    result_dict.pop("_covered_ids", None)
+                    if max_items > 0:
+                        uncovered = result_dict.get("uncovered_ids", [])
+                        if len(uncovered) > max_items:
+                            result_dict["uncovered_ids"] = uncovered[:max_items]
+                            result_dict["uncovered_ids_truncated"] = True
+                    raw = json.dumps(result_dict)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return _tc.finish(raw)
 
     @mcp.tool()
     @safe_tool

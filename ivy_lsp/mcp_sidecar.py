@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json as _json
 import logging
 import os
 import socket
 import threading
+import time as _time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -103,7 +105,9 @@ def start_mcp_http_thread(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(_serve_mcp_http(mcp_app, actual_port, ctx.root))
+            loop.run_until_complete(
+                _serve_mcp_http(mcp_app, actual_port, ctx.root, ctx=ctx)
+            )
         except Exception:
             logger.error("MCP HTTP sidecar crashed", exc_info=True)
         finally:
@@ -124,7 +128,9 @@ def start_mcp_http_thread(
     return thread, actual_port
 
 
-async def _serve_mcp_http(mcp_app: Any, port: int, workspace_root: str) -> None:
+async def _serve_mcp_http(
+    mcp_app: Any, port: int, workspace_root: str, ctx: Any = None
+) -> None:
     """Run the FastMCP app via uvicorn's Streamable HTTP transport."""
     try:
         import uvicorn
@@ -150,8 +156,39 @@ async def _serve_mcp_http(mcp_app: Any, port: int, workspace_root: str) -> None:
             )
             return
 
+    # Wrap the ASGI app with a health-check middleware
+    sidecar_start_time = _time.monotonic()
+
+    async def _health_middleware(scope: dict, receive: Any, send: Any) -> None:
+        """ASGI middleware that intercepts /health requests."""
+        if scope["type"] == "http" and scope["path"] == "/health":
+            model_status = "unknown"
+            if ctx is not None and hasattr(ctx, "get_model_status"):
+                try:
+                    model_status = ctx.get_model_status().get("state", "unknown")
+                except Exception:
+                    model_status = "error"
+            body = _json.dumps(
+                {
+                    "status": "ok",
+                    "uptime_seconds": round(_time.monotonic() - sidecar_start_time, 1),
+                    "tools_registered": 13,
+                    "model_status": model_status,
+                }
+            ).encode()
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [[b"content-type", b"application/json"]],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+        await asgi_app(scope, receive, send)
+
     config = uvicorn.Config(
-        app=asgi_app,
+        app=_health_middleware,
         host="127.0.0.1",
         port=port,
         log_level="warning",

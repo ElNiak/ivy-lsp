@@ -267,3 +267,65 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                         }
 
         return _tc.finish(json.dumps(result, indent=2))
+
+    @mcp.tool()
+    @safe_tool
+    async def ivy_health_check() -> str:
+        """Server health check: uptime, cache status, tool metrics, model status.
+
+        Returns server health information including:
+        - Server uptime and memory usage
+        - Verification cache status (entries, hit rate)
+        - Model build status
+        - Tool call metrics (count, avg duration, error count per tool)
+        """
+        from ivy_lsp.tools import get_tool_metrics
+
+        _tc = ToolTraceContext("ivy_health_check", {})
+
+        health: dict[str, Any] = {
+            "success": True,
+            "server": {
+                "workspace": ctx.root,
+                "staging_dir": ctx.staging_dir,
+            },
+            "model_status": ctx.get_model_status(),
+        }
+
+        # Verification cache summary
+        if hasattr(ctx, "get_verify_cache_summary"):
+            try:
+                health["verification_cache"] = ctx.get_verify_cache_summary()
+            except Exception as exc:
+                health["verification_cache"] = {"error": str(exc)}
+
+        # Tool metrics
+        metrics = get_tool_metrics()
+        tool_stats = {}
+        for tool_name, m in metrics.items():
+            avg_duration = (
+                round(m.total_duration / m.call_count, 2) if m.call_count > 0 else 0
+            )
+            tool_stats[tool_name] = {
+                "call_count": m.call_count,
+                "avg_duration_seconds": avg_duration,
+                "error_count": m.error_count,
+                "timeout_count": m.timeout_count,
+            }
+        health["tool_metrics"] = tool_stats
+
+        # Capabilities
+        health["capabilities"] = {
+            "ivy_check": shutil.which("ivy_check") is not None,
+            "ivyc": shutil.which("ivyc") is not None,
+            "ivy_show": shutil.which("ivy_show") is not None,
+        }
+
+        # File counts
+        try:
+            ivy_files = ctx.find_ivy_files(ctx.root)
+            health["workspace_files"] = len(ivy_files)
+        except Exception:
+            health["workspace_files"] = -1
+
+        return _tc.finish(json.dumps(health, indent=2))

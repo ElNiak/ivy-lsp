@@ -354,6 +354,21 @@ def start_mcp(
             return sorted(set(results))
         return _find_ivy_files_raw(search_root, _effective_exclude_dirs)
 
+    # --- Cached file list (avoids redundant directory traversals) ---
+    _cached_ivy_files: list[str] | None = None
+    _cached_ivy_files_lock = threading.Lock()
+
+    def _find_ivy_files_cached(search_root: str) -> list[str]:
+        """Return cached file list, building on first call."""
+        nonlocal _cached_ivy_files
+        if _cached_ivy_files is not None:
+            return _cached_ivy_files
+        with _cached_ivy_files_lock:
+            if _cached_ivy_files is not None:
+                return _cached_ivy_files
+            _cached_ivy_files = _find_ivy_files(search_root)
+            return _cached_ivy_files
+
     if _include_paths:
         logger.info("Workspace include paths: %s", _include_paths)
     if _extra_exclude_dirs:
@@ -444,7 +459,7 @@ def start_mcp(
             if _basename_cache is not None:
                 return _basename_cache
             cache: dict[str, list[str]] = {}
-            for rel_path in _find_ivy_files(root):
+            for rel_path in _find_ivy_files_cached(root):
                 basename = os.path.basename(rel_path)[:-4]  # strip .ivy
                 cache.setdefault(basename, []).append(rel_path)
             _basename_cache = cache
@@ -562,7 +577,7 @@ def start_mcp(
                 read_model_cache,
             )
 
-            ivy_files = _find_ivy_files(root)
+            ivy_files = _find_ivy_files_cached(root)
             freshness = compute_freshness_key(root, ivy_files)
             cached_model, cached_graph = read_model_cache(root, freshness)
             if cached_model is not None:
@@ -580,7 +595,7 @@ def start_mcp(
 
         return build_semantic_model(
             root=root,
-            find_files_fn=_find_ivy_files,
+            find_files_fn=_find_ivy_files_cached,
             include_resolver=(
                 _resolver.resolve if _resolver else _make_resolve_callback()
             ),
@@ -722,7 +737,7 @@ def start_mcp(
                 read_model_cache,
             )
 
-            ivy_files = _find_ivy_files(root)
+            ivy_files = _find_ivy_files_cached(root)
             freshness = compute_freshness_key(root, ivy_files)
             _cached_model, cached_graph = read_model_cache(root, freshness)
             if cached_graph is not None:
@@ -747,7 +762,7 @@ def start_mcp(
             known_vars: set[str] = set()
 
             files_scanned = 0
-            for rel_path in _find_ivy_files(root):
+            for rel_path in _find_ivy_files_cached(root):
                 abs_path = os.path.join(root, rel_path)
                 try:
                     with open(abs_path, encoding="utf-8", errors="replace") as f:
@@ -908,7 +923,7 @@ def start_mcp(
         stdlib_modules=discovered_stdlib,
     )
     # Wire up callables that close over start_mcp's local state
-    ctx.find_ivy_files = _find_ivy_files
+    ctx.find_ivy_files = _find_ivy_files_cached
     ctx.get_model = _get_model
     ctx.get_model_status = _get_model_status
     ctx.get_req_graph = _get_req_graph
@@ -926,4 +941,47 @@ def start_mcp(
 
     logger.info("Starting ivy-lsp MCP server (workspace: %s)", root)
     logger.info("[MCP-READY] Server initialized, tools registered")
+
+    # --- Background pre-warming (non-blocking) ---
+    _prewarm_model = os.environ.get("IVY_LSP_PREWARM_MODEL", "1") != "0"
+    _prewarm_graph = os.environ.get("IVY_LSP_PREWARM_GRAPH", "1") != "0"
+
+    if _prewarm_model or _prewarm_graph:
+        import threading as _threading
+
+        def _prewarm():
+            """Pre-warm model and graph in background thread."""
+            import asyncio as _asyncio
+
+            loop = _asyncio.new_event_loop()
+            try:
+                if _prewarm_model:
+                    logger.info("[INDEX-PREWARM] Starting model pre-warm...")
+                    model = loop.run_until_complete(_get_model())
+                    if model is not None:
+                        logger.info("[INDEX-MODEL-READY] SemanticModel pre-warmed")
+                    else:
+                        logger.warning(
+                            "[INDEX-MODEL-READY] Model pre-warm returned None"
+                        )
+                if _prewarm_graph:
+                    logger.info("[INDEX-PREWARM] Starting graph pre-warm...")
+                    graph = loop.run_until_complete(_get_req_graph())
+                    if graph is not None:
+                        logger.info("[INDEX-GRAPH-READY] RequirementGraph pre-warmed")
+                    else:
+                        logger.warning(
+                            "[INDEX-GRAPH-READY] Graph pre-warm returned None"
+                        )
+            except Exception:
+                logger.error("[INDEX-PREWARM] Pre-warming failed", exc_info=True)
+            finally:
+                loop.close()
+
+        _prewarm_thread = _threading.Thread(
+            target=_prewarm, name="mcp-prewarm", daemon=True
+        )
+        _prewarm_thread.start()
+        logger.info("[INDEX-PREWARM] Background pre-warming started")
+
     mcp.run(transport="stdio")

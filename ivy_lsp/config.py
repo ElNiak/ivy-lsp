@@ -80,6 +80,10 @@ class ServerConfig:
     tool_compile_timeout: float = 300.0
     show_model_timeout: float = 30.0
 
+    # Tool timeout
+    tool_timeout_scale: float = 1.0
+    max_raw_output_length: int = 2000
+
     # Debug tracing
     debug_log: bool = False
     debug_log_path: str | None = None
@@ -113,6 +117,8 @@ class ServerConfig:
             show_model_timeout=_float_env(
                 "IVY_LSP_SHOW_MODEL_TIMEOUT", 30.0, floor=5.0
             ),
+            tool_timeout_scale=_float_env("IVY_LSP_TOOL_TIMEOUT_SCALE", 1.0, floor=0.1),
+            max_raw_output_length=_int_env("IVY_LSP_MAX_RAW_OUTPUT_LENGTH", 2000),
             debug_log=_bool_env("IVY_LSP_DEBUG_LOG", "0"),
             debug_log_path=os.environ.get("IVY_LSP_DEBUG_LOG_PATH"),
         )

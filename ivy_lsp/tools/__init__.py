@@ -7,13 +7,173 @@ Each sub-module registers a logical group of ``@mcp.tool()`` handlers.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
+import os
+import time
 import types
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Per-tool timeout configuration (seconds)
+# ---------------------------------------------------------------------------
+
+_TOOL_TIMEOUTS: dict[str, float] = {
+    "ivy_verify": 180.0,
+    "ivy_compile": 360.0,
+    "ivy_model_info": 60.0,
+    "ivy_diagnostics": 120.0,
+    "ivy_include_graph": 60.0,
+    "ivy_capabilities": 10.0,
+    "ivy_coverage": 120.0,
+    "ivy_extract_requirements": 30.0,
+    "ivy_manifest": 60.0,
+    "ivy_visualize": 60.0,
+    "ivy_model_summary": 60.0,
+    "ivy_patterns": 60.0,
+    "ivy_pattern_scaffold": 30.0,
+    "ivy_quality": 60.0,
+    "ivy_scope": 30.0,
+    "ivy_verification_dashboard": 30.0,
+    "ivy_health_check": 10.0,
+}
+
+_DEFAULT_TIMEOUT: float = 60.0
+
+# ---------------------------------------------------------------------------
+# Per-tool metadata (cost, category, model dependency)
+# ---------------------------------------------------------------------------
+
+_TOOL_METADATA: dict[str, dict[str, Any]] = {
+    "ivy_verify": {"cost": "high", "category": "verification", "needs_model": False},
+    "ivy_compile": {"cost": "high", "category": "verification", "needs_model": False},
+    "ivy_model_info": {"cost": "medium", "category": "analysis", "needs_model": False},
+    "ivy_diagnostics": {"cost": "medium", "category": "analysis", "needs_model": True},
+    "ivy_include_graph": {
+        "cost": "medium",
+        "category": "analysis",
+        "needs_model": False,
+    },
+    "ivy_capabilities": {"cost": "low", "category": "analysis", "needs_model": False},
+    "ivy_coverage": {"cost": "high", "category": "traceability", "needs_model": True},
+    "ivy_extract_requirements": {
+        "cost": "low",
+        "category": "traceability",
+        "needs_model": False,
+    },
+    "ivy_manifest": {
+        "cost": "medium",
+        "category": "traceability",
+        "needs_model": False,
+    },
+    "ivy_visualize": {
+        "cost": "medium",
+        "category": "visualization",
+        "needs_model": True,
+    },
+    "ivy_model_summary": {
+        "cost": "medium",
+        "category": "visualization",
+        "needs_model": True,
+    },
+    "ivy_patterns": {"cost": "medium", "category": "patterns", "needs_model": False},
+    "ivy_pattern_scaffold": {
+        "cost": "low",
+        "category": "patterns",
+        "needs_model": False,
+    },
+    "ivy_quality": {"cost": "medium", "category": "quality", "needs_model": True},
+    "ivy_scope": {"cost": "low", "category": "analysis", "needs_model": True},
+    "ivy_verification_dashboard": {
+        "cost": "low",
+        "category": "verification",
+        "needs_model": False,
+    },
+    "ivy_health_check": {"cost": "low", "category": "analysis", "needs_model": False},
+}
+
+
+def get_tool_metadata(tool_name: str | None = None) -> dict[str, Any]:
+    """Return metadata for *tool_name*, or all metadata if *tool_name* is None."""
+    if tool_name is not None:
+        return dict(_TOOL_METADATA.get(tool_name, {}))
+    return {k: dict(v) for k, v in _TOOL_METADATA.items()}
+
+
+# ---------------------------------------------------------------------------
+# Tool metrics (Phase 7 telemetry will consume these)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ToolMetrics:
+    """Per-tool call metrics."""
+
+    call_count: int = 0
+    total_duration: float = 0.0
+    error_count: int = 0
+    timeout_count: int = 0
+
+
+_tool_metrics: dict[str, ToolMetrics] = {}
+
+# Lazily initialised semaphore for concurrency enforcement.
+_tool_semaphore: asyncio.Semaphore | None = None
+
+
+def get_tool_metrics() -> dict[str, ToolMetrics]:
+    """Return a shallow copy of per-tool metrics."""
+    return dict(_tool_metrics)
+
+
+def _get_effective_timeout(tool_name: str) -> float:
+    """Compute the effective timeout for *tool_name*.
+
+    Resolution order:
+    1. Per-tool env override  ``IVY_LSP_TOOL_TIMEOUT_<TOOL_NAME_UPPER>``
+    2. Base timeout from ``_TOOL_TIMEOUTS`` (or ``_DEFAULT_TIMEOUT``)
+       scaled by ``get_config().tool_timeout_scale``
+    """
+    # Lazy import to avoid circular dependency (config -> tools -> config).
+    from ivy_lsp.config import get_config
+
+    cfg = get_config()
+
+    # 1. Per-tool env var override (unscaled – explicit value wins)
+    env_key = f"IVY_LSP_TOOL_TIMEOUT_{tool_name.upper()}"
+    env_val = os.environ.get(env_key)
+    if env_val is not None:
+        try:
+            return max(1.0, float(env_val))
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Base * scale
+    base = _TOOL_TIMEOUTS.get(tool_name, _DEFAULT_TIMEOUT)
+    return max(1.0, base * cfg.tool_timeout_scale)
+
+
+def _ensure_semaphore() -> asyncio.Semaphore:
+    """Return the module-level semaphore, creating it on first use.
+
+    Must be called from within a running event loop.
+    """
+    global _tool_semaphore
+    if _tool_semaphore is None:
+        from ivy_lsp.config import get_config
+
+        _tool_semaphore = asyncio.Semaphore(get_config().max_concurrent_tools)
+    return _tool_semaphore
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def error_response(message: str) -> str:
@@ -21,11 +181,33 @@ def error_response(message: str) -> str:
     return json.dumps({"success": False, "message": message})
 
 
-def safe_tool(fn):
-    """Decorator that catches unhandled exceptions in MCP tool handlers.
+def _timeout_response(tool_name: str, timeout: float) -> str:
+    """Return a JSON response for a timed-out tool call."""
+    return json.dumps(
+        {
+            "success": False,
+            "message": f"Tool timed out after {timeout:.0f}s",
+            "timeout": True,
+            "tool": tool_name,
+        }
+    )
 
-    Returns an ``error_response(...)`` JSON string instead of letting the
-    exception propagate through FastMCP/uvicorn and kill the sidecar.
+
+# ---------------------------------------------------------------------------
+# safe_tool – the single decorator applied to every MCP tool handler
+# ---------------------------------------------------------------------------
+
+
+def safe_tool(fn):
+    """Decorator that adds timeout, concurrency, metrics, and crash safety.
+
+    Applied to every MCP tool handler.  Responsibilities:
+
+    1. Acquires a concurrency semaphore (lazy-init from config).
+    2. Enforces a per-tool timeout via ``asyncio.wait_for``.
+    3. Records call metrics (count, duration, errors, timeouts).
+    4. Catches unhandled exceptions and returns a JSON error instead of
+       crashing the sidecar process.
 
     The wrapper is rebuilt with the original function's ``__globals__`` so
     that FastMCP can resolve ``ForwardRef`` type annotations (``Literal``,
@@ -34,26 +216,70 @@ def safe_tool(fn):
 
     @functools.wraps(fn)
     async def _wrapper(*args, **kwargs):
+        tool_name = fn.__name__
+        timeout = _get_effective_timeout(tool_name)
+        sem = _ensure_semaphore()
+
+        # Ensure per-tool metrics bucket exists.
+        if tool_name not in _tool_metrics:
+            _tool_metrics[tool_name] = ToolMetrics()
+        metrics = _tool_metrics[tool_name]
+
+        start = time.monotonic()
         try:
-            return await fn(*args, **kwargs)
+            async with sem:
+                result = await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - start
+            metrics.timeout_count += 1
+            metrics.error_count += 1
+            logger.error(
+                "MCP tool %s timed out after %.1fs (limit %.0fs)",
+                tool_name,
+                elapsed,
+                timeout,
+            )
+            return _timeout_response(tool_name, timeout)
         except Exception as exc:
+            metrics.error_count += 1
             logger.error(
                 "Unhandled exception in MCP tool %s: %s",
-                fn.__name__,
+                tool_name,
                 exc,
                 exc_info=True,
             )
-            return error_response(f"Internal error in {fn.__name__}: {exc}")
+            return error_response(f"Internal error in {tool_name}: {exc}")
+        finally:
+            elapsed = time.monotonic() - start
+            metrics.call_count += 1
+            metrics.total_duration += elapsed
 
     # FastMCP resolves ForwardRef type annotations using func.__globals__.
     # The wrapper lives in tools/__init__.py whose globals lack Literal and
     # other imports from tool modules.  Rebuild the wrapper with fn's
     # __globals__ — all names the wrapper body references (logger,
-    # error_response) are also available there via each tool module's own
-    # imports.
+    # error_response, _timeout_response, _get_effective_timeout,
+    # _ensure_semaphore, _tool_metrics, ToolMetrics, asyncio, time) are
+    # also available there via each tool module's own imports *or* via
+    # closure.  We inject the missing names into fn's globals so the
+    # rebuilt function can find them.
+    _injected_names = {
+        "logger": logger,
+        "error_response": error_response,
+        "_timeout_response": _timeout_response,
+        "_get_effective_timeout": _get_effective_timeout,
+        "_ensure_semaphore": _ensure_semaphore,
+        "_tool_metrics": _tool_metrics,
+        "ToolMetrics": ToolMetrics,
+        "asyncio": asyncio,
+        "time": time,
+    }
+    patched_globals = {**fn.__globals__, **_injected_names}
+
     wrapper = types.FunctionType(
         _wrapper.__code__,
-        fn.__globals__,
+        patched_globals,
         _wrapper.__name__,
         _wrapper.__defaults__,
         _wrapper.__closure__,
@@ -83,4 +309,11 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_quality_tools(mcp, ctx)
 
 
-__all__ = ["error_response", "register_all_tools", "safe_tool"]
+__all__ = [
+    "ToolMetrics",
+    "error_response",
+    "get_tool_metadata",
+    "get_tool_metrics",
+    "register_all_tools",
+    "safe_tool",
+]
