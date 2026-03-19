@@ -105,7 +105,7 @@ def word_at_position(lines: list[str], position: Any) -> str:
         return ""
 
     for m in re.finditer(r"[_a-zA-Z0-9.]+", line):
-        if m.start() <= position.character <= m.end():
+        if m.start() <= position.character < m.end():
             return m.group().strip(".")
 
     return ""

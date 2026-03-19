@@ -262,3 +262,29 @@ class TestWordAtPosition:
         lines = ["type cid"]
         pos = Position(line=0, character=3)  # cursor on 'e' of "type"
         assert word_at_position(lines, pos) == "type"
+
+    def test_cursor_between_tokens_returns_empty(self):
+        """Character at the space between 'object' and 'ack' should return ''."""
+        from ivy_lsp.utils.position_utils import word_at_position
+
+        lines = ["    object ack = {"]
+        # character=10 is the space after 'object' (end of match is exclusive)
+        pos = Position(line=0, character=10)
+        assert word_at_position(lines, pos) == ""
+
+    def test_cursor_at_token_exclusive_end(self):
+        """m.end() is exclusive — cursor there should NOT match the token."""
+        from ivy_lsp.utils.position_utils import word_at_position
+
+        lines = ["type cid"]
+        # character=4 is the space after 'type', m.end()=4 for 'type'
+        pos = Position(line=0, character=4)
+        assert word_at_position(lines, pos) == ""
+
+    def test_cursor_at_second_token_start(self):
+        """Cursor at start of 'ack' on 'object ack' line resolves to 'ack'."""
+        from ivy_lsp.utils.position_utils import word_at_position
+
+        lines = ["    object ack = {"]
+        pos = Position(line=0, character=11)  # 'a' of 'ack'
+        assert word_at_position(lines, pos) == "ack"
