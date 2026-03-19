@@ -399,10 +399,13 @@ class TestAllToolsReturnJSON:
 
 class TestErrorResponseConsistency:
     @pytest.mark.asyncio
-    async def test_lint_error_has_success_field(self, tmp_path):
+    async def test_diagnostics_structural_error_has_success_field(self, tmp_path):
         """Error response has success: false and message key."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "nonexistent.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "nonexistent.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is False
         assert "message" in parsed

@@ -98,19 +98,23 @@ class TestCapabilities:
         assert data["ivy_show"] is True
 
 
-class TestLintCorrectness:
+class TestStructuralDiagnosticsCorrectness:
     def test_quic_types_clean(self, mcp_app):
-        """quic_types.ivy should have 0 lint diagnostics."""
+        """quic_types.ivy should have 0 structural diagnostics."""
         data = _call_and_parse(
-            mcp_app, "ivy_lint", {"relative_path": "quic/quic_stack/quic_types.ivy"}
+            mcp_app,
+            "ivy_diagnostics",
+            {"relative_path": "quic/quic_stack/quic_types.ivy", "mode": "structural"},
         )
         assert data["success"] is True
         assert data["diagnostic_count"] == 0
 
     def test_quic_frame_clean(self, mcp_app):
-        """quic_frame.ivy should have 0 lint diagnostics (all includes resolve)."""
+        """quic_frame.ivy should have 0 structural diagnostics (all includes resolve)."""
         data = _call_and_parse(
-            mcp_app, "ivy_lint", {"relative_path": "quic/quic_stack/quic_frame.ivy"}
+            mcp_app,
+            "ivy_diagnostics",
+            {"relative_path": "quic/quic_stack/quic_frame.ivy", "mode": "structural"},
         )
         assert data["success"] is True
         assert data["diagnostic_count"] == 0
@@ -242,53 +246,6 @@ class TestCoverageCorrectness:
         assert (
             stats_uncovered == gaps_uncovered
         ), f"stats says {stats_uncovered} uncovered, gaps says {gaps_uncovered}"
-
-
-# ---------------------------------------------------------------------------
-# Phase 3: Symbol Query — Known Bugs
-# ---------------------------------------------------------------------------
-
-
-class TestSymbolQueryCorrectness:
-    def test_cid_found_in_correct_file(self, mcp_app):
-        data = _call_and_parse(
-            mcp_app,
-            "ivy_query",
-            {"mode": "info", "symbol_name": "cid", "protocol": "quic"},
-        )
-        assert data["found"] is True
-        assert "quic_types.ivy" in data.get("type_info", {}).get("file", "")
-
-    def test_cid_correct_line(self, mcp_app):
-        data = _call_and_parse(
-            mcp_app,
-            "ivy_query",
-            {"mode": "info", "symbol_name": "cid", "protocol": "quic"},
-        )
-        line = data.get("type_info", {}).get("line", -1)
-        assert line in (29, 30), f"Expected line 29 or 30, got {line}"
-
-    def test_quic_packet_type_kind(self, mcp_app):
-        data = _call_and_parse(
-            mcp_app,
-            "ivy_query",
-            {"mode": "info", "symbol_name": "quic_packet_type", "protocol": "quic"},
-        )
-        kind = data.get("symbol_info", {}).get("kind", "")
-        assert kind == "object", f"Expected 'object', got '{kind}'"
-
-    @pytest.mark.xfail(reason="C3: semantic edge graph never computed")
-    def test_cross_references_not_empty(self, mcp_app):
-        """Cid has 1404 LSP references — MCP should find some too."""
-        data = _call_and_parse(
-            mcp_app,
-            "ivy_query",
-            {"mode": "xrefs", "node_id": "cid"},
-        )
-        if not data.get("found", False):
-            pytest.skip("Node not found with plain name")
-        total = len(data.get("incoming", [])) + len(data.get("outgoing", []))
-        assert total > 0
 
 
 # ---------------------------------------------------------------------------

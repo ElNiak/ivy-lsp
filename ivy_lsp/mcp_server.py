@@ -112,6 +112,132 @@ class ToolContext:
         }
     )
 
+    @classmethod
+    def from_lsp_server(cls, server: Any) -> "ToolContext":
+        """Bridge an IvyLanguageServer instance into a ToolContext.
+
+        Maps the LSP server's live state (indexer, semantic model,
+        requirement graph, resolver) into the ToolContext interface
+        so MCP tools can share the same data without re-indexing.
+
+        Handles ``server._indexer is None`` gracefully — tools that
+        need the model/graph already handle None returns.
+        """
+        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
+        from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_raw
+
+        indexer = server._indexer
+        resolver = indexer.resolver if indexer is not None else None
+        ws_root = indexer._workspace_root if indexer is not None else ""
+
+        staging_dir = None
+        if resolver is not None and hasattr(resolver, "_staging_dir"):
+            staging_dir = resolver._staging_dir
+
+        # Build file finder that delegates to the resolver
+        _exclude = DEFAULT_EXCLUDE_DIRS
+        if resolver is not None and hasattr(resolver, "_exclude_paths"):
+            _exclude = _exclude | frozenset(resolver._exclude_paths)
+
+        def _find_files(search_root: str) -> list[str]:
+            if resolver is not None:
+                return resolver.find_all_ivy_files()
+            return _find_ivy_raw(search_root, _exclude)
+
+        # Basename cache
+        _basename_cache: dict[str, list[str]] | None = None
+        _cache_lock = __import__("threading").Lock()
+
+        def _get_basename_cache() -> dict[str, list[str]]:
+            nonlocal _basename_cache
+            if _basename_cache is not None:
+                return _basename_cache
+            with _cache_lock:
+                if _basename_cache is not None:
+                    return _basename_cache
+                cache: dict[str, list[str]] = {}
+                import os as _os
+
+                for rel_path in _find_files(ws_root):
+                    basename = _os.path.basename(rel_path)[:-4]
+                    cache.setdefault(basename, []).append(rel_path)
+                _basename_cache = cache
+                return cache
+
+        discovered_stdlib = discover_stdlib_modules()
+
+        ctx = cls(
+            root=ws_root,
+            staging_dir=staging_dir,
+            executor=None,
+            base_path=None,
+            stdlib_modules=discovered_stdlib,
+        )
+
+        # Wire up callables backed by the LSP server's live state
+        ctx.find_ivy_files = _find_files
+        ctx.include_resolver = resolver
+
+        async def _get_model():
+            return server._semantic_model
+
+        async def _get_req_graph():
+            if indexer is not None:
+                return indexer.requirement_graph
+            return None
+
+        def _get_model_status() -> dict:
+            if server._semantic_model is not None:
+                return {"state": "ready"}
+            if server._initializing:
+                return {"state": "building"}
+            return {"state": "not_built"}
+
+        ctx.get_model = _get_model
+        ctx.get_model_status = _get_model_status
+        ctx.get_req_graph = _get_req_graph
+        ctx.get_basename_cache = _get_basename_cache
+
+        def _make_resolve_callback():
+            cache = _get_basename_cache()
+
+            def _resolve(inc_name: str, from_file: str) -> str | None:
+                if inc_name in ctx.stdlib_modules:
+                    return f"<stdlib>/{inc_name}.ivy"
+                candidates = cache.get(inc_name)
+                if candidates:
+                    return candidates[0]
+                return None
+
+            return _resolve
+
+        ctx.make_resolve_callback = _make_resolve_callback
+
+        # Visualization server proxy
+        from dataclasses import dataclass as _dc
+
+        @_dc
+        class _IndexerProxy:
+            requirement_graph: Any
+
+        @_dc
+        class _ServerProxy:
+            indexer: _IndexerProxy
+            initializing: bool = False
+            workspace_root: str = ""
+
+        async def _make_viz_server_proxy():
+            graph = await _get_req_graph()
+            return _ServerProxy(
+                indexer=_IndexerProxy(requirement_graph=graph),
+                workspace_root=ws_root,
+            )
+
+        ctx.make_viz_server_proxy = _make_viz_server_proxy
+
+        return ctx
+
     def validate_path(self, relative_path: str) -> str:
         """Resolve *relative_path* under workspace root."""
         return _validate_path(self.root, relative_path)
@@ -124,6 +250,43 @@ class ToolContext:
     ) -> list[dict[str, Any]]:
         """Fast structural checks without full parsing."""
         return _check_structural_issues(source, filepath, resolve_callback)
+
+
+_MCP_INSTRUCTIONS = (
+    "Ivy Language Server MCP tools for formal verification. "
+    "Tools: ivy_verify (check), ivy_compile (ivyc), ivy_model_info (show), "
+    "ivy_diagnostics (mode: structural|full), ivy_include_graph, "
+    "ivy_capabilities; "
+    "ivy_coverage (mode: matrix|stats|gaps|diff), "
+    "ivy_extract_requirements (output: structured|manifest); "
+    "ivy_visualize (view: dependencies|state_machine|layers), "
+    "ivy_model_summary (detail: summary|requirements); "
+    "ivy_patterns (mode: analyze|validate|compare|check), "
+    "ivy_pattern_scaffold; "
+    "ivy_quality (mode: suggestions|gate)."
+)
+
+
+def create_mcp_app(ctx: ToolContext) -> Any:
+    """Create a FastMCP application with all Ivy tools registered.
+
+    Pure tool registration — no startup logic. Used by both the standalone
+    MCP stdio mode and the HTTP sidecar mode.
+
+    Args:
+        ctx: Shared ToolContext with workspace state and helpers.
+
+    Returns:
+        A configured FastMCP instance.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("ivy-lsp", instructions=_MCP_INSTRUCTIONS)
+
+    from ivy_lsp.tools import register_all_tools
+
+    register_all_tools(mcp, ctx)
+    return mcp
 
 
 def start_mcp(
@@ -156,7 +319,7 @@ def start_mcp(
         ws_config: Optional workspace configuration object.
     """
     try:
-        from mcp.server.fastmcp import FastMCP
+        import mcp.server.fastmcp  # noqa: F401 — validate dependency
     except ImportError:
         raise ImportError(
             "MCP mode requires the 'mcp' package. "
@@ -253,24 +416,6 @@ def start_mcp(
                 "panther_ivy.api.executor not available; "
                 "falling back to native subprocess"
             )
-    mcp = FastMCP(
-        "ivy-lsp",
-        instructions=(
-            "Ivy Language Server MCP tools for formal verification. "
-            "Tools: ivy_verify (check), ivy_compile (ivyc), ivy_model_info (show), "
-            "ivy_lint (fast linting), ivy_diagnostics, ivy_include_graph, "
-            "ivy_capabilities; "
-            "ivy_coverage (mode: matrix|stats|gaps), "
-            "ivy_query (mode: impact|xrefs|info), "
-            "ivy_extract_requirements (output: structured|manifest); "
-            "ivy_visualize (view: dependencies|state_machine|layers), "
-            "ivy_model_summary (detail: summary|requirements); "
-            "ivy_patterns (mode: analyze|validate|compare|check), "
-            "ivy_pattern_scaffold; "
-            "ivy_quality (mode: suggestions|gate)."
-        ),
-    )
-
     _model_lock = asyncio.Lock()
     _model_build_attempted: float = 0.0  # timestamp of last failed attempt
     _model_build_error: str | None = None
@@ -400,11 +545,37 @@ def start_mcp(
         Delegates to the shared ``build_semantic_model`` function in
         ``ivy_lsp.semantic.model_builder``.
 
+        Tries the shared disk cache first (written by the LSP process).
+        Falls back to a full build if the cache is stale or absent.
+
         Returns the model on success, or ``None`` when a required
         dependency is missing (logged at WARNING).  The caller
         (``_get_model``) is responsible for caching the result and
         assigning the ``semantic_model`` nonlocal under the lock.
         """
+        nonlocal _req_graph
+
+        # Try shared cache (written by LSP after bulk T1+T2 analysis)
+        try:
+            from ivy_lsp.indexer.shared_cache import (
+                compute_freshness_key,
+                read_model_cache,
+            )
+
+            ivy_files = _find_ivy_files(root)
+            freshness = compute_freshness_key(root, ivy_files)
+            cached_model, cached_graph = read_model_cache(root, freshness)
+            if cached_model is not None:
+                logger.info("Loaded semantic model from shared cache")
+                if cached_graph is not None and _req_graph is None:
+                    _req_graph = cached_graph
+                    logger.info("Loaded requirement graph from shared cache")
+                return cached_model
+        except Exception:
+            logger.debug(
+                "Shared cache lookup failed, building from scratch", exc_info=True
+            )
+
         from ivy_lsp.semantic.model_builder import build_semantic_model
 
         return build_semantic_model(
@@ -541,10 +712,27 @@ def start_mcp(
     def _build_requirement_graph():
         """Build a RequirementGraph from workspace .ivy files.
 
-        Uses the light-mode extractor (regex or PLY lexer) to extract
-        requirements and writes from each file, populates ActionNode
-        and RequirementNode entries, wires CONSTRAINS and WRITES edges.
+        Tries the shared disk cache first (written by the LSP process).
+        Falls back to a full build using the light-mode extractor.
         """
+        # Try shared cache before doing the expensive build
+        try:
+            from ivy_lsp.indexer.shared_cache import (
+                compute_freshness_key,
+                read_model_cache,
+            )
+
+            ivy_files = _find_ivy_files(root)
+            freshness = compute_freshness_key(root, ivy_files)
+            _cached_model, cached_graph = read_model_cache(root, freshness)
+            if cached_graph is not None:
+                logger.info("Loaded requirement graph from shared cache")
+                return cached_graph
+        except Exception:
+            logger.debug(
+                "Shared cache lookup failed for requirement graph", exc_info=True
+            )
+
         try:
             from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
             from ivy_lsp.analysis.requirement_graph import (
@@ -729,9 +917,7 @@ def start_mcp(
     ctx.make_resolve_callback = _make_resolve_callback
     ctx.include_resolver = _resolver
 
-    from ivy_lsp.tools import register_all_tools
-
-    register_all_tools(mcp, ctx)
+    mcp = create_mcp_app(ctx)
 
     # --- Start or return ---
 

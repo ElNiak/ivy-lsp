@@ -1,8 +1,9 @@
 """Entry point for running the Ivy Language Server.
 
-Supports two modes:
-  - LSP mode (default): Language Server Protocol over stdio
-  - MCP mode (--mcp):   Model Context Protocol server exposing Ivy tools
+Supports three modes:
+  - Default:     LSP over stdio + MCP HTTP sidecar (unified process)
+  - --mcp:       Standalone MCP server over stdio (backward compat)
+  - --lsp-only:  LSP over stdio without MCP sidecar
 """
 
 import logging
@@ -38,8 +39,25 @@ def _patch_pygls_converter(server: Any) -> None:
     converter.register_structure_hook(JsonRPCNotification, _fixed_params_hook)
 
 
+def _parse_mcp_port() -> int:
+    """Parse MCP port from --mcp-port arg or IVY_MCP_PORT env var."""
+    for i, arg in enumerate(sys.argv):
+        if arg == "--mcp-port" and i + 1 < len(sys.argv):
+            try:
+                return int(sys.argv[i + 1])
+            except ValueError:
+                pass
+    env_port = os.environ.get("IVY_MCP_PORT", "")
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            pass
+    return 0  # use default (19847)
+
+
 def main():
-    """Start the Ivy Language Server in LSP or MCP mode."""
+    """Start the Ivy Language Server in LSP, MCP, or unified mode."""
     log_level = os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         stream=sys.stderr,
@@ -49,7 +67,7 @@ def main():
     log = logging.getLogger("ivy_lsp")
 
     if "--mcp" in sys.argv:
-        # MCP server mode: expose Ivy tools via Model Context Protocol
+        # Standalone MCP server mode (backward compat): stdio transport
         try:
             from ivy_lsp.mcp_server import start_mcp
             from ivy_lsp.workspace_detection import detect_ivy_workspace
@@ -98,12 +116,18 @@ def main():
             log.critical("[MCP-FATAL] Ivy MCP server crashed: %s", e, exc_info=True)
             sys.exit(1)
     else:
-        # LSP server mode (default): Language Server Protocol over stdio
+        # LSP server mode (default): stdio + optional MCP HTTP sidecar
         try:
             from ivy_lsp.server import IvyLanguageServer
 
             server = IvyLanguageServer()
             _patch_pygls_converter(server)
+
+            # Start MCP HTTP sidecar unless --lsp-only is passed
+            if "--lsp-only" not in sys.argv:
+                mcp_port = _parse_mcp_port()
+                server.start_mcp_sidecar(port=mcp_port)
+
             server.start_io()
         except ImportError as e:
             log.critical(

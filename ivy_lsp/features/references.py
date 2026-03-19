@@ -3,14 +3,64 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
+
+
+def _get_layer_scope(resolver, filepath: str) -> Optional[Set[str]]:
+    """Return the set of layer IDs visible from *filepath*.
+
+    Includes the file's own layer plus all upstream ``depends_on`` layers
+    (transitively).  Returns ``None`` when layer staging is not active,
+    meaning no filtering should be applied.
+    """
+    if not hasattr(resolver, "_file_to_layer") or not resolver._file_to_layer:
+        return None
+
+    norm = os.path.normpath(os.path.realpath(filepath))
+    current_layer = resolver._file_to_layer.get(norm)
+    if current_layer is None:
+        return None
+
+    layer_by_id = getattr(resolver, "_layer_by_id", {})
+    if not layer_by_id:
+        return None
+
+    # Walk depends_on upward (transitively) to collect visible layers.
+    visible: Set[str] = set()
+    queue = [current_layer]
+    while queue:
+        lid = queue.pop()
+        if lid in visible:
+            continue
+        visible.add(lid)
+        layer_obj = layer_by_id.get(lid)
+        if layer_obj and hasattr(layer_obj, "depends_on"):
+            for dep in layer_obj.depends_on:
+                if dep not in visible:
+                    queue.append(dep)
+
+    return visible
+
+
+def _filter_files_by_layer_scope(
+    resolver, all_files: List[str], layer_scope: Set[str]
+) -> List[str]:
+    """Keep only files belonging to one of the layers in *layer_scope*."""
+    filtered = []
+    for fpath in all_files:
+        norm = os.path.normpath(os.path.realpath(fpath))
+        file_layer = resolver._file_to_layer.get(norm)
+        if file_layer is None or file_layer in layer_scope:
+            filtered.append(fpath)
+    return filtered
 
 
 def find_references(
@@ -22,8 +72,14 @@ def find_references(
 ) -> List[lsp.Location]:
     """Find all references to the symbol at the given position.
 
-    Extracts the word under the cursor, then scans every ``.ivy`` file in the
-    workspace for whole-word matches, returning an LSP ``Location`` for each.
+    Extracts the word under the cursor, then scans ``.ivy`` files visible
+    from the current file's layer scope for whole-word matches, returning
+    an LSP ``Location`` for each.
+
+    Layer scoping: when workspace layers are active, only files in the
+    queried file's own layer and its upstream ``depends_on`` layers are
+    searched.  Downstream layers that depend on the current layer are
+    excluded.
 
     Args:
         indexer: The :class:`WorkspaceIndexer` instance providing access to
@@ -48,7 +104,13 @@ def find_references(
     name = word.rsplit(".", 1)[-1] if "." in word else word
     pattern = re.compile(r"\b" + re.escape(name) + r"\b")
 
-    all_files = indexer.resolver.find_all_ivy_files()
+    resolver = indexer.resolver
+    all_files = resolver.find_all_ivy_files()
+
+    # Layer-scope filtering: restrict to current layer + upstream deps.
+    layer_scope = _get_layer_scope(resolver, filepath)
+    if layer_scope is not None:
+        all_files = _filter_files_by_layer_scope(resolver, all_files, layer_scope)
 
     abs_filepath = str(Path(filepath).resolve())
     # H4: Ensure the queried file is always in the scan list

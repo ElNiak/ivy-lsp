@@ -2,7 +2,6 @@
 
 Covers:
 - ivy_include_graph: simple includes, transitive includes, missing includes
-- ivy_lint: basic structural checks
 """
 
 import json

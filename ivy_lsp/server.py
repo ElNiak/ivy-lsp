@@ -55,6 +55,8 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
         from ivy_lsp.features.diagnostics import DiagnosticCache
 
         self._diagnostic_cache: DiagnosticCache = DiagnosticCache()
+        self._mcp_sidecar_thread: Optional[Any] = None
+        self._mcp_sidecar_port: int = 0
         self.__init_features()
 
     def _install_audit_logging(self) -> None:
@@ -217,6 +219,49 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
         """Public accessor for the bulk analysis cancel event."""
         return self._bulk_analysis_cancel
 
+    def start_mcp_sidecar(self, port: int = 0) -> None:
+        """Start the MCP HTTP sidecar in a daemon thread.
+
+        Should be called before ``start_io()`` so the sidecar is ready
+        when the LSP client connects.
+
+        Args:
+            port: Desired port (0 = default 19847). Auto-increments on conflict.
+        """
+        try:
+            from ivy_lsp.mcp_sidecar import start_mcp_http_thread
+
+            thread, actual_port = start_mcp_http_thread(self, port=port)
+            self._mcp_sidecar_thread = thread
+            self._mcp_sidecar_port = actual_port
+            logger.info("MCP sidecar started on port %d", actual_port)
+        except ImportError as exc:
+            logger.info(
+                "MCP sidecar not available (missing dependency: %s) — "
+                "MCP tools will not be served via HTTP",
+                exc,
+            )
+        except Exception:
+            logger.warning("MCP sidecar failed to start", exc_info=True)
+
+    def _stop_mcp_sidecar(self) -> None:
+        """Clean up MCP sidecar resources on shutdown."""
+        if self._mcp_sidecar_thread is None:
+            return
+        try:
+            from ivy_lsp.mcp_sidecar import _remove_port_file
+
+            # Get workspace root for port file cleanup
+            ws_root = ""
+            if self._indexer is not None:
+                ws_root = self._indexer._workspace_root
+            _remove_port_file(ws_root)
+        except Exception:
+            logger.debug("MCP sidecar cleanup failed", exc_info=True)
+        # Daemon thread will die when the process exits
+        self._mcp_sidecar_thread = None
+        self._mcp_sidecar_port = 0
+
     def __init_features(self):
         # -- Feature registration (below) ---
         from ivy_lsp.features import (
@@ -378,4 +423,5 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
                 self._indexer.request_stop()
             if self._compiler_manager is not None:
                 self._compiler_manager.shutdown()
+            self._stop_mcp_sidecar()
             self._cleanup_staging()

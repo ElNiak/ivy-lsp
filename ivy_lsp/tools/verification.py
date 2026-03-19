@@ -350,23 +350,27 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
     @mcp.tool()
     async def ivy_diagnostics(
         relative_path: str,
+        mode: str = "full",
         layers: list[str] | None = None,
         min_severity: str | None = None,
     ) -> str:
-        """Full diagnostic analysis of an Ivy file.
+        """Diagnostic analysis of an Ivy file.
 
-        Runs 5 diagnostic layers (structural, lexer, semantic, coverage,
-        pattern) — comparable to what an IDE shows via
-        textDocument/publishDiagnostics. More thorough than ivy_lint but
-        may take longer on first call (lazy model/graph building).
-
-        Use ivy_lint for quick structural checks (milliseconds).
-        Use ivy_diagnostics for thorough analysis after editing.
+        Supports two modes:
+        - "structural": Fast structural lint only (milliseconds, no subprocess).
+          Checks missing #lang header, unmatched braces, unresolved includes.
+          Replaces the former ivy_lint tool.
+        - "full": All 5 diagnostic layers (structural, lexer, semantic,
+          coverage, pattern). More thorough but may take longer on first
+          call (lazy model/graph building). Default.
 
         Args:
             relative_path: Relative path to the .ivy file to diagnose.
-            layers: Optional list of layers to run. Valid values: structural,
-                lexer, semantic, coverage, pattern. Defaults to all.
+            mode: Diagnostic mode — "structural" for fast lint (replaces
+                ivy_lint), "full" for all layers (default).
+            layers: Optional list of layers to run (full mode only).
+                Valid values: structural, lexer, semantic, coverage, pattern.
+                Defaults to all layers.
             min_severity: Minimum severity to include: error, warning, info, hint.
         """
         logger.debug(
@@ -374,10 +378,16 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             ctx.root,
             {
                 "relative_path": relative_path,
+                "mode": mode,
                 "layers": layers,
                 "min_severity": min_severity,
             },
         )
+        if mode not in ("structural", "full"):
+            return error_response(
+                f"Unknown mode '{mode}'. Valid modes: ['structural', 'full']"
+            )
+
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
@@ -388,10 +398,31 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
 
+        # Fast path: structural-only mode (replaces former ivy_lint tool)
+        if mode == "structural":
+            resolve_cb = ctx.make_resolve_callback()
+            diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
+            return json.dumps(
+                {
+                    "success": True,
+                    "file": relative_path,
+                    "mode": "structural",
+                    "diagnostics": diagnostics,
+                    "diagnostic_count": len(diagnostics),
+                    "error_count": sum(
+                        1 for d in diagnostics if d["severity"] == "error"
+                    ),
+                    "warning_count": sum(
+                        1 for d in diagnostics if d["severity"] == "warning"
+                    ),
+                }
+            )
+
+        # Full mode: all 5 diagnostic layers
         all_diags: list[dict[str, Any]] = []
         layer_errors: list[dict[str, str]] = []
 
-        # 1. Structural checks (same as ivy_lint)
+        # 1. Structural checks
         if layers is None or "structural" in layers:
             resolve_cb = ctx.make_resolve_callback()
             all_diags.extend(ctx.check_structural_issues(source, abs_path, resolve_cb))

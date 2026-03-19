@@ -1,4 +1,4 @@
-"""Analysis tools: ivy_lint, ivy_include_graph, ivy_capabilities."""
+"""Analysis tools: ivy_include_graph, ivy_capabilities, ivy_scope."""
 
 from __future__ import annotations
 
@@ -19,45 +19,6 @@ _extractor = TieredExtractor()
 
 def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     """Register analysis-related MCP tools."""
-
-    @mcp.tool()
-    async def ivy_lint(relative_path: str) -> str:
-        """Fast structural lint of an Ivy file (milliseconds, no subprocess).
-
-        Checks: missing #lang header, unmatched braces, unresolved includes.
-
-        Args:
-            relative_path: Relative path to the .ivy file to lint.
-        """
-        logger.debug(
-            "[ivy_lint] workspace=%s, args=%r",
-            ctx.root,
-            {"relative_path": relative_path},
-        )
-        try:
-            abs_path = ctx.validate_path(relative_path)
-        except ValueError as exc:
-            return error_response(str(exc))
-        if not os.path.isfile(abs_path):
-            return error_response(f"File not found: {relative_path}")
-
-        with open(abs_path, encoding="utf-8", errors="replace") as f:
-            source = f.read()
-
-        resolve_cb = ctx.make_resolve_callback()
-        diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
-        return json.dumps(
-            {
-                "success": True,
-                "file": relative_path,
-                "diagnostics": diagnostics,
-                "diagnostic_count": len(diagnostics),
-                "error_count": sum(1 for d in diagnostics if d["severity"] == "error"),
-                "warning_count": sum(
-                    1 for d in diagnostics if d["severity"] == "warning"
-                ),
-            }
-        )
 
     @mcp.tool()
     async def ivy_include_graph(relative_path: str | None = None) -> str:

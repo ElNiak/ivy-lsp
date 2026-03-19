@@ -260,6 +260,19 @@ class RequirementGraph:
         self._cached_snapshot: Optional[GraphSnapshot] = None
         self._cached_snapshot_version: int = -1
 
+    # -- Pickle support (shared cache) ------------------------------------
+
+    def __getstate__(self) -> dict:
+        """Strip the unpicklable RLock before serialization."""
+        state = self.__dict__.copy()
+        del state["_lock"]
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Rebuild the RLock after deserialization."""
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
+
     # -- Mutation -----------------------------------------------------------
 
     def add_requirement(self, node: RequirementNode) -> None:

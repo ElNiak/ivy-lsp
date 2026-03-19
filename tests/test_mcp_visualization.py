@@ -167,7 +167,7 @@ class TestToolRegistration:
         tools = await mcp.list_tools()
         tool_names = {t.name for t in tools}
         assert "ivy_verify" in tool_names
-        assert "ivy_lint" in tool_names
+        assert "ivy_diagnostics" in tool_names
         assert "ivy_capabilities" in tool_names
 
 

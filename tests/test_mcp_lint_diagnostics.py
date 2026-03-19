@@ -1,7 +1,7 @@
-"""Tests for MCP ivy_lint and ivy_diagnostics tools.
+"""Tests for MCP ivy_diagnostics tool.
 
-Covers structural checks, layer filtering, severity filtering,
-error paths, and pattern detection.
+Covers structural mode (replaces former ivy_lint), full mode with layer
+filtering, severity filtering, error paths, and pattern detection.
 """
 
 import json
@@ -47,42 +47,50 @@ def _extract_text(result) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ivy_lint tests
+# ivy_diagnostics (mode="structural") tests — replaces former ivy_lint
 # ---------------------------------------------------------------------------
 
 
-class TestIvyLint:
+class TestIvyDiagnosticsStructural:
     @pytest.mark.asyncio
-    async def test_lint_missing_lang_header(self, tmp_path):
+    async def test_structural_missing_lang_header(self, tmp_path):
         """File without #lang header -> warning diagnostic."""
         (tmp_path / "no_header.ivy").write_text("type cid\n")
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "no_header.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "no_header.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
-        assert parsed["success"] is True  # lint succeeds, but with diagnostics
+        assert parsed["success"] is True  # structural succeeds, but with diagnostics
         assert parsed["diagnostic_count"] > 0
         # Should have a warning about missing #lang
-        sources = {d.get("source", "") for d in parsed["diagnostics"]}
         assert any("lang" in d["message"].lower() for d in parsed["diagnostics"])
 
     @pytest.mark.asyncio
-    async def test_lint_unmatched_braces(self, tmp_path):
+    async def test_structural_unmatched_braces(self, tmp_path):
         """Unclosed brace -> error diagnostic."""
         (tmp_path / "bad_braces.ivy").write_text("#lang ivy1.7\n\ntype a = { b\n")
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "bad_braces.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "bad_braces.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
         assert parsed["diagnostic_count"] > 0
         assert parsed["error_count"] > 0
 
     @pytest.mark.asyncio
-    async def test_lint_unresolved_include(self, tmp_path):
+    async def test_structural_unresolved_include(self, tmp_path):
         """Unresolvable include -> warning diagnostic."""
         (tmp_path / "bad_include.ivy").write_text(
             "#lang ivy1.7\n\ninclude nonexistent_module\n\ntype x\n"
         )
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "bad_include.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "bad_include.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
         assert parsed["diagnostic_count"] > 0
         assert any(
@@ -91,11 +99,14 @@ class TestIvyLint:
         )
 
     @pytest.mark.asyncio
-    async def test_lint_valid_file_clean(self, tmp_path):
+    async def test_structural_valid_file_clean(self, tmp_path):
         """Valid file -> no diagnostics."""
         (tmp_path / "clean.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "clean.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "clean.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is True
         assert parsed["diagnostic_count"] == 0
@@ -185,10 +196,13 @@ class TestIvyDiagnostics:
 
 class TestErrorPaths:
     @pytest.mark.asyncio
-    async def test_lint_nonexistent_file(self, tmp_path):
-        """ivy_lint with nonexistent file -> success: False."""
+    async def test_structural_nonexistent_file(self, tmp_path):
+        """ivy_diagnostics(mode='structural') with nonexistent file -> success: False."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "no_such_file.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "no_such_file.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is False
         assert "message" in parsed

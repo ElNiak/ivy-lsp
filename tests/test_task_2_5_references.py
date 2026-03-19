@@ -74,6 +74,95 @@ class TestFindReferences:
         assert results == []
 
 
+class TestLayerScopedReferences:
+    """References should be scoped to the queried file's layer + upstream deps."""
+
+    def _make_layered_workspace(self, tmp_path):
+        """Create a workspace with quic and apt layers (apt depends_on quic)."""
+        from ivy_lsp.features.references import find_references
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.workspace_detection import WorkspaceLayer
+
+        quic_dir = tmp_path / "quic"
+        quic_dir.mkdir()
+        apt_dir = tmp_path / "apt"
+        apt_dir.mkdir()
+
+        (quic_dir / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
+        (quic_dir / "frame.ivy").write_text(
+            "#lang ivy1.7\ninclude types\nrelation uses_cid(X:cid)\n"
+        )
+        (apt_dir / "attack.ivy").write_text(
+            "#lang ivy1.7\ninclude types\nrelation forges_cid(X:cid)\n"
+        )
+
+        layers = [
+            WorkspaceLayer(id="quic", include_paths=["quic"], priority=1),
+            WorkspaceLayer(
+                id="apt", include_paths=["apt"], priority=2, depends_on=["quic"]
+            ),
+        ]
+        parser = IvyParserWrapper()
+        resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
+        # Build staging so _file_to_layer and _layer_by_id get populated.
+        resolver.create_staging_directory()
+        resolver.build_layered_staging()
+        indexer = WorkspaceIndexer(str(tmp_path), parser, resolver)
+        indexer.index_workspace()
+        return indexer, find_references
+
+    def test_quic_layer_excludes_apt_references(self, tmp_path):
+        indexer, find_references = self._make_layered_workspace(tmp_path)
+        quic_types = str(tmp_path / "quic" / "types.ivy")
+        lines = Path(quic_types).read_text().split("\n")
+        pos = Position(line=1, character=5)  # "cid"
+        results = find_references(indexer, quic_types, pos, lines)
+        uris = [r.uri for r in results]
+        assert any("types.ivy" in u for u in uris)
+        assert any("frame.ivy" in u for u in uris)
+        assert not any(
+            "attack.ivy" in u for u in uris
+        ), "References from downstream apt layer should be excluded"
+
+    def test_apt_layer_includes_quic_references(self, tmp_path):
+        indexer, find_references = self._make_layered_workspace(tmp_path)
+        apt_attack = str(tmp_path / "apt" / "attack.ivy")
+        lines = Path(apt_attack).read_text().split("\n")
+        pos = Position(line=2, character=22)  # "cid" in "forges_cid(X:cid)"
+        results = find_references(indexer, apt_attack, pos, lines)
+        uris = [r.uri for r in results]
+        assert any("attack.ivy" in u for u in uris)
+        # apt depends_on quic, so quic files should be visible
+        assert any("types.ivy" in u for u in uris)
+        assert any("frame.ivy" in u for u in uris)
+
+    def test_no_layers_returns_all_files(self, tmp_path):
+        """Without workspace layers, all files are searched (backward compat)."""
+        from ivy_lsp.features.references import find_references
+        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+
+        d1 = tmp_path / "d1"
+        d1.mkdir()
+        d2 = tmp_path / "d2"
+        d2.mkdir()
+        (d1 / "a.ivy").write_text("#lang ivy1.7\ntype cid\n")
+        (d2 / "b.ivy").write_text("#lang ivy1.7\nrelation r(X:cid)\n")
+        parser = IvyParserWrapper()
+        resolver = IncludeResolver(str(tmp_path))
+        indexer = WorkspaceIndexer(str(tmp_path), parser, resolver)
+        indexer.index_workspace()
+        lines = (d1 / "a.ivy").read_text().split("\n")
+        pos = Position(line=1, character=5)
+        results = find_references(indexer, str(d1 / "a.ivy"), pos, lines)
+        uris = [r.uri for r in results]
+        assert any("a.ivy" in u for u in uris)
+        assert any("b.ivy" in u for u in uris)
+
+
 class TestReferencesNotBlocking:
     """H4: references handler must use run_in_executor for file I/O."""
 

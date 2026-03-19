@@ -61,6 +61,29 @@ class BulkOrchestrationMixin:
         except Exception:
             logger.warning("Failed to send ivy/modelReady notification", exc_info=True)
 
+    def _write_shared_cache(self) -> None:
+        """Persist SemanticModel + RequirementGraph to shared disk cache.
+
+        Called after bulk T1+T2 analysis completes so the MCP process can
+        reuse the built model instead of rebuilding from scratch.
+        """
+        try:
+            from ivy_lsp.indexer.shared_cache import (
+                compute_freshness_key,
+                write_model_cache,
+            )
+
+            indexer = self._indexer
+            if indexer is None:
+                return
+            root = indexer._workspace_root
+            ivy_files = indexer.get_all_ivy_file_paths()
+            freshness = compute_freshness_key(root, ivy_files)
+            graph = indexer.requirement_graph
+            write_model_cache(root, self._semantic_model, graph, freshness)
+        except Exception:
+            logger.debug("Shared cache write skipped", exc_info=True)
+
     def _send_server_ready_notification(self, init_start: float) -> None:
         """Send ``ivy/serverReady`` notification after initialization completes."""
         if self._shutdown_event.is_set():
@@ -243,6 +266,7 @@ class BulkOrchestrationMixin:
                     },
                 )
                 self._send_model_ready_notification()
+                self._write_shared_cache()
                 self._start_bulk_compilation_via_pipeline()
             except RuntimeError as exc:
                 msg = str(exc).lower()

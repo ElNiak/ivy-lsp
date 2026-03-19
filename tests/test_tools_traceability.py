@@ -4,7 +4,6 @@ Covers:
 - ivy_extract_requirements (structured and manifest output)
 - Coverage diff uses full uncovered ID set (not truncated)
 - ivy_coverage mode dispatch
-- ivy_query error paths
 """
 
 import json
@@ -181,42 +180,6 @@ class TestCoverageModeValidation:
         assert (
             "matrix" in str(exc_info.value) or "literal" in str(exc_info.value).lower()
         )
-
-
-# ---------------------------------------------------------------------------
-# ivy_query error paths
-# ---------------------------------------------------------------------------
-
-
-class TestIvyQuery:
-    @pytest.mark.asyncio
-    async def test_query_impact_requires_symbol_name(self):
-        """ivy_query(mode='impact') without symbol_name returns error."""
-        mcp = _get_mcp_app()
-        result = await mcp.call_tool("ivy_query", {"mode": "impact"})
-        text = _extract_text(result)
-        data = json.loads(text)
-        assert data["success"] is False
-        assert "symbol_name" in data["message"]
-
-    @pytest.mark.asyncio
-    async def test_query_xrefs_requires_id(self):
-        """ivy_query(mode='xrefs') without node_id or symbol_name returns error."""
-        mcp = _get_mcp_app()
-        result = await mcp.call_tool("ivy_query", {"mode": "xrefs"})
-        text = _extract_text(result)
-        data = json.loads(text)
-        assert data["success"] is False
-
-    @pytest.mark.asyncio
-    async def test_query_info_requires_symbol_name(self):
-        """ivy_query(mode='info') without symbol_name returns error."""
-        mcp = _get_mcp_app()
-        result = await mcp.call_tool("ivy_query", {"mode": "info"})
-        text = _extract_text(result)
-        data = json.loads(text)
-        assert data["success"] is False
-        assert "symbol_name" in data["message"]
 
 
 # ---------------------------------------------------------------------------
