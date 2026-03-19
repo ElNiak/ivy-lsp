@@ -6,7 +6,6 @@ Consolidated from the original two tools:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -30,7 +29,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         context: str | None = None,
         protocol: str | None = None,
         max_items: int = 50,
-    ) -> str:
+    ) -> dict:
         """Get context-aware suggestions for improving the Ivy specification."""
         from ivy_lsp.features.visualization import handle_smart_suggestions
 
@@ -55,12 +54,12 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             result["total"] = len(suggestions)
             result["suggestions"] = suggestions[:max_items]
             result["truncated"] = True
-        return json.dumps(result)
+        return result
 
     async def _ivy_quality_gate(
         protocol: str,
         gate_level: str = "minimal",
-    ) -> str:
+    ) -> dict:
         """Validate a protocol model against quality gates."""
         prot_dir = os.path.join(ctx.root, "protocol-testing", protocol)
         if not os.path.isdir(prot_dir):
@@ -292,7 +291,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             unique_skipped = sorted(set(skipped_files))
             result["skipped_files"] = unique_skipped
             result["skipped_file_count"] = len(unique_skipped)
-        return json.dumps(result)
+        return result
 
     # ------------------------------------------------------------------
     # Public MCP tool
@@ -308,7 +307,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
         gate_level: str = "minimal",
         max_items: int = 50,
-    ) -> str:
+    ) -> dict:
         """Unified quality analysis tool for Ivy specifications.
 
         Combines context-aware suggestions with quality gate validation

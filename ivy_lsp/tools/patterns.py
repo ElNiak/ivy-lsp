@@ -7,7 +7,6 @@ Consolidated from the original three tools:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Any
@@ -29,7 +28,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         mode: str = "detect",
         pattern: str | None = None,
         reference_protocol: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Analyze formal model patterns in a protocol specification."""
         from ivy_lsp.features.patterns import handle_pattern_analysis
 
@@ -38,9 +37,9 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             params["pattern"] = pattern
         if reference_protocol:
             params["reference_protocol"] = reference_protocol
-        return json.dumps(handle_pattern_analysis(ctx.root, params))
+        return handle_pattern_analysis(ctx.root, params)
 
-    async def _ivy_scaffold_check(protocol: str) -> str:
+    async def _ivy_scaffold_check(protocol: str) -> dict:
         """Check which layers/patterns are present or missing in a protocol model."""
         # Canonical layers with detection heuristics
         _LAYERS = [
@@ -156,20 +155,18 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                 }
             )
 
-        return json.dumps(
-            {
-                "protocol": protocol,
-                "completeness_score": score,
-                "total_layers": total,
-                "present": present,
-                "missing": len(layers_missing),
-                "total_ivy_files": len(prot_files),
-                "has_manifest": has_manifest,
-                "layers_present": layers_present,
-                "layers_missing": layers_missing,
-                "suggestions": suggestions,
-            }
-        )
+        return {
+            "protocol": protocol,
+            "completeness_score": score,
+            "total_layers": total,
+            "present": present,
+            "missing": len(layers_missing),
+            "total_ivy_files": len(prot_files),
+            "has_manifest": has_manifest,
+            "layers_present": layers_present,
+            "layers_missing": layers_missing,
+            "suggestions": suggestions,
+        }
 
     # ------------------------------------------------------------------
     # Public MCP tools
@@ -182,7 +179,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         mode: str = "analyze",
         pattern: str | None = None,
         reference_protocol: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Unified pattern analysis and scaffold completeness checking tool.
 
         Combines pattern detection/validation with layer completeness
@@ -246,7 +243,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         role_type: str = "asymmetric",
         variant_names: list[str] | None = None,
         roles: list[str] | None = None,
-    ) -> str:
+    ) -> dict:
         """Generate Ivy source from a pattern template.
 
         Loads a pattern template, performs placeholder substitution with the
@@ -287,4 +284,4 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             params["variant_names"] = variant_names
         if roles:
             params["roles"] = roles
-        return _tc.finish(json.dumps(handle_pattern_scaffold(ctx.root, params)))
+        return _tc.finish(handle_pattern_scaffold(ctx.root, params))

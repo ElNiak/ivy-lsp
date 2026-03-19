@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -23,14 +22,21 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     @safe_tool
-    async def ivy_include_graph(relative_path: str | None = None) -> str:
+    async def ivy_include_graph(
+        relative_path: str | None = None,
+        detail: str = "summary",
+        limit: int = 30,
+    ) -> dict:
         """Return the include dependency graph for Ivy files.
 
         If a file is given, returns its includes and files that include it.
-        If omitted, returns the full project include graph.
+        If omitted, returns a workspace-level summary.
 
         Args:
             relative_path: Optional .ivy file to focus on.
+            detail: "summary" (default) returns file counts and top
+                entry points; "full" returns every file with its includes.
+            limit: Max files to return in summary mode (default 30).
         """
         logger.debug(
             "[ivy_include_graph] workspace=%s, args=%r",
@@ -141,35 +147,96 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     stack.extend(graph[mod_path])
 
             return _tc.finish(
-                json.dumps(
-                    {
-                        "file": relative_path,
-                        "includes": resolved,
-                        "included_by": included_by,
-                        "transitive_includes": sorted(transitive),
-                    }
-                )
+                {
+                    "file": relative_path,
+                    "includes": resolved,
+                    "included_by": included_by,
+                    "transitive_includes": sorted(transitive),
+                }
             )
         else:
-            return _tc.finish(
-                json.dumps(
+            # Compute entry points (files not included by any other file)
+            all_included = set()
+            for incs in graph.values():
+                all_included.update(incs)
+            entry_points = sorted(
+                fp
+                for fp in graph
+                if os.path.splitext(os.path.basename(fp))[0] not in all_included
+            )
+
+            if detail == "full":
+                # Full graph — may be very large
+                files_data = {fp: {"includes": incs} for fp, incs in graph.items()}
+                if limit > 0 and len(files_data) > limit:
+                    # Truncate
+                    truncated_keys = sorted(files_data.keys())[:limit]
+                    files_data = {k: files_data[k] for k in truncated_keys}
+                    return _tc.finish(
+                        {
+                            "files": files_data,
+                            "total_files": len(graph),
+                            "truncated": True,
+                            "showing": limit,
+                        }
+                    )
+                return _tc.finish(
                     {
-                        "files": {fp: {"includes": incs} for fp, incs in graph.items()},
+                        "files": files_data,
                         "total_files": len(graph),
                     }
                 )
-            )
+            else:
+                # Summary mode (default) — compact overview
+                # Top files by include count (most-included)
+                include_counts: dict[str, int] = {}
+                for incs in graph.values():
+                    for inc in incs:
+                        include_counts[inc] = include_counts.get(inc, 0) + 1
+                most_included = sorted(
+                    include_counts.items(), key=lambda x: x[1], reverse=True
+                )[:limit]
+
+                return _tc.finish(
+                    {
+                        "total_files": len(graph),
+                        "entry_points": entry_points[:limit],
+                        "entry_point_count": len(entry_points),
+                        "most_included": [
+                            {"module": mod, "included_by_count": cnt}
+                            for mod, cnt in most_included
+                        ],
+                        "detail": "summary",
+                        "hint": "Use detail='full' for the complete graph.",
+                    }
+                )
 
     @mcp.tool()
     @safe_tool
-    async def ivy_capabilities() -> str:
-        """Report which Ivy CLI tools are available on PATH and staging health."""
+    async def ivy_capabilities() -> dict:
+        """Report which Ivy CLI tools are available on PATH, MCP tools, and staging health."""
+        from ivy_lsp.tools import get_tool_metadata
+
         _tc = ToolTraceContext("ivy_capabilities", {})
         result: dict[str, Any] = {
             "success": True,
+            "cli_tools": {
+                "ivy_check": shutil.which("ivy_check") is not None,
+                "ivyc": shutil.which("ivyc") is not None,
+                "ivy_show": shutil.which("ivy_show") is not None,
+            },
+            # Also report legacy flat keys for backward compat
             "ivy_check": shutil.which("ivy_check") is not None,
             "ivyc": shutil.which("ivyc") is not None,
             "ivy_show": shutil.which("ivy_show") is not None,
+            "mcp_tools": {
+                name: {
+                    "category": meta.get("category", ""),
+                    "cost": meta.get("cost", ""),
+                }
+                for name, meta in get_tool_metadata().items()
+            },
+            "mcp_tool_count": len(get_tool_metadata()),
         }
         if ctx.include_resolver is not None and hasattr(
             ctx.include_resolver, "staging_health"
@@ -178,11 +245,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 result["staging_health"] = ctx.include_resolver.staging_health()
             except Exception:
                 pass  # staging health is optional
-        return _tc.finish(json.dumps(result))
+        return _tc.finish(result)
 
     @mcp.tool()
     @safe_tool
-    async def ivy_scope(relative_path: str) -> str:
+    async def ivy_scope(relative_path: str) -> dict:
         """Return endpoint mirror scope info for an Ivy file.
 
         Reports (all dynamically computed from the include graph):
@@ -266,11 +333,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                             ],
                         }
 
-        return _tc.finish(json.dumps(result, indent=2))
+        return _tc.finish(result)
 
     @mcp.tool()
     @safe_tool
-    async def ivy_health_check() -> str:
+    async def ivy_health_check() -> dict:
         """Server health check: uptime, cache status, tool metrics, model status.
 
         Returns server health information including:
@@ -328,4 +395,4 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         except Exception:
             health["workspace_files"] = -1
 
-        return _tc.finish(json.dumps(health, indent=2))
+        return _tc.finish(health)

@@ -8,6 +8,7 @@ Supports three modes:
 
 import logging
 import os
+import signal
 import sys
 from typing import Any
 
@@ -56,6 +57,27 @@ def _parse_mcp_port() -> int:
     return 0  # use default (19847)
 
 
+def _setup_log_rotation() -> None:
+    """Add a rotating file handler for MCP/LSP server logs.
+
+    Writes to ``/tmp/ivy-lsp.log`` with 5 MB rotation and 2 backups,
+    preventing unbounded log growth (previously 18 MB+ per day).
+    """
+    from logging.handlers import RotatingFileHandler
+
+    log_path = os.environ.get("IVY_LSP_LOG_FILE", "/tmp/ivy-lsp.log")
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=5 * 1024 * 1024,  # 5 MB
+        backupCount=2,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(name)s %(levelname)s: %(message)s")
+    )
+    logging.getLogger().addHandler(handler)
+
+
 def main():
     """Start the Ivy Language Server in LSP, MCP, or unified mode."""
     log_level = os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper()
@@ -65,6 +87,14 @@ def main():
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
     log = logging.getLogger("ivy_lsp")
+
+    # Add rotating file handler to prevent unbounded log growth
+    _setup_log_rotation()
+
+    # Add dedup filter to suppress cascading duplicate messages
+    from ivy_lsp.utils.log_dedup_filter import DedupFilter
+
+    logging.getLogger().addFilter(DedupFilter())
 
     # Initialize debug tracer if enabled
     from ivy_lsp.config import get_config
@@ -79,6 +109,17 @@ def main():
             log_path=cfg.debug_log_path,
         )
         log.info("Debug tracing enabled: %s", tracer.log_path)
+
+    def _sigterm_handler(signum, frame):
+        log.warning(
+            "[SIGTERM] Server received signal %d (PID=%d). Shutting down.",
+            signum,
+            os.getpid(),
+        )
+        logging.shutdown()
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     if "--mcp" in sys.argv:
         # Standalone MCP server mode (backward compat): stdio transport

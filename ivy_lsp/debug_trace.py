@@ -242,26 +242,40 @@ class ToolTraceContext:
         self._tracer = get_tracer()
         self._t0 = time.monotonic() if self._tracer else 0.0
 
-    def finish(self, result: str) -> str:
-        """Log the tool result and return it unchanged (passthrough)."""
+    def finish(self, result):
+        """Log the tool result and return it unchanged (passthrough).
+
+        Accepts both str and dict results.  Dicts are serialized for
+        the trace log but returned as-is so the formatter layer can
+        process them directly (avoiding double-encoding).
+        """
         if self._tracer is not None:
+            import json as _json
+
             elapsed = (time.monotonic() - self._t0) * 1000
+            trace_output = _json.dumps(result) if isinstance(result, dict) else result
             self._tracer.trace_mcp_call(
                 tool_name=self._tool_name,
                 inputs=self._inputs,
-                output=result,
+                output=trace_output,
                 duration_ms=elapsed,
             )
         return result
 
-    def finish_error(self, result: str, error: str) -> str:
-        """Log the tool error and return the result unchanged."""
+    def finish_error(self, result, error: str):
+        """Log the tool error and return the result unchanged.
+
+        Accepts both str and dict results.
+        """
         if self._tracer is not None:
+            import json as _json
+
             elapsed = (time.monotonic() - self._t0) * 1000
+            trace_output = _json.dumps(result) if isinstance(result, dict) else result
             self._tracer.trace_mcp_call(
                 tool_name=self._tool_name,
                 inputs=self._inputs,
-                output=result,
+                output=trace_output,
                 duration_ms=elapsed,
                 error=error,
             )
@@ -301,11 +315,16 @@ def trace_tool(
         error_msg = f"{type(exc).__name__}: {exc}"
         raise
     finally:
+        import json as _json
+
         elapsed = (time.monotonic() - t0) * 1000
+        trace_output = holder[0]
+        if isinstance(trace_output, dict):
+            trace_output = _json.dumps(trace_output)
         tracer.trace_mcp_call(
             tool_name=tool_name,
             inputs=inputs,
-            output=holder[0],
+            output=trace_output,
             duration_ms=elapsed,
             error=error_msg,
         )

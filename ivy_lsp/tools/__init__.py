@@ -176,21 +176,57 @@ def _ensure_semaphore() -> asyncio.Semaphore:
 # ---------------------------------------------------------------------------
 
 
-def error_response(message: str) -> str:
-    """Return a JSON error response string."""
-    return json.dumps({"success": False, "message": message})
+def error_response(message: str) -> dict:
+    """Return an error response dict."""
+    return {"success": False, "message": message}
 
 
-def _timeout_response(tool_name: str, timeout: float) -> str:
-    """Return a JSON response for a timed-out tool call."""
-    return json.dumps(
-        {
-            "success": False,
-            "message": f"Tool timed out after {timeout:.0f}s",
-            "timeout": True,
-            "tool": tool_name,
-        }
-    )
+def _timeout_response(tool_name: str, timeout: float) -> dict:
+    """Return a response dict for a timed-out tool call."""
+    return {
+        "success": False,
+        "message": f"Tool timed out after {timeout:.0f}s",
+        "timeout": True,
+        "tool": tool_name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Markdown formatting layer
+# ---------------------------------------------------------------------------
+
+from ivy_lsp.tools.formatters import format_error, format_tool_result
+
+
+def _format_result(tool_name: str, result: object) -> str | object:
+    """Post-process a tool result into markdown.
+
+    Handles two cases:
+    - ``str``: Parse JSON, then dispatch to the per-tool formatter.
+    - ``dict``: Dispatch directly (Phase 2 — tools returning dicts).
+
+    If the result is neither, or parsing fails, return it unchanged.
+
+    Set ``IVY_LSP_RAW_JSON=1`` to disable formatting (useful for tests
+    that assert on the raw JSON structure).
+    """
+    if os.environ.get("IVY_LSP_RAW_JSON"):
+        return result
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return result  # Not JSON — return as-is
+        if isinstance(parsed, dict):
+            if not parsed.get("success", True):
+                return format_error(parsed)
+            return format_tool_result(tool_name, parsed)
+        return result
+    if isinstance(result, dict):
+        if not result.get("success", True):
+            return format_error(result)
+        return format_tool_result(tool_name, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +265,7 @@ def safe_tool(fn):
         try:
             async with sem:
                 result = await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout)
+            result = _format_result(tool_name, result)
             return result
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - start
@@ -240,7 +277,14 @@ def safe_tool(fn):
                 elapsed,
                 timeout,
             )
-            return _timeout_response(tool_name, timeout)
+            return format_error(
+                {
+                    "success": False,
+                    "message": f"Tool timed out after {timeout:.0f}s",
+                    "timeout": True,
+                    "tool": tool_name,
+                }
+            )
         except Exception as exc:
             metrics.error_count += 1
             logger.error(
@@ -249,7 +293,9 @@ def safe_tool(fn):
                 exc,
                 exc_info=True,
             )
-            return error_response(f"Internal error in {tool_name}: {exc}")
+            return format_error(
+                {"success": False, "message": f"Internal error in {tool_name}: {exc}"}
+            )
         finally:
             elapsed = time.monotonic() - start
             metrics.call_count += 1
@@ -274,6 +320,9 @@ def safe_tool(fn):
         "ToolMetrics": ToolMetrics,
         "asyncio": asyncio,
         "time": time,
+        "format_error": format_error,
+        "format_tool_result": format_tool_result,
+        "_format_result": _format_result,
     }
     patched_globals = {**fn.__globals__, **_injected_names}
 

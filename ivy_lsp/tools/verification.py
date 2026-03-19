@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -138,7 +137,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         isolate: str | None = None,
         use_cache: bool = False,
         compact: bool = True,
-    ) -> str:
+    ) -> dict:
         """Run ivy_check on an Ivy file to verify formal properties.
 
         Returns structured diagnostics with file, line, severity, and message.
@@ -193,7 +192,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     if _cache_is_fresh(entry, abs_path):
                         cached_result = dict(entry.result)
                         cached_result["cached"] = True
-                        _tt[0] = json.dumps(cached_result)
+                        _tt[0] = cached_result
                         return _tt[0]
                     else:
                         # Stale — remove from cache
@@ -215,7 +214,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                             if _cache_is_fresh(entry, abs_path):
                                 cached_result = dict(entry.result)
                                 cached_result["cached"] = True
-                                _tt[0] = json.dumps(cached_result)
+                                _tt[0] = cached_result
                                 return _tt[0]
                         if cache_key not in _verify_in_flight:
                             _verify_in_flight.add(cache_key)
@@ -285,7 +284,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         " full output in /tmp/ivy-lsp-latest.log]"
                     )
 
-            _tt[0] = json.dumps(result)
+            _tt[0] = result
             return _tt[0]
 
     @mcp.tool()
@@ -294,7 +293,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         relative_path: str,
         target: str = "test",
         isolate: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Compile an Ivy file to a test executable using ivyc.
 
         When a Docker image is configured (--docker-image), compilation runs
@@ -357,14 +356,13 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         hasattr(setup_result, "exit_code")
                         and setup_result.exit_code != 0
                     ):
-                        _tt[0] = json.dumps(
-                            {
-                                "success": False,
-                                "message": f"Docker setup failed (exit {setup_result.exit_code})",
-                                "raw_output": getattr(setup_result, "stderr", ""),
-                                "duration_seconds": round(time.monotonic() - t0, 2),
-                            }
-                        )
+                        setup_fail = {
+                            "success": False,
+                            "message": f"Docker setup failed (exit {setup_result.exit_code})",
+                            "raw_output": getattr(setup_result, "stderr", ""),
+                            "duration_seconds": round(time.monotonic() - t0, 2),
+                        }
+                        _tt[0] = setup_fail
                         return _tt[0]
                     exec_result = await asyncio.to_thread(
                         ctx.executor.execute,
@@ -378,20 +376,17 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         exec_result.stderr + "\n" + exec_result.stdout
                     ).strip()
                     diagnostics = parse_ivy_output(raw_output)
-                    _tt[0] = json.dumps(
-                        {
-                            "success": exec_result.exit_code == 0
-                            and not any(d["severity"] == "error" for d in diagnostics),
-                            "diagnostics": diagnostics,
-                            "diagnostic_count": len(diagnostics),
-                            "error_summary": extract_error_summary(
-                                raw_output, diagnostics
-                            ),
-                            "raw_output": raw_output,
-                            "target": exec_result.target,
-                            "duration_seconds": round(duration, 2),
-                        }
-                    )
+                    compile_result_dict = {
+                        "success": exec_result.exit_code == 0
+                        and not any(d["severity"] == "error" for d in diagnostics),
+                        "diagnostics": diagnostics,
+                        "diagnostic_count": len(diagnostics),
+                        "error_summary": extract_error_summary(raw_output, diagnostics),
+                        "raw_output": raw_output,
+                        "target": exec_result.target,
+                        "duration_seconds": round(duration, 2),
+                    }
+                    _tt[0] = compile_result_dict
                     return _tt[0]
                 except ImportError:
                     logger.debug(
@@ -418,7 +413,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 result["fallback"] = "subprocess"
                 result["fallback_reason"] = _docker_fallback_reason
 
-            _tt[0] = json.dumps(result)
+            _tt[0] = result
             return _tt[0]
 
     @mcp.tool()
@@ -426,7 +421,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
     async def ivy_model_info(
         relative_path: str,
         isolate: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Display the structure of an Ivy model using ivy_show.
 
         Args:
@@ -464,7 +459,30 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 staging_dir=ctx.staging_dir,
                 resolver=ctx.include_resolver,
             )
-            _tt[0] = json.dumps(result)
+
+            # If the error mentions isolates, detect available isolates
+            if not result.get("success", True):
+                err_msg = result.get("error_summary", "") or result.get(
+                    "raw_output", ""
+                )
+                if "isolate" in err_msg.lower() or "no isolate" in err_msg.lower():
+                    # Scan file for isolate declarations
+                    try:
+                        with open(abs_path, encoding="utf-8", errors="replace") as f:
+                            source = f.read()
+                        isolates = re.findall(
+                            r"^\s*isolate\s+([\w.]+)\s*", source, re.MULTILINE
+                        )
+                        if isolates:
+                            result["available_isolates"] = isolates
+                            result["hint"] = (
+                                f"This file has {len(isolates)} isolate(s). "
+                                f"Specify one with isolate='{isolates[0]}'"
+                            )
+                    except OSError:
+                        pass
+
+            _tt[0] = result
             return _tt[0]
 
     @mcp.tool()
@@ -474,7 +492,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         mode: str = "full",
         layers: list[str] | None = None,
         min_severity: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Diagnostic analysis of an Ivy file.
 
         Supports two modes:
@@ -535,21 +553,19 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             resolve_cb = ctx.make_resolve_callback()
             diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
             return _tc.finish(
-                json.dumps(
-                    {
-                        "success": True,
-                        "file": relative_path,
-                        "mode": "structural",
-                        "diagnostics": diagnostics,
-                        "diagnostic_count": len(diagnostics),
-                        "error_count": sum(
-                            1 for d in diagnostics if d["severity"] == "error"
-                        ),
-                        "warning_count": sum(
-                            1 for d in diagnostics if d["severity"] == "warning"
-                        ),
-                    }
-                )
+                {
+                    "success": True,
+                    "file": relative_path,
+                    "mode": "structural",
+                    "diagnostics": diagnostics,
+                    "diagnostic_count": len(diagnostics),
+                    "error_count": sum(
+                        1 for d in diagnostics if d["severity"] == "error"
+                    ),
+                    "warning_count": sum(
+                        1 for d in diagnostics if d["severity"] == "warning"
+                    ),
+                }
             )
 
         # Full mode: all 5 diagnostic layers
@@ -757,29 +773,23 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             by_source[src] = by_source.get(src, 0) + 1
 
         return _tc.finish(
-            json.dumps(
-                {
-                    "success": True,
-                    "file": relative_path,
-                    "diagnostics": all_diags,
-                    "diagnostic_count": len(all_diags),
-                    "by_source": by_source,
-                    "error_count": sum(
-                        1 for d in all_diags if d.get("severity") == "error"
-                    ),
-                    "warning_count": sum(
-                        1 for d in all_diags if d.get("severity") == "warning"
-                    ),
-                    "hint_count": sum(
-                        1 for d in all_diags if d.get("severity") == "hint"
-                    ),
-                    "info_count": sum(
-                        1 for d in all_diags if d.get("severity") == "info"
-                    ),
-                    "layer_errors": layer_errors,
-                    "partial": bool(layer_errors),
-                }
-            )
+            {
+                "success": True,
+                "file": relative_path,
+                "diagnostics": all_diags,
+                "diagnostic_count": len(all_diags),
+                "by_source": by_source,
+                "error_count": sum(
+                    1 for d in all_diags if d.get("severity") == "error"
+                ),
+                "warning_count": sum(
+                    1 for d in all_diags if d.get("severity") == "warning"
+                ),
+                "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
+                "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
+                "layer_errors": layer_errors,
+                "partial": bool(layer_errors),
+            }
         )
 
     # -- Verification dashboard ------------------------------------------------
@@ -810,7 +820,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     @safe_tool
-    async def ivy_verification_dashboard() -> str:
+    async def ivy_verification_dashboard() -> dict:
         """Workspace-level verification status: files verified, failed, pending.
 
         Returns verification cache state showing which files have been
@@ -827,18 +837,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         ]
 
         return _tc.finish(
-            json.dumps(
-                {
-                    "success": True,
-                    "total_files": len(ivy_files),
-                    "verified": len(verified_set),
-                    "failed": len(failed_set),
-                    "pending": len(pending),
-                    "cache_size": cache["cache_size"],
-                    "cache_max": cache["cache_max"],
-                    "verified_files": sorted(verified_set),
-                    "failed_files": sorted(failed_set),
-                },
-                indent=2,
-            )
+            {
+                "success": True,
+                "total_files": len(ivy_files),
+                "verified": len(verified_set),
+                "failed": len(failed_set),
+                "pending": len(pending),
+                "cache_size": cache["cache_size"],
+                "cache_max": cache["cache_max"],
+                "verified_files": sorted(verified_set),
+                "failed_files": sorted(failed_set),
+            }
         )

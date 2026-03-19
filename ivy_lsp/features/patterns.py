@@ -206,13 +206,33 @@ def handle_pattern_scaffold(
     if not catalog:
         return {"success": False, "message": "pattern_catalog.yaml not found"}
 
-    pattern_info = catalog.get("patterns", {}).get(pattern)
+    available_patterns = catalog.get("patterns", {})
+    pattern_info = available_patterns.get(pattern)
+
+    # Fuzzy match: try singular/plural normalization and close matches
     if not pattern_info:
-        return {
-            "success": False,
-            "message": f"Unknown pattern: {pattern}",
-            "available": list(catalog.get("patterns", {}).keys()),
-        }
+        import difflib
+
+        available_keys = list(available_patterns.keys())
+        # Try singular/plural normalization
+        normalized = pattern
+        if pattern.endswith("s") and pattern[:-1] in available_patterns:
+            normalized = pattern[:-1]
+        elif not pattern.endswith("s") and (pattern + "s") in available_patterns:
+            normalized = pattern + "s"
+
+        if normalized != pattern:
+            pattern_info = available_patterns.get(normalized)
+            pattern = normalized  # Use the resolved name
+
+        if not pattern_info:
+            close = difflib.get_close_matches(pattern, available_keys, n=3, cutoff=0.6)
+            return {
+                "success": False,
+                "message": f"Unknown pattern: {pattern}",
+                "available": available_keys,
+                "did_you_mean": close if close else None,
+            }
 
     # Determine template files to load
     templates = pattern_info.get("templates", {})

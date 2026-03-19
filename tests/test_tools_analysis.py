@@ -122,11 +122,19 @@ class TestIncludeGraphMissing:
 class TestIncludeGraphFull:
     @pytest.mark.asyncio
     async def test_full_graph_without_file(self, tmp_path):
-        """Include graph returns full project graph when no file specified."""
+        """Include graph returns summary by default, full with detail='full'."""
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\n\ntype a_t\n")
         (tmp_path / "b.ivy").write_text("#lang ivy1.7\n\ninclude a\n\ntype b_t\n")
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
+
+        # Default: summary mode
         result = await mcp.call_tool("ivy_include_graph", {})
+        data = json.loads(_extract_text(result))
+        assert data["total_files"] == 2
+        assert "entry_points" in data
+
+        # Full mode
+        result = await mcp.call_tool("ivy_include_graph", {"detail": "full"})
         data = json.loads(_extract_text(result))
         assert "files" in data
         assert data["total_files"] == 2

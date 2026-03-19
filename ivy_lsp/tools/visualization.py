@@ -9,7 +9,6 @@ Consolidated from the original six tools:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Literal
 
@@ -32,7 +31,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
         offset: int = 0,
         limit: int | None = None,
-    ) -> str:
+    ) -> dict:
         """Get requirements organized by action boundaries."""
         from ivy_lsp.features.visualization import handle_action_requirements
 
@@ -56,14 +55,14 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             params["offset"] = offset
         if limit is not None:
             params["limit"] = limit
-        return json.dumps(handle_action_requirements(server_proxy, params))
+        return handle_action_requirements(server_proxy, params)
 
     async def _ivy_model_summary_logic(
         test_file: str | None = None,
         protocol: str | None = None,
         sort_by: str | None = None,
         limit: int | None = None,
-    ) -> str:
+    ) -> dict:
         """Get per-action requirement counts, state variable usage, and RFC coverage."""
         from ivy_lsp.features.visualization import handle_model_summary_table
 
@@ -102,13 +101,13 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         else:
             result["rows"] = rows
 
-        return json.dumps(result)
+        return result
 
     async def _ivy_action_dependency_graph(
         test_file: str | None = None,
         include_state_vars: bool = False,
         protocol: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Return the action dependency graph showing shared-state relationships."""
         from ivy_lsp.features.visualization import handle_action_dependency_graph
 
@@ -123,13 +122,13 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             params["includeStateVars"] = True
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
-        return json.dumps(handle_action_dependency_graph(server_proxy, params))
+        return handle_action_dependency_graph(server_proxy, params)
 
     async def _ivy_state_machine_view(
         test_file: str | None = None,
         state_var_filter: str | None = None,
         protocol: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Return a state-machine view of the Ivy specification."""
         from ivy_lsp.features.visualization import handle_state_machine_view
 
@@ -144,13 +143,13 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             params["stateVarFilter"] = state_var_filter
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
-        return json.dumps(handle_state_machine_view(server_proxy, params))
+        return handle_state_machine_view(server_proxy, params)
 
     async def _ivy_layered_overview(
         test_file: str | None = None,
         group_by: str = "file",
         protocol: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Get a layered overview of the Ivy model organized by file or module."""
         from ivy_lsp.features.visualization import handle_layered_overview
 
@@ -165,7 +164,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             params["groupBy"] = group_by
         if protocol:
             params["protocolFilter"] = f"protocol-testing/{protocol}/"
-        return json.dumps(handle_layered_overview(server_proxy, params))
+        return handle_layered_overview(server_proxy, params)
 
     # ------------------------------------------------------------------
     # Public MCP tools
@@ -192,7 +191,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         state_var_filter: str | None = None,
         group_by: str = "file",
         max_items: int = 50,
-    ) -> str:
+    ) -> dict:
         """Unified model visualization tool.
 
         Combines dependency graph, state machine view, and layered overview
@@ -235,23 +234,22 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 )
             )
         if view == "state_machine":
-            raw = await _ivy_state_machine_view(test_file, state_var_filter, protocol)
-            result = json.loads(raw)
+            result = await _ivy_state_machine_view(
+                test_file, state_var_filter, protocol
+            )
             result = _apply_max_items(result, "states", max_items)
             result = _apply_max_items(result, "transitions", max_items)
-            return _tc.finish(json.dumps(result))
+            return _tc.finish(result)
         elif view == "layers":
-            raw = await _ivy_layered_overview(test_file, group_by, protocol)
-            result = json.loads(raw)
+            result = await _ivy_layered_overview(test_file, group_by, protocol)
             result = _apply_max_items(result, "layers", max_items)
-            return _tc.finish(json.dumps(result))
+            return _tc.finish(result)
         else:  # default: dependencies
-            raw = await _ivy_action_dependency_graph(
+            result = await _ivy_action_dependency_graph(
                 test_file, include_state_vars, protocol
             )
-            result = json.loads(raw)
             result = _apply_max_items(result, "nodes", max_items)
-            return _tc.finish(json.dumps(result))
+            return _tc.finish(result)
 
     @mcp.tool()
     @safe_tool
@@ -265,7 +263,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         file_path: str | None = None,
         offset: int = 0,
         max_items: int = 50,
-    ) -> str:
+    ) -> dict:
         """Unified model summary and action requirements tool.
 
         Combines per-action summary statistics with detailed action

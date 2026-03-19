@@ -10,7 +10,6 @@ provided by the LSP server via hover, findReferences, and call hierarchy.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -38,40 +37,34 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # Private helpers (former standalone tool bodies)
     # ------------------------------------------------------------------
 
-    def _model_unavailable_response() -> str:
+    def _model_unavailable_response() -> dict:
         """Error response with indexing status note."""
         status = ctx.get_model_status()
         if status.get("state") == "not_built":
-            return json.dumps(
-                {
-                    "success": False,
-                    "message": "Semantic model unavailable",
-                    "note": "LSP is still indexing. Results may be incomplete. Try again shortly.",
-                }
-            )
+            return {
+                "success": False,
+                "message": "Semantic model unavailable",
+                "note": "LSP is still indexing. Results may be incomplete. Try again shortly.",
+            }
         if status.get("state") == "building":
-            return json.dumps(
-                {
-                    "success": False,
-                    "message": "Semantic model is currently building",
-                    "note": "The model is being built (this can take 2-4 minutes on first use). Try again shortly.",
-                }
-            )
+            return {
+                "success": False,
+                "message": "Semantic model is currently building",
+                "note": "The model is being built (this can take 2-4 minutes on first use). Try again shortly.",
+            }
         if status.get("state") == "failed":
-            return json.dumps(
-                {
-                    "success": False,
-                    "message": "Semantic model unavailable",
-                    "note": f"Model build failed: {status.get('error', 'unknown')}. "
-                    f"Retry in {status.get('retry_in_seconds', '?')}s.",
-                }
-            )
+            return {
+                "success": False,
+                "message": "Semantic model unavailable",
+                "note": f"Model build failed: {status.get('error', 'unknown')}. "
+                f"Retry in {status.get('retry_in_seconds', '?')}s.",
+            }
         return error_response("Semantic model unavailable")
 
     async def _ivy_traceability_matrix(
         relative_path: str | None = None,
         test_file: str | None = None,
-    ) -> str:
+    ) -> dict:
         """RFC requirement-to-annotation traceability matrix."""
         # Check model status first to avoid blocking
         status = ctx.get_model_status()
@@ -158,12 +151,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         }
         if warnings:
             result["warnings"] = warnings
-        return json.dumps(result)
+        return result
 
     async def _ivy_requirement_coverage(
         relative_path: str | None = None,
         test_file: str | None = None,
-    ) -> str:
+    ) -> dict:
         """RFC requirement coverage statistics by level and layer."""
         # Check model status first to avoid blocking
         status = ctx.get_model_status()
@@ -209,21 +202,19 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         # FX2 fix: when relative_path scoping yields no annotations,
         # return zero coverage instead of counting global requirements.
         if relative_path and not annotations:
-            return json.dumps(
-                {
-                    "total": 0,
-                    "covered": 0,
-                    "uncovered": 0,
-                    "coverage_percent": 0,
-                    "by_level": {},
-                    "by_layer": {},
-                    "uncovered_ids": [],
-                    "_uncovered_ids_full": [],
-                    "_covered_ids": [],
-                    "counting_method": "manifest_annotations",
-                    "scope": relative_path,
-                }
-            )
+            return {
+                "total": 0,
+                "covered": 0,
+                "uncovered": 0,
+                "coverage_percent": 0,
+                "by_level": {},
+                "by_layer": {},
+                "uncovered_ids": [],
+                "_uncovered_ids_full": [],
+                "_covered_ids": [],
+                "counting_method": "manifest_annotations",
+                "scope": relative_path,
+            }
 
         req_ids = {r.id for r in requirements}
         covered_tags: set[str] = set()
@@ -307,12 +298,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         scope_key = relative_path or "__global__"
         _coverage_baselines[scope_key] = result
 
-        return json.dumps(result)
+        return result
 
     async def _ivy_coverage_gaps(
         test_file: str | None = None,
         protocol: str | None = None,
-    ) -> str:
+    ) -> dict:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements."""
         from ivy_lsp.features.visualization import handle_coverage_gaps
 
@@ -329,11 +320,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         # C4 fix: override RFC uncovered requirements using the same
         # logic as _ivy_requirement_coverage() so stats and gaps agree.
-        stats_raw = await _ivy_requirement_coverage(
-            relative_path=None, test_file=test_file
-        )
+        stats = await _ivy_requirement_coverage(relative_path=None, test_file=test_file)
         try:
-            stats = json.loads(stats_raw)
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
             # Check model status first to avoid blocking
             _status = ctx.get_model_status()
@@ -383,7 +371,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             result["summary"]["uncoveredRfcCount"] = len(
                 result.get("uncoveredRfcRequirements", [])
             )
-        except (json.JSONDecodeError, KeyError):
+        except KeyError:
             pass  # Fall back to visualization handler result
 
         # Apply protocol filter to uncovered requirements
@@ -409,9 +397,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 )
 
         result["counting_method"] = "requirement_graph_with_stats_overlay"
-        return json.dumps(result)
+        return result
 
-    async def _ivy_coverage_diff(relative_path: str | None = None) -> str:
+    async def _ivy_coverage_diff(relative_path: str | None = None) -> dict:
         """Compare current coverage against the cached baseline."""
         scope_key = relative_path or "__global__"
         baseline = _coverage_baselines.get(scope_key)
@@ -423,8 +411,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             )
 
         # Get current stats (this also updates the baseline)
-        current_raw = await _ivy_requirement_coverage(relative_path)
-        current = json.loads(current_raw)
+        current = await _ivy_requirement_coverage(relative_path)
 
         if not current.get("total"):
             return error_response("No requirements found")
@@ -469,21 +456,19 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             parts.append("no changes")
         summary = f"Coverage {direction} by {abs(delta)}% ({', '.join(parts)})"
 
-        return json.dumps(
-            {
-                "baseline_coverage_percent": baseline_pct,
-                "current_coverage_percent": current_pct,
-                "delta_percent": delta,
-                "delta_direction": direction,
-                "new_gaps": new_gaps,
-                "recovered": recovered,
-                "unchanged_covered": unchanged_covered,
-                "unchanged_uncovered": unchanged_uncovered,
-                "summary": summary,
-            }
-        )
+        return {
+            "baseline_coverage_percent": baseline_pct,
+            "current_coverage_percent": current_pct,
+            "delta_percent": delta,
+            "delta_direction": direction,
+            "new_gaps": new_gaps,
+            "recovered": recovered,
+            "unchanged_covered": unchanged_covered,
+            "unchanged_uncovered": unchanged_uncovered,
+            "summary": summary,
+        }
 
-    async def _ivy_extract_requirements_logic(rfc_text: str) -> str:
+    async def _ivy_extract_requirements_logic(rfc_text: str) -> dict:
         """Parse RFC text to extract MUST/SHOULD/MAY structured requirements."""
         results = []
         for m in _RFC_REQ_PATTERN.finditer(rfc_text):
@@ -507,23 +492,21 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 }
             )
 
-        return json.dumps(
-            {
-                "requirements": results,
-                "total": len(results),
-                "by_level": {
-                    level: sum(1 for r in results if r["level"] == level)
-                    for level in sorted({r["level"] for r in results})
-                },
-            }
-        )
+        return {
+            "requirements": results,
+            "total": len(results),
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        }
 
     async def _ivy_generate_manifest(
         rfc_name: str,
         rfc_text: str,
         protocol: str = "",
         base_section: str = "",
-    ) -> str:
+    ) -> dict:
         """Generate a YAML requirements manifest from RFC text."""
         results = []
         for m in _RFC_REQ_PATTERN.finditer(rfc_text):
@@ -563,17 +546,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 f"protocol-testing/{protocol}/" f"{rfc_lower}_requirements.yaml"
             )
 
-        return json.dumps(
-            {
-                "yaml": yaml_content,
-                "total_requirements": len(results),
-                "suggested_path": suggested_path,
-                "by_level": {
-                    level: sum(1 for r in results if r["level"] == level)
-                    for level in sorted({r["level"] for r in results})
-                },
-            }
-        )
+        return {
+            "yaml": yaml_content,
+            "total_requirements": len(results),
+            "suggested_path": suggested_path,
+            "by_level": {
+                level: sum(1 for r in results if r["level"] == level)
+                for level in sorted({r["level"] for r in results})
+            },
+        }
 
     # ------------------------------------------------------------------
     # Public MCP tools
@@ -588,7 +569,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
         compact: bool = True,
         max_items: int = 50,
-    ) -> str:
+    ) -> dict:
         """Unified RFC coverage analysis tool.
 
         Combines traceability matrix, coverage statistics, gap detection,
@@ -648,39 +629,29 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 )
             )
         if mode == "matrix":
-            raw = await _ivy_traceability_matrix(relative_path, test_file)
+            result_dict = await _ivy_traceability_matrix(relative_path, test_file)
             if max_items > 0:
-                try:
-                    result_dict = json.loads(raw)
-                    matrix = result_dict.get("matrix", [])
-                    if len(matrix) > max_items:
-                        result_dict["matrix"] = matrix[:max_items]
-                        result_dict["matrix_truncated"] = True
-                        result_dict["matrix_total"] = len(matrix)
-                    raw = json.dumps(result_dict)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            return _tc.finish(raw)
+                matrix = result_dict.get("matrix", [])
+                if len(matrix) > max_items:
+                    result_dict["matrix"] = matrix[:max_items]
+                    result_dict["matrix_truncated"] = True
+                    result_dict["matrix_total"] = len(matrix)
+            return _tc.finish(result_dict)
         elif mode == "gaps":
             return _tc.finish(await _ivy_coverage_gaps(test_file, protocol))
         elif mode == "diff":
             return _tc.finish(await _ivy_coverage_diff(relative_path))
         else:  # default: stats
-            raw = await _ivy_requirement_coverage(relative_path, test_file)
+            result_dict = await _ivy_requirement_coverage(relative_path, test_file)
             if compact:
-                try:
-                    result_dict = json.loads(raw)
-                    result_dict.pop("_uncovered_ids_full", None)
-                    result_dict.pop("_covered_ids", None)
-                    if max_items > 0:
-                        uncovered = result_dict.get("uncovered_ids", [])
-                        if len(uncovered) > max_items:
-                            result_dict["uncovered_ids"] = uncovered[:max_items]
-                            result_dict["uncovered_ids_truncated"] = True
-                    raw = json.dumps(result_dict)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            return _tc.finish(raw)
+                result_dict.pop("_uncovered_ids_full", None)
+                result_dict.pop("_covered_ids", None)
+                if max_items > 0:
+                    uncovered = result_dict.get("uncovered_ids", [])
+                    if len(uncovered) > max_items:
+                        result_dict["uncovered_ids"] = uncovered[:max_items]
+                        result_dict["uncovered_ids_truncated"] = True
+            return _tc.finish(result_dict)
 
     @mcp.tool()
     @safe_tool
@@ -692,7 +663,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         base_section: str = "",
         rfc_source: str = "",
         sections: str = "",
-    ) -> str:
+    ) -> dict:
         """Parse RFC text to extract MUST/SHOULD/MAY requirements.
 
         Can output either structured requirement data or a YAML manifest
@@ -777,27 +748,22 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 return _tc.finish(
                     error_response("rfc_name is required for output='manifest'")
                 )
-            result_str = await _ivy_generate_manifest(
+            result_data = await _ivy_generate_manifest(
                 rfc_name, rfc_text, protocol, base_section
             )
             # Add metadata if we fetched the source
             if fetch_result:
-                try:
-                    import datetime
+                import datetime
 
-                    result_data = json.loads(result_str)
-                    result_data["metadata"] = {
-                        "generated_at": datetime.datetime.now(
-                            datetime.timezone.utc
-                        ).isoformat(),
-                        "generator_version": "ivy-lsp",
-                        "source": fetch_result.source,
-                        "content_hash": fetch_result.content_hash,
-                    }
-                    return _tc.finish(json.dumps(result_data))
-                except json.JSONDecodeError:
-                    pass
-            return _tc.finish(result_str)
+                result_data["metadata"] = {
+                    "generated_at": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                    "generator_version": "ivy-lsp",
+                    "source": fetch_result.source,
+                    "content_hash": fetch_result.content_hash,
+                }
+            return _tc.finish(result_data)
         else:  # default: structured
             return _tc.finish(await _ivy_extract_requirements_logic(rfc_text))
 
@@ -810,7 +776,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         protocol: str = "",
         rfc_source: str = "",
         check_online: bool = False,
-    ) -> str:
+    ) -> dict:
         """Manage and inspect requirement manifests.
 
         Args:
@@ -888,13 +854,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                             protocols_without.append(entry)
 
             return _tc.finish(
-                json.dumps(
-                    {
-                        "manifests": summaries,
-                        "total_manifests": len(summaries),
-                        "protocols_without_manifests": protocols_without,
-                    }
-                )
+                {
+                    "manifests": summaries,
+                    "total_manifests": len(summaries),
+                    "protocols_without_manifests": protocols_without,
+                }
             )
 
         elif mode == "validate":
@@ -931,13 +895,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 )
 
             return _tc.finish(
-                json.dumps(
-                    {
-                        "results": results,
-                        "total_manifests": len(results),
-                        "all_valid": all(r.get("valid", False) for r in results),
-                    }
-                )
+                {
+                    "results": results,
+                    "total_manifests": len(results),
+                    "all_valid": all(r.get("valid", False) for r in results),
+                }
             )
 
         elif mode == "staleness":
@@ -1004,7 +966,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     }
                 )
 
-            return _tc.finish(json.dumps({"reports": reports}))
+            return _tc.finish({"reports": reports})
 
         elif mode == "refresh":
             if not rfc_source:
@@ -1019,8 +981,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 fetch_result = await fetch_rfc(rfc_source)
 
                 # Extract requirements from fetched text
-                new_reqs_raw = await _ivy_extract_requirements_logic(fetch_result.text)
-                new_reqs = json.loads(new_reqs_raw)
+                new_reqs = await _ivy_extract_requirements_logic(fetch_result.text)
             except Exception as exc:
                 return _tc.finish(error_response(f"Failed to fetch/parse: {exc}"))
 
@@ -1031,17 +992,13 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 current_ids.update(result.requirements.keys())
 
             return _tc.finish(
-                json.dumps(
-                    {
-                        "rfc_source": rfc_source,
-                        "new_requirements_found": new_reqs.get("total", 0),
-                        "current_manifest_ids": len(current_ids),
-                        "by_level": new_reqs.get("by_level", {}),
-                        "source_hash": (
-                            fetch_result.content_hash if fetch_result else ""
-                        ),
-                    }
-                )
+                {
+                    "rfc_source": rfc_source,
+                    "new_requirements_found": new_reqs.get("total", 0),
+                    "current_manifest_ids": len(current_ids),
+                    "by_level": new_reqs.get("by_level", {}),
+                    "source_hash": (fetch_result.content_hash if fetch_result else ""),
+                }
             )
 
         return _tc.finish(error_response(f"Unknown mode '{mode}'"))

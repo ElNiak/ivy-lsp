@@ -33,6 +33,12 @@ _CPP_ERROR_LINE = re.compile(
     r"(.*?\.\w+):(\d+):\d+:\s*(error|warning|fatal error):\s*(.*)"
 )
 
+# Python traceback final exception line: FileNotFoundError: [Errno 2] No such file
+# Matches the last line of a Python traceback (the actual exception).
+_PYTHON_EXCEPTION_LINE = re.compile(
+    r"^(\w+(?:\.\w+)*(?:Error|Exception|Warning|Exit))\s*:\s*(.*)"
+)
+
 # Unified exclusion set — superset of mcp_server.py and include_resolver.py
 DEFAULT_EXCLUDE_DIRS = frozenset(
     {
@@ -137,6 +143,18 @@ def parse_ivy_output(output: str) -> List[Dict[str, Any]]:
                             "source": "ivy_check",
                         }
 
+        # Try Python exception line (e.g. FileNotFoundError: ...)
+        if diag is None:
+            m = _PYTHON_EXCEPTION_LINE.match(raw_line.strip())
+            if m:
+                diag = {
+                    "file": "",
+                    "line": 0,
+                    "severity": "error",
+                    "message": f"{m.group(1)}: {m.group(2)}",
+                    "source": "python_exception",
+                }
+
         if diag is not None:
             key = (diag["file"], diag["line"], diag["message"])
             if key not in seen:
@@ -166,6 +184,14 @@ def extract_error_summary(
         # No errors but have warnings — use first warning
         d = diagnostics[0]
         return f"{d['file']}:{d['line']}: {d['message']}"
+
+    # Try to extract Python exception from traceback
+    if "Traceback (most recent call last):" in raw_output:
+        for line in reversed(raw_output.splitlines()):
+            stripped = line.strip()
+            m = _PYTHON_EXCEPTION_LINE.match(stripped)
+            if m:
+                return f"{m.group(1)}: {m.group(2)}"
 
     # Fallback: last non-empty line
     for line in reversed(raw_output.splitlines()):

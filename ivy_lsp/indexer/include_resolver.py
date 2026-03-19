@@ -149,6 +149,8 @@ class IncludeResolver:
         self._file_to_layer: Dict[str, str] = {}
         # Layer ID → layer object mapping (populated by build_layered_staging)
         self._layer_by_id: Dict[str, Any] = {}
+        # Track files we've already warned about (dedup layer routing warnings)
+        self._warned_routing_miss: set = set()
 
     @property
     def collision_map(self) -> Dict[str, List[str]]:
@@ -284,13 +286,19 @@ class IncludeResolver:
 
             elif not layer_id and self._file_to_layer:
                 # File should be in a layer but isn't in _file_to_partition
-                logger.warning(
-                    "Layer routing miss: %s not in _file_to_partition (%d entries). "
-                    "abs_from=%s",
-                    os.path.relpath(from_file, self._workspace_root),
-                    len(self._file_to_partition),
-                    abs_from[-80:],
-                )
+                # Log WARNING on first occurrence per file, then DEBUG
+                _rel = os.path.relpath(from_file, self._workspace_root)
+                if _rel not in self._warned_routing_miss:
+                    self._warned_routing_miss.add(_rel)
+                    logger.warning(
+                        "Layer routing miss: %s not in _file_to_partition (%d entries). "
+                        "abs_from=%s",
+                        _rel,
+                        len(self._file_to_partition),
+                        abs_from[-80:],
+                    )
+                else:
+                    logger.debug("Layer routing miss (repeat): %s", _rel)
 
         # 3. Flat staging directory
         if self._staging_dir:
