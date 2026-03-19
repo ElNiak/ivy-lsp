@@ -83,7 +83,7 @@ def discover_stdlib_modules(
         try:
             import ivy as ivy_mod
 
-            ivy_dir = os.path.dirname(os.path.abspath(ivy_mod.__file__))
+            ivy_dir = os.path.dirname(os.path.realpath(ivy_mod.__file__))
             inc_base = os.path.join(ivy_dir, "include")
             if not os.path.isdir(inc_base):
                 return _STDLIB_FALLBACK
@@ -132,7 +132,7 @@ class IncludeResolver:
         workspace_layers: Optional[List] = None,
     ) -> None:
         """Initialize resolver with workspace root and search paths."""
-        self._workspace_root = os.path.abspath(workspace_root)
+        self._workspace_root = os.path.realpath(workspace_root)
         self._ivy_include_path = ivy_include_path
         self._exclude_paths = [p.rstrip(os.sep) for p in (exclude_paths or [])]
         self._include_paths = [p.rstrip(os.sep) for p in (include_paths or [])]
@@ -147,6 +147,8 @@ class IncludeResolver:
         self._workspace_layers = workspace_layers or []
         # File → layer ID mapping (populated when workspace_layers is set)
         self._file_to_layer: Dict[str, str] = {}
+        # Layer ID → layer object mapping (populated by build_layered_staging)
+        self._layer_by_id: Dict[str, Any] = {}
 
     @property
     def collision_map(self) -> Dict[str, List[str]]:
@@ -209,15 +211,15 @@ class IncludeResolver:
         fname = include_name + ".ivy"
 
         # 1. Same directory as the including file
-        from_dir = os.path.dirname(os.path.abspath(from_file))
+        from_dir = os.path.dirname(os.path.realpath(from_file))
         candidate = os.path.join(from_dir, fname)
         if os.path.isfile(candidate):
-            return os.path.abspath(candidate)
+            return os.path.realpath(candidate)
 
         # 2. Layer-aware staging (when active, replaces flat staging for
         #    colliding basenames)
         if self._partition_staging and self._file_to_partition:
-            abs_from = os.path.abspath(from_file)
+            abs_from = os.path.realpath(from_file)
             layer_id = self._file_to_partition.get(abs_from)
             if layer_id and layer_id in self._partition_staging:
                 candidate = os.path.join(self._partition_staging[layer_id], fname)
@@ -231,6 +233,15 @@ class IncludeResolver:
                     self._partition_staging[layer_id],
                     os.path.relpath(from_file, self._workspace_root),
                 )
+                # Cross-layer dependency fallback: try dependency layers
+                layer_obj = self._layer_by_id.get(layer_id)
+                if layer_obj and layer_obj.depends_on:
+                    for dep_id in layer_obj.depends_on:
+                        dep_staging = self._partition_staging.get(dep_id)
+                        if dep_staging:
+                            candidate = os.path.join(dep_staging, fname)
+                            if os.path.isfile(candidate):
+                                return os.path.realpath(candidate)
             elif not layer_id and self._file_to_layer:
                 # File should be in a layer but isn't in _file_to_partition
                 logger.warning(
@@ -264,14 +275,14 @@ class IncludeResolver:
         # 4. Workspace root
         candidate = os.path.join(self._workspace_root, fname)
         if os.path.isfile(candidate):
-            return os.path.abspath(candidate)
+            return os.path.realpath(candidate)
 
         # 5. Standard library
         std_dir = self._get_std_include_dir()
         if std_dir is not None:
             candidate = os.path.join(std_dir, fname)
             if os.path.isfile(candidate):
-                return os.path.abspath(candidate)
+                return os.path.realpath(candidate)
 
         return None
 
@@ -409,7 +420,7 @@ class IncludeResolver:
             # Classify: intra-layer (real problem) vs cross-layer (expected)
             if self._file_to_layer:
                 layers_involved = {
-                    self._file_to_layer.get(os.path.abspath(p), "unknown")
+                    self._file_to_layer.get(os.path.realpath(p), "unknown")
                     for p in paths
                 }
                 if len(layers_involved) <= 1:
@@ -506,7 +517,7 @@ class IncludeResolver:
         original = self._staged_files.get(basename)
         if original is None:
             return None
-        if os.path.abspath(filepath) != os.path.abspath(original):
+        if os.path.realpath(filepath) != os.path.realpath(original):
             return None
         staged = os.path.join(self._staging_dir, basename)
         if os.path.isfile(staged):
@@ -680,13 +691,13 @@ class IncludeResolver:
             return self.resolve(include_name, from_file)
 
         fname = include_name + ".ivy"
-        abs_from = os.path.abspath(from_file)
+        abs_from = os.path.realpath(from_file)
 
         # 1. Same directory as the including file
         from_dir = os.path.dirname(abs_from)
         candidate = os.path.join(from_dir, fname)
         if os.path.isfile(candidate):
-            return os.path.abspath(candidate)
+            return os.path.realpath(candidate)
 
         # 2. Partition-specific staging directory
         partition_id = self._file_to_partition.get(abs_from)
@@ -705,20 +716,20 @@ class IncludeResolver:
         # 4. Workspace root
         candidate = os.path.join(self._workspace_root, fname)
         if os.path.isfile(candidate):
-            return os.path.abspath(candidate)
+            return os.path.realpath(candidate)
 
         # 5. Standard library
         std_dir = self._get_std_include_dir()
         if std_dir is not None:
             candidate = os.path.join(std_dir, fname)
             if os.path.isfile(candidate):
-                return os.path.abspath(candidate)
+                return os.path.realpath(candidate)
 
         return None
 
     def get_partition_for_file(self, filepath: str) -> Optional[str]:
         """Return the partition ID for a file, or None if unpartitioned."""
-        return self._file_to_partition.get(os.path.abspath(filepath))
+        return self._file_to_partition.get(os.path.realpath(filepath))
 
     def get_files_in_partition(self, partition_id: str) -> List[str]:
         """Return all files assigned to a given partition."""
@@ -769,9 +780,9 @@ class IncludeResolver:
                             continue
                     for fn in filenames:
                         if fn.endswith(".ivy"):
-                            filepath = os.path.join(dirpath, fn)
+                            filepath = os.path.realpath(os.path.join(dirpath, fn))
                             files.append(filepath)
-                            self._file_to_layer[os.path.abspath(filepath)] = layer.id
+                            self._file_to_layer[filepath] = layer.id
             layer_files[layer.id] = sorted(files)
         return layer_files
 
@@ -890,15 +901,15 @@ class IncludeResolver:
 
         # Inject dependency files from depends_on layers.
         # Own files (already symlinked above) take precedence.
+        self._layer_by_id = {l.id: l for l in self._workspace_layers}
         if has_deps and deps_valid:
-            layer_id_map = {l.id: l for l in self._workspace_layers}
             for layer in self._workspace_layers:
                 if not layer.depends_on:
                     continue
                 layer_dir = self._partition_staging[layer.id]
                 injected_count = 0
                 for dep_id in layer.depends_on:
-                    if dep_id not in layer_id_map:
+                    if dep_id not in self._layer_by_id:
                         continue  # Already warned in _validate_layer_deps
                     for filepath in layer_files.get(dep_id, []):
                         basename = os.path.basename(filepath)
@@ -1001,7 +1012,7 @@ class IncludeResolver:
         try:
             import ivy as ivy_mod
 
-            ivy_dir = os.path.dirname(os.path.abspath(ivy_mod.__file__))
+            ivy_dir = os.path.dirname(os.path.realpath(ivy_mod.__file__))
             inc_base = os.path.join(ivy_dir, "include")
             if not os.path.isdir(inc_base):
                 return None

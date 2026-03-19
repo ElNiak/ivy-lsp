@@ -143,6 +143,14 @@ def compute_document_symbols(
     elif indexer is not None:
         symbols = indexer.get_symbols(filepath) or []
 
+    if not symbols and source.strip():
+        logger.info(
+            "documentSymbol: 0 symbols for %s (%d chars), parser=%s",
+            filepath,
+            len(source),
+            "available" if parser else "none",
+        )
+
     return get_document_symbols(symbols)
 
 

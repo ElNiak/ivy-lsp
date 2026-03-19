@@ -89,13 +89,13 @@ def main():
             )
         except ImportError as e:
             log.critical(
-                "MCP mode requires the 'mcp' package: %s\n"
+                "[MCP-FATAL] Missing dependency: %s\n"
                 "Install with: pip install ivy-lsp[mcp]",
                 e,
             )
             sys.exit(1)
         except Exception as e:
-            log.critical("Ivy MCP server crashed: %s", e, exc_info=True)
+            log.critical("[MCP-FATAL] Ivy MCP server crashed: %s", e, exc_info=True)
             sys.exit(1)
     else:
         # LSP server mode (default): Language Server Protocol over stdio

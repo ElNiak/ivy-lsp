@@ -535,6 +535,25 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             else:
                 result["note"] = "No cross-reference edges found for this symbol."
 
+            # Lexical reference count fallback
+            pattern = re.compile(r"\b" + re.escape(symbol_name) + r"\b")
+            lexical_count = 0
+            lexical_files: set[str] = set()
+            ivy_files = ctx.find_ivy_files(ctx.root)
+            for ivy_file in ivy_files[:200]:  # Cap at 200 files for performance
+                try:
+                    with open(ivy_file, "r") as f:
+                        for line in f:
+                            if pattern.search(line):
+                                lexical_count += 1
+                                lexical_files.add(ivy_file)
+                except OSError:
+                    pass
+            if lexical_count:
+                result["lexical_reference_count"] = lexical_count
+                result["lexical_file_count"] = len(lexical_files)
+                result["note"] += " Lexical scan found references as fallback."
+
         return json.dumps(result)
 
     async def _ivy_cross_references(node_id: str) -> str:

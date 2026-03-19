@@ -41,6 +41,12 @@ _KEYWORD_TO_KIND = {
     "BEFORE": SymbolKind.Function,
     "AFTER": SymbolKind.Function,
     "INSTANTIATE": SymbolKind.Variable,
+    "FUNCTION": SymbolKind.Function,
+    "INDIVIDUAL": SymbolKind.Variable,
+    "DEFINITION": SymbolKind.Function,
+    "INSTANCE": SymbolKind.Variable,
+    "PARAMETER": SymbolKind.Variable,
+    "IMPLEMENT": SymbolKind.Function,
 }
 
 # Keywords that open a brace-delimited scope for child symbols.
