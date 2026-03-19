@@ -444,6 +444,7 @@ class TestHighImpactStateVariable:
         assert diag.severity == DiagnosticSeverity.Information
         assert diag.source == "ivy-lsp-reqs"
         assert "6" in diag.message  # 6 requirements
+        assert "'connected'" in diag.message  # variable name included
 
     def test_below_threshold_no_diagnostic(self):
         """A relation read by fewer than 5 requirements emits no diagnostic."""
@@ -534,6 +535,7 @@ class TestHighImpactStateVariable:
         impact_diags = [d for d in diags if "high-impact" in d.message.lower()]
         assert len(impact_diags) >= 1
         assert "5 files" in impact_diags[0].message
+        assert "'data'" in impact_diags[0].message  # variable name included
 
 
 class TestComputeDiagnosticsIntegration:

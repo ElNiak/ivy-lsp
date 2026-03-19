@@ -372,7 +372,7 @@ def compute_requirement_diagnostics(
                         end=lsp.Position(line_no, len(line_text)),
                     ),
                     message=(
-                        f"High-impact state variable: read by "
+                        f"High-impact state variable '{var_name}': read by "
                         f"{len(readers)} requirements across {len(files)} files"
                     ),
                     severity=lsp.DiagnosticSeverity.Information,
