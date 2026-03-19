@@ -365,7 +365,7 @@ def register(server) -> None:
             filepath = uri_to_path(uri)
             model = server.semantic_model
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None,
                 get_hover_info,
                 server.indexer,
@@ -374,6 +374,26 @@ def register(server) -> None:
                 lines,
                 model,
             )
+
+            from ivy_lsp.debug_trace import get_tracer
+
+            tracer = get_tracer()
+            if tracer is not None:
+                word = word_at_position(lines, params.position) if lines else None
+                content_len = 0
+                if result and result.contents:
+                    content_len = len(getattr(result.contents, "value", ""))
+                tracer.trace_lsp_request(
+                    method="textDocument/hover",
+                    filepath=filepath,
+                    position=f"{params.position.line}:{params.position.character}",
+                    word=word,
+                    result_summary=(
+                        f"Hover content, {content_len} chars" if result else None
+                    ),
+                )
+
+            return result
         except Exception:
             logger.warning("hover handler failed", exc_info=True)
             return None

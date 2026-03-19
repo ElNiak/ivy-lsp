@@ -162,7 +162,7 @@ class TieredExtractor:
                     len(includes),
                     elapsed,
                 )
-                return ExtractionResult(
+                result = ExtractionResult(
                     symbols=symbols,
                     includes=includes,
                     references=references,
@@ -170,6 +170,8 @@ class TieredExtractor:
                     timing_ms=elapsed,
                     errors=errors,
                 )
+                self._trace_result(filepath, result)
+                return result
             except ImportError as exc:
                 elapsed = (time.monotonic() - t0) * 1000
                 self._parser_available = False
@@ -206,7 +208,7 @@ class TieredExtractor:
                     len(includes),
                     elapsed,
                 )
-                return ExtractionResult(
+                result = ExtractionResult(
                     symbols=symbols,
                     includes=includes,
                     references=references,
@@ -214,6 +216,8 @@ class TieredExtractor:
                     timing_ms=elapsed,
                     errors=errors,
                 )
+                self._trace_result(filepath, result)
+                return result
             except ImportError as exc:
                 elapsed = (time.monotonic() - t0) * 1000
                 self._lexer_available = False
@@ -248,7 +252,7 @@ class TieredExtractor:
             len(includes),
             elapsed,
         )
-        return ExtractionResult(
+        result = ExtractionResult(
             symbols=symbols,
             includes=includes,
             references=references,
@@ -256,6 +260,17 @@ class TieredExtractor:
             timing_ms=elapsed,
             errors=errors,
         )
+        self._trace_result(filepath, result)
+        return result
+
+    @staticmethod
+    def _trace_result(filepath: str, result: ExtractionResult) -> None:
+        """Send extraction result to the debug tracer (no-op when disabled)."""
+        from ivy_lsp.debug_trace import get_tracer
+
+        tracer = get_tracer()
+        if tracer is not None:
+            tracer.trace_tier_selection(filepath, result)
 
     # -- Tier implementations -----------------------------------------------
 

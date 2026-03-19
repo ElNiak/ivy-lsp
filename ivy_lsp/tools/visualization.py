@@ -13,6 +13,7 @@ import json
 import logging
 from typing import Any, Literal
 
+from ivy_lsp.debug_trace import ToolTraceContext
 from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
@@ -221,29 +222,35 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 includes ``"truncated": true`` and ``"total": N``.
                 Set to 0 for unlimited.
         """
+        _tc = ToolTraceContext(
+            "ivy_visualize",
+            {"view": view, "test_file": test_file, "protocol": protocol},
+        )
         _valid_views = {"dependencies", "state_machine", "layers"}
         if view not in _valid_views:
-            return error_response(
-                f"Unknown view '{view}'. Valid views: {sorted(_valid_views)}"
+            return _tc.finish(
+                error_response(
+                    f"Unknown view '{view}'. Valid views: {sorted(_valid_views)}"
+                )
             )
         if view == "state_machine":
             raw = await _ivy_state_machine_view(test_file, state_var_filter, protocol)
             result = json.loads(raw)
             result = _apply_max_items(result, "states", max_items)
             result = _apply_max_items(result, "transitions", max_items)
-            return json.dumps(result)
+            return _tc.finish(json.dumps(result))
         elif view == "layers":
             raw = await _ivy_layered_overview(test_file, group_by, protocol)
             result = json.loads(raw)
             result = _apply_max_items(result, "layers", max_items)
-            return json.dumps(result)
+            return _tc.finish(json.dumps(result))
         else:  # default: dependencies
             raw = await _ivy_action_dependency_graph(
                 test_file, include_state_vars, protocol
             )
             result = json.loads(raw)
             result = _apply_max_items(result, "nodes", max_items)
-            return json.dumps(result)
+            return _tc.finish(json.dumps(result))
 
     @mcp.tool()
     async def ivy_model_summary(
@@ -294,16 +301,26 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             limit if limit is not None else (max_items if max_items > 0 else None)
         )
 
+        _tc = ToolTraceContext(
+            "ivy_model_summary",
+            {"detail": detail, "test_file": test_file, "protocol": protocol},
+        )
         _valid_details = {"summary", "requirements"}
         if detail not in _valid_details:
-            return error_response(
-                f"Unknown detail '{detail}'. Valid details: {sorted(_valid_details)}"
+            return _tc.finish(
+                error_response(
+                    f"Unknown detail '{detail}'. Valid details: {sorted(_valid_details)}"
+                )
             )
         if detail == "requirements":
-            return await _ivy_action_requirements(
-                action_name, file_path, test_file, protocol, offset, effective_limit
+            return _tc.finish(
+                await _ivy_action_requirements(
+                    action_name, file_path, test_file, protocol, offset, effective_limit
+                )
             )
         else:  # default: summary
-            return await _ivy_model_summary_logic(
-                test_file, protocol, sort_by, effective_limit
+            return _tc.finish(
+                await _ivy_model_summary_logic(
+                    test_file, protocol, sort_by, effective_limit
+                )
             )

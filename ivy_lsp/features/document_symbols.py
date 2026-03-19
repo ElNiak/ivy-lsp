@@ -175,7 +175,7 @@ def register(server) -> None:
             parser = getattr(server, "parser", None)
             indexer = getattr(server, "indexer", None)
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None,
                 compute_document_symbols,
                 parser,
@@ -183,6 +183,18 @@ def register(server) -> None:
                 source,
                 filepath,
             )
+
+            from ivy_lsp.debug_trace import get_tracer
+
+            tracer = get_tracer()
+            if tracer is not None:
+                tracer.trace_lsp_request(
+                    method="textDocument/documentSymbol",
+                    filepath=filepath,
+                    result_summary=f"{len(result)} symbols",
+                )
+
+            return result
         except Exception:
             logger.warning("document_symbol handler failed", exc_info=True)
             return []

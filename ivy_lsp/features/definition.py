@@ -188,7 +188,7 @@ def register(server) -> None:
             filepath = uri_to_path(uri)
             model = server.semantic_model
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None,
                 lambda: goto_definition(
                     server.indexer,
@@ -198,6 +198,26 @@ def register(server) -> None:
                     semantic_model=model,
                 ),
             )
+
+            from ivy_lsp.debug_trace import get_tracer
+
+            tracer = get_tracer()
+            if tracer is not None:
+                word = word_at_position(lines, params.position) if lines else None
+                loc_count = 0
+                if isinstance(result, list):
+                    loc_count = len(result)
+                elif result is not None:
+                    loc_count = 1
+                tracer.trace_lsp_request(
+                    method="textDocument/definition",
+                    filepath=filepath,
+                    position=f"{params.position.line}:{params.position.character}",
+                    word=word,
+                    result_summary=f"{loc_count} location(s)" if result else None,
+                )
+
+            return result
         except Exception:
             logger.warning("definition handler failed", exc_info=True)
             return None

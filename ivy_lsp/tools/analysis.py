@@ -9,6 +9,7 @@ import os
 import shutil
 from typing import Any
 
+from ivy_lsp.debug_trace import ToolTraceContext
 from ivy_lsp.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.tools import error_response
 
@@ -35,6 +36,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             ctx.root,
             {"relative_path": relative_path},
         )
+        _tc = ToolTraceContext("ivy_include_graph", {"relative_path": relative_path})
 
         def _build_graph():
             graph: dict[str, list[str]] = {}
@@ -137,32 +139,36 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 if mod_path and mod_path in graph:
                     stack.extend(graph[mod_path])
 
-            return json.dumps(
-                {
-                    "file": relative_path,
-                    "includes": resolved,
-                    "included_by": included_by,
-                    "transitive_includes": sorted(transitive),
-                }
+            return _tc.finish(
+                json.dumps(
+                    {
+                        "file": relative_path,
+                        "includes": resolved,
+                        "included_by": included_by,
+                        "transitive_includes": sorted(transitive),
+                    }
+                )
             )
         else:
-            return json.dumps(
-                {
-                    "files": {fp: {"includes": incs} for fp, incs in graph.items()},
-                    "total_files": len(graph),
-                }
+            return _tc.finish(
+                json.dumps(
+                    {
+                        "files": {fp: {"includes": incs} for fp, incs in graph.items()},
+                        "total_files": len(graph),
+                    }
+                )
             )
 
     @mcp.tool()
     async def ivy_capabilities() -> str:
         """Report which Ivy CLI tools are available on PATH and staging health."""
+        _tc = ToolTraceContext("ivy_capabilities", {})
         result: dict[str, Any] = {
             "success": True,
             "ivy_check": shutil.which("ivy_check") is not None,
             "ivyc": shutil.which("ivyc") is not None,
             "ivy_show": shutil.which("ivy_show") is not None,
         }
-        # Include staging health when resolver is available
         if ctx.include_resolver is not None and hasattr(
             ctx.include_resolver, "staging_health"
         ):
@@ -170,7 +176,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 result["staging_health"] = ctx.include_resolver.staging_health()
             except Exception:
                 pass  # staging health is optional
-        return json.dumps(result)
+        return _tc.finish(json.dumps(result))
 
     @mcp.tool()
     async def ivy_scope(relative_path: str) -> str:
@@ -191,12 +197,13 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             ctx.root,
             {"relative_path": relative_path},
         )
+        _tc = ToolTraceContext("ivy_scope", {"relative_path": relative_path})
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return error_response(str(exc))
+            return _tc.finish(error_response(str(exc)))
         if not os.path.isfile(abs_path):
-            return error_response(f"File not found: {relative_path}")
+            return _tc.finish(error_response(f"File not found: {relative_path}"))
 
         result: dict[str, Any] = {
             "file": relative_path,
@@ -256,4 +263,4 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                             ],
                         }
 
-        return json.dumps(result, indent=2)
+        return _tc.finish(json.dumps(result, indent=2))

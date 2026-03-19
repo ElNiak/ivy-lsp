@@ -16,6 +16,7 @@ import os
 import re
 from typing import Any, Literal
 
+from ivy_lsp.debug_trace import ToolTraceContext
 from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
@@ -608,19 +609,30 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 "protocol": protocol,
             },
         )
+        _tc = ToolTraceContext(
+            "ivy_coverage",
+            {
+                "mode": mode,
+                "relative_path": relative_path,
+                "test_file": test_file,
+                "protocol": protocol,
+            },
+        )
         _valid_modes = {"matrix", "stats", "gaps", "diff"}
         if mode not in _valid_modes:
-            return error_response(
-                f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+            return _tc.finish(
+                error_response(
+                    f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+                )
             )
         if mode == "matrix":
-            return await _ivy_traceability_matrix(relative_path, test_file)
+            return _tc.finish(await _ivy_traceability_matrix(relative_path, test_file))
         elif mode == "gaps":
-            return await _ivy_coverage_gaps(test_file, protocol)
+            return _tc.finish(await _ivy_coverage_gaps(test_file, protocol))
         elif mode == "diff":
-            return await _ivy_coverage_diff(relative_path)
+            return _tc.finish(await _ivy_coverage_diff(relative_path))
         else:  # default: stats
-            return await _ivy_requirement_coverage(relative_path, test_file)
+            return _tc.finish(await _ivy_requirement_coverage(relative_path, test_file))
 
     @mcp.tool()
     async def ivy_extract_requirements(
@@ -672,6 +684,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 "rfc_text_len": len(rfc_text),
             },
         )
+        _tc = ToolTraceContext(
+            "ivy_extract_requirements",
+            {
+                "output": output,
+                "rfc_name": rfc_name,
+                "rfc_source": rfc_source,
+                "rfc_text_len": len(rfc_text),
+            },
+        )
 
         fetch_result = None
         # If rfc_source is provided, fetch and optionally filter by section
@@ -695,14 +716,18 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     rfc_text = fetch_result.text
 
             except Exception as exc:
-                return error_response(f"Failed to fetch RFC: {exc}")
+                return _tc.finish(error_response(f"Failed to fetch RFC: {exc}"))
 
         if not rfc_text:
-            return error_response("Either rfc_text or rfc_source must be provided")
+            return _tc.finish(
+                error_response("Either rfc_text or rfc_source must be provided")
+            )
 
         if output == "manifest":
             if not rfc_name:
-                return error_response("rfc_name is required for output='manifest'")
+                return _tc.finish(
+                    error_response("rfc_name is required for output='manifest'")
+                )
             result_str = await _ivy_generate_manifest(
                 rfc_name, rfc_text, protocol, base_section
             )
@@ -720,12 +745,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                         "source": fetch_result.source,
                         "content_hash": fetch_result.content_hash,
                     }
-                    return json.dumps(result_data)
+                    return _tc.finish(json.dumps(result_data))
                 except json.JSONDecodeError:
                     pass
-            return result_str
+            return _tc.finish(result_str)
         else:  # default: structured
-            return await _ivy_extract_requirements_logic(rfc_text)
+            return _tc.finish(await _ivy_extract_requirements_logic(rfc_text))
 
     # --- ivy_manifest tool ---
 
@@ -756,6 +781,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         logger.debug(
             "[ivy_manifest] workspace=%s, args=%r",
             ctx.root,
+            {"mode": mode, "protocol": protocol, "rfc_source": rfc_source},
+        )
+        _tc = ToolTraceContext(
+            "ivy_manifest",
             {"mode": mode, "protocol": protocol, "rfc_source": rfc_source},
         )
 
@@ -808,12 +837,14 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                         if entry not in protocols_with_manifests:
                             protocols_without.append(entry)
 
-            return json.dumps(
-                {
-                    "manifests": summaries,
-                    "total_manifests": len(summaries),
-                    "protocols_without_manifests": protocols_without,
-                }
+            return _tc.finish(
+                json.dumps(
+                    {
+                        "manifests": summaries,
+                        "total_manifests": len(summaries),
+                        "protocols_without_manifests": protocols_without,
+                    }
+                )
             )
 
         elif mode == "validate":
@@ -849,12 +880,14 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     }
                 )
 
-            return json.dumps(
-                {
-                    "results": results,
-                    "total_manifests": len(results),
-                    "all_valid": all(r.get("valid", False) for r in results),
-                }
+            return _tc.finish(
+                json.dumps(
+                    {
+                        "results": results,
+                        "total_manifests": len(results),
+                        "all_valid": all(r.get("valid", False) for r in results),
+                    }
+                )
             )
 
         elif mode == "staleness":
@@ -921,11 +954,13 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     }
                 )
 
-            return json.dumps({"reports": reports})
+            return _tc.finish(json.dumps({"reports": reports}))
 
         elif mode == "refresh":
             if not rfc_source:
-                return error_response("rfc_source is required for mode='refresh'")
+                return _tc.finish(
+                    error_response("rfc_source is required for mode='refresh'")
+                )
 
             # Fetch and extract new requirements
             try:
@@ -937,7 +972,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 new_reqs_raw = await _ivy_extract_requirements_logic(fetch_result.text)
                 new_reqs = json.loads(new_reqs_raw)
             except Exception as exc:
-                return error_response(f"Failed to fetch/parse: {exc}")
+                return _tc.finish(error_response(f"Failed to fetch/parse: {exc}"))
 
             # Load current manifest requirements
             current_ids: set[str] = set()
@@ -945,14 +980,18 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 result = load_manifest_with_metadata(mpath)
                 current_ids.update(result.requirements.keys())
 
-            return json.dumps(
-                {
-                    "rfc_source": rfc_source,
-                    "new_requirements_found": new_reqs.get("total", 0),
-                    "current_manifest_ids": len(current_ids),
-                    "by_level": new_reqs.get("by_level", {}),
-                    "source_hash": fetch_result.content_hash if fetch_result else "",
-                }
+            return _tc.finish(
+                json.dumps(
+                    {
+                        "rfc_source": rfc_source,
+                        "new_requirements_found": new_reqs.get("total", 0),
+                        "current_manifest_ids": len(current_ids),
+                        "by_level": new_reqs.get("by_level", {}),
+                        "source_hash": (
+                            fetch_result.content_hash if fetch_result else ""
+                        ),
+                    }
+                )
             )
 
-        return error_response(f"Unknown mode '{mode}'")
+        return _tc.finish(error_response(f"Unknown mode '{mode}'"))

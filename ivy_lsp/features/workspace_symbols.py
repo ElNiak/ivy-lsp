@@ -266,10 +266,23 @@ def register(server) -> None:
         )
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None,
             compute_workspace_symbols,
             server.indexer,
             params.query or "",
             active_filepath,
         )
+
+        from ivy_lsp.debug_trace import get_tracer
+
+        tracer = get_tracer()
+        if tracer is not None:
+            tracer.trace_lsp_request(
+                method="workspace/symbol",
+                filepath=active_filepath or "(none)",
+                word=params.query or None,
+                result_summary=f"{len(result)} symbols",
+            )
+
+        return result

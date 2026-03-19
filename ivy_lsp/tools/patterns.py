@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any
 
+from ivy_lsp.debug_trace import ToolTraceContext
 from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
@@ -215,18 +216,24 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                 "reference_protocol": reference_protocol,
             },
         )
+        _tc = ToolTraceContext(
+            "ivy_patterns", {"protocol": protocol, "mode": mode, "pattern": pattern}
+        )
         if mode == "check":
-            return await _ivy_scaffold_check(protocol)
+            return _tc.finish(await _ivy_scaffold_check(protocol))
         else:
-            # Validate mode and alias "analyze" -> "detect"
             _VALID_MODES = {"analyze", "detect", "validate", "compare", "check"}
             if mode not in _VALID_MODES:
-                return error_response(
-                    f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"
+                return _tc.finish(
+                    error_response(
+                        f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"
+                    )
                 )
             effective_mode = "detect" if mode == "analyze" else mode
-            return await _ivy_pattern_analysis(
-                protocol, effective_mode, pattern, reference_protocol
+            return _tc.finish(
+                await _ivy_pattern_analysis(
+                    protocol, effective_mode, pattern, reference_protocol
+                )
             )
 
     @mcp.tool()
@@ -263,6 +270,9 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                 "role_type": role_type,
             },
         )
+        _tc = ToolTraceContext(
+            "ivy_pattern_scaffold", {"protocol": protocol, "pattern": pattern}
+        )
         from ivy_lsp.features.patterns import handle_pattern_scaffold
 
         params: dict[str, Any] = {
@@ -275,4 +285,4 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             params["variant_names"] = variant_names
         if roles:
             params["roles"] = roles
-        return json.dumps(handle_pattern_scaffold(ctx.root, params))
+        return _tc.finish(json.dumps(handle_pattern_scaffold(ctx.root, params)))

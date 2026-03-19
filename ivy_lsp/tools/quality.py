@@ -12,6 +12,7 @@ import os
 import re
 from typing import Any, Literal
 
+from ivy_lsp.debug_trace import ToolTraceContext
 from ivy_lsp.tools import error_response
 
 logger = logging.getLogger(__name__)
@@ -349,16 +350,25 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
                 "gate_level": gate_level,
             },
         )
+        _tc = ToolTraceContext(
+            "ivy_quality", {"mode": mode, "file_path": file_path, "protocol": protocol}
+        )
         _valid_modes = {"suggestions", "gate"}
         if mode not in _valid_modes:
-            return error_response(
-                f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+            return _tc.finish(
+                error_response(
+                    f"Unknown mode '{mode}'. Valid modes: {sorted(_valid_modes)}"
+                )
             )
         if mode == "gate":
             if not protocol:
-                return error_response("protocol is required for mode='gate'")
-            return await _ivy_quality_gate(protocol, gate_level)
+                return _tc.finish(
+                    error_response("protocol is required for mode='gate'")
+                )
+            return _tc.finish(await _ivy_quality_gate(protocol, gate_level))
         else:  # default: suggestions
-            return await _ivy_smart_suggestions(
-                file_path, line, context, protocol, max_items
+            return _tc.finish(
+                await _ivy_smart_suggestions(
+                    file_path, line, context, protocol, max_items
+                )
             )

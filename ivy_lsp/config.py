@@ -80,6 +80,10 @@ class ServerConfig:
     tool_compile_timeout: float = 300.0
     show_model_timeout: float = 30.0
 
+    # Debug tracing
+    debug_log: bool = False
+    debug_log_path: str | None = None
+
     @classmethod
     def from_env(cls) -> ServerConfig:
         """Read all ``IVY_LSP_*`` environment variables and return a config."""
@@ -109,6 +113,8 @@ class ServerConfig:
             show_model_timeout=_float_env(
                 "IVY_LSP_SHOW_MODEL_TIMEOUT", 30.0, floor=5.0
             ),
+            debug_log=_bool_env("IVY_LSP_DEBUG_LOG", "0"),
+            debug_log_path=os.environ.get("IVY_LSP_DEBUG_LOG_PATH"),
         )
 
 

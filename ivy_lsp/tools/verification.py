@@ -10,6 +10,7 @@ import re
 import time
 from typing import Any
 
+from ivy_lsp.debug_trace import ToolTraceContext, trace_tool
 from ivy_lsp.tools import error_response
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
@@ -103,93 +104,105 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "use_cache": use_cache,
             },
         )
-        try:
-            abs_path = ctx.validate_path(relative_path)
-        except ValueError as exc:
-            return error_response(str(exc))
-        if not os.path.isfile(abs_path):
-            return error_response(f"File not found: {relative_path}")
-
-        if isolate:
+        with trace_tool(
+            "ivy_verify",
+            {
+                "relative_path": relative_path,
+                "isolate": isolate,
+                "use_cache": use_cache,
+            },
+        ) as _tt:
             try:
-                _validate_ivy_param(isolate)
+                abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
-                return error_response(str(exc))
+                _tt[0] = error_response(str(exc))
+                return _tt[0]
+            if not os.path.isfile(abs_path):
+                _tt[0] = error_response(f"File not found: {relative_path}")
+                return _tt[0]
 
-        cache_key = (abs_path, isolate)
+            if isolate:
+                try:
+                    _validate_ivy_param(isolate)
+                except ValueError as exc:
+                    _tt[0] = error_response(str(exc))
+                    return _tt[0]
 
-        # Phase 1: Acquire lock, check cache / in-flight
-        async with _verify_cache_lock:
-            if use_cache and cache_key in _verify_cache:
-                cached_result = dict(_verify_cache[cache_key])
-                cached_result["cached"] = True
-                return json.dumps(cached_result)
+            cache_key = (abs_path, isolate)
 
-            if cache_key in _verify_in_flight:
-                # Another coroutine is already verifying; wait outside lock
-                need_wait = True
-            else:
-                _verify_in_flight.add(cache_key)
-                need_wait = False
+            # Phase 1: Acquire lock, check cache / in-flight
+            async with _verify_cache_lock:
+                if use_cache and cache_key in _verify_cache:
+                    cached_result = dict(_verify_cache[cache_key])
+                    cached_result["cached"] = True
+                    _tt[0] = json.dumps(cached_result)
+                    return _tt[0]
 
-        # If another coroutine owns this key, poll for its result
-        if need_wait:
-            for _ in range(600):  # up to ~60s
-                await asyncio.sleep(0.1)
-                async with _verify_cache_lock:
-                    if cache_key in _verify_cache:
-                        cached_result = dict(_verify_cache[cache_key])
-                        cached_result["cached"] = True
-                        return json.dumps(cached_result)
-                    if cache_key not in _verify_in_flight:
-                        _verify_in_flight.add(cache_key)
-                        break
-            else:
-                async with _verify_cache_lock:
+                if cache_key in _verify_in_flight:
+                    need_wait = True
+                else:
                     _verify_in_flight.add(cache_key)
+                    need_wait = False
 
-        # Phase 2: Run subprocess WITHOUT holding lock
-        try:
-            result = await shared_ivy_check(
-                filepath=abs_path,
-                workspace_root=ctx.root,
-                isolate=isolate,
-                staging_dir=ctx.staging_dir,
-                resolver=ctx.include_resolver,
-            )
+            # If another coroutine owns this key, poll for its result
+            if need_wait:
+                for _ in range(600):  # up to ~60s
+                    await asyncio.sleep(0.1)
+                    async with _verify_cache_lock:
+                        if cache_key in _verify_cache:
+                            cached_result = dict(_verify_cache[cache_key])
+                            cached_result["cached"] = True
+                            _tt[0] = json.dumps(cached_result)
+                            return _tt[0]
+                        if cache_key not in _verify_in_flight:
+                            _verify_in_flight.add(cache_key)
+                            break
+                else:
+                    async with _verify_cache_lock:
+                        _verify_in_flight.add(cache_key)
 
-            # Parse counterexample if verification failed
-            if not result.get("success", True):
-                from ivy_lsp.utils.counterexample_parser import parse_counterexample
+            # Phase 2: Run subprocess WITHOUT holding lock
+            try:
+                result = await shared_ivy_check(
+                    filepath=abs_path,
+                    workspace_root=ctx.root,
+                    isolate=isolate,
+                    staging_dir=ctx.staging_dir,
+                    resolver=ctx.include_resolver,
+                )
 
-                raw = result.get("raw_output", "")
-                cex = parse_counterexample(raw)
-                if cex is not None:
-                    result["counterexample"] = cex
-                    from ivy_lsp.utils.counterexample_formatter import (
-                        format_counterexample,
-                    )
+                if not result.get("success", True):
+                    from ivy_lsp.utils.counterexample_parser import parse_counterexample
 
-                    result["counterexample_trace"] = format_counterexample(cex)
+                    raw = result.get("raw_output", "")
+                    cex = parse_counterexample(raw)
+                    if cex is not None:
+                        result["counterexample"] = cex
+                        from ivy_lsp.utils.counterexample_formatter import (
+                            format_counterexample,
+                        )
 
-            result["cached"] = False
+                        result["counterexample_trace"] = format_counterexample(cex)
 
-            # Phase 3: Write to cache under lock
-            async with _verify_cache_lock:
-                _verify_cache[cache_key] = dict(result)
-                _evict_oldest_if_needed()
+                result["cached"] = False
 
-                if isolate is None:
-                    raw_output = result.get("raw_output", "")
-                    _cache_per_isolate_results(abs_path, raw_output, result)
+                # Phase 3: Write to cache under lock
+                async with _verify_cache_lock:
+                    _verify_cache[cache_key] = dict(result)
+                    _evict_oldest_if_needed()
 
-                _verify_in_flight.discard(cache_key)
-        except Exception:
-            async with _verify_cache_lock:
-                _verify_in_flight.discard(cache_key)
-            raise
+                    if isolate is None:
+                        raw_output = result.get("raw_output", "")
+                        _cache_per_isolate_results(abs_path, raw_output, result)
 
-        return json.dumps(result)
+                    _verify_in_flight.discard(cache_key)
+            except Exception:
+                async with _verify_cache_lock:
+                    _verify_in_flight.discard(cache_key)
+                raise
+
+            _tt[0] = json.dumps(result)
+            return _tt[0]
 
     @mcp.tool()
     async def ivy_compile(
@@ -213,101 +226,115 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             ctx.root,
             {"relative_path": relative_path, "target": target, "isolate": isolate},
         )
-        try:
-            abs_path = ctx.validate_path(relative_path)
-        except ValueError as exc:
-            return error_response(str(exc))
-        if not os.path.isfile(abs_path):
-            return error_response(f"File not found: {relative_path}")
-
-        try:
-            _validate_ivy_param(target)
-            if isolate:
-                _validate_ivy_param(isolate)
-        except ValueError as exc:
-            return error_response(str(exc))
-
-        t0 = time.monotonic()
-        _docker_fallback_reason: str | None = None
-
-        # Try API executor path (Docker-aware compilation)
-        if ctx.executor is not None and ctx.base_path is not None:
+        with trace_tool(
+            "ivy_compile",
+            {"relative_path": relative_path, "target": target, "isolate": isolate},
+        ) as _tt:
             try:
-                from pathlib import Path as P
+                abs_path = ctx.validate_path(relative_path)
+            except ValueError as exc:
+                _tt[0] = error_response(str(exc))
+                return _tt[0]
+            if not os.path.isfile(abs_path):
+                _tt[0] = error_response(f"File not found: {relative_path}")
+                return _tt[0]
 
-                from panther_ivy.api.compiler import generate_compile_commands
+            try:
+                _validate_ivy_param(target)
+                if isolate:
+                    _validate_ivy_param(isolate)
+            except ValueError as exc:
+                _tt[0] = error_response(str(exc))
+                return _tt[0]
 
-                compile_result = generate_compile_commands(
-                    ivy_file=P(abs_path),
-                    base_path=ctx.base_path,
-                )
+            t0 = time.monotonic()
+            _docker_fallback_reason: str | None = None
 
-                start = time.monotonic()
-                # Run setup + compilation via thread pool (executor.execute is blocking)
-                setup_result = await asyncio.to_thread(
-                    ctx.executor.execute,
-                    compile_result.setup_commands,
-                    workspace_root=ctx.root,
-                    timeout=30,
-                )
-                if hasattr(setup_result, "exit_code") and setup_result.exit_code != 0:
-                    return json.dumps(
+            if ctx.executor is not None and ctx.base_path is not None:
+                try:
+                    from pathlib import Path as P
+
+                    from panther_ivy.api.compiler import generate_compile_commands
+
+                    compile_result = generate_compile_commands(
+                        ivy_file=P(abs_path),
+                        base_path=ctx.base_path,
+                    )
+
+                    start = time.monotonic()
+                    setup_result = await asyncio.to_thread(
+                        ctx.executor.execute,
+                        compile_result.setup_commands,
+                        workspace_root=ctx.root,
+                        timeout=30,
+                    )
+                    if (
+                        hasattr(setup_result, "exit_code")
+                        and setup_result.exit_code != 0
+                    ):
+                        _tt[0] = json.dumps(
+                            {
+                                "success": False,
+                                "message": f"Docker setup failed (exit {setup_result.exit_code})",
+                                "raw_output": getattr(setup_result, "stderr", ""),
+                                "duration_seconds": round(time.monotonic() - t0, 2),
+                            }
+                        )
+                        return _tt[0]
+                    exec_result = await asyncio.to_thread(
+                        ctx.executor.execute,
+                        compile_result.compile_commands,
+                        workspace_root=ctx.root,
+                        timeout=300,
+                    )
+                    duration = time.monotonic() - start
+
+                    raw_output = (
+                        exec_result.stderr + "\n" + exec_result.stdout
+                    ).strip()
+                    diagnostics = parse_ivy_output(raw_output)
+                    _tt[0] = json.dumps(
                         {
-                            "success": False,
-                            "message": f"Docker setup failed (exit {setup_result.exit_code})",
-                            "raw_output": getattr(setup_result, "stderr", ""),
-                            "duration_seconds": round(time.monotonic() - t0, 2),
+                            "success": exec_result.exit_code == 0
+                            and not any(d["severity"] == "error" for d in diagnostics),
+                            "diagnostics": diagnostics,
+                            "diagnostic_count": len(diagnostics),
+                            "error_summary": extract_error_summary(
+                                raw_output, diagnostics
+                            ),
+                            "raw_output": raw_output,
+                            "target": exec_result.target,
+                            "duration_seconds": round(duration, 2),
                         }
                     )
-                exec_result = await asyncio.to_thread(
-                    ctx.executor.execute,
-                    compile_result.compile_commands,
-                    workspace_root=ctx.root,
-                    timeout=300,
-                )
-                duration = time.monotonic() - start
+                    return _tt[0]
+                except ImportError:
+                    logger.debug(
+                        "panther_ivy.api not available; falling back to direct subprocess"
+                    )
+                except (ConnectionError, OSError, RuntimeError) as exc:
+                    logger.error(
+                        "Docker compile failed unexpectedly: %s",
+                        exc,
+                        exc_info=True,
+                    )
+                    _docker_fallback_reason = str(exc)
 
-                raw_output = (exec_result.stderr + "\n" + exec_result.stdout).strip()
-                diagnostics = parse_ivy_output(raw_output)
-                return json.dumps(
-                    {
-                        "success": exec_result.exit_code == 0
-                        and not any(d["severity"] == "error" for d in diagnostics),
-                        "diagnostics": diagnostics,
-                        "diagnostic_count": len(diagnostics),
-                        "error_summary": extract_error_summary(raw_output, diagnostics),
-                        "raw_output": raw_output,
-                        "target": exec_result.target,
-                        "duration_seconds": round(duration, 2),
-                    }
-                )
-            except ImportError:
-                logger.debug(
-                    "panther_ivy.api not available; falling back to direct subprocess"
-                )
-            except (ConnectionError, OSError, RuntimeError) as exc:
-                logger.error(
-                    "Docker compile failed unexpectedly: %s",
-                    exc,
-                    exc_info=True,
-                )
-                _docker_fallback_reason = str(exc)
+            result = await shared_ivy_compile(
+                filepath=abs_path,
+                workspace_root=ctx.root,
+                target=target,
+                isolate=isolate,
+                staging_dir=ctx.staging_dir,
+                resolver=ctx.include_resolver,
+            )
 
-        # Direct subprocess fallback
-        result = await shared_ivy_compile(
-            filepath=abs_path,
-            workspace_root=ctx.root,
-            target=target,
-            isolate=isolate,
-            staging_dir=ctx.staging_dir,
-            resolver=ctx.include_resolver,
-        )
+            if _docker_fallback_reason:
+                result["fallback"] = "subprocess"
+                result["fallback_reason"] = _docker_fallback_reason
 
-        if _docker_fallback_reason:
-            result["fallback"] = "subprocess"
-            result["fallback_reason"] = _docker_fallback_reason
-
-        return json.dumps(result)
+            _tt[0] = json.dumps(result)
+            return _tt[0]
 
     @mcp.tool()
     async def ivy_model_info(
@@ -325,27 +352,34 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             ctx.root,
             {"relative_path": relative_path, "isolate": isolate},
         )
-        try:
-            abs_path = ctx.validate_path(relative_path)
-        except ValueError as exc:
-            return error_response(str(exc))
-        if not os.path.isfile(abs_path):
-            return error_response(f"File not found: {relative_path}")
-
-        if isolate:
+        with trace_tool(
+            "ivy_model_info", {"relative_path": relative_path, "isolate": isolate}
+        ) as _tt:
             try:
-                _validate_ivy_param(isolate)
+                abs_path = ctx.validate_path(relative_path)
             except ValueError as exc:
-                return error_response(str(exc))
+                _tt[0] = error_response(str(exc))
+                return _tt[0]
+            if not os.path.isfile(abs_path):
+                _tt[0] = error_response(f"File not found: {relative_path}")
+                return _tt[0]
 
-        result = await shared_ivy_show(
-            filepath=abs_path,
-            workspace_root=ctx.root,
-            isolate=isolate,
-            staging_dir=ctx.staging_dir,
-            resolver=ctx.include_resolver,
-        )
-        return json.dumps(result)
+            if isolate:
+                try:
+                    _validate_ivy_param(isolate)
+                except ValueError as exc:
+                    _tt[0] = error_response(str(exc))
+                    return _tt[0]
+
+            result = await shared_ivy_show(
+                filepath=abs_path,
+                workspace_root=ctx.root,
+                isolate=isolate,
+                staging_dir=ctx.staging_dir,
+                resolver=ctx.include_resolver,
+            )
+            _tt[0] = json.dumps(result)
+            return _tt[0]
 
     @mcp.tool()
     async def ivy_diagnostics(
@@ -383,17 +417,28 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "min_severity": min_severity,
             },
         )
+        _tc = ToolTraceContext(
+            "ivy_diagnostics",
+            {
+                "relative_path": relative_path,
+                "mode": mode,
+                "layers": layers,
+                "min_severity": min_severity,
+            },
+        )
         if mode not in ("structural", "full"):
-            return error_response(
-                f"Unknown mode '{mode}'. Valid modes: ['structural', 'full']"
+            return _tc.finish(
+                error_response(
+                    f"Unknown mode '{mode}'. Valid modes: ['structural', 'full']"
+                )
             )
 
         try:
             abs_path = ctx.validate_path(relative_path)
         except ValueError as exc:
-            return error_response(str(exc))
+            return _tc.finish(error_response(str(exc)))
         if not os.path.isfile(abs_path):
-            return error_response(f"File not found: {relative_path}")
+            return _tc.finish(error_response(f"File not found: {relative_path}"))
 
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
@@ -402,20 +447,22 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         if mode == "structural":
             resolve_cb = ctx.make_resolve_callback()
             diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
-            return json.dumps(
-                {
-                    "success": True,
-                    "file": relative_path,
-                    "mode": "structural",
-                    "diagnostics": diagnostics,
-                    "diagnostic_count": len(diagnostics),
-                    "error_count": sum(
-                        1 for d in diagnostics if d["severity"] == "error"
-                    ),
-                    "warning_count": sum(
-                        1 for d in diagnostics if d["severity"] == "warning"
-                    ),
-                }
+            return _tc.finish(
+                json.dumps(
+                    {
+                        "success": True,
+                        "file": relative_path,
+                        "mode": "structural",
+                        "diagnostics": diagnostics,
+                        "diagnostic_count": len(diagnostics),
+                        "error_count": sum(
+                            1 for d in diagnostics if d["severity"] == "error"
+                        ),
+                        "warning_count": sum(
+                            1 for d in diagnostics if d["severity"] == "warning"
+                        ),
+                    }
+                )
             )
 
         # Full mode: all 5 diagnostic layers
@@ -617,24 +664,30 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             src = d.get("source", "unknown")
             by_source[src] = by_source.get(src, 0) + 1
 
-        return json.dumps(
-            {
-                "success": True,
-                "file": relative_path,
-                "diagnostics": all_diags,
-                "diagnostic_count": len(all_diags),
-                "by_source": by_source,
-                "error_count": sum(
-                    1 for d in all_diags if d.get("severity") == "error"
-                ),
-                "warning_count": sum(
-                    1 for d in all_diags if d.get("severity") == "warning"
-                ),
-                "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
-                "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
-                "layer_errors": layer_errors,
-                "partial": bool(layer_errors),
-            }
+        return _tc.finish(
+            json.dumps(
+                {
+                    "success": True,
+                    "file": relative_path,
+                    "diagnostics": all_diags,
+                    "diagnostic_count": len(all_diags),
+                    "by_source": by_source,
+                    "error_count": sum(
+                        1 for d in all_diags if d.get("severity") == "error"
+                    ),
+                    "warning_count": sum(
+                        1 for d in all_diags if d.get("severity") == "warning"
+                    ),
+                    "hint_count": sum(
+                        1 for d in all_diags if d.get("severity") == "hint"
+                    ),
+                    "info_count": sum(
+                        1 for d in all_diags if d.get("severity") == "info"
+                    ),
+                    "layer_errors": layer_errors,
+                    "partial": bool(layer_errors),
+                }
+            )
         )
 
     # -- Verification dashboard ------------------------------------------------
@@ -671,6 +724,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         verified, which failed, and which are pending.
         """
         logger.debug("[ivy_verification_dashboard] workspace=%s", ctx.root)
+        _tc = ToolTraceContext("ivy_verification_dashboard", {})
         ivy_files = ctx.find_ivy_files(ctx.root)
         cache = _get_cache_summary()
         verified_set = set(cache["verified_files"])
@@ -679,17 +733,19 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             f for f in ivy_files if f not in verified_set and f not in failed_set
         ]
 
-        return json.dumps(
-            {
-                "success": True,
-                "total_files": len(ivy_files),
-                "verified": len(verified_set),
-                "failed": len(failed_set),
-                "pending": len(pending),
-                "cache_size": cache["cache_size"],
-                "cache_max": cache["cache_max"],
-                "verified_files": sorted(verified_set),
-                "failed_files": sorted(failed_set),
-            },
-            indent=2,
+        return _tc.finish(
+            json.dumps(
+                {
+                    "success": True,
+                    "total_files": len(ivy_files),
+                    "verified": len(verified_set),
+                    "failed": len(failed_set),
+                    "pending": len(pending),
+                    "cache_size": cache["cache_size"],
+                    "cache_max": cache["cache_max"],
+                    "verified_files": sorted(verified_set),
+                    "failed_files": sorted(failed_set),
+                },
+                indent=2,
+            )
         )

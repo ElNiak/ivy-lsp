@@ -165,7 +165,7 @@ def register(server) -> None:
         filepath = uri_to_path(uri)
         include_decl = params.context.include_declaration if params.context else True
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None,
             find_references,
             server.indexer,
@@ -174,3 +174,18 @@ def register(server) -> None:
             lines,
             include_decl,
         )
+
+        from ivy_lsp.debug_trace import get_tracer
+
+        tracer = get_tracer()
+        if tracer is not None:
+            word = word_at_position(lines, params.position) if lines else None
+            tracer.trace_lsp_request(
+                method="textDocument/references",
+                filepath=filepath,
+                position=f"{params.position.line}:{params.position.character}",
+                word=word,
+                result_summary=f"{len(result)} references" if result else None,
+            )
+
+        return result

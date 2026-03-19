@@ -66,6 +66,20 @@ def main():
     )
     log = logging.getLogger("ivy_lsp")
 
+    # Initialize debug tracer if enabled
+    from ivy_lsp.config import get_config
+
+    cfg = get_config()
+    if cfg.debug_log:
+        from ivy_lsp.debug_trace import init_tracer
+
+        ws_root = cfg.workspace or cfg.workspace_root or os.getcwd()
+        tracer = init_tracer(
+            workspace_root=ws_root,
+            log_path=cfg.debug_log_path,
+        )
+        log.info("Debug tracing enabled: %s", tracer.log_path)
+
     if "--mcp" in sys.argv:
         # Standalone MCP server mode (backward compat): stdio transport
         try:
