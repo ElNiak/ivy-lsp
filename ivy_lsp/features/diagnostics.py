@@ -20,7 +20,7 @@ from ivy_lsp.utils import uri_to_path
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
 
-DEBOUNCE_DELAY = 0.5  # seconds
+DEBOUNCE_DELAY = float(os.environ.get("IVY_LSP_DEBOUNCE_DELAY", "0.3"))
 
 # Pre-compiled regex patterns for hot-path performance (Phase 2.1)
 _INCLUDE_RE = re.compile(r"^include\s+(\w+)", re.MULTILINE)
@@ -743,6 +743,22 @@ def register(server) -> None:
     async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
         uri = params.text_document.uri
         server._last_active_uri = uri
+
+        # Immediate structural diagnostics (no debounce) for fast feedback
+        try:
+            doc = server.workspace.get_text_document(uri)
+            filepath = uri_to_path(uri)
+            source = doc.source or ""
+            fast_diags = check_structural_issues(source, filepath, server.indexer)
+            server.diagnostic_cache.update_fast(uri, source, fast_diags)
+            server.text_document_publish_diagnostics(
+                lsp.PublishDiagnosticsParams(
+                    uri=uri, version=doc.version, diagnostics=fast_diags
+                )
+            )
+        except Exception:
+            logger.debug("Immediate T1 push failed for %s", uri, exc_info=True)
+
         old_task = _debounce_tasks.pop(uri, None)
         if old_task and not old_task.done():
             old_task.cancel()

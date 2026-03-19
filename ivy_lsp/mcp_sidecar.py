@@ -92,6 +92,11 @@ def start_mcp_http_thread(
 
     ctx = ToolContext.from_lsp_server(lsp_server)
 
+    # Fallback: indexer not initialized yet, use env var from start-ivy-server.sh
+    if not ctx.root:
+        ctx.root = os.environ.get("IVY_WORKSPACE_ROOT", os.getcwd())
+        logger.info("Sidecar using workspace root from env: %s", ctx.root)
+
     if port <= 0:
         port = _DEFAULT_MCP_PORT
 
@@ -186,6 +191,30 @@ async def _serve_mcp_http(
             await send({"type": "http.response.body", "body": body})
             return
         await asgi_app(scope, receive, send)
+
+    async def _prewarm_model():
+        """Pre-warm the semantic model after LSP initialization completes."""
+        from ivy_lsp.config import get_config
+
+        cfg = get_config()
+        if not cfg.prewarm_model:
+            logger.info("[MCP-PREWARM] Model pre-warm disabled by config")
+            return
+        # Wait for LSP to finish initializing
+        await asyncio.sleep(5)
+        try:
+            if hasattr(ctx, "get_model") and callable(ctx.get_model):
+                import inspect
+
+                result = ctx.get_model()
+                if inspect.isawaitable(result):
+                    await result
+                logger.info("[MCP-PREWARM] Model pre-warm completed")
+        except Exception:
+            logger.warning("[MCP-PREWARM] Model pre-warm failed", exc_info=True)
+
+    if ctx is not None:
+        asyncio.create_task(_prewarm_model())
 
     config = uvicorn.Config(
         app=_health_middleware,

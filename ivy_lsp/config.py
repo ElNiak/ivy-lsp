@@ -80,6 +80,12 @@ class ServerConfig:
     tool_compile_timeout: float = 300.0
     show_model_timeout: float = 30.0
 
+    # Model build
+    model_build_timeout: float = 600.0
+    model_retry_cooldown: float = 30.0
+    req_graph_cooldown: float = 30.0
+    prewarm_model: bool = True
+
     # Tool timeout
     tool_timeout_scale: float = 1.0
     max_raw_output_length: int = 2000
@@ -117,6 +123,16 @@ class ServerConfig:
             show_model_timeout=_float_env(
                 "IVY_LSP_SHOW_MODEL_TIMEOUT", 30.0, floor=5.0
             ),
+            model_build_timeout=_float_env(
+                "IVY_LSP_MODEL_BUILD_TIMEOUT", 600.0, floor=30.0
+            ),
+            model_retry_cooldown=_float_env(
+                "IVY_LSP_MODEL_RETRY_COOLDOWN", 30.0, floor=5.0
+            ),
+            req_graph_cooldown=_float_env(
+                "IVY_LSP_REQ_GRAPH_COOLDOWN", 30.0, floor=5.0
+            ),
+            prewarm_model=_bool_env("IVY_LSP_PREWARM_MODEL"),
             tool_timeout_scale=_float_env("IVY_LSP_TOOL_TIMEOUT_SCALE", 1.0, floor=0.1),
             max_raw_output_length=_int_env("IVY_LSP_MAX_RAW_OUTPUT_LENGTH", 2000),
             debug_log=_bool_env("IVY_LSP_DEBUG_LOG", "0"),

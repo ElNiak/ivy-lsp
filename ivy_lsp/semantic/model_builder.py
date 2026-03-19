@@ -129,6 +129,14 @@ def build_semantic_model(
         total_symbols,
         build_elapsed,
     )
+    fallback_count = tier_counts.get(2, 0) + tier_counts.get(3, 0)
+    if fallback_count > 0:
+        logger.info(
+            "Model build: %d files required fallback parsing (%d tier-2, %d tier-3)",
+            fallback_count,
+            tier_counts.get(2, 0),
+            tier_counts.get(3, 0),
+        )
 
     # -- Wire semantic edges --
     _wire_semantic_edges(model, basename_to_path, file_includes, file_references)

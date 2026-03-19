@@ -1,6 +1,7 @@
 """Ivy Language Server implementation."""
 
 import logging
+import os
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -144,8 +145,11 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
 
         def _tracked_publish(params):
             server_ref._diagnostics_published_count += 1
+            diag_count = len(params.diagnostics) if params.diagnostics else 0
+            logger.debug(
+                "publishDiagnostics -> uri=%s, count=%d", params.uri, diag_count
+            )
             try:
-                diag_count = len(params.diagnostics) if params.diagnostics else 0
                 if diag_count > 0:
                     error_count = sum(
                         1
@@ -168,7 +172,15 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
                     )
             except Exception:
                 logger.debug("Audit logging failed in _tracked_publish", exc_info=True)
-            return _original_publish(params)
+            try:
+                result = _original_publish(params)
+                logger.debug("publishDiagnostics delivered successfully")
+                return result
+            except Exception:
+                logger.warning(
+                    "publishDiagnostics FAILED for %s", params.uri, exc_info=True
+                )
+                raise
 
         self.text_document_publish_diagnostics = _tracked_publish  # type: ignore[assignment]
 
@@ -255,6 +267,8 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
             ws_root = ""
             if self._indexer is not None:
                 ws_root = self._indexer._workspace_root
+            if not ws_root:
+                ws_root = os.environ.get("IVY_WORKSPACE_ROOT", os.getcwd())
             _remove_port_file(ws_root)
         except Exception:
             logger.debug("MCP sidecar cleanup failed", exc_info=True)

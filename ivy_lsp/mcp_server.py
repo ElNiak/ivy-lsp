@@ -435,14 +435,15 @@ def start_mcp(
     _model_build_attempted: float = 0.0  # timestamp of last failed attempt
     _model_build_error: str | None = None
     _model_building: bool = False  # True while a build is in progress
-    _MODEL_RETRY_COOLDOWN = 30.0  # seconds before retry after failure
-    _MODEL_BUILD_TIMEOUT = 600.0  # generous timeout for large workspaces (666+ files)
+    _cfg = get_config()
+    _MODEL_RETRY_COOLDOWN = _cfg.model_retry_cooldown
+    _MODEL_BUILD_TIMEOUT = _cfg.model_build_timeout
 
     _req_graph_lock = asyncio.Lock()
     _req_graph: Any = requirement_graph  # may be pre-populated or None
     _req_graph_import_failed = False  # permanent flag for ImportError
     _req_graph_last_failure: float = 0.0  # timestamp of last non-import failure
-    _REQ_GRAPH_COOLDOWN = 30.0  # seconds before retry after transient failure
+    _REQ_GRAPH_COOLDOWN = _cfg.req_graph_cooldown
 
     # --- Workspace-aware include resolution cache ---
 
@@ -943,7 +944,7 @@ def start_mcp(
     logger.info("[MCP-READY] Server initialized, tools registered")
 
     # --- Background pre-warming (non-blocking) ---
-    _prewarm_model = os.environ.get("IVY_LSP_PREWARM_MODEL", "1") != "0"
+    _prewarm_model = _cfg.prewarm_model
     _prewarm_graph = os.environ.get("IVY_LSP_PREWARM_GRAPH", "1") != "0"
 
     if _prewarm_model or _prewarm_graph:

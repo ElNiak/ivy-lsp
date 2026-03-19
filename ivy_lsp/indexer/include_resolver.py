@@ -209,9 +209,10 @@ class IncludeResolver:
             Absolute path to the resolved .ivy file, or None if not found.
         """
         fname = include_name + ".ivy"
+        from_file_real = os.path.realpath(from_file)
 
         # 1. Same directory as the including file
-        from_dir = os.path.dirname(os.path.realpath(from_file))
+        from_dir = os.path.dirname(from_file_real)
         candidate = os.path.join(from_dir, fname)
         if os.path.isfile(candidate):
             return os.path.realpath(candidate)
@@ -219,7 +220,7 @@ class IncludeResolver:
         # 2. Layer-aware staging (when active, replaces flat staging for
         #    colliding basenames)
         if self._partition_staging and self._file_to_partition:
-            abs_from = os.path.realpath(from_file)
+            abs_from = from_file_real
             layer_id = self._file_to_partition.get(abs_from)
             if layer_id and layer_id in self._partition_staging:
                 candidate = os.path.join(self._partition_staging[layer_id], fname)
@@ -242,6 +243,45 @@ class IncludeResolver:
                             candidate = os.path.join(dep_staging, fname)
                             if os.path.isfile(candidate):
                                 return os.path.realpath(candidate)
+
+                # Broader priority-ordered layer fallback with proximity scoring
+                cross_candidates = []
+                for lid in self._partition_staging:
+                    if lid == layer_id:
+                        continue
+                    cand = os.path.join(self._partition_staging[lid], fname)
+                    if os.path.isfile(cand):
+                        cross_candidates.append((lid, cand))
+
+                if cross_candidates:
+                    if len(cross_candidates) == 1:
+                        _lid, _cand = cross_candidates[0]
+                        logger.debug(
+                            "Cross-layer resolve: '%s' found in layer '%s' (from layer '%s')",
+                            include_name,
+                            _lid,
+                            layer_id,
+                        )
+                        return os.path.realpath(_cand)
+
+                    # Multiple candidates: score by path proximity to from_file
+                    def _proximity(item):
+                        _item_lid, _item_cand = item
+                        real = os.path.realpath(_item_cand)
+                        common = os.path.commonpath([from_file_real, real])
+                        return len(common)
+
+                    best_lid, best_cand = max(cross_candidates, key=_proximity)
+                    logger.debug(
+                        "Cross-layer resolve (proximity): '%s' -> layer '%s' "
+                        "(from layer '%s', %d candidates)",
+                        include_name,
+                        best_lid,
+                        layer_id,
+                        len(cross_candidates),
+                    )
+                    return os.path.realpath(best_cand)
+
             elif not layer_id and self._file_to_layer:
                 # File should be in a layer but isn't in _file_to_partition
                 logger.warning(
@@ -424,7 +464,7 @@ class IncludeResolver:
                     for p in paths
                 }
                 if len(layers_involved) <= 1:
-                    logger.error(
+                    logger.warning(
                         "Intra-layer collision: %s has %d variants in layer '%s': %s "
                         "— this MUST be fixed (duplicate basenames within same protocol)",
                         basename,
@@ -465,7 +505,7 @@ class IncludeResolver:
                     )
                 else:
                     # No layers → collision is a real ambiguity problem
-                    logger.error(
+                    logger.warning(
                         "Staging collision (ambiguous): %s (keeping %s, skipping %s) "
                         "— include resolution for this basename may be wrong",
                         basename,
@@ -481,7 +521,7 @@ class IncludeResolver:
                 logger.warning("Failed to create symlink for %s: %s", filepath, exc)
                 continue
             self._staged_files[basename] = filepath
-        logger.warning(
+        logger.info(
             "Staged %d files in %s (%d collisions, %d unique basenames affected)",
             len(self._staged_files),
             staging,
@@ -966,7 +1006,7 @@ class IncludeResolver:
         for filepath, layer_id in self._file_to_layer.items():
             self._file_to_partition[filepath] = layer_id
 
-        logger.warning(
+        logger.info(
             "Layered staging active: %d layers, %d files mapped to partitions",
             len(self._partition_staging),
             len(self._file_to_partition),

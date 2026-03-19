@@ -808,8 +808,8 @@ class TestLayerAwareFileDiscovery:
         )
         resolver.cleanup_staging()
 
-    def test_staging_collision_error_without_layers(self, tmp_path, caplog):
-        """Without layers, flat staging collision logged at ERROR."""
+    def test_staging_collision_warning_without_layers(self, tmp_path, caplog):
+        """Without layers, flat staging collision logged at WARNING."""
         import logging
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
@@ -827,16 +827,18 @@ class TestLayerAwareFileDiscovery:
         with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
             resolver.create_staging_directory()
 
-        error_msgs = [
+        warning_msgs = [
             r
             for r in caplog.records
-            if "Staging collision" in r.message and r.levelno == logging.ERROR
+            if "Staging collision" in r.message and r.levelno == logging.WARNING
         ]
-        assert len(error_msgs) >= 1, "Expected ERROR staging collision without layers"
+        assert (
+            len(warning_msgs) >= 1
+        ), "Expected WARNING staging collision without layers"
         resolver.cleanup_staging()
 
-    def test_intra_layer_collision_is_error(self, tmp_path, caplog):
-        """Single layer with two same-name files → logged at ERROR."""
+    def test_intra_layer_collision_is_warning(self, tmp_path, caplog):
+        """Single layer with two same-name files -> logged at WARNING."""
         import logging
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
@@ -857,12 +859,14 @@ class TestLayerAwareFileDiscovery:
         with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
             resolver.create_staging_directory()
 
-        error_msgs = [
+        warning_msgs = [
             r
             for r in caplog.records
-            if "Intra-layer collision" in r.message and r.levelno == logging.ERROR
+            if "Intra-layer collision" in r.message and r.levelno == logging.WARNING
         ]
-        assert len(error_msgs) >= 1, "Intra-layer collision should be logged at ERROR"
+        assert (
+            len(warning_msgs) >= 1
+        ), "Intra-layer collision should be logged at WARNING"
         resolver.cleanup_staging()
 
 
@@ -1017,7 +1021,7 @@ class TestDiagnosticLogging:
         resolver.cleanup_staging()
 
     def test_build_layered_staging_summary_logged(self, tmp_path, caplog):
-        """After build_layered_staging(), a WARNING-level summary message appears."""
+        """After build_layered_staging(), an INFO-level summary message appears."""
         import logging
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
@@ -1026,18 +1030,16 @@ class TestDiagnosticLogging:
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
         resolver.create_staging_directory()
 
-        with caplog.at_level(
-            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
-        ):
+        with caplog.at_level(logging.INFO, logger="ivy_lsp.indexer.include_resolver"):
             resolver.build_layered_staging()
 
         summary = [
             r.message
             for r in caplog.records
-            if "Layered staging active" in r.message and r.levelno >= logging.WARNING
+            if "Layered staging active" in r.message and r.levelno >= logging.INFO
         ]
         assert len(summary) >= 1, (
-            f"Expected 'Layered staging active' WARNING, got: "
+            f"Expected 'Layered staging active' INFO, got: "
             f"{[r.message for r in caplog.records]}"
         )
         # Verify content includes counts

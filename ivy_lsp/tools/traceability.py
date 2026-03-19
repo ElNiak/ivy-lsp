@@ -73,6 +73,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         test_file: str | None = None,
     ) -> str:
         """RFC requirement-to-annotation traceability matrix."""
+        # Check model status first to avoid blocking
+        status = ctx.get_model_status()
+        if status.get("state") not in ("ready", "not_built"):
+            return _model_unavailable_response()
         model = await ctx.get_model()
         if model is None:
             return _model_unavailable_response()
@@ -161,6 +165,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         test_file: str | None = None,
     ) -> str:
         """RFC requirement coverage statistics by level and layer."""
+        # Check model status first to avoid blocking
+        status = ctx.get_model_status()
+        if status.get("state") not in ("ready", "not_built"):
+            return _model_unavailable_response()
         model = await ctx.get_model()
         if model is None:
             return _model_unavailable_response()
@@ -327,7 +335,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         try:
             stats = json.loads(stats_raw)
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
-            model = await ctx.get_model()
+            # Check model status first to avoid blocking
+            _status = ctx.get_model_status()
+            if _status.get("state") not in ("ready", "not_built"):
+                model = None
+            else:
+                model = await ctx.get_model()
 
             # Build req_map from the semantic model first
             req_map: dict[str, Any] = {}

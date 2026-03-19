@@ -587,7 +587,12 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         # 3. Semantic diagnostics (orphaned RFC tags, untagged assertions)
         if layers is None or "semantic" in layers:
             try:
-                model = await ctx.get_model()
+                # Check model status first to avoid blocking
+                _model_status = ctx.get_model_status()
+                if _model_status.get("state") not in ("ready", "not_built"):
+                    model = None
+                else:
+                    model = await ctx.get_model()
                 if model is not None:
                     from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
                     from ivy_lsp.semantic.rfc_annotations import is_tag_covered
