@@ -80,8 +80,12 @@ def goto_definition(
 
     results = indexer.lookup_symbol(word)
     if not results and "." in word:
-        last = word.rsplit(".", 1)[1]
-        results = indexer.lookup_symbol(last)
+        parts = word.split(".")
+        for i in range(1, len(parts)):
+            suffix = ".".join(parts[i:])
+            results = indexer.lookup_symbol(suffix)
+            if results:
+                break
 
     if not results and semantic_model is not None:
         results = _lookup_via_semantic_model(word, semantic_model)

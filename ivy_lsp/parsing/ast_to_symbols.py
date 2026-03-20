@@ -82,6 +82,10 @@ def _reconstruct_hierarchy(flat_symbols: List[IvySymbol]) -> List[IvySymbol]:
     by_name: Dict[str, IvySymbol] = {}
 
     _CONTAINER_KINDS = {SymbolKind.Module, SymbolKind.Namespace}
+    # Attribute (Constant) and native (String) symbols use callatom-composed
+    # dotted names that are qualified references, not parser-flattened scopes.
+    # They must stay flat at root level even when their name contains dots.
+    _FLAT_KINDS = {SymbolKind.Constant, SymbolKind.String}
 
     # First pass: index symbols, preferring container kinds.
     for sym in flat_symbols:
@@ -96,6 +100,9 @@ def _reconstruct_hierarchy(flat_symbols: List[IvySymbol]) -> List[IvySymbol]:
 
     # Second pass: nest children and collect roots.
     for sym in flat_symbols:
+        if sym.kind in _FLAT_KINDS:
+            root_symbols.append(sym)
+            continue
         if "." in sym.name:
             # Check whether a container symbol with the *same* full
             # dotted name already exists.  If so, this is the inner

@@ -336,3 +336,32 @@ class TestFallbackScanComplex:
         assert len(symbols) == 1
         assert symbols[0].name == "r"
         assert symbols[0].kind == SymbolKind.Property
+
+    def test_attribute_simple(self):
+        """``attribute radix = 16`` produces Constant with name 'radix'."""
+        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
+        symbols, _error_info = fallback_scan("attribute radix = 16", "test.ivy")
+        assert len(symbols) == 1
+        assert symbols[0].name == "radix"
+        assert symbols[0].kind == SymbolKind.Constant
+
+    def test_attribute_dotted_name(self):
+        """``attribute frame.weight = "0.02"`` reads full dotted name."""
+        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
+        source = 'attribute frame.weight = "0.02"'
+        symbols, _error_info = fallback_scan(source, "test.ivy")
+        assert len(symbols) == 1
+        assert symbols[0].name == "frame.weight"
+        assert symbols[0].kind == SymbolKind.Constant
+
+    def test_attribute_deeply_dotted(self):
+        """``attribute frame.rst_stream.handle.weight = "0.02"`` reads full path."""
+        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+
+        source = 'attribute frame.rst_stream.handle.weight = "0.02"'
+        symbols, _error_info = fallback_scan(source, "test.ivy")
+        assert len(symbols) == 1
+        assert symbols[0].name == "frame.rst_stream.handle.weight"
+        assert symbols[0].kind == SymbolKind.Constant

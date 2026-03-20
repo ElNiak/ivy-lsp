@@ -66,8 +66,9 @@ _SCOPE_OPENERS = {"OBJECT", "MODULE"}
 # Keywords that can use ``[label]`` syntax (e.g. ``property [p1] ...``).
 _LABEL_KEYWORDS = {"PROPERTY", "AXIOM", "CONJECTURE"}
 
-# Keywords whose name is a dotted path (e.g. ``before foo.step``).
-_DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER", "IMPLEMENT", "AROUND"}
+# Keywords whose name is a dotted path (e.g. ``before foo.step``,
+# ``attribute stream_pos.cardinality = 4``).
+_DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER", "IMPLEMENT", "AROUND", "ATTRIBUTE"}
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +239,17 @@ def fallback_scan(
             name: Optional[str] = None
 
             if tok.type in _DOTTED_NAME_KEYWORDS:
-                # BEFORE / AFTER: read dotted name like ``foo.step``
+                # BEFORE / AFTER / ATTRIBUTE: read dotted name like ``foo.step``
                 name, i = _read_dotted_name(tokens, i + 1)
+                # ATTRIBUTE: consume ``= value`` to build a richer detail
+                if tok.type == "ATTRIBUTE" and name is not None:
+                    if i < len(tokens) and tokens[i].type == "EQ":
+                        i += 1  # skip EQ
+                        if i < len(tokens) and tokens[i].type in (
+                            "PRESYMBOL",
+                            "STRING",
+                        ):
+                            i += 1  # skip value token
 
             elif tok.type in _LABEL_KEYWORDS:
                 # PROPERTY / AXIOM / CONJECTURE: may have ``[label]`` or

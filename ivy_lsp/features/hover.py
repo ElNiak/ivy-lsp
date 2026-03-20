@@ -336,8 +336,12 @@ def get_hover_info(
 
     results = indexer.lookup_symbol(word)
     if not results and "." in word:
-        last = word.rsplit(".", 1)[1]
-        results = indexer.lookup_symbol(last)
+        parts = word.split(".")
+        for i in range(1, len(parts)):
+            suffix = ".".join(parts[i:])
+            results = indexer.lookup_symbol(suffix)
+            if results:
+                break
 
     if not results:
         # Fallback: query the SemanticModel directly when the indexer

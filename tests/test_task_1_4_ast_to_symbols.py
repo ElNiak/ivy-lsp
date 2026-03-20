@@ -388,6 +388,67 @@ object frame = {
             "largest_acked" in child_names
         ), f"Expected 'largest_acked' in ack children, got {child_names}"
 
+    def test_four_level_nesting(self):
+        """Four levels of nested objects are correctly reconstructed."""
+        source = """\
+#lang ivy1.7
+
+object a = {
+    object b = {
+        object c = {
+            type this
+        }
+    }
+}
+"""
+        symbols = _parse_and_convert(source)
+        a_sym = _find_symbol(symbols, "a", SymbolKind.Module)
+        assert a_sym is not None
+        b_sym = _find_symbol(a_sym.children, "b", SymbolKind.Module)
+        assert (
+            b_sym is not None
+        ), f"Expected 'b' as child of 'a', got: {[c.name for c in a_sym.children]}"
+        c_sym = _find_symbol(b_sym.children, "c", SymbolKind.Module)
+        assert (
+            c_sym is not None
+        ), f"Expected 'c' as child of 'b', got: {[c.name for c in b_sym.children]}"
+        # 'type this' should be child of c
+        this_sym = _find_symbol(c_sym.children, "this", SymbolKind.Class)
+        assert (
+            this_sym is not None or len(c_sym.children) >= 1
+        ), f"Expected 'this' in c's children, got: {[c.name for c in c_sym.children]}"
+
+    def test_duplicate_name_object_plus_type(self):
+        """Object and inner 'type this' sharing name 'bit': type nests under object.
+
+        The parser expands ``type this`` inside ``object bit`` to a TypeDecl
+        named ``"bit"``, so both the ObjectDecl and the TypeDecl share the
+        same name.  The Module (object) should win as the root symbol and
+        the Class (type) should be nested as its child.
+        """
+        source = """\
+#lang ivy1.7
+
+object bit = {
+    type this
+    individual zero:bit
+}
+"""
+        symbols = _parse_and_convert(source)
+        # 'bit' Module should be at root
+        bit_module = _find_symbol(symbols, "bit", SymbolKind.Module)
+        assert bit_module is not None, "Expected Module 'bit' at root"
+        # The type 'bit' (from 'type this') should be a Class child of the Module
+        type_child = None
+        for c in bit_module.children:
+            if c.kind == SymbolKind.Class:
+                type_child = c
+                break
+        assert type_child is not None, (
+            f"Expected a Class child (from 'type this') under 'bit' Module, got: "
+            f"{[(c.name, c.kind) for c in bit_module.children]}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test: File path propagation
@@ -749,3 +810,57 @@ class TestAttributeDecl:
         sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
         assert sym is not None
         assert sym.file_path == "my_file.ivy"
+
+    def test_dotted_attribute_stays_at_root(self):
+        """Dotted attribute names are callatom references, not nested scopes."""
+        source = """\
+#lang ivy1.7
+
+type stream_pos
+attribute stream_pos.cardinality = 4
+"""
+        symbols = _parse_and_convert(source)
+        # The attribute should be at root level with its full dotted name,
+        # NOT nested under the 'stream_pos' type.
+        attr = None
+        for s in symbols:
+            if s.kind == SymbolKind.Constant and "stream_pos" in s.name:
+                attr = s
+                break
+        assert attr is not None, (
+            f"Expected Constant attribute with 'stream_pos' in name at root, "
+            f"got: {[(s.name, s.kind) for s in symbols]}"
+        )
+        # Verify it was NOT nested under stream_pos type
+        stream_type = _find_symbol(symbols, "stream_pos", SymbolKind.Class)
+        if stream_type is not None:
+            child_kinds = [c.kind for c in stream_type.children]
+            assert (
+                SymbolKind.Constant not in child_kinds
+            ), "Dotted attribute should NOT be nested under the type"
+
+    def test_deeply_dotted_attribute(self):
+        """Deeply dotted attribute names stay at root level."""
+        source = """\
+#lang ivy1.7
+
+object frame = {
+    type this
+}
+attribute frame.rst_stream.handle.weight = "0.02"
+"""
+        symbols = _parse_and_convert(source)
+        # The attribute should be at root, not nested under frame
+        frame_sym = _find_symbol(symbols, "frame", SymbolKind.Module)
+        assert frame_sym is not None
+        # No Constant children should exist on frame
+        const_children = [
+            c for c in frame_sym.children if c.kind == SymbolKind.Constant
+        ]
+        assert len(const_children) == 0, (
+            f"Deeply dotted attribute should NOT be nested under 'frame', "
+            f"found: {[(c.name, c.kind) for c in const_children]}"
+        )
+        # Should be findable at root level
+        root_constants = [s for s in symbols if s.kind == SymbolKind.Constant]
+        assert len(root_constants) >= 1, "Expected at least one root-level Constant"
