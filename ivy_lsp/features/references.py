@@ -12,42 +12,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
-
-
-def _get_layer_scope(resolver, filepath: str) -> Optional[Set[str]]:
-    """Return the set of layer IDs visible from *filepath*.
-
-    Includes the file's own layer plus all upstream ``depends_on`` layers
-    (transitively).  Returns ``None`` when layer staging is not active,
-    meaning no filtering should be applied.
-    """
-    if not hasattr(resolver, "_file_to_layer") or not resolver._file_to_layer:
-        return None
-
-    norm = os.path.normpath(os.path.realpath(filepath))
-    current_layer = resolver._file_to_layer.get(norm)
-    if current_layer is None:
-        return None
-
-    layer_by_id = getattr(resolver, "_layer_by_id", {})
-    if not layer_by_id:
-        return None
-
-    # Walk depends_on upward (transitively) to collect visible layers.
-    visible: Set[str] = set()
-    queue = [current_layer]
-    while queue:
-        lid = queue.pop()
-        if lid in visible:
-            continue
-        visible.add(lid)
-        layer_obj = layer_by_id.get(lid)
-        if layer_obj and hasattr(layer_obj, "depends_on"):
-            for dep in layer_obj.depends_on:
-                if dep not in visible:
-                    queue.append(dep)
-
-    return visible
+from ivy_lsp.utils.scope_ranking import get_layer_scope
 
 
 def _filter_files_by_layer_scope(
@@ -108,7 +73,7 @@ def find_references(
     all_files = resolver.find_all_ivy_files()
 
     # Layer-scope filtering: restrict to current layer + upstream deps.
-    layer_scope = _get_layer_scope(resolver, filepath)
+    layer_scope = get_layer_scope(resolver, filepath)
     if layer_scope is not None:
         all_files = _filter_files_by_layer_scope(resolver, all_files, layer_scope)
 

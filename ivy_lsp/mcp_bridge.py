@@ -47,19 +47,34 @@ def _read_port_from_file(port_file: str) -> int | None:
     return None
 
 
-def _synthesize_errors(pending: dict[str | int, Any]) -> None:
+def _synthesize_errors(
+    pending: dict[str | int, Any],
+    attempt: int = 0,
+    max_attempts: int = _MAX_RECONNECT_ATTEMPTS,
+) -> None:
     """Write JSON-RPC error responses for all pending (in-flight) requests.
 
     This is called when the connection drops so that the client does not
-    hang waiting for a response that will never come.
+    hang waiting for a response that will never come.  The message is
+    differentiated by attempt number to guide the client.
     """
+    if attempt == 0:
+        msg = "Ivy LSP server starting, please retry in a moment"
+    elif attempt < max_attempts:
+        msg = f"Ivy LSP server reconnecting (attempt {attempt}/{max_attempts})"
+    else:
+        msg = (
+            f"Ivy LSP server unavailable after {max_attempts} attempts. "
+            "Run /nct-health to diagnose."
+        )
+
     for req_id in list(pending.keys()):
         error = {
             "jsonrpc": "2.0",
             "id": req_id,
             "error": {
                 "code": -32603,
-                "message": "Ivy LSP server unavailable, reconnecting...",
+                "message": msg,
             },
         }
         sys.stdout.write(json.dumps(error) + "\n")
@@ -260,7 +275,7 @@ async def run(port: int, port_file: str | None = None) -> None:
         except Exception as exc:
             logger.error("Connection lost: %s", exc)
             # Synthesize errors for any pending requests
-            _synthesize_errors(pending_requests)
+            _synthesize_errors(pending_requests, attempt, _MAX_RECONNECT_ATTEMPTS)
             if attempt >= _MAX_RECONNECT_ATTEMPTS:
                 logger.error("All reconnection attempts exhausted")
                 stdin_task.cancel()

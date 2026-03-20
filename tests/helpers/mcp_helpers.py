@@ -46,5 +46,21 @@ def extract_text(result) -> str:
 
 
 def extract_json(result) -> dict[str, Any]:
-    """Normalize MCP tool response to a parsed JSON dict."""
-    return json.loads(extract_text(result))
+    """Normalize MCP tool response to a parsed JSON dict.
+
+    Handles both raw JSON strings (legacy) and markdown-formatted output
+    (new formatter layer).  For markdown, extracts JSON from a code fence.
+    """
+    import re
+
+    text = extract_text(result)
+    # Try direct JSON parse first (backward compat)
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Extract JSON from markdown code fence
+    m = re.search(r"```json\n(.*?)\n```", text, re.DOTALL)
+    if m:
+        return json.loads(m.group(1))
+    raise ValueError(f"Cannot extract JSON from: {text[:200]}")

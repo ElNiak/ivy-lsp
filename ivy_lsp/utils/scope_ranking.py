@@ -1,7 +1,47 @@
 """Scope- and layer-aware ranking for symbol lookup results."""
 
 import os
-from typing import Optional
+from typing import Optional, Set
+
+
+def get_layer_scope(resolver, filepath: str) -> Optional[Set[str]]:
+    """Return the set of layer IDs visible from *filepath*.
+
+    Includes the file's own layer plus all upstream ``depends_on`` layers
+    (transitively).  Returns ``None`` when layer staging is not active,
+    meaning no filtering should be applied.
+    """
+    if (
+        not resolver
+        or not hasattr(resolver, "_file_to_layer")
+        or not resolver._file_to_layer
+    ):
+        return None
+
+    norm = os.path.normpath(os.path.abspath(filepath))
+    current_layer = resolver._file_to_layer.get(norm)
+    if current_layer is None:
+        return None
+
+    layer_by_id = getattr(resolver, "_layer_by_id", {})
+    if not layer_by_id:
+        return None
+
+    # Walk depends_on upward (transitively) to collect visible layers.
+    visible: Set[str] = set()
+    queue = [current_layer]
+    while queue:
+        lid = queue.pop()
+        if lid in visible:
+            continue
+        visible.add(lid)
+        layer_obj = layer_by_id.get(lid)
+        if layer_obj and hasattr(layer_obj, "depends_on"):
+            for dep in layer_obj.depends_on:
+                if dep not in visible:
+                    queue.append(dep)
+
+    return visible
 
 
 def rank_by_scope(
@@ -45,4 +85,25 @@ def rank_by_scope(
                 return (5, 0)  # different layer
         return (5, 0)
 
-    return sorted(results, key=_score)
+    # Layer-aware soft partition: prefer layer-visible results, fall back
+    # to cross-layer only when no visible results exist.
+    visible_layers = get_layer_scope(resolver, current_filepath)
+
+    if visible_layers is None:
+        return sorted(results, key=_score)
+
+    layer_visible = []
+    layer_external = []
+    for r in results:
+        raw = getattr(r, "filepath", None) or getattr(r, "file_path", None) or ""
+        rpath = os.path.normpath(os.path.abspath(raw))
+        r_layer = resolver._file_to_layer.get(rpath)
+        # Unmapped files (stdlib, etc.) and files in visible layers stay visible
+        if r_layer is None or r_layer in visible_layers:
+            layer_visible.append(r)
+        else:
+            layer_external.append(r)
+
+    if layer_visible:
+        return sorted(layer_visible, key=_score)
+    return sorted(layer_external, key=_score)

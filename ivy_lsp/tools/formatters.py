@@ -89,7 +89,7 @@ def _bullet_list(items: list[str], max_items: int = 30) -> str:
 
 def format_error(data: dict) -> str:
     """Format an error/timeout response as markdown."""
-    msg = data.get("message", "Unknown error")
+    msg = data.get("message") or data.get("error") or "Unknown error"
     parts = [f"**Error** -- {msg}"]
 
     note = data.get("note")

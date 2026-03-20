@@ -1066,25 +1066,36 @@ class TestDefinitionLayerAwareRanking:
 
         results = [FakeResult(apt_file), FakeResult(quic_file)]
 
-        # Simulate a resolver with _file_to_layer mapping
+        class FakeLayer:
+            def __init__(self, depends_on=None):
+                self.depends_on = depends_on or []
+
+        # Simulate a resolver with _file_to_layer and _layer_by_id
         class FakeResolver:
             _file_to_layer = {
                 os.path.normpath(os.path.abspath(quic_file)): "standard",
                 os.path.normpath(os.path.abspath(apt_file)): "apt",
                 os.path.normpath(os.path.abspath(current_file)): "standard",
             }
+            _layer_by_id = {
+                "standard": FakeLayer(),
+                "apt": FakeLayer(depends_on=["standard"]),
+            }
 
         # No scope files (neither result is in scope)
         ranked = _rank_by_scope(results, current_file, set(), resolver=FakeResolver())
         # Same-layer result (quic_stack) should rank before different-layer (apt)
         assert ranked[0].filepath == quic_file
-        assert ranked[1].filepath == apt_file
+        # APT is external (standard doesn't depend on apt), so filtered out
+        assert len(ranked) == 1
 
-    def test_scope_still_beats_layer(self, tmp_path):
-        """In-scope results should rank higher than same-layer out-of-scope results."""
+    def test_scope_still_beats_layer_within_visible(self, tmp_path):
+        """Within visible layers, in-scope results rank higher than same-layer out-of-scope."""
         from ivy_lsp.features.definition import _rank_by_scope
 
-        in_scope_file = str(tmp_path / "apt" / "quic_types.ivy")
+        # Both files are in visible layers (standard depends on nothing,
+        # but we make apt depend on standard so both are visible from standard)
+        in_scope_file = str(tmp_path / "quic_stack" / "quic_utils.ivy")
         same_layer_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
         current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
 
@@ -1092,20 +1103,27 @@ class TestDefinitionLayerAwareRanking:
             def __init__(self, filepath):
                 self.filepath = filepath
 
+        class FakeLayer:
+            def __init__(self, depends_on=None):
+                self.depends_on = depends_on or []
+
         results = [FakeResult(same_layer_file), FakeResult(in_scope_file)]
 
         class FakeResolver:
             _file_to_layer = {
                 os.path.normpath(os.path.abspath(same_layer_file)): "standard",
-                os.path.normpath(os.path.abspath(in_scope_file)): "apt",
+                os.path.normpath(os.path.abspath(in_scope_file)): "standard",
                 os.path.normpath(os.path.abspath(current_file)): "standard",
+            }
+            _layer_by_id = {
+                "standard": FakeLayer(),
             }
 
         scope_files = {os.path.normpath(os.path.abspath(in_scope_file))}
         ranked = _rank_by_scope(
             results, current_file, scope_files, resolver=FakeResolver()
         )
-        # In-scope (apt) should rank first, even though same-layer (quic_stack) is closer
+        # In-scope result should rank first (both are same-layer/visible)
         assert ranked[0].filepath == in_scope_file
 
     def test_no_resolver_falls_back(self, tmp_path):
@@ -1124,6 +1142,127 @@ class TestDefinitionLayerAwareRanking:
         # No resolver — should not crash, both get same score
         ranked = _rank_by_scope(results, current_file, set(), resolver=None)
         assert len(ranked) == 2
+
+    def test_cross_layer_fallback(self, tmp_path):
+        """When only cross-layer results exist, they are returned as fallback."""
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        apt_file = str(tmp_path / "apt" / "types.ivy")
+        current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        class FakeLayer:
+            def __init__(self, depends_on=None):
+                self.depends_on = depends_on or []
+
+        results = [FakeResult(apt_file)]
+
+        class FakeResolver:
+            _file_to_layer = {
+                os.path.normpath(os.path.abspath(apt_file)): "apt",
+                os.path.normpath(os.path.abspath(current_file)): "standard",
+            }
+            _layer_by_id = {
+                "standard": FakeLayer(),
+                "apt": FakeLayer(depends_on=["standard"]),
+            }
+
+        ranked = rank_by_scope(results, current_file, set(), resolver=FakeResolver())
+        # APT is external to standard, but it's the only result → fallback
+        assert len(ranked) == 1
+        assert ranked[0].filepath == apt_file
+
+    def test_unmapped_files_always_visible(self, tmp_path):
+        """Files with r_layer=None (e.g. stdlib) stay in the visible partition."""
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        stdlib_file = str(tmp_path / "stdlib" / "order.ivy")
+        apt_file = str(tmp_path / "apt" / "types.ivy")
+        current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        class FakeLayer:
+            def __init__(self, depends_on=None):
+                self.depends_on = depends_on or []
+
+        results = [FakeResult(apt_file), FakeResult(stdlib_file)]
+
+        class FakeResolver:
+            _file_to_layer = {
+                # stdlib_file is NOT in _file_to_layer (unmapped)
+                os.path.normpath(os.path.abspath(apt_file)): "apt",
+                os.path.normpath(os.path.abspath(current_file)): "standard",
+            }
+            _layer_by_id = {
+                "standard": FakeLayer(),
+                "apt": FakeLayer(depends_on=["standard"]),
+            }
+
+        ranked = rank_by_scope(results, current_file, set(), resolver=FakeResolver())
+        # stdlib_file (unmapped) is visible; apt_file is external and filtered out
+        assert len(ranked) == 1
+        assert ranked[0].filepath == stdlib_file
+
+    def test_depends_on_upstream_visible(self, tmp_path):
+        """quic_tests (depends_on: quic) sees quic definitions."""
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
+        current_file = str(tmp_path / "quic_tests" / "test_handshake.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        class FakeLayer:
+            def __init__(self, depends_on=None):
+                self.depends_on = depends_on or []
+
+        results = [FakeResult(quic_file)]
+
+        class FakeResolver:
+            _file_to_layer = {
+                os.path.normpath(os.path.abspath(quic_file)): "quic",
+                os.path.normpath(os.path.abspath(current_file)): "quic_tests",
+            }
+            _layer_by_id = {
+                "quic": FakeLayer(),
+                "quic_tests": FakeLayer(depends_on=["quic"]),
+            }
+
+        ranked = rank_by_scope(results, current_file, set(), resolver=FakeResolver())
+        # quic_tests depends_on quic, so quic is visible
+        assert len(ranked) == 1
+        assert ranked[0].filepath == quic_file
+
+    def test_no_layer_staging_preserves_old_behavior(self, tmp_path):
+        """When _file_to_layer is empty, layer partition is skipped (pure ranking)."""
+        from ivy_lsp.utils.scope_ranking import rank_by_scope
+
+        file_a = str(tmp_path / "a" / "types.ivy")
+        file_b = str(tmp_path / "b" / "types.ivy")
+        current_file = str(tmp_path / "a" / "frame.ivy")
+
+        class FakeResult:
+            def __init__(self, filepath):
+                self.filepath = filepath
+
+        results = [FakeResult(file_b), FakeResult(file_a)]
+
+        class FakeResolver:
+            _file_to_layer = {}  # Empty — no layer staging
+            _layer_by_id = {}
+
+        ranked = rank_by_scope(results, current_file, set(), resolver=FakeResolver())
+        # Both returned; file_a in same dir as current_file ranks first
+        assert len(ranked) == 2
+        assert ranked[0].filepath == file_a
 
 
 class TestLayerGuardPreventsPartitionOverwrite:

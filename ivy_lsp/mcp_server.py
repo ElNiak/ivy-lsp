@@ -935,13 +935,16 @@ def start_mcp(
 
     mcp = create_mcp_app(ctx)
 
+    # Log MCP-READY immediately after tool registration — tools are callable now.
+    # This is polled by wait-for-indexing.sh; logging it before prewarm avoids
+    # a 5-15s delay in readiness detection.
+    logger.info("Starting ivy-lsp MCP server (workspace: %s)", root)
+    logger.info("[MCP-READY] Server initialized, tools registered")
+
     # --- Start or return ---
 
     if _return_app:
         return mcp
-
-    logger.info("Starting ivy-lsp MCP server (workspace: %s)", root)
-    logger.info("[MCP-READY] Server initialized, tools registered")
 
     # --- Background pre-warming (non-blocking) ---
     _prewarm_model = _cfg.prewarm_model
@@ -976,6 +979,8 @@ def start_mcp(
                         )
             except Exception:
                 logger.error("[INDEX-PREWARM] Pre-warming failed", exc_info=True)
+            else:
+                logger.info("[MCP-PREWARM-DONE] Background pre-warming complete")
             finally:
                 loop.close()
 

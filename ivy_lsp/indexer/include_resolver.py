@@ -416,6 +416,11 @@ class IncludeResolver:
         Returns:
             Sorted list of absolute paths to .ivy files.
         """
+        # When layer staging is active, return ALL layer-mapped files.
+        # Flat _staged_files only has collision winners; layer staging
+        # correctly maps every file to its layer.
+        if self._file_to_layer and root is None:
+            return sorted(self._file_to_layer.keys())
         if self._staging_dir and root is None:
             return sorted(self._staged_files.values())
         return self._find_source_files(root)

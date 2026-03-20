@@ -156,6 +156,8 @@ class DebugTracer:
         word: Optional[str] = None,
         source: Optional[str] = None,
         result_summary: Optional[str] = None,
+        status: str = "ok",
+        call_id: str = "",
     ) -> None:
         """Log an LSP feature request and response.
 
@@ -166,6 +168,8 @@ class DebugTracer:
             word: Word at cursor.
             source: Which data path produced the result.
             result_summary: Short description of the result.
+            status: Outcome status (e.g. ``ok``, ``empty``, ``degraded``, ``error``).
+            call_id: Optional correlation id for linking tool/lsp events.
         """
         lines: List[str] = []
         lines.append("")
@@ -181,12 +185,34 @@ class DebugTracer:
             lines.append(f'Word:     "{word}"')
         if source:
             lines.append(f"Source:   {source}")
+        lines.append(f"Status:   {status}")
         if result_summary:
             lines.append(f"Result:   {result_summary}")
         else:
             lines.append("Result:   (none)")
 
         self._logger.debug("\n".join(lines))
+
+        try:
+            from ivy_lsp.session_observability import get_session_logger
+
+            get_session_logger().log_event(
+                channel="lsp",
+                event_type="request",
+                name=method,
+                status=status,
+                call_id=call_id or None,
+                payload={
+                    "filepath": filepath,
+                    "position": position,
+                    "word": word,
+                    "source": source,
+                    "result_summary": result_summary,
+                },
+            )
+        except (OSError, TypeError, ValueError):
+            # Observability logging must never affect LSP behavior.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -214,10 +240,23 @@ def init_tracer(
     global _tracer
 
     if log_path is None:
-        # Generate deterministic filename from workspace root
-        key = (workspace_root or "default").encode()
-        h = hashlib.sha256(key).hexdigest()[:8]
-        log_path = f"/tmp/ivy-lsp-debug-{h}.log"
+        try:
+            from ivy_lsp.session_observability import (
+                get_session_id,
+                resolve_session_log_dir,
+            )
+
+            session_dir = resolve_session_log_dir(
+                get_session_id(),
+                workspace_root=workspace_root,
+            )
+            session_dir.mkdir(parents=True, exist_ok=True)
+            log_path = str(session_dir / "debug-trace.log")
+        except (OSError, TypeError, ValueError):
+            # Generate deterministic filename from workspace root
+            key = (workspace_root or "default").encode()
+            h = hashlib.sha256(key).hexdigest()[:8]
+            log_path = f"/tmp/ivy-lsp-debug-{h}.log"
 
     _tracer = DebugTracer(log_path)
     return _tracer
@@ -286,7 +325,7 @@ class ToolTraceContext:
 def trace_tool(
     tool_name: str,
     inputs: Dict[str, Any],
-) -> Generator[List[Optional[str]], None, None]:
+) -> Generator[List[Any], None, None]:
     """Context manager for tracing MCP tool calls.
 
     Usage::
@@ -302,7 +341,7 @@ def trace_tool(
     tracer = get_tracer()
     if tracer is None:
         # No-op: yield and return
-        holder: List[Optional[str]] = [None]
+        holder: List[Any] = [None]
         yield holder
         return
 

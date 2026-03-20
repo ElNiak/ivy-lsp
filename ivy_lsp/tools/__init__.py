@@ -15,6 +15,7 @@ import os
 import time
 import types
 from dataclasses import dataclass
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,21 @@ def _timeout_response(tool_name: str, timeout: float) -> dict:
 from ivy_lsp.tools.formatters import format_error, format_tool_result
 
 
+def _truncate_if_needed(result_str: str) -> str:
+    """Truncate result string if it exceeds the configured max_result_chars."""
+    from ivy_lsp.config import get_config
+
+    max_chars = get_config().max_result_chars
+    if max_chars > 0 and len(result_str) > max_chars:
+        return (
+            result_str[:max_chars]
+            + "\n\n---\n*Truncated at "
+            + str(max_chars)
+            + " chars. Use more specific parameters to narrow results.*"
+        )
+    return result_str
+
+
 def _format_result(tool_name: str, result: object) -> str | object:
     """Post-process a tool result into markdown.
 
@@ -216,17 +232,46 @@ def _format_result(tool_name: str, result: object) -> str | object:
         try:
             parsed = json.loads(result)
         except (json.JSONDecodeError, TypeError):
-            return result  # Not JSON — return as-is
+            return _truncate_if_needed(result)
         if isinstance(parsed, dict):
             if not parsed.get("success", True):
                 return format_error(parsed)
-            return format_tool_result(tool_name, parsed)
-        return result
+            return _truncate_if_needed(format_tool_result(tool_name, parsed))
+        return _truncate_if_needed(result)
     if isinstance(result, dict):
         if not result.get("success", True):
             return format_error(result)
-        return format_tool_result(tool_name, result)
+        return _truncate_if_needed(format_tool_result(tool_name, result))
     return result
+
+
+def _summarize_for_log(value: Any, max_len: int = 240) -> Any:
+    """Return a compact, JSON-safe summary for observability logs."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        if isinstance(value, str) and len(value) > max_len:
+            return value[:max_len] + "..."
+        return value
+
+    if isinstance(value, dict):
+        summary: dict[str, Any] = {}
+        for idx, (key, item) in enumerate(value.items()):
+            if idx >= 8:
+                summary["..."] = f"{len(value)} keys"
+                break
+            summary[str(key)] = _summarize_for_log(item, max_len=max_len)
+        return summary
+
+    if isinstance(value, (list, tuple, set)):
+        seq = list(islice(value, 8))
+        compact = [_summarize_for_log(item, max_len=max_len) for item in seq]
+        if len(value) > len(seq):
+            compact.append(f"... ({len(value)} total)")
+        return compact
+
+    rendered = repr(value)
+    if len(rendered) > max_len:
+        rendered = rendered[:max_len] + "..."
+    return rendered
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +297,18 @@ def safe_tool(fn):
 
     @functools.wraps(fn)
     async def _wrapper(*args, **kwargs):
+        from ivy_lsp.config import get_config
+        from ivy_lsp.session_observability import get_session_logger
+
         tool_name = fn.__name__
         timeout = _get_effective_timeout(tool_name)
         sem = _ensure_semaphore()
+        cfg = get_config()
+        call_id = f"{tool_name}-{int(time.time() * 1000)}-{id(asyncio.current_task())}"
+        logger_session = get_session_logger()
+
+        arg_summary = [_summarize_for_log(arg) for arg in list(args)[:4]]
+        kw_summary = {k: _summarize_for_log(v) for k, v in list(kwargs.items())[:8]}
 
         # Ensure per-tool metrics bucket exists.
         if tool_name not in _tool_metrics:
@@ -263,9 +317,47 @@ def safe_tool(fn):
 
         start = time.monotonic()
         try:
+            if cfg.debug_log:
+                logger.debug(
+                    "[TOOL-START] %s call_id=%s timeout=%.1fs",
+                    tool_name,
+                    call_id,
+                    timeout,
+                )
+                logger_session.log_event(
+                    channel="mcp",
+                    event_type="call_start",
+                    name=tool_name,
+                    status="started",
+                    payload={"args": arg_summary, "kwargs": kw_summary},
+                    call_id=call_id,
+                )
+
             async with sem:
                 result = await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout)
             result = _format_result(tool_name, result)
+
+            if cfg.debug_log:
+                elapsed_ms = (time.monotonic() - start) * 1000
+                logger.debug(
+                    "[TOOL-END] %s call_id=%s duration_ms=%.0f",
+                    tool_name,
+                    call_id,
+                    elapsed_ms,
+                )
+                logger_session.log_event(
+                    channel="mcp",
+                    event_type="call_end",
+                    name=tool_name,
+                    status="ok",
+                    duration_ms=elapsed_ms,
+                    payload={
+                        "result_type": type(result).__name__,
+                        "result": _summarize_for_log(result),
+                    },
+                    call_id=call_id,
+                )
+
             return result
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - start
@@ -277,6 +369,16 @@ def safe_tool(fn):
                 elapsed,
                 timeout,
             )
+            if cfg.debug_log:
+                logger_session.log_event(
+                    channel="mcp",
+                    event_type="call_end",
+                    name=tool_name,
+                    status="timeout",
+                    duration_ms=elapsed * 1000,
+                    payload={"timeout_s": timeout},
+                    call_id=call_id,
+                )
             return format_error(
                 {
                     "success": False,
@@ -293,6 +395,19 @@ def safe_tool(fn):
                 exc,
                 exc_info=True,
             )
+            if cfg.debug_log:
+                logger_session.log_event(
+                    channel="mcp",
+                    event_type="call_end",
+                    name=tool_name,
+                    status="error",
+                    duration_ms=(time.monotonic() - start) * 1000,
+                    payload={
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                    call_id=call_id,
+                )
             return format_error(
                 {"success": False, "message": f"Internal error in {tool_name}: {exc}"}
             )
@@ -323,6 +438,8 @@ def safe_tool(fn):
         "format_error": format_error,
         "format_tool_result": format_tool_result,
         "_format_result": _format_result,
+        "_truncate_if_needed": _truncate_if_needed,
+        "_summarize_for_log": _summarize_for_log,
     }
     patched_globals = {**fn.__globals__, **_injected_names}
 

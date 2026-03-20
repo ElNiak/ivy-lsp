@@ -1,5 +1,6 @@
 """Shared fixtures for Ivy LSP tests."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,27 @@ def _reset_server_config():
     reset_config()
     yield
     reset_config()
+
+
+@pytest.fixture(autouse=True)
+def _raw_json_for_legacy_tests(request):
+    """Enable raw JSON output for tests that parse tool results as JSON.
+
+    The markdown formatter layer (ivy_lsp.tools.formatters) converts tool
+    output from JSON to markdown.  Legacy tests that call ``json.loads``
+    on tool results need the raw JSON.  Set ``IVY_LSP_RAW_JSON=1`` for
+    every test **except** those in ``test_formatters.py`` (which test the
+    formatter layer itself).
+    """
+    module_name = request.module.__name__
+    if "test_formatters" in module_name:
+        # Formatter tests want markdown output — do NOT set the bypass flag
+        os.environ.pop("IVY_LSP_RAW_JSON", None)
+        yield
+    else:
+        os.environ["IVY_LSP_RAW_JSON"] = "1"
+        yield
+        os.environ.pop("IVY_LSP_RAW_JSON", None)
 
 
 # Try to resolve QUIC_STACK_DIR from the ivy package (if installed),

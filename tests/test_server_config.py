@@ -43,6 +43,8 @@ class TestServerConfigFromEnv:
         assert cfg.verify_timeout == 120.0
         assert cfg.tool_compile_timeout == 300.0
         assert cfg.show_model_timeout == 30.0
+        assert cfg.observability_enabled is False
+        assert cfg.observability_dir is None
 
     def test_bulk_analysis_disabled(self):
         with patch.dict(os.environ, {"IVY_LSP_BULK_ANALYSIS": "0"}):
@@ -150,6 +152,27 @@ class TestServerConfigFromEnv:
         cfg = ServerConfig.from_env()
         with pytest.raises(AttributeError):
             cfg.log_level = "DEBUG"  # type: ignore[misc]
+
+    def test_observability_enabled_follows_debug_when_unset(self):
+        with patch.dict(os.environ, {"IVY_LSP_DEBUG_LOG": "1"}, clear=True):
+            cfg = ServerConfig.from_env()
+        assert cfg.debug_log is True
+        assert cfg.observability_enabled is True
+
+    def test_observability_enabled_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                "IVY_LSP_DEBUG_LOG": "1",
+                "IVY_OBSERVABILITY_ENABLED": "0",
+                "IVY_OBSERVABILITY_DIR": "/tmp/obs-test",
+            },
+            clear=True,
+        ):
+            cfg = ServerConfig.from_env()
+        assert cfg.debug_log is True
+        assert cfg.observability_enabled is False
+        assert cfg.observability_dir == "/tmp/obs-test"
 
 
 class TestGetConfig:

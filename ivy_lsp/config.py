@@ -89,14 +89,23 @@ class ServerConfig:
     # Tool timeout
     tool_timeout_scale: float = 1.0
     max_raw_output_length: int = 2000
+    max_result_chars: int = 8000
 
     # Debug tracing
     debug_log: bool = False
     debug_log_path: str | None = None
 
+    # Session observability
+    observability_enabled: bool = False
+    observability_dir: str | None = None
+
     @classmethod
     def from_env(cls) -> ServerConfig:
         """Read all ``IVY_LSP_*`` environment variables and return a config."""
+        debug_log = _bool_env("IVY_LSP_DEBUG_LOG", "0")
+        obs_raw = os.environ.get("IVY_OBSERVABILITY_ENABLED")
+        observability_enabled = debug_log if obs_raw is None else (obs_raw != "0")
+
         return cls(
             log_level=os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper(),
             activity_level=os.environ.get("IVY_LSP_ACTIVITY_LEVEL", "phase"),
@@ -135,8 +144,11 @@ class ServerConfig:
             prewarm_model=_bool_env("IVY_LSP_PREWARM_MODEL"),
             tool_timeout_scale=_float_env("IVY_LSP_TOOL_TIMEOUT_SCALE", 1.0, floor=0.1),
             max_raw_output_length=_int_env("IVY_LSP_MAX_RAW_OUTPUT_LENGTH", 2000),
-            debug_log=_bool_env("IVY_LSP_DEBUG_LOG", "0"),
+            max_result_chars=_int_env("IVY_LSP_MAX_RESULT_CHARS", 8000),
+            debug_log=debug_log,
             debug_log_path=os.environ.get("IVY_LSP_DEBUG_LOG_PATH"),
+            observability_enabled=observability_enabled,
+            observability_dir=os.environ.get("IVY_OBSERVABILITY_DIR"),
         )
 
 

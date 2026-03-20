@@ -101,6 +101,24 @@ def get_document_symbols(
     return ivy_symbols_to_document_symbols(symbols)
 
 
+def _status_document_symbol(message: str, detail: str) -> lsp.DocumentSymbol:
+    """Return a synthetic status symbol instead of silently returning empty.
+
+    This gives clients an actionable hint when symbol extraction is not ready
+    (e.g. startup indexing) or otherwise unavailable.
+    """
+    kind = getattr(lsp.SymbolKind, "Null", lsp.SymbolKind.Namespace)
+    r = make_range(0, 0, 0, 0)
+    return lsp.DocumentSymbol(
+        name=f"[ivy-lsp] {message}",
+        kind=kind,
+        range=r,
+        selection_range=r,
+        detail=detail,
+        children=None,
+    )
+
+
 def compute_document_symbols(
     parser,
     indexer,
@@ -133,7 +151,7 @@ def compute_document_symbols(
                     ast_to_symbols(result.ast, filepath, source)
                 )
             else:
-                symbols, _error_info = fallback_scan(source, filepath)
+                symbols, _ = fallback_scan(source, filepath)
         except TimeoutError:
             logger.debug("Parser lock busy, using cached symbols for %s", filepath)
             if indexer is not None:
@@ -166,11 +184,14 @@ def register(server) -> None:
         params: lsp.DocumentSymbolParams,
     ) -> List[lsp.DocumentSymbol]:
         """Handle textDocument/documentSymbol requests."""
+        uri = params.text_document.uri
+        filepath = uri_to_path(uri)
+        source = ""
+        status = "ok"
+        result_summary = "0 symbols"
         try:
-            uri = params.text_document.uri
             server._last_active_uri = uri
             doc = server.workspace.get_text_document(uri)
-            filepath = uri_to_path(uri)
             source = doc.source or ""
             parser = getattr(server, "parser", None)
             indexer = getattr(server, "indexer", None)
@@ -184,6 +205,32 @@ def register(server) -> None:
                 filepath,
             )
 
+            # Avoid silent false-success "0 symbols" states in startup/degraded mode.
+            if not result and source.strip():
+                initializing = bool(getattr(server, "initializing", False))
+                parser_available = parser is not None
+                indexer_available = indexer is not None
+                if initializing:
+                    status = "degraded"
+                    result = [
+                        _status_document_symbol(
+                            "indexing in progress",
+                            "Document symbols may be incomplete until initialization finishes.",
+                        )
+                    ]
+                elif not parser_available and not indexer_available:
+                    status = "degraded"
+                    result = [
+                        _status_document_symbol(
+                            "symbol extraction unavailable",
+                            "Parser and indexer are unavailable; check ivy-lsp server health.",
+                        )
+                    ]
+                else:
+                    status = "empty"
+
+            result_summary = f"{len(result)} symbols"
+
             from ivy_lsp.debug_trace import get_tracer
 
             tracer = get_tracer()
@@ -191,10 +238,21 @@ def register(server) -> None:
                 tracer.trace_lsp_request(
                     method="textDocument/documentSymbol",
                     filepath=filepath,
-                    result_summary=f"{len(result)} symbols",
+                    result_summary=f"[{status}] {result_summary}",
                 )
 
             return result
-        except Exception:
+        except Exception as exc:
+            status = "error"
+            result_summary = f"error: {type(exc).__name__}"
+            from ivy_lsp.debug_trace import get_tracer
+
+            tracer = get_tracer()
+            if tracer is not None:
+                tracer.trace_lsp_request(
+                    method="textDocument/documentSymbol",
+                    filepath=filepath,
+                    result_summary=f"[{status}] {result_summary}",
+                )
             logger.warning("document_symbol handler failed", exc_info=True)
             return []

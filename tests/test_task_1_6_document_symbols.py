@@ -256,6 +256,22 @@ class TestGetDocumentSymbols:
         assert all(isinstance(ds, lsp.DocumentSymbol) for ds in result)
 
 
+class TestStatusDocumentSymbol:
+    """Verify synthetic status symbols used for degraded documentSymbol responses."""
+
+    def test_status_symbol_shape(self):
+        """Status symbol should contain prefixed name, detail, and zero range."""
+        from ivy_lsp.features.document_symbols import _status_document_symbol
+
+        sym = _status_document_symbol("indexing in progress", "warmup")
+
+        assert isinstance(sym, lsp.DocumentSymbol)
+        assert sym.name.startswith("[ivy-lsp] ")
+        assert sym.detail == "warmup"
+        assert sym.range.start.line == 0
+        assert sym.range.end.line == 0
+
+
 class TestMultipleKinds:
     """Verify that different SymbolKinds are preserved through conversion."""
 
