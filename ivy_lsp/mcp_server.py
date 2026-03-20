@@ -562,11 +562,10 @@ def start_mcp(
     def _build_model():
         """Build a lightweight semantic model from workspace files.
 
-        Delegates to the shared ``build_semantic_model`` function in
-        ``ivy_lsp.semantic.model_builder``.
-
-        Tries the shared disk cache first (written by the LSP process).
-        Falls back to a full build if the cache is stale or absent.
+        Tries three strategies in order:
+        1. Shared disk cache (written by LSP or previous MCP run)
+        2. Offline index merge (per-protocol models from .ivy-index/)
+        3. Full rebuild via TieredExtractor
 
         Returns the model on success, or ``None`` when a required
         dependency is missing (logged at WARNING).  The caller
@@ -575,27 +574,84 @@ def start_mcp(
         """
         nonlocal _req_graph
 
-        # Try shared cache (written by LSP after bulk T1+T2 analysis)
+        # Shared cache imports — used by cache read, offline merge write,
+        # and full rebuild write paths.
         try:
             from ivy_lsp.indexer.shared_cache import (
                 compute_freshness_key,
                 read_model_cache,
+                write_model_cache,
             )
 
-            ivy_files = _find_ivy_files_cached(root)
-            freshness = compute_freshness_key(root, ivy_files)
-            cached_model, cached_graph = read_model_cache(root, freshness)
-            if cached_model is not None:
-                logger.info("Loaded semantic model from shared cache")
-                if cached_graph is not None and _req_graph is None:
-                    _req_graph = cached_graph
-                    logger.info("Loaded requirement graph from shared cache")
-                return cached_model
+            _has_cache_module = True
+        except ImportError:
+            _has_cache_module = False
+
+        # --- Strategy 1: Shared disk cache ---
+        if _has_cache_module:
+            try:
+                ivy_files = _find_ivy_files_cached(root)
+                freshness = compute_freshness_key(root, ivy_files)
+                cached_model, cached_graph = read_model_cache(root, freshness)
+                if cached_model is not None:
+                    logger.info("Loaded semantic model from shared cache")
+                    if cached_graph is not None and _req_graph is None:
+                        _req_graph = cached_graph
+                        logger.info("Loaded requirement graph from shared cache")
+                    return cached_model
+            except Exception:
+                logger.debug("Shared cache lookup failed", exc_info=True)
+
+        # --- Strategy 2: Merge per-protocol models from offline index ---
+        try:
+            if ctx.workspace_context is not None and ctx.workspace_context.has_index():
+                from ivy_lsp.semantic.model import SemanticModel
+
+                merged = SemanticModel()
+                used_protos: list[str] = []
+                skipped_protos: list[str] = []
+                for proto, idx in ctx.workspace_context.protocol_indexes.items():
+                    if idx.semantic_model is None:
+                        skipped_protos.append(f"{proto}(no model)")
+                        continue
+                    if idx.staleness.status not in ("fresh", "stale_minor"):
+                        skipped_protos.append(f"{proto}({idx.staleness.status})")
+                        continue
+                    merged.merge_from(idx.semantic_model)
+                    used_protos.append(proto)
+
+                if used_protos and merged.node_count() > 0:
+                    logger.info(
+                        "Loaded semantic model from offline index: "
+                        "%d nodes from %s (skipped: %s)",
+                        merged.node_count(),
+                        ", ".join(used_protos),
+                        ", ".join(skipped_protos) or "none",
+                    )
+                    # Write merged model to shared cache for next startup
+                    if _has_cache_module:
+                        try:
+                            ivy_files = _find_ivy_files_cached(root)
+                            freshness = compute_freshness_key(root, ivy_files)
+                            write_model_cache(root, merged, _req_graph, freshness)
+                        except Exception:
+                            logger.debug(
+                                "Failed to write merged model cache", exc_info=True
+                            )
+                    return merged
+                elif skipped_protos:
+                    logger.info(
+                        "Offline index incomplete, falling back to full build "
+                        "(skipped: %s)",
+                        ", ".join(skipped_protos),
+                    )
         except Exception:
             logger.debug(
-                "Shared cache lookup failed, building from scratch", exc_info=True
+                "Offline index merge failed, falling back to full build",
+                exc_info=True,
             )
 
+        # --- Strategy 3: Full rebuild from scratch ---
         from ivy_lsp.semantic.model_builder import build_semantic_model
 
         model = build_semantic_model(
@@ -608,13 +664,8 @@ def start_mcp(
         )
 
         # Write to shared cache so subsequent MCP startups can skip rebuild
-        if model is not None:
+        if model is not None and _has_cache_module:
             try:
-                from ivy_lsp.indexer.shared_cache import (
-                    compute_freshness_key,
-                    write_model_cache,
-                )
-
                 ivy_files = _find_ivy_files_cached(root)
                 freshness = compute_freshness_key(root, ivy_files)
                 written = write_model_cache(root, model, _req_graph, freshness)
