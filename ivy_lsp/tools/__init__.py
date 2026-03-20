@@ -42,6 +42,7 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "ivy_scope": 30.0,
     "ivy_verification_dashboard": 30.0,
     "ivy_health_check": 10.0,
+    "ivy_index": 300.0,
 }
 
 _DEFAULT_TIMEOUT: float = 60.0
@@ -96,6 +97,7 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
         "needs_model": False,
     },
     "ivy_health_check": {"cost": "low", "category": "analysis", "needs_model": False},
+    "ivy_index": {"cost": "high", "category": "analysis", "needs_model": False},
 }
 
 

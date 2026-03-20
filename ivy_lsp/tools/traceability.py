@@ -80,6 +80,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
+        # Fallback: if semantic model has no requirements, load from manifests
+        if not requirements:
+            from ivy_lsp.semantic.rfc_annotations import (
+                find_manifests,
+                load_requirement_manifest,
+            )
+
+            for manifest_path in find_manifests(ctx.root):
+                manifest_reqs = load_requirement_manifest(manifest_path)
+                requirements.extend(manifest_reqs.values())
+
         if test_file:
             # Endpoint-mirror scoping: filter to include closure of test file.
             try:
@@ -171,6 +182,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
+
+        # Fallback: if semantic model has no requirements, load from manifests
+        if not requirements:
+            from ivy_lsp.semantic.rfc_annotations import (
+                find_manifests,
+                load_requirement_manifest,
+            )
+
+            for manifest_path in find_manifests(ctx.root):
+                manifest_reqs = load_requirement_manifest(manifest_path)
+                requirements.extend(manifest_reqs.values())
 
         if test_file:
             # Endpoint-mirror scoping: filter annotations to include closure
