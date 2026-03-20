@@ -217,6 +217,41 @@ class SemanticModel:
             self._outgoing[src].append((etype, dst))
             self._incoming[dst].append((etype, src))
 
+    def merge_from(self, other: "SemanticModel") -> None:
+        """Merge all nodes and edges from *other* into this model.
+
+        Used to combine per-protocol SemanticModels (from offline indexes)
+        into a single workspace-wide model for the MCP server.
+
+        Both ``add_node`` and ``add_edge`` are idempotent, so merging
+        the same model twice is safe.  If two protocols produce nodes
+        with the same ``id``, the last merge wins (consistent with
+        ``add_node`` replace semantics).
+
+        Note: ``other._lock`` is NOT acquired — the caller must ensure
+        ``other`` is not being concurrently mutated (e.g. a deserialized
+        offline model with no active writers).
+        """
+        with self._lock:
+            # Inline node/edge insertion (avoids per-item lock re-acquisition)
+            for node in other._nodes.values():
+                node_id = node.id
+                self._nodes[node_id] = node
+                self._nodes_by_type[type(node)][node_id] = node
+                file_attr = getattr(node, "file", None)
+                if file_attr:
+                    self._nodes_by_file[file_attr].add(node_id)
+                tier = getattr(node, "tier", None)
+                if tier:
+                    self._node_tiers[node_id] = tier
+            # Copy edges
+            for src, etype, dst in other._edges:
+                edge = (src, etype, dst)
+                if edge not in self._edges:
+                    self._edges.add(edge)
+                    self._outgoing[src].append((etype, dst))
+                    self._incoming[dst].append((etype, src))
+
     # -- Queries ------------------------------------------------------------
 
     def get_node(self, node_id: str) -> Optional[Any]:
