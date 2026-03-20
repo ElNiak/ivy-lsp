@@ -21,6 +21,7 @@ from typing import Any, Callable
 # Re-export verification functions so that external code and tests that patch
 # ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.tools.*``.
+from ivy_lsp import sidecar_client
 from ivy_lsp.config import get_config
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
@@ -264,6 +265,60 @@ class ToolContext:
     ) -> list[dict[str, Any]]:
         """Fast structural checks without full parsing."""
         return _check_structural_issues(source, filepath, resolve_callback)
+
+
+async def _sidecar_monitor(
+    workspace_root: str,
+    _poll_interval: float = 2.0,
+    _max_iterations: int = 0,
+) -> None:
+    """Background task: poll for sidecar port file, upgrade when ready.
+
+    Args:
+        workspace_root: Our workspace root for validation.
+        _poll_interval: Override for testing (default 2s).
+        _max_iterations: If >0, exit after N iterations (for testing).
+    """
+    if os.environ.get("IVY_MCP_DISABLE_UPGRADE") == "1":
+        logger.info("[SIDECAR-MONITOR] Upgrade disabled by IVY_MCP_DISABLE_UPGRADE")
+        return
+
+    ws_hash = sidecar_client.workspace_hash(workspace_root)
+    elapsed = 0.0
+    poll = _poll_interval
+    iteration = 0
+
+    while True:
+        await asyncio.sleep(poll)
+        elapsed += poll
+        iteration += 1
+
+        if _max_iterations > 0 and iteration >= _max_iterations:
+            return
+
+        # Progressive backoff: fast for first 60s, then slow
+        if elapsed > 60 and poll < 10:
+            poll = 10.0
+            logger.debug("[SIDECAR-MONITOR] Backing off to 10s polling")
+
+        # Already upgraded — just keep a slow heartbeat
+        if sidecar_client.get_sidecar_client() is not None:
+            poll = 30.0
+            continue
+
+        port = sidecar_client.read_port_file(ws_hash=ws_hash)
+        if port is None:
+            continue
+
+        if not await sidecar_client.validate_sidecar_workspace(port, workspace_root):
+            logger.debug("[SIDECAR-MONITOR] Workspace mismatch, skipping")
+            continue
+
+        client = await sidecar_client.connect_to_sidecar(port)
+        if client is not None:
+            sidecar_client.set_sidecar_client(client)
+            logger.info("[UPGRADED] Delegating tools to LSP sidecar on port %d", port)
+            poll = 30.0
 
 
 _MCP_INSTRUCTIONS = (
@@ -1125,5 +1180,25 @@ def start_mcp(
         )
         _prewarm_thread.start()
         logger.info("[INDEX-PREWARM] Background pre-warming started")
+
+    # Start sidecar upgrade monitor in a daemon thread
+    # (FastMCP's run() blocks the main event loop, so we use a separate thread)
+    if os.environ.get("IVY_MCP_DISABLE_UPGRADE") != "1":
+
+        def _start_monitor_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(_sidecar_monitor(root))
+            finally:
+                loop.close()
+
+        monitor_thread = threading.Thread(
+            target=_start_monitor_in_thread,
+            name="sidecar-monitor",
+            daemon=True,
+        )
+        monitor_thread.start()
+        logger.info("[SIDECAR-MONITOR] Started background upgrade monitor")
 
     mcp.run(transport="stdio")
