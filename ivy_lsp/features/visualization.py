@@ -696,14 +696,14 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
     Builds a graph where actions are nodes and edges represent shared
     state variables (action A writes a var that action B reads).
     """
-    _not_ready = {
-        "nodes": [],
-        "edges": [],
-        "scopeInfo": {"testFile": None, "scoped": False},
-    }
     graph = _get_requirement_graph(server)
     if graph is None:
-        return _not_ready
+        return {
+            "nodes": [],
+            "edges": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+            "reason": "requirement_graph_not_available",
+        }
 
     try:
         t0 = time.monotonic()
@@ -823,8 +823,12 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
         return _cap_response(result, "nodes")
     except Exception as exc:
         logger.exception("handle_action_dependency_graph failed")
-        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
-        return _not_ready
+        return {
+            "nodes": [],
+            "edges": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -841,14 +845,14 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
     - Guards are require/assume clauses on the action's monitors
     - Invariants are properties that constrain active state variables
     """
-    _not_ready = {
-        "nodes": [],
-        "transitions": [],
-        "scopeInfo": {"testFile": None, "scoped": False},
-    }
     graph = _get_requirement_graph(server)
     if graph is None:
-        return _not_ready
+        return {
+            "nodes": [],
+            "transitions": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+            "reason": "requirement_graph_not_available",
+        }
 
     try:
         t0 = time.monotonic()
@@ -967,8 +971,12 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
         return _cap_response(result, "nodes")
     except Exception as exc:
         logger.exception("handle_state_machine_view failed")
-        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
-        return _not_ready
+        return {
+            "nodes": [],
+            "transitions": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -981,10 +989,13 @@ def handle_layered_overview(server: IvyServerProtocol, params: dict) -> dict:
 
     Groups symbols, actions, state vars, and requirements by file or module.
     """
-    _not_ready = {"layers": [], "scopeInfo": {"testFile": None, "scoped": False}}
     graph = _get_requirement_graph(server)
     if graph is None:
-        return _not_ready
+        return {
+            "layers": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+            "reason": "requirement_graph_not_available",
+        }
 
     try:
         snap = graph.snapshot()
@@ -1046,8 +1057,11 @@ def handle_layered_overview(server: IvyServerProtocol, params: dict) -> dict:
         return _cap_response(result, "layers")
     except Exception as exc:
         logger.exception("handle_layered_overview failed")
-        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
-        return _not_ready
+        return {
+            "layers": [],
+            "scopeInfo": {"testFile": None, "scoped": False},
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _extract_module(qualified_name: str) -> str:

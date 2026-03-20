@@ -49,17 +49,27 @@ _EXCLUDED_DIR_PATTERNS = [
 _STALE_THRESHOLD_SECS = 3600  # 1 hour
 
 # Hardcoded fallback when stdlib directory cannot be discovered from disk.
+# Should approximate the full set of modules in ivy/include/1.7/.
 _STDLIB_FALLBACK = frozenset(
     {
         "order",
         "collections",
+        "collections_impl",
         "ip",
         "ipv6",
         "tcp",
+        "tcp_impl",
         "udp",
+        "udp_impl",
         "byte_stream",
         "timeout",
         "net",
+        "tls",
+        "tls_msg",
+        "serdes",
+        "deserializer",
+        "c_time",
+        "chrono_time",
     }
 )
 

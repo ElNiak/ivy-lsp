@@ -100,18 +100,28 @@ class ToolContext:
     # Workspace context (loaded from .ivy-index/, shared with LSP)
     workspace_context: Any = None
 
-    # Known Ivy standard library modules
+    # Known Ivy standard library modules (fallback; overwritten at runtime
+    # by discover_stdlib_modules() which scans ivy/include/1.7/)
     stdlib_modules: frozenset[str] = frozenset(
         {
             "order",
             "collections",
+            "collections_impl",
             "ip",
             "ipv6",
             "tcp",
+            "tcp_impl",
             "udp",
+            "udp_impl",
             "byte_stream",
             "timeout",
             "net",
+            "tls",
+            "tls_msg",
+            "serdes",
+            "deserializer",
+            "c_time",
+            "chrono_time",
         }
     )
 
@@ -848,8 +858,22 @@ def start_mcp(
             all_writes: list[tuple[str, str, int]] = []
             known_vars: set[str] = set()
 
+            discovered = _find_ivy_files_cached(root)
+            logger.info(
+                "Requirement graph: discovered %d .ivy files (root=%s, include_paths=%s)",
+                len(discovered),
+                root,
+                _include_paths or "(all)",
+            )
+            if not discovered:
+                logger.warning(
+                    "Requirement graph: no .ivy files found — graph will be empty. "
+                    "Check workspace root and include_paths."
+                )
+                return None
+
             files_scanned = 0
-            for rel_path in _find_ivy_files_cached(root):
+            for rel_path in discovered:
                 abs_path = os.path.join(root, rel_path)
                 try:
                     with open(abs_path, encoding="utf-8", errors="replace") as f:
@@ -960,7 +984,20 @@ def start_mcp(
             # until the model is constructed.
             _populate_semantic_model_from_graph(graph)
 
-            return graph if total > 0 else None
+            if total == 0:
+                logger.warning(
+                    "Requirement graph built but empty: %d files scanned, "
+                    "0 requirements/actions/vars extracted. "
+                    "Files may lack monitors or RFC annotations.",
+                    files_scanned,
+                )
+                return None
+            return graph
+        except ImportError as exc:
+            logger.warning(
+                "Requirement graph build failed (missing dependency): %s", exc
+            )
+            return None
         except Exception:
             logger.warning(
                 "Failed to build requirement graph",

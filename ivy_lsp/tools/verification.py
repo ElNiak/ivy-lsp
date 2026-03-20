@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import time
 from typing import Any
 
@@ -142,6 +143,8 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         """Run ivy_check on an Ivy file to verify formal properties.
 
         Returns structured diagnostics with file, line, severity, and message.
+        Requires the ``ivy_check`` CLI tool (available inside Docker or with
+        native Ivy installation).
 
         Args:
             relative_path: Relative path to the .ivy file to check.
@@ -154,6 +157,12 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 context has a matching scope, the scope name is included in
                 the result summary.  Empty string (default) = no scoping.
         """
+        if not shutil.which("ivy_check"):
+            return error_response(
+                "ivy_check CLI not found on PATH. "
+                "This tool requires the Ivy compiler, typically available "
+                "inside Docker containers built by PANTHER."
+            )
         logger.debug(
             "[ivy_verify] workspace=%s, args=%r",
             ctx.root,
@@ -323,6 +332,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         inside a Docker container with all required C++ dependencies.
         Otherwise falls back to native subprocess execution.
 
+        Requires the ``ivyc`` CLI tool (available inside Docker or with
+        native Ivy installation).
+
         Args:
             relative_path: Relative path to the .ivy file to compile.
             target: Compilation target (default: "test").
@@ -331,6 +343,12 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 context has a matching scope, the scope name is included in
                 the result summary.  Empty string (default) = no scoping.
         """
+        if not shutil.which("ivyc") and not ctx.docker_image:
+            return error_response(
+                "ivyc CLI not found on PATH and no Docker image configured. "
+                "This tool requires the Ivy compiler, typically available "
+                "inside Docker containers built by PANTHER."
+            )
         logger.debug(
             "[ivy_compile] workspace=%s, args=%r",
             ctx.root,
@@ -474,10 +492,20 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
     ) -> dict:
         """Display the structure of an Ivy model using ivy_show.
 
+        Requires the ``ivy_show`` CLI tool (available inside Docker containers
+        built by the PANTHER framework, or when Ivy is installed natively).
+
         Args:
             relative_path: Relative path to the .ivy file to inspect.
             isolate: Optional isolate name for a specific isolate.
         """
+        if not shutil.which("ivy_show"):
+            return error_response(
+                "ivy_show CLI not found on PATH. "
+                "This tool requires the Ivy compiler, which is typically "
+                "available inside Docker containers built by PANTHER. "
+                "Run 'panther run' with a config to build the Docker environment first."
+            )
         logger.debug(
             "[ivy_model_info] workspace=%s, args=%r",
             ctx.root,

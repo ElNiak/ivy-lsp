@@ -443,7 +443,9 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         Returns:
             Build summary or staleness report.
         """
-        _tc = ToolTraceContext("ivy_index")
+        _tc = ToolTraceContext(
+            "ivy_index", {"protocol": protocol, "fast": fast, "status": status}
+        )
 
         try:
             from ivy_lsp.index_builder import IndexBuilder
