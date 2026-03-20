@@ -71,6 +71,29 @@ class TestScope:
         """Return True if the file is in this scope's include closure."""
         return filepath in self.include_closure
 
+    def to_dict(self) -> dict:
+        """Serialize to a plain dictionary."""
+        return {
+            "test": os.path.basename(self.test_file).replace(".ivy", ""),
+            "entry_file": self.test_file,
+            "role": self.tester_role,
+            "transitive_includes": sorted(self.include_closure),
+            "exported_actions": sorted(self.exported_actions),
+            "imported_actions": sorted(self.imported_actions),
+            "file_count": len(self.include_closure),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TestScope":
+        """Deserialize from a plain dictionary."""
+        return cls(
+            test_file=d["entry_file"],
+            include_closure=frozenset(d.get("transitive_includes", [])),
+            exported_actions=frozenset(d.get("exported_actions", [])),
+            imported_actions=frozenset(d.get("imported_actions", [])),
+            tester_role=d.get("role", "unknown"),
+        )
+
 
 def detect_test_role(
     include_closure: FrozenSet[str],

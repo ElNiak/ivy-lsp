@@ -233,3 +233,18 @@ class IncludeGraph:
                     queue.append(includer)
 
         return result
+
+    # -- Serialization -----------------------------------------------------
+
+    def to_edges(self) -> Dict[str, List[str]]:
+        """Serialize forward edges as {from_file: sorted([to_files])}."""
+        return {k: sorted(v) for k, v in self._includes.items()}
+
+    @classmethod
+    def from_edges(cls, data: Dict[str, List[str]]) -> "IncludeGraph":
+        """Reconstruct from serialized edge dict."""
+        graph = cls()
+        for from_file, to_files in data.items():
+            for to_file in to_files:
+                graph.add_edge(from_file, to_file)
+        return graph
