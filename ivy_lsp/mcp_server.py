@@ -598,7 +598,7 @@ def start_mcp(
 
         from ivy_lsp.semantic.model_builder import build_semantic_model
 
-        return build_semantic_model(
+        model = build_semantic_model(
             root=root,
             find_files_fn=_find_ivy_files_cached,
             include_resolver=(
@@ -606,6 +606,24 @@ def start_mcp(
             ),
             stdlib_modules=discovered_stdlib,
         )
+
+        # Write to shared cache so subsequent MCP startups can skip rebuild
+        if model is not None:
+            try:
+                from ivy_lsp.indexer.shared_cache import (
+                    compute_freshness_key,
+                    write_model_cache,
+                )
+
+                ivy_files = _find_ivy_files_cached(root)
+                freshness = compute_freshness_key(root, ivy_files)
+                written = write_model_cache(root, model, _req_graph, freshness)
+                if written:
+                    logger.info("Wrote semantic model to shared cache")
+            except Exception:
+                logger.debug("Failed to write model cache", exc_info=True)
+
+        return model
 
     # --- Lazy RequirementGraph construction ---
 

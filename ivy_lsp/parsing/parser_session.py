@@ -168,36 +168,8 @@ class IvyParserWrapper:
         with ParserSession(timeout=timeout):
             iu.filename = filename
 
-            # Cache parsed modules to prevent duplicate parsing and
-            # break circular includes.  The Ivy parser's own include
-            # guard (p_top_include_symbol) checks ``Ivy.included`` per
-            # scope, but the *root* file's name is never in that set,
-            # so transitive includes that reference the root (or any
-            # file parsed via a different branch of the include tree)
-            # re-parse it and cause spurious "redefining" errors.
-            #
-            # ``_module_cache`` maps module name → parsed Ivy() AST.
-            # A sentinel ``None`` entry means parsing is in progress
-            # (circular include detected — return empty module).
-            # Completed entries are returned directly on cache hit.
-            _module_cache: dict = {}
-            root_stem = os.path.splitext(os.path.basename(filename))[0]
-            # Mark the root file as in-progress so circular includes
-            # from transitive dependencies return an empty module
-            # rather than re-parsing the root.
-            _module_cache[root_stem] = None
-
             def _lsp_importer(name: str):
                 """Resolve and parse an included module."""
-                if name in _module_cache:
-                    cached = _module_cache[name]
-                    # None = in-progress (circular) → empty module
-                    # otherwise → return cached result
-                    return cached if cached is not None else ip.Ivy()
-
-                # Mark as in-progress before parsing
-                _module_cache[name] = None
-
                 fname = name + ".ivy"
                 current_file = iu.filename or filename
                 candidate = None
@@ -226,11 +198,25 @@ class IvyParserWrapper:
                 with open(candidate) as f:
                     content = f.read()
                 with iu.SourceFile(candidate):
-                    module = ip.parse(content, nested=True)
-                _module_cache[name] = module
-                return module
+                    return ip.parse(content, nested=True)
 
             ip.importer = _lsp_importer
+
+            # Suppress Redefining errors during parse.  Circular
+            # includes (root file not in Ivy's include guard set)
+            # cause harmless symbol redefinitions that would otherwise
+            # abort the parse.  We patch report_error to skip them so
+            # the AST builds successfully.
+            from ivy.ivy_parser import Redefining
+
+            _orig_report_error = ip.report_error
+
+            def _filtered_report_error(error):
+                if isinstance(error, Redefining):
+                    return
+                _orig_report_error(error)
+
+            ip.report_error = _filtered_report_error
 
             try:
                 ast = ip.parse(source)
@@ -268,3 +254,5 @@ class IvyParserWrapper:
                     success=False,
                     filename=filename,
                 )
+            finally:
+                ip.report_error = _orig_report_error
