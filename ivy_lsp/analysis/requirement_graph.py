@@ -475,7 +475,7 @@ class RequirementGraph:
 
         with self._lock:
             for sym in symbols:
-                if sym.kind == SymbolKind.Function:
+                if sym.kind in (SymbolKind.Function, SymbolKind.Method):
                     if sym.name not in self.actions:
                         self.add_action(
                             ActionNode(

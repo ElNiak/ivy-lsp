@@ -137,6 +137,29 @@ class SymbolTable:
 
         return candidates
 
+    def lookup_unqualified(self, name: str) -> List[IvySymbol]:
+        """Search children recursively for a plain name match.
+
+        Falls back to walking the entire symbol tree when ``lookup()``
+        (which only checks top-level names) returns nothing.
+        """
+        direct = self.lookup(name)
+        if direct:
+            return direct
+        results: List[IvySymbol] = []
+        seen: Set[int] = set()
+
+        def _search(symbols: List[IvySymbol]) -> None:
+            for sym in symbols:
+                for child in sym.children:
+                    if child.name == name and id(child) not in seen:
+                        seen.add(id(child))
+                        results.append(child)
+                    _search([child])
+
+        _search(self._all)
+        return results
+
     def all_symbols(self) -> List[IvySymbol]:
         """Return every registered symbol."""
         return list(self._all)

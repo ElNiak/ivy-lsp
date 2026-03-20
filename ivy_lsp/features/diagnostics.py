@@ -718,6 +718,14 @@ def register(server) -> None:
         doc = server.workspace.get_text_document(uri)
         filepath = uri_to_path(uri)
         source = doc.source or ""
+
+        # Notify session overlay of file open (fast Tier 2/3 indexing)
+        ws_ctx = getattr(server, "_workspace_context", None)
+        if ws_ctx is not None and hasattr(ws_ctx, "overlay") and source:
+            try:
+                ws_ctx.overlay.notify_file_change(filepath, source)
+            except Exception:
+                logger.debug("Overlay notification failed on open", exc_info=True)
         loop = asyncio.get_running_loop()
         pipeline_result = await loop.run_in_executor(
             None, _run_pipeline, source, filepath, "change"
@@ -749,6 +757,14 @@ def register(server) -> None:
             doc = server.workspace.get_text_document(uri)
             filepath = uri_to_path(uri)
             source = doc.source or ""
+
+            # Notify session overlay of file change (fast Tier 2/3 indexing)
+            ws_ctx = getattr(server, "_workspace_context", None)
+            if ws_ctx is not None and hasattr(ws_ctx, "overlay"):
+                try:
+                    ws_ctx.overlay.notify_file_change(filepath, source)
+                except Exception:
+                    logger.debug("Overlay notification failed", exc_info=True)
             fast_diags = check_structural_issues(source, filepath, server.indexer)
             server.diagnostic_cache.update_fast(uri, source, fast_diags)
             server.text_document_publish_diagnostics(

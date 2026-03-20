@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
@@ -182,17 +183,31 @@ def _convert_decl(decl: Any, filename: str, source: str) -> List[IvySymbol]:
     if isinstance(decl, ia.DefinitionDecl):
         return _convert_definition(decl, filename, source)
     if isinstance(decl, ia.PropertyDecl):
-        return _convert_labeled(decl, filename, source, SymbolKind.Property)
+        return _convert_labeled(
+            decl, filename, source, SymbolKind.Property, keyword="property"
+        )
     if isinstance(decl, ia.AxiomDecl):
-        return _convert_labeled(decl, filename, source, SymbolKind.Property)
+        return _convert_labeled(
+            decl, filename, source, SymbolKind.Property, keyword="axiom"
+        )
     if isinstance(decl, ia.ConjectureDecl):
-        return _convert_labeled(decl, filename, source, SymbolKind.Property)
+        return _convert_labeled(
+            decl, filename, source, SymbolKind.Property, keyword="conjecture"
+        )
     if isinstance(decl, ia.IsolateDecl):
         return _convert_isolate(decl, filename, source)
     if isinstance(decl, ia.ModuleDecl):
         return _convert_module(decl, filename, source)
     if isinstance(decl, ia.AliasDecl):
         return _convert_alias(decl, filename, source)
+    if isinstance(decl, ia.DerivedDecl):
+        return _convert_derived(decl, filename, source)
+    if isinstance(decl, ia.InterpretDecl):
+        return _convert_interpret(decl, filename, source)
+    if isinstance(decl, ia.SchemaDecl):
+        return _convert_schema(decl, filename, source)
+    if isinstance(decl, ia.TheoremDecl):
+        return _convert_theorem(decl, filename, source)
     # ConstantDecl check must come after subclass checks (DestructorDecl,
     # ConstructorDecl inherit from ConstantDecl).
     if isinstance(decl, ia.DestructorDecl):
@@ -203,13 +218,20 @@ def _convert_decl(decl: Any, filename: str, source: str) -> List[IvySymbol]:
         return _convert_constant_or_relation(decl, filename, source)
     if isinstance(decl, ia.InstantiateDecl):
         return _convert_instantiate(decl, filename, source)
-    if isinstance(decl, (ia.MixinDecl, ia.VariantDecl)):
+    if isinstance(decl, ia.VariantDecl):
         return []
+    if isinstance(decl, ia.MixinDecl):
+        return _convert_mixin(decl, filename, source)
     if isinstance(decl, ia.ExportDecl):
         return _convert_export(decl, filename, source)
     if isinstance(decl, ia.ImportDecl):
         return _convert_import(decl, filename, source)
+    if isinstance(decl, ia.NativeDecl):
+        return _convert_native(decl, filename, source)
+    if isinstance(decl, ia.AttributeDecl):
+        return _convert_attribute(decl, filename, source)
 
+    logger.debug("No converter for %s", type(decl).__name__)
     return []
 
 
@@ -230,7 +252,7 @@ def _convert_type(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword="type")
     detail = _extract_enum_detail(decl)
 
     return [
@@ -284,7 +306,7 @@ def _convert_object(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword="object")
 
     return [
         IvySymbol(
@@ -302,7 +324,12 @@ def _convert_object(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
 
 def _convert_action(decl: Any, filename: str, source: str) -> List[IvySymbol]:
-    """Convert an ActionDecl to SymbolKind.Function with param/return detail."""
+    """Convert an ActionDecl to SymbolKind.Method with param/return detail.
+
+    Actions are stateful procedures that can modify state, unlike pure
+    functions/relations.  We use Method to distinguish them in the LSP
+    symbol outline.
+    """
     defs = decl.defines()
     if not defs:
         return []
@@ -318,7 +345,7 @@ def _convert_action(decl: Any, filename: str, source: str) -> List[IvySymbol]:
     return [
         IvySymbol(
             name=name,
-            kind=SymbolKind.Function,
+            kind=SymbolKind.Method,
             range=rng,
             detail=detail,
             file_path=filename,
@@ -417,7 +444,6 @@ def _convert_constant_or_relation(
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
 
     # Detect relation: ConstantDecl whose atom has args and bool sort
     kind = SymbolKind.Variable
@@ -432,6 +458,9 @@ def _convert_constant_or_relation(
         detail = _extract_constant_detail(arg0)
     except (IndexError, AttributeError):
         logger.debug("Could not determine relation kind for %s", type(decl).__name__)
+
+    kw = "relation" if kind == SymbolKind.Function else "function"
+    rng = _loc_to_tuple(loc, source, name=name, keyword=kw)
 
     return [
         IvySymbol(
@@ -507,7 +536,7 @@ def _convert_isolate(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword="isolate")
 
     return [
         IvySymbol(
@@ -532,7 +561,7 @@ def _convert_module(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword="module")
 
     return [
         IvySymbol(
@@ -554,6 +583,7 @@ def _convert_labeled(
     filename: str,
     source: str,
     kind: SymbolKind,
+    keyword: Optional[str] = None,
 ) -> List[IvySymbol]:
     """Convert a LabeledDecl (Axiom/Property/Conjecture) to the given kind."""
     defs = decl.defines()
@@ -562,7 +592,7 @@ def _convert_labeled(
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword=keyword)
 
     return [
         IvySymbol(
@@ -601,6 +631,111 @@ def _convert_definition(decl: Any, filename: str, source: str) -> List[IvySymbol
 
 
 # ---------------------------------------------------------------------------
+# Derived declarations
+# ---------------------------------------------------------------------------
+
+
+def _convert_derived(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert a DerivedDecl to SymbolKind.Function."""
+    defs = decl.defines()
+    if not defs:
+        return []
+
+    name = defs[0][0]
+    loc = defs[0][1] if len(defs[0]) >= 2 else None
+    leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
+    rng = _loc_to_tuple(loc, source, name=leaf_name, keyword="derived")
+
+    return [
+        IvySymbol(
+            name=name,
+            kind=SymbolKind.Function,
+            range=rng,
+            file_path=filename,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Interpret declarations
+# ---------------------------------------------------------------------------
+
+
+def _convert_interpret(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert an InterpretDecl to SymbolKind.TypeParameter."""
+    defs = decl.defines()
+    if not defs:
+        return []
+
+    name = defs[0][0]
+    loc = defs[0][1] if len(defs[0]) >= 2 else None
+    rng = _loc_to_tuple(loc, source, name=name, keyword="interpret")
+
+    return [
+        IvySymbol(
+            name=name,
+            kind=SymbolKind.TypeParameter,
+            range=rng,
+            file_path=filename,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Schema declarations
+# ---------------------------------------------------------------------------
+
+
+def _convert_schema(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert a SchemaDecl to SymbolKind.Interface."""
+    defs = decl.defines()
+    if not defs:
+        return []
+
+    symbols: List[IvySymbol] = []
+    for defn in defs:
+        name = defn[0]
+        loc = defn[1] if len(defn) >= 2 else None
+        rng = _loc_to_tuple(loc, source, name=name, keyword="schema")
+        symbols.append(
+            IvySymbol(
+                name=name,
+                kind=SymbolKind.Interface,
+                range=rng,
+                file_path=filename,
+            )
+        )
+    return symbols
+
+
+# ---------------------------------------------------------------------------
+# Theorem declarations
+# ---------------------------------------------------------------------------
+
+
+def _convert_theorem(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert a TheoremDecl to SymbolKind.Property."""
+    defs = decl.defines()
+    if not defs:
+        return []
+
+    symbols: List[IvySymbol] = []
+    for defn in defs:
+        name = defn[0]
+        loc = defn[1] if len(defn) >= 2 else None
+        rng = _loc_to_tuple(loc, source, name=name, keyword="theorem")
+        symbols.append(
+            IvySymbol(
+                name=name,
+                kind=SymbolKind.Property,
+                range=rng,
+                file_path=filename,
+            )
+        )
+    return symbols
+
+
+# ---------------------------------------------------------------------------
 # Instantiate declarations
 # ---------------------------------------------------------------------------
 
@@ -613,7 +748,7 @@ def _convert_instantiate(decl: Any, filename: str, source: str) -> List[IvySymbo
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    rng = _loc_to_tuple(loc, source)
+    rng = _loc_to_tuple(loc, source, name=name, keyword="instance")
 
     return [
         IvySymbol(
@@ -623,6 +758,53 @@ def _convert_instantiate(decl: Any, filename: str, source: str) -> List[IvySymbo
             file_path=filename,
         )
     ]
+
+
+# ---------------------------------------------------------------------------
+# Mixin declarations (before/after/implement)
+# ---------------------------------------------------------------------------
+
+
+def _convert_mixin(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert a MixinDecl to SymbolKind.Method with detail showing relationship.
+
+    Mixins (before/after/implement) are action monitors — they execute around
+    an action call and can modify state, so they get Method like actions.
+    MixinDecl.args[0] is a MixinDef subclass with mixer() and mixee() methods.
+    """
+    import ivy.ivy_ast as ia
+
+    try:
+        mixin_def = decl.args[0] if decl.args else None
+        if mixin_def is None:
+            return []
+
+        mixee_name = mixin_def.mixee()
+        if not mixee_name:
+            return []
+
+        # Determine the kind of mixin (before/after/implement)
+        if isinstance(mixin_def, ia.MixinAfterDef):
+            detail = f"after {mixee_name}"
+        elif isinstance(mixin_def, ia.MixinImplementDef):
+            detail = f"implement {mixee_name}"
+        else:
+            detail = f"before {mixee_name}"
+
+        rng = _loc_to_tuple(getattr(decl, "lineno", None), source)
+
+        return [
+            IvySymbol(
+                name=mixee_name,
+                kind=SymbolKind.Method,
+                range=rng,
+                detail=detail,
+                file_path=filename,
+            )
+        ]
+    except (IndexError, AttributeError):
+        logger.debug("Could not convert MixinDecl in %s", filename)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +827,7 @@ def _convert_export(decl: Any, filename: str, source: str) -> List[IvySymbol]:
         if name:
             symbols.append(
                 IvySymbol(
-                    name=f"export {name}",
+                    name=name,
                     kind=SymbolKind.Event,
                     range=rng,
                     detail=f"export {name}",
@@ -668,7 +850,7 @@ def _convert_import(decl: Any, filename: str, source: str) -> List[IvySymbol]:
         if name:
             symbols.append(
                 IvySymbol(
-                    name=f"import {name}",
+                    name=name,
                     kind=SymbolKind.Event,
                     range=rng,
                     detail=f"import {name}",
@@ -676,6 +858,69 @@ def _convert_import(decl: Any, filename: str, source: str) -> List[IvySymbol]:
                 )
             )
     return symbols
+
+
+# ---------------------------------------------------------------------------
+# Native declarations (<<<...>>> C++ blocks)
+# ---------------------------------------------------------------------------
+
+
+def _convert_native(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert a NativeDecl (<<<...>>> C++ block) to SymbolKind.String.
+
+    Uses the auto-generated label (e.g. 'native3') from NativeDef.args[0].
+    """
+    try:
+        native_def = decl.args[0]
+        label_atom = native_def.args[0]
+        name = (
+            getattr(label_atom, "rep", None)
+            or getattr(label_atom, "relname", None)
+            or "native"
+        )
+        rng = _loc_to_tuple(getattr(decl, "lineno", None), source)
+        return [
+            IvySymbol(
+                name=name,
+                kind=SymbolKind.String,
+                range=rng,
+                detail="native",
+                file_path=filename,
+            )
+        ]
+    except (IndexError, AttributeError):
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Attribute declarations (attribute foo = bar)
+# ---------------------------------------------------------------------------
+
+
+def _convert_attribute(decl: Any, filename: str, source: str) -> List[IvySymbol]:
+    """Convert an AttributeDecl (attribute foo = bar) to SymbolKind.Constant."""
+    try:
+        attr_def = decl.args[0]
+        name_atom = attr_def.args[0]
+        val_atom = attr_def.args[1]
+        name = (
+            getattr(name_atom, "rep", None)
+            or getattr(name_atom, "relname", None)
+            or str(name_atom)
+        )
+        val = str(val_atom) if val_atom else ""
+        rng = _loc_to_tuple(getattr(decl, "lineno", None), source)
+        return [
+            IvySymbol(
+                name=name,
+                kind=SymbolKind.Constant,
+                range=rng,
+                detail=f"attribute {name} = {val}",
+                file_path=filename,
+            )
+        ]
+    except (IndexError, AttributeError):
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -746,8 +991,13 @@ def _loc_to_tuple(
     """
     rng = ivy_location_to_range(loc, source)
     if rng.start.line == 0 and rng.end.line == 0 and name and keyword:
+        pattern = re.compile(
+            r"^\s*" + re.escape(keyword) + r"\s+" + re.escape(name) + r"\b"
+        )
         for i, line in enumerate(source.split("\n")):
-            if keyword in line and name in line:
+            if line.lstrip().startswith("#"):
+                continue
+            if pattern.search(line):
                 line_len = len(line)
                 return (i, 0, i, line_len)
     return (

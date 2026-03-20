@@ -153,6 +153,7 @@ class CompletionContext(enum.Enum):
 _KIND_TO_COMPLETION = {
     SymbolKind.Class: lsp.CompletionItemKind.Class,
     SymbolKind.Function: lsp.CompletionItemKind.Function,
+    SymbolKind.Method: lsp.CompletionItemKind.Method,
     SymbolKind.Module: lsp.CompletionItemKind.Module,
     SymbolKind.Variable: lsp.CompletionItemKind.Variable,
     SymbolKind.Property: lsp.CompletionItemKind.Property,

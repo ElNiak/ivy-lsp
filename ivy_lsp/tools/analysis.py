@@ -26,6 +26,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         relative_path: str | None = None,
         detail: str = "summary",
         limit: int = 30,
+        scope: str = "",
     ) -> dict:
         """Return the include dependency graph for Ivy files.
 
@@ -37,13 +38,31 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             detail: "summary" (default) returns file counts and top
                 entry points; "full" returns every file with its includes.
             limit: Max files to return in summary mode (default 30).
+            scope: Optional test scope name.  When set, the graph is
+                filtered to only include edges within the scope's include
+                closure.  Empty string (default) = no scoping.
         """
         logger.debug(
             "[ivy_include_graph] workspace=%s, args=%r",
             ctx.root,
-            {"relative_path": relative_path},
+            {"relative_path": relative_path, "scope": scope},
         )
-        _tc = ToolTraceContext("ivy_include_graph", {"relative_path": relative_path})
+
+        # Resolve scope for graph filtering
+        _scope_files: frozenset[str] | None = None
+        if scope and getattr(ctx, "workspace_context", None) is not None:
+            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
+            if _resolved_scope is not None:
+                _scope_files = _resolved_scope.include_closure
+            else:
+                logger.warning(
+                    "[ivy_include_graph] Unknown scope '%s'; proceeding without scoping",
+                    scope,
+                )
+
+        _tc = ToolTraceContext(
+            "ivy_include_graph", {"relative_path": relative_path, "scope": scope}
+        )
 
         def _build_graph():
             graph: dict[str, list[str]] = {}
@@ -100,6 +119,12 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         graph, basename_cache, _skipped = await asyncio.to_thread(_build_graph)
 
+        # Task 3.2: Filter graph to scope's include closure when set.
+        # include_closure contains absolute paths; graph keys are relative.
+        if _scope_files is not None:
+            scope_rel_files = {os.path.relpath(f, ctx.root) for f in _scope_files}
+            graph = {fp: incs for fp, incs in graph.items() if fp in scope_rel_files}
+
         if relative_path is not None:
             # C5: Try key variants (with/without protocol-testing/ prefix)
             includes = graph.get(relative_path)
@@ -146,14 +171,15 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 if mod_path and mod_path in graph:
                     stack.extend(graph[mod_path])
 
-            return _tc.finish(
-                {
-                    "file": relative_path,
-                    "includes": resolved,
-                    "included_by": included_by,
-                    "transitive_includes": sorted(transitive),
-                }
-            )
+            _file_result: dict[str, Any] = {
+                "file": relative_path,
+                "includes": resolved,
+                "included_by": included_by,
+                "transitive_includes": sorted(transitive),
+            }
+            if _scope_files is not None:
+                _file_result["scope"] = scope
+            return _tc.finish(_file_result)
         else:
             # Compute entry points (files not included by any other file)
             all_included = set()
@@ -172,20 +198,22 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     # Truncate
                     truncated_keys = sorted(files_data.keys())[:limit]
                     files_data = {k: files_data[k] for k in truncated_keys}
-                    return _tc.finish(
-                        {
-                            "files": files_data,
-                            "total_files": len(graph),
-                            "truncated": True,
-                            "showing": limit,
-                        }
-                    )
-                return _tc.finish(
-                    {
+                    _trunc_result: dict[str, Any] = {
                         "files": files_data,
                         "total_files": len(graph),
+                        "truncated": True,
+                        "showing": limit,
                     }
-                )
+                    if _scope_files is not None:
+                        _trunc_result["scope"] = scope
+                    return _tc.finish(_trunc_result)
+                _full_result: dict[str, Any] = {
+                    "files": files_data,
+                    "total_files": len(graph),
+                }
+                if _scope_files is not None:
+                    _full_result["scope"] = scope
+                return _tc.finish(_full_result)
             else:
                 # Summary mode (default) — compact overview
                 # Top files by include count (most-included)
@@ -197,19 +225,20 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     include_counts.items(), key=lambda x: x[1], reverse=True
                 )[:limit]
 
-                return _tc.finish(
-                    {
-                        "total_files": len(graph),
-                        "entry_points": entry_points[:limit],
-                        "entry_point_count": len(entry_points),
-                        "most_included": [
-                            {"module": mod, "included_by_count": cnt}
-                            for mod, cnt in most_included
-                        ],
-                        "detail": "summary",
-                        "hint": "Use detail='full' for the complete graph.",
-                    }
-                )
+                _summary_result: dict[str, Any] = {
+                    "total_files": len(graph),
+                    "entry_points": entry_points[:limit],
+                    "entry_point_count": len(entry_points),
+                    "most_included": [
+                        {"module": mod, "included_by_count": cnt}
+                        for mod, cnt in most_included
+                    ],
+                    "detail": "summary",
+                    "hint": "Use detail='full' for the complete graph.",
+                }
+                if _scope_files is not None:
+                    _summary_result["scope"] = scope
+                return _tc.finish(_summary_result)
 
     @mcp.tool()
     @safe_tool
@@ -396,3 +425,76 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             health["workspace_files"] = -1
 
         return _tc.finish(health)
+
+    @mcp.tool()
+    @safe_tool
+    async def ivy_index(
+        protocol: str = "all",
+        fast: bool = False,
+        status: bool = False,
+    ) -> dict:
+        """Build or check the offline .ivy-index/ for a protocol.
+
+        Args:
+            protocol: Protocol name (e.g. "quic") or "all" for all protocols.
+            fast: Use Tier 2 (lexer) only, skip full parser.
+            status: Check staleness without rebuilding.
+
+        Returns:
+            Build summary or staleness report.
+        """
+        _tc = ToolTraceContext("ivy_index")
+
+        try:
+            from ivy_lsp.index_builder import IndexBuilder
+            from ivy_lsp.workspace_detection import detect_ivy_workspace
+        except ImportError as exc:
+            return _tc.finish(
+                error_response(
+                    f"Index builder not available: {exc}",
+                    "ivy_index",
+                )
+            )
+
+        ws_config = detect_ivy_workspace(start_dir=ctx.root)
+
+        if status:
+            builder = IndexBuilder(ctx.root, ws_config)
+            if protocol == "all":
+                results = []
+                for proto_dir in sorted(
+                    __import__("glob").glob(
+                        os.path.join(ctx.root, "protocol-testing", "*")
+                    )
+                ):
+                    if os.path.isdir(proto_dir):
+                        results.append(builder.check_status(proto_dir))
+                return _tc.finish({"status_reports": results})
+            else:
+                proto_dir = os.path.join(ctx.root, "protocol-testing", protocol)
+                return _tc.finish(builder.check_status(proto_dir))
+
+        builder = IndexBuilder(ctx.root, ws_config, fast=fast)
+        loop = asyncio.get_running_loop()
+
+        if protocol == "all":
+            summaries = await loop.run_in_executor(None, builder.build_all)
+        else:
+            proto_dir = os.path.join(ctx.root, "protocol-testing", protocol)
+            summary = await loop.run_in_executor(
+                None, builder.build_protocol, proto_dir
+            )
+            summaries = [summary]
+
+        # Reload workspace context after build
+        ws_ctx = getattr(ctx, "workspace_context", None)
+        if ws_ctx is not None:
+            try:
+                from ivy_lsp.workspace_context import WorkspaceContext
+
+                ctx.workspace_context = WorkspaceContext.load(ctx.root)
+                logger.info("Reloaded WorkspaceContext after index build")
+            except Exception:
+                logger.debug("WorkspaceContext reload failed", exc_info=True)
+
+        return _tc.finish({"summaries": summaries})

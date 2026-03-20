@@ -68,7 +68,7 @@ class TestPrepareCallHierarchy:
         assert len(result) == 1
         item = result[0]
         assert item.name == "connect"
-        assert item.kind == lsp.SymbolKind.Function
+        assert item.kind == lsp.SymbolKind.Method
 
     @pytest.mark.unit
     def test_type_returns_none(self, tmp_path):

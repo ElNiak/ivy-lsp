@@ -57,6 +57,47 @@ class ServerSetupMixin:
         else:
             ws_root = os.getcwd()
 
+        # Load offline index context (graceful fallback to empty context)
+        try:
+            from ivy_lsp.workspace_context import WorkspaceContext
+
+            self._workspace_context = WorkspaceContext.load(ws_root)
+            if self._workspace_context.has_index():
+                protocols = self._workspace_context.list_protocols()
+                slog.info(
+                    "Loaded offline index for %d protocol(s): %s",
+                    len(protocols),
+                    ", ".join(protocols),
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.MILESTONE,
+                            "offline_index",
+                            {"protocols": protocols},
+                        )
+                    },
+                )
+            else:
+                slog.debug(
+                    "No offline index found; will use live indexing",
+                    extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "offline_index")},
+                )
+        except Exception:
+            logger.debug(
+                "WorkspaceContext loading failed; proceeding without offline index",
+                exc_info=True,
+            )
+            from ivy_lsp.workspace_context import WorkspaceContext
+            from ivy_lsp.workspace_detection import WorkspaceConfig
+
+            self._workspace_context = WorkspaceContext(
+                workspace_root=ws_root,
+                project_type="fallback",
+                workspace_config=WorkspaceConfig(
+                    workspace_root=ws_root,
+                    detected_by="fallback",
+                ),
+            )
+
         resolver, ws_root = self._create_resolver(ws_root)
         if resolver is None:
             return
@@ -240,6 +281,11 @@ class ServerSetupMixin:
     def _create_indexer(self, ws_root: str, resolver: "IncludeResolver") -> bool:
         """Create the workspace indexer and run initial indexing.
 
+        If an offline ``.ivy-index/`` exists (loaded via ``WorkspaceContext``),
+        the fast-scan phase is replaced by pre-populating the indexer from
+        the cached artifacts.  Post-indexing wiring and background deep
+        parse still run as normal.
+
         Returns True on success, False if the indexer could not be created.
         """
         from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
@@ -270,10 +316,20 @@ class ServerSetupMixin:
         self.state_tracker.set_indexing()
         try:
             index_start = time.time()
-            self._indexer.index_workspace()
+
+            ws_ctx = getattr(self, "_workspace_context", None)
+            if ws_ctx is not None and ws_ctx.has_index():
+                self._prepopulate_from_offline_index(ws_ctx)
+            else:
+                self._indexer.index_workspace()
+
             index_duration = time.time() - index_start
             self.state_tracker.set_indexed(index_duration)
             n_files = len(self._indexer._cache._cache) if self._indexer._cache else 0
+            if n_files == 0:
+                # Offline index pre-population bypasses the file cache;
+                # fall back to progress-tracked file count.
+                n_files = len(self._indexer._deep_index_progress.file_statuses)
             n_symbols = sum(1 for _ in self._indexer.lookup_all_symbols())
             slog.info(
                 "Indexed %d files, %d symbols",
@@ -311,6 +367,148 @@ class ServerSetupMixin:
                 )
             )
         return True
+
+    # ------------------------------------------------------------------
+    # Offline index pre-population
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _patch_symbol_file_paths(sym, abs_path: str) -> None:
+        """Recursively set ``file_path`` on *sym* and all descendants.
+
+        Symbols serialized by the offline index builder retain the
+        absolute paths from the build machine.  This helper normalizes
+        them to the current workspace's absolute path so that all
+        downstream consumers (go-to-definition, document symbols, etc.)
+        see consistent paths.
+        """
+        stack = [sym]
+        while stack:
+            s = stack.pop()
+            s.file_path = abs_path
+            stack.extend(s.children)
+
+    def _prepopulate_from_offline_index(self, ws_ctx) -> None:
+        """Replace the fast-scan phase with pre-built index data.
+
+        Iterates over every :class:`ProtocolIndex` in *ws_ctx*, converts
+        relative paths to absolute, and populates the indexer's
+        ``_symbol_table``, ``_include_graph``, and ``_file_export_imports``.
+
+        After pre-population the standard post-indexing wiring steps run
+        (requirement graph, coverage edges, test scopes) followed by
+        the background deep-parse thread (unchanged).
+        """
+        import threading
+
+        from ivy_lsp.indexer.workspace_indexer import FileIndexStatus
+        from ivy_lsp.parsing.symbols import IvySymbol
+
+        prepop_start = time.time()
+        total_files = 0
+        total_symbols = 0
+        total_edges = 0
+
+        for proto_name, proto_idx in ws_ctx.protocol_indexes.items():
+            # protocol_dir = workspace_root / protocol-testing / <proto>
+            protocol_dir = os.path.dirname(proto_idx.index_dir)
+
+            # -- 1. Symbols ------------------------------------------------
+            for rel_path, sym_dicts in proto_idx.symbols.items():
+                abs_path = os.path.join(protocol_dir, rel_path)
+                for sd in sym_dicts:
+                    try:
+                        sym = IvySymbol.from_dict(sd)
+                        self._patch_symbol_file_paths(sym, abs_path)
+                        self._indexer._symbol_table.add_symbol(sym)
+                        total_symbols += 1
+                    except Exception:
+                        logger.debug(
+                            "Skipping corrupt symbol in %s/%s",
+                            proto_name,
+                            rel_path,
+                            exc_info=True,
+                        )
+                total_files += 1
+
+                # Mark file as shallow-indexed in progress tracking
+                with self._indexer._progress_lock:
+                    self._indexer._deep_index_progress.file_statuses[abs_path] = (
+                        FileIndexStatus(
+                            filepath=abs_path,
+                            shallow_indexed=True,
+                            last_indexed_at=time.time(),
+                        )
+                    )
+
+            # -- 2. Include graph ------------------------------------------
+            edges = proto_idx.includes.to_edges()
+            for from_rel, to_rels in edges.items():
+                abs_from = os.path.join(protocol_dir, from_rel)
+                for to_rel in to_rels:
+                    abs_to = os.path.join(protocol_dir, to_rel)
+                    self._indexer._include_graph.add_edge(abs_from, abs_to)
+                    total_edges += 1
+
+            # -- 3. Exports / imports --------------------------------------
+            for rel_path, export_info in proto_idx.exports.items():
+                abs_path = os.path.join(protocol_dir, rel_path)
+                # ExportImportInfo stores the originating file; update to
+                # absolute path so downstream consumers (test scope builder,
+                # coverage tools) find it.
+                patched = type(export_info)(
+                    file=abs_path,
+                    exports=list(export_info.exports),
+                    imports=list(export_info.imports),
+                    export_lines=dict(export_info.export_lines),
+                    import_lines=dict(export_info.import_lines),
+                )
+                with self._indexer._exports_lock:
+                    self._indexer._file_export_imports[abs_path] = patched
+
+            # -- 4. Requirement graph (optional pickle) --------------------
+            if proto_idx.requirement_graph is not None:
+                self._indexer._requirement_graph = proto_idx.requirement_graph
+
+        slog.info(
+            "Pre-populated from offline index: %d files, %d symbols, %d include edges",
+            total_files,
+            total_symbols,
+            total_edges,
+            extra={
+                "event": LogEvent(
+                    LogCategory.MILESTONE,
+                    "offline_index_prepopulate",
+                    {
+                        "files": total_files,
+                        "symbols": total_symbols,
+                        "include_edges": total_edges,
+                    },
+                )
+            },
+        )
+
+        # Run post-indexing wiring (same sequence as index_workspace)
+        self._indexer._wire_requirement_graph()
+        self._indexer._load_requirement_manifests()
+        self._indexer._wire_coverage_edges()
+        self._indexer._compute_test_scopes()
+        self._indexer._last_index_duration = time.time() - prepop_start
+        self._indexer._last_index_time = time.time()
+
+        # Phase 2: background full-parse from test entry points
+        from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
+
+        has_full_parser = not isinstance(self._indexer._parser, FallbackOnlyParser)
+        if has_full_parser:
+            with self._indexer._progress_lock:
+                self._indexer._deep_index_running = True
+            t = threading.Thread(
+                target=self._indexer._deep_index_from_tests,
+                daemon=True,
+                name="ivy-deep-index",
+            )
+            t.start()
 
     def _setup_analysis_pipeline(self) -> None:
         """Set up semantic model, adapters, compiler manager, and analysis pipeline."""

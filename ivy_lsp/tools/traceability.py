@@ -569,6 +569,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
         compact: bool = True,
         max_items: int = 50,
+        scope: str = "",
     ) -> dict:
         """Unified RFC coverage analysis tool.
 
@@ -601,7 +602,32 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             max_items: Maximum number of list items to return (default 50).
                 Truncates matrix rows and uncovered_ids lists.  Set to 0
                 to disable truncation.
+            scope: Optional test scope name from the workspace context.
+                When set and test_file is not provided, the scope's test
+                file is used as the test_file for scoping.  Empty string
+                (default) = no scope-based override.
         """
+        # Task 3.2: Resolve scope -> test_file when scope is provided
+        if (
+            scope
+            and not test_file
+            and getattr(ctx, "workspace_context", None) is not None
+        ):
+            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
+            if _resolved_scope is not None:
+                # Convert absolute test_file path to relative for the tool
+                test_file = os.path.relpath(_resolved_scope.test_file, ctx.root)
+                logger.debug(
+                    "[ivy_coverage] Scope '%s' resolved to test_file='%s'",
+                    scope,
+                    test_file,
+                )
+            else:
+                logger.warning(
+                    "[ivy_coverage] Unknown scope '%s'; proceeding without scoping",
+                    scope,
+                )
+
         logger.debug(
             "[ivy_coverage] workspace=%s, args=%r",
             ctx.root,
@@ -610,6 +636,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 "relative_path": relative_path,
                 "test_file": test_file,
                 "protocol": protocol,
+                "scope": scope,
             },
         )
         _tc = ToolTraceContext(
@@ -619,6 +646,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 "relative_path": relative_path,
                 "test_file": test_file,
                 "protocol": protocol,
+                "scope": scope,
             },
         )
         _valid_modes = {"matrix", "stats", "gaps", "diff"}
@@ -636,11 +664,19 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     result_dict["matrix"] = matrix[:max_items]
                     result_dict["matrix_truncated"] = True
                     result_dict["matrix_total"] = len(matrix)
+            if scope:
+                result_dict["scope"] = scope
             return _tc.finish(result_dict)
         elif mode == "gaps":
-            return _tc.finish(await _ivy_coverage_gaps(test_file, protocol))
+            result_dict = await _ivy_coverage_gaps(test_file, protocol)
+            if scope:
+                result_dict["scope"] = scope
+            return _tc.finish(result_dict)
         elif mode == "diff":
-            return _tc.finish(await _ivy_coverage_diff(relative_path))
+            result_dict = await _ivy_coverage_diff(relative_path)
+            if scope:
+                result_dict["scope"] = scope
+            return _tc.finish(result_dict)
         else:  # default: stats
             result_dict = await _ivy_requirement_coverage(relative_path, test_file)
             if compact:
@@ -651,6 +687,8 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     if len(uncovered) > max_items:
                         result_dict["uncovered_ids"] = uncovered[:max_items]
                         result_dict["uncovered_ids_truncated"] = True
+            if scope:
+                result_dict["scope"] = scope
             return _tc.finish(result_dict)
 
     @mcp.tool()

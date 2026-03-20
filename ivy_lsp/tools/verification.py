@@ -137,6 +137,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         isolate: str | None = None,
         use_cache: bool = False,
         compact: bool = True,
+        scope: str = "",
     ) -> dict:
         """Run ivy_check on an Ivy file to verify formal properties.
 
@@ -149,6 +150,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             compact: When True (default), strip raw_output and full
                 counterexample from the result to reduce context window usage.
                 Only counterexample_trace (formatted summary) is kept.
+            scope: Optional test scope name.  When set and the workspace
+                context has a matching scope, the scope name is included in
+                the result summary.  Empty string (default) = no scoping.
         """
         logger.debug(
             "[ivy_verify] workspace=%s, args=%r",
@@ -157,14 +161,27 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "relative_path": relative_path,
                 "isolate": isolate,
                 "use_cache": use_cache,
+                "scope": scope,
             },
         )
+
+        # Resolve scope (if provided) for result annotation
+        _resolved_scope = None
+        if scope and getattr(ctx, "workspace_context", None) is not None:
+            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
+            if _resolved_scope is None:
+                logger.warning(
+                    "[ivy_verify] Unknown scope '%s'; proceeding without scoping",
+                    scope,
+                )
+
         with trace_tool(
             "ivy_verify",
             {
                 "relative_path": relative_path,
                 "isolate": isolate,
                 "use_cache": use_cache,
+                "scope": scope,
             },
         ) as _tt:
             try:
@@ -284,6 +301,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         " full output in /tmp/ivy-lsp-latest.log]"
                     )
 
+            # Task 3.2: Annotate result with scope info when available
+            if _resolved_scope is not None:
+                result["scope"] = scope
+                result["scope_role"] = _resolved_scope.tester_role
+
             _tt[0] = result
             return _tt[0]
 
@@ -293,6 +315,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         relative_path: str,
         target: str = "test",
         isolate: str | None = None,
+        scope: str = "",
     ) -> dict:
         """Compile an Ivy file to a test executable using ivyc.
 
@@ -304,12 +327,30 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             relative_path: Relative path to the .ivy file to compile.
             target: Compilation target (default: "test").
             isolate: Optional isolate name to compile in isolation.
+            scope: Optional test scope name.  When set and the workspace
+                context has a matching scope, the scope name is included in
+                the result summary.  Empty string (default) = no scoping.
         """
         logger.debug(
             "[ivy_compile] workspace=%s, args=%r",
             ctx.root,
-            {"relative_path": relative_path, "target": target, "isolate": isolate},
+            {
+                "relative_path": relative_path,
+                "target": target,
+                "isolate": isolate,
+                "scope": scope,
+            },
         )
+
+        # Resolve scope (if provided) for result annotation
+        _resolved_scope = None
+        if scope and getattr(ctx, "workspace_context", None) is not None:
+            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
+            if _resolved_scope is None:
+                logger.warning(
+                    "[ivy_compile] Unknown scope '%s'; proceeding without scoping",
+                    scope,
+                )
         with trace_tool(
             "ivy_compile",
             {"relative_path": relative_path, "target": target, "isolate": isolate},
@@ -386,6 +427,10 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         "target": exec_result.target,
                         "duration_seconds": round(duration, 2),
                     }
+                    # Task 3.2: Annotate result with scope info
+                    if _resolved_scope is not None:
+                        compile_result_dict["scope"] = scope
+                        compile_result_dict["scope_role"] = _resolved_scope.tester_role
                     _tt[0] = compile_result_dict
                     return _tt[0]
                 except ImportError:
@@ -412,6 +457,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             if _docker_fallback_reason:
                 result["fallback"] = "subprocess"
                 result["fallback_reason"] = _docker_fallback_reason
+
+            # Task 3.2: Annotate result with scope info
+            if _resolved_scope is not None:
+                result["scope"] = scope
+                result["scope_role"] = _resolved_scope.tester_role
 
             _tt[0] = result
             return _tt[0]
@@ -492,6 +542,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         mode: str = "full",
         layers: list[str] | None = None,
         min_severity: str | None = None,
+        scope: str = "",
     ) -> dict:
         """Diagnostic analysis of an Ivy file.
 
@@ -511,6 +562,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 Valid values: structural, lexer, semantic, coverage, pattern.
                 Defaults to all layers.
             min_severity: Minimum severity to include: error, warning, info, hint.
+            scope: Optional test scope name.  When set, diagnostics are
+                filtered to files within the scope's include closure.
+                Empty string (default) = no scoping.
         """
         logger.debug(
             "[ivy_diagnostics] workspace=%s, args=%r",
@@ -520,8 +574,22 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "mode": mode,
                 "layers": layers,
                 "min_severity": min_severity,
+                "scope": scope,
             },
         )
+
+        # Resolve scope for file filtering
+        _scope_files: frozenset[str] | None = None
+        if scope and getattr(ctx, "workspace_context", None) is not None:
+            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
+            if _resolved_scope is not None:
+                _scope_files = _resolved_scope.include_closure
+            else:
+                logger.warning(
+                    "[ivy_diagnostics] Unknown scope '%s'; proceeding without scoping",
+                    scope,
+                )
+
         _tc = ToolTraceContext(
             "ivy_diagnostics",
             {
@@ -529,6 +597,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "mode": mode,
                 "layers": layers,
                 "min_severity": min_severity,
+                "scope": scope,
             },
         )
         if mode not in ("structural", "full"):
@@ -545,6 +614,23 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         if not os.path.isfile(abs_path):
             return _tc.finish(error_response(f"File not found: {relative_path}"))
 
+        # Task 3.2: Skip file if it falls outside the requested scope
+        if _scope_files is not None and abs_path not in _scope_files:
+            return _tc.finish(
+                {
+                    "success": True,
+                    "file": relative_path,
+                    "mode": mode,
+                    "diagnostics": [],
+                    "diagnostic_count": 0,
+                    "error_count": 0,
+                    "warning_count": 0,
+                    "scope": scope,
+                    "scope_filtered": True,
+                    "note": f"File not in scope '{scope}' include closure; skipped.",
+                }
+            )
+
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
 
@@ -552,21 +638,20 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         if mode == "structural":
             resolve_cb = ctx.make_resolve_callback()
             diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
-            return _tc.finish(
-                {
-                    "success": True,
-                    "file": relative_path,
-                    "mode": "structural",
-                    "diagnostics": diagnostics,
-                    "diagnostic_count": len(diagnostics),
-                    "error_count": sum(
-                        1 for d in diagnostics if d["severity"] == "error"
-                    ),
-                    "warning_count": sum(
-                        1 for d in diagnostics if d["severity"] == "warning"
-                    ),
-                }
-            )
+            _struct_result: dict[str, Any] = {
+                "success": True,
+                "file": relative_path,
+                "mode": "structural",
+                "diagnostics": diagnostics,
+                "diagnostic_count": len(diagnostics),
+                "error_count": sum(1 for d in diagnostics if d["severity"] == "error"),
+                "warning_count": sum(
+                    1 for d in diagnostics if d["severity"] == "warning"
+                ),
+            }
+            if _scope_files is not None:
+                _struct_result["scope"] = scope
+            return _tc.finish(_struct_result)
 
         # Full mode: all 5 diagnostic layers
         all_diags: list[dict[str, Any]] = []
@@ -772,25 +857,26 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             src = d.get("source", "unknown")
             by_source[src] = by_source.get(src, 0) + 1
 
-        return _tc.finish(
-            {
-                "success": True,
-                "file": relative_path,
-                "diagnostics": all_diags,
-                "diagnostic_count": len(all_diags),
-                "by_source": by_source,
-                "error_count": sum(
-                    1 for d in all_diags if d.get("severity") == "error"
-                ),
-                "warning_count": sum(
-                    1 for d in all_diags if d.get("severity") == "warning"
-                ),
-                "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
-                "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
-                "layer_errors": layer_errors,
-                "partial": bool(layer_errors),
-            }
-        )
+        _diag_result: dict[str, Any] = {
+            "success": True,
+            "file": relative_path,
+            "diagnostics": all_diags,
+            "diagnostic_count": len(all_diags),
+            "by_source": by_source,
+            "error_count": sum(1 for d in all_diags if d.get("severity") == "error"),
+            "warning_count": sum(
+                1 for d in all_diags if d.get("severity") == "warning"
+            ),
+            "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
+            "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
+            "layer_errors": layer_errors,
+            "partial": bool(layer_errors),
+        }
+        # Task 3.2: Annotate result with scope info when available
+        if _scope_files is not None:
+            _diag_result["scope"] = scope
+
+        return _tc.finish(_diag_result)
 
     # -- Verification dashboard ------------------------------------------------
 

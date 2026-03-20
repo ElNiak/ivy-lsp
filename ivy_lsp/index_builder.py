@@ -114,10 +114,11 @@ class IndexBuilder:
         # -- 1. Discover .ivy files ----------------------------------------
         from ivy_lsp.indexer.include_resolver import IncludeResolver
 
+        protocol_rel = os.path.relpath(protocol_dir, self.workspace_root)
         resolver = IncludeResolver(
             workspace_root=self.workspace_root,
             exclude_paths=self.workspace_config.exclude_paths,
-            include_paths=[],  # Scoped to protocol_dir directly
+            include_paths=[protocol_rel],
         )
         # Create staging so resolver.resolve() can find cross-directory includes
         try:

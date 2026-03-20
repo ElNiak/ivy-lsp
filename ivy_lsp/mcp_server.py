@@ -97,6 +97,9 @@ class ToolContext:
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
     include_resolver: Any = None
 
+    # Workspace context (loaded from .ivy-index/, shared with LSP)
+    workspace_context: Any = None
+
     # Known Ivy standard library modules
     stdlib_modules: frozenset[str] = frozenset(
         {
@@ -178,6 +181,7 @@ class ToolContext:
         # Wire up callables backed by the LSP server's live state
         ctx.find_ivy_files = _find_files
         ctx.include_resolver = resolver
+        ctx.workspace_context = getattr(server, "_workspace_context", None)
 
         async def _get_model():
             return server._semantic_model
@@ -932,6 +936,19 @@ def start_mcp(
     ctx.get_basename_cache = _get_basename_cache
     ctx.make_resolve_callback = _make_resolve_callback
     ctx.include_resolver = _resolver
+
+    # Load workspace context from .ivy-index/ if available
+    try:
+        from ivy_lsp.workspace_context import WorkspaceContext
+
+        ctx.workspace_context = WorkspaceContext.load(root)
+        if ctx.workspace_context.has_index():
+            logger.info(
+                "MCP loaded offline index for: %s",
+                ", ".join(ctx.workspace_context.list_protocols()),
+            )
+    except Exception:
+        logger.debug("WorkspaceContext loading failed in MCP", exc_info=True)
 
     mcp = create_mcp_app(ctx)
 

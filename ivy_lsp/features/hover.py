@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 # Map SymbolKind back to Ivy keyword for display.
 _KIND_TO_KEYWORD = {
     SymbolKind.Class: "type",
-    SymbolKind.Function: "action",
+    SymbolKind.Function: "function",
+    SymbolKind.Method: "action",
     SymbolKind.Module: "object",
     SymbolKind.Variable: "individual",
     SymbolKind.Property: "property",
@@ -27,6 +28,11 @@ _KIND_TO_KEYWORD = {
     SymbolKind.File: "include",
     SymbolKind.Field: "destructor",
     SymbolKind.EnumMember: "constructor",
+    SymbolKind.TypeParameter: "interpret",
+    SymbolKind.Interface: "schema",
+    SymbolKind.Event: "export",
+    SymbolKind.String: "native",
+    SymbolKind.Constant: "attribute",
 }
 
 # Detail prefixes that override the kind-based keyword.
@@ -51,6 +57,15 @@ _DETAIL_KEYWORDS = frozenset(
         "interpret",
     }
 )
+
+
+def _relative_path(filepath: str) -> str:
+    """Shorten an absolute path to a relative one from protocol-testing/ or ivy/include/."""
+    for marker in ("protocol-testing/", "ivy/include/"):
+        idx = filepath.find(marker)
+        if idx != -1:
+            return filepath[idx:]
+    return os.path.basename(filepath)
 
 
 def format_hover_content(symbol: Optional[IvySymbol]) -> Optional[str]:
@@ -80,8 +95,17 @@ def format_hover_content(symbol: Optional[IvySymbol]) -> Optional[str]:
     lines = [f"```ivy\n{sig}\n```"]
 
     if symbol.file_path:
-        basename = os.path.basename(symbol.file_path)
-        lines.append(f"\n*Defined in: {basename}*")
+        rel_path = _relative_path(symbol.file_path)
+        line_num = symbol.range[0] + 1 if symbol.range[0] > 0 else None
+        if line_num:
+            lines.append(f"\n*Defined in: {rel_path}:{line_num}*")
+        else:
+            lines.append(f"\n*Defined in: {rel_path}*")
+
+    # Show children count for container symbols (objects, modules)
+    if symbol.children:
+        n = len(symbol.children)
+        lines.append(f"*Members:* {n}")
 
     return "\n".join(lines)
 
@@ -122,7 +146,7 @@ def _enrich_with_semantic_model(
                 req = semantic_model.get_node(tag)
                 if req and isinstance(req, RfcRequirement):
                     extra_parts.append(
-                        f"\n**{req.rfc} {req.section}** ({req.level}): {req.text[:120]}"
+                        f"\n**{req.rfc} {req.section}** ({req.level}): {req.text}"
                     )
 
     # Enrich with sort/arity from SymbolNode
@@ -236,8 +260,8 @@ def _hover_from_semantic_model(
         sig = f"{keyword} {sn.qualified_name}{param_str}{ret_str}"
         parts.append(f"```ivy\n{sig}\n```")
         if sn.file:
-            basename = os.path.basename(sn.file)
-            parts.append(f"\n*Defined in: {basename}:{sn.line}*")
+            rel = _relative_path(sn.file)
+            parts.append(f"\n*Defined in: {rel}:{sn.line}*")
     elif type_matches:
         tn = type_matches[0]
         if tn.is_enum and tn.variants:
@@ -246,8 +270,8 @@ def _hover_from_semantic_model(
             sig = f"type {tn.qualified_name}"
         parts.append(f"```ivy\n{sig}\n```")
         if tn.file:
-            basename = os.path.basename(tn.file)
-            parts.append(f"\n*Defined in: {basename}:{tn.line}*")
+            rel = _relative_path(tn.file)
+            parts.append(f"\n*Defined in: {rel}:{tn.line}*")
 
     if not parts:
         return None
@@ -286,9 +310,9 @@ def _enrich_with_mirror_context(
     if not mirrors:
         return content
 
-    mirror_names = [os.path.basename(m).replace(".ivy", "") for m in mirrors[:5]]
-    if len(mirrors) > 5:
-        mirror_names.append(f"... +{len(mirrors) - 5} more")
+    mirror_names = [os.path.basename(m).replace(".ivy", "") for m in mirrors[:20]]
+    if len(mirrors) > 20:
+        mirror_names.append(f"... +{len(mirrors) - 20} more")
 
     content += f"\n\n*Endpoint mirrors:* {', '.join(mirror_names)}"
     return content

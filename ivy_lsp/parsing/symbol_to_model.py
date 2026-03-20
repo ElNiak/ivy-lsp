@@ -165,9 +165,9 @@ def _add_symbol_node(
         return 1
 
     # -- SymbolNode: Function-family ----------------------------------------
-    if sym.kind == SymbolKind.Function:
+    if sym.kind in (SymbolKind.Function, SymbolKind.Method):
         # Determine kind from detail string
-        kind = "action"  # default for Function
+        kind = "action" if sym.kind == SymbolKind.Method else "function"
         if detail:
             detail_lower = detail.lower().strip()
             for key, mapped_kind in _FUNCTION_DETAIL_MAP.items():

@@ -413,7 +413,8 @@ class WorkspaceIndexer:
                 )
 
             for sym in symbols:
-                self._symbol_table.add_symbol(sym)
+                if sym.detail != "include":
+                    self._symbol_table.add_symbol(sym)
 
             for inc_name in includes:
                 resolved = self._resolver.resolve(inc_name, filepath)
@@ -566,7 +567,8 @@ class WorkspaceIndexer:
 
             if symbols is not None:
                 for sym in symbols:
-                    self._symbol_table.add_symbol(sym)
+                    if sym.detail != "include":
+                        self._symbol_table.add_symbol(sym)
 
             if includes is not None:
                 for inc_name in includes:
@@ -1008,7 +1010,8 @@ class WorkspaceIndexer:
         self._cache.put(filepath, result, symbols, includes)
 
         for sym in symbols:
-            self._symbol_table.add_symbol(sym)
+            if sym.detail != "include":
+                self._symbol_table.add_symbol(sym)
 
         for inc_name in includes:
             resolved = self._resolver.resolve(inc_name, filepath)
@@ -1147,12 +1150,16 @@ class WorkspaceIndexer:
         """Look up a symbol by name across the entire workspace.
 
         Uses :meth:`SymbolTable.lookup_qualified` for dotted names,
-        :meth:`SymbolTable.lookup` otherwise.
+        :meth:`SymbolTable.lookup` otherwise.  Falls back to
+        :meth:`SymbolTable.lookup_unqualified` for plain names that
+        are only registered as children (e.g. nested object members).
         """
         if "." in name:
             symbols = self._symbol_table.lookup_qualified(name)
         else:
             symbols = self._symbol_table.lookup(name)
+            if not symbols:
+                symbols = self._symbol_table.lookup_unqualified(name)
         return [
             SymbolLocation(
                 symbol=sym,
@@ -1321,7 +1328,11 @@ class WorkspaceIndexer:
         # Build known_vars set from existing state vars + symbol table
         known_vars = self._requirement_graph.get_all_state_var_names()
         for sym in all_symbols:
-            if sym.kind in (SymbolKind.Variable, SymbolKind.Function):
+            if sym.kind in (
+                SymbolKind.Variable,
+                SymbolKind.Function,
+                SymbolKind.Method,
+            ):
                 known_vars.add(sym.name)
 
         # Populate StateVarNodes

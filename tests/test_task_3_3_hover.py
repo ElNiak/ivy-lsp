@@ -53,7 +53,7 @@ class TestFormatHoverContent:
         from ivy_lsp.features.hover import format_hover_content
 
         sym = self._sym(
-            "send", SymbolKind.Function, detail="(src:cid, dst:cid, pkt:pkt_num)"
+            "send", SymbolKind.Method, detail="(src:cid, dst:cid, pkt:pkt_num)"
         )
         result = format_hover_content(sym)
         assert "action send" in result

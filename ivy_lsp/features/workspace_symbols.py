@@ -34,6 +34,7 @@ _DEFINITION_KINDS = frozenset(
         lsp.SymbolKind.Class,
         lsp.SymbolKind.Module,
         lsp.SymbolKind.Function,
+        lsp.SymbolKind.Method,
         lsp.SymbolKind.Variable,
         lsp.SymbolKind.Namespace,
         lsp.SymbolKind.Property,

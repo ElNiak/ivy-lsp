@@ -23,19 +23,17 @@ class TestBareNumericRejection:
         anns = parse_file_rfc_annotations(source, "test.ivy")
         assert len(anns) == 0
 
-    def test_standalone_bare_numeric_comment_accepted(self):
-        """# [8] as a standalone comment IS a valid RFC annotation."""
+    def test_standalone_bare_numeric_comment_rejected(self):
+        """# [8] as a standalone bare numeric is rejected (field marker, not RFC)."""
         source = "# [8]"
         anns = parse_file_rfc_annotations(source, "test.ivy")
-        assert len(anns) == 1
-        assert anns[0].tags == ["8"]
+        assert len(anns) == 0
 
-    def test_standalone_bare_numeric_indented_accepted(self):
-        """# [8] (indented standalone) IS valid."""
+    def test_standalone_bare_numeric_indented_rejected(self):
+        """# [8] (indented standalone bare numeric) is rejected."""
         source = "    # [8]"
         anns = parse_file_rfc_annotations(source, "test.ivy")
-        assert len(anns) == 1
-        assert anns[0].tags == ["8"]
+        assert len(anns) == 0
 
     def test_qualified_tag_on_code_line_accepted(self):
         """rfc9000:4.1 is not a bare numeric — always accepted."""
@@ -66,13 +64,12 @@ class TestBareNumericRejection:
                 "payload : frame.arr # [1]",  # rejected: bare numeric on code
                 "# [rfc9000:4.1]",  # accepted: qualified
                 "require x; # [42]",  # rejected: bare numeric on code
-                "    # [7]",  # accepted: standalone comment
+                "    # [7]",  # rejected: standalone bare numeric
             ]
         )
         anns = parse_file_rfc_annotations(source, "test.ivy")
-        assert len(anns) == 2
+        assert len(anns) == 1
         assert anns[0].tags == ["rfc9000:4.1"]
-        assert anns[1].tags == ["7"]
 
 
 class TestIsTagCovered:

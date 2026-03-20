@@ -230,7 +230,7 @@ class TestHoverFormatting:
         """Action with params -> shows param signature."""
         sym = IvySymbol(
             name="send",
-            kind=lsp.SymbolKind.Function,
+            kind=lsp.SymbolKind.Method,
             range=(5, 0, 5, 20),
             detail="(src:cid, dst:cid)",
         )

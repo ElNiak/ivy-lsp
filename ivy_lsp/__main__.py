@@ -86,6 +86,23 @@ def main():
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
+    # Subcommand dispatch: index, detect — lightweight CLI commands that
+    # don't need log rotation, debug tracing, or SIGTERM handling.
+    if len(sys.argv) > 1 and sys.argv[1] == "index":
+        from ivy_lsp.index_builder import cli_index
+
+        sys.exit(cli_index(sys.argv[2:]))
+
+    if len(sys.argv) > 1 and sys.argv[1] == "detect":
+        import json
+
+        from ivy_lsp.workspace_context import WorkspaceContext
+
+        start = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+        print(json.dumps(WorkspaceContext.detect(start), indent=2))
+        sys.exit(0)
+
+    # --- Full server setup below (LSP/MCP modes only) ---
     log = logging.getLogger("ivy_lsp")
 
     # Add rotating file handler to prevent unbounded log growth

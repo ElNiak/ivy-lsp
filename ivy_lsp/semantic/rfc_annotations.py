@@ -103,8 +103,9 @@ def _is_rfc_annotation(line_text: str, tags: List[str]) -> bool:
     # Pure comment lines like "# [8]" have only whitespace/# before bracket
     stripped = before_bracket.lstrip()
     if stripped == "" or stripped == "#":
-        # Standalone comment — treat as RFC annotation
-        return True
+        # Standalone comment with all bare integers (no dots/colons)
+        # → reject as field marker, not RFC annotation
+        return False
     # Code exists before bracket — reject bare numerics as phantom tags
     return False
 

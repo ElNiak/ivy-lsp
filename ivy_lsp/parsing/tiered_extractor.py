@@ -358,7 +358,7 @@ class TieredExtractor:
             best_line = -1
             for sym in declaration_symbols:
                 if (
-                    sym.kind == SymbolKind.Function
+                    sym.kind in (SymbolKind.Function, SymbolKind.Method)
                     and sym.range[0] <= call_line
                     and sym.range[0] > best_line
                 ):
@@ -539,7 +539,7 @@ class TieredExtractor:
             best_line = -1
             for sym in symbols:
                 if (
-                    sym.kind == SymbolKind.Function
+                    sym.kind in (SymbolKind.Function, SymbolKind.Method)
                     and sym.range[0] <= line_idx
                     and sym.range[0] > best_line
                 ):

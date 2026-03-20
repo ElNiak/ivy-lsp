@@ -70,10 +70,15 @@ def _is_monitor_symbol(sym) -> bool:
 
 
 def _is_action_symbol(sym) -> bool:
-    """Return True if *sym* is an action/relation/function declaration (not a monitor)."""
+    """Return True if *sym* is an action/relation/function declaration (not a monitor).
+
+    Actions use SymbolKind.Method; pure functions/relations use
+    SymbolKind.Function.  Both are callable, so both are eligible for
+    call hierarchy.
+    """
     from lsprotocol.types import SymbolKind
 
-    if sym.kind != SymbolKind.Function:
+    if sym.kind not in (SymbolKind.Function, SymbolKind.Method):
         return False
     return not _is_monitor_symbol(sym)
 
@@ -179,7 +184,7 @@ def prepare_call_hierarchy(
     # Only actions and monitors make sense for call hierarchy.
     from lsprotocol.types import SymbolKind
 
-    if sym.kind not in (SymbolKind.Function,):
+    if sym.kind not in (SymbolKind.Function, SymbolKind.Method):
         return None
 
     uri = Path(sl.filepath).as_uri() if sl.filepath else ""

@@ -36,13 +36,13 @@ class TestFallbackScanSingleDeclarations:
         assert sym.children[0].kind == SymbolKind.Class
 
     def test_single_action(self):
-        """``action send(src:cid)`` produces a Function symbol."""
+        """``action send(src:cid)`` produces a Method symbol (stateful procedure)."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         symbols, _error_info = fallback_scan("action send(src:cid)", "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "send"
-        assert symbols[0].kind == SymbolKind.Function
+        assert symbols[0].kind == SymbolKind.Method
 
     def test_relation(self):
         """``relation r(X,Y)`` produces a Function symbol."""
@@ -101,24 +101,24 @@ class TestFallbackScanSingleDeclarations:
         assert symbols[0].kind == SymbolKind.Variable
 
     def test_before_mixin(self):
-        """``before foo.step { ... }`` produces a Function with dotted name."""
+        """``before foo.step { ... }`` produces a Method with dotted name."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "before foo.step {\n    require true;\n}\n"
         symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "foo.step"
-        assert symbols[0].kind == SymbolKind.Function
+        assert symbols[0].kind == SymbolKind.Method
 
     def test_after_mixin(self):
-        """``after foo.step { ... }`` produces a Function with dotted name."""
+        """``after foo.step { ... }`` produces a Method with dotted name."""
         from ivy_lsp.parsing.fallback_scanner import fallback_scan
 
         source = "after foo.step {\n    ensure true;\n}\n"
         symbols, _error_info = fallback_scan(source, "test.ivy")
         assert len(symbols) == 1
         assert symbols[0].name == "foo.step"
-        assert symbols[0].kind == SymbolKind.Function
+        assert symbols[0].kind == SymbolKind.Method
 
     def test_instance(self):
         """``instance idx : unbounded_sequence`` produces a Variable."""

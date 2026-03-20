@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _KEYWORD_TO_KIND = {
     "TYPE": SymbolKind.Class,
     "OBJECT": SymbolKind.Module,
-    "ACTION": SymbolKind.Function,
+    "ACTION": SymbolKind.Method,
     "RELATION": SymbolKind.Function,
     "MODULE": SymbolKind.Module,
     "ISOLATE": SymbolKind.Namespace,
@@ -38,15 +38,26 @@ _KEYWORD_TO_KIND = {
     "AXIOM": SymbolKind.Property,
     "CONJECTURE": SymbolKind.Property,
     "ALIAS": SymbolKind.Variable,
-    "BEFORE": SymbolKind.Function,
-    "AFTER": SymbolKind.Function,
+    "BEFORE": SymbolKind.Method,
+    "AFTER": SymbolKind.Method,
     "INSTANTIATE": SymbolKind.Variable,
     "FUNCTION": SymbolKind.Function,
-    "INDIVIDUAL": SymbolKind.Variable,
+    "INDIV": SymbolKind.Variable,
     "DEFINITION": SymbolKind.Function,
-    "INSTANCE": SymbolKind.Variable,
+    "VAR": SymbolKind.Variable,
+    "INVARIANT": SymbolKind.Property,
     "PARAMETER": SymbolKind.Variable,
-    "IMPLEMENT": SymbolKind.Function,
+    "IMPLEMENT": SymbolKind.Method,
+    "DERIVED": SymbolKind.Function,
+    "INTERPRET": SymbolKind.TypeParameter,
+    "SCHEMA": SymbolKind.Interface,
+    "THEOREM": SymbolKind.Property,
+    "EXPORT": SymbolKind.Event,
+    "IMPORT": SymbolKind.Event,
+    "DESTRUCTOR": SymbolKind.Field,
+    "CONSTRUCTOR": SymbolKind.EnumMember,
+    "AROUND": SymbolKind.Method,
+    "ATTRIBUTE": SymbolKind.Constant,
 }
 
 # Keywords that open a brace-delimited scope for child symbols.
@@ -56,7 +67,7 @@ _SCOPE_OPENERS = {"OBJECT", "MODULE"}
 _LABEL_KEYWORDS = {"PROPERTY", "AXIOM", "CONJECTURE"}
 
 # Keywords whose name is a dotted path (e.g. ``before foo.step``).
-_DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER"}
+_DOTTED_NAME_KEYWORDS = {"BEFORE", "AFTER", "IMPLEMENT", "AROUND"}
 
 
 # ---------------------------------------------------------------------------

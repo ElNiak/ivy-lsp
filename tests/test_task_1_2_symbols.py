@@ -1,5 +1,7 @@
 """Tests for Task 1.2: IvySymbol Dataclasses and Supporting Types (TDD)."""
 
+import logging
+
 from lsprotocol.types import SymbolKind
 
 
@@ -522,3 +524,128 @@ class TestIncludeGraph:
 
         assert graph.get_includes("a.ivy") == {"b.ivy"}
         assert graph.get_included_by("b.ivy") == {"a.ivy"}
+
+
+class TestLookupUnqualified:
+    """Verify SymbolTable.lookup_unqualified finds nested children."""
+
+    def test_finds_nested_child(self):
+        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+
+        child = IvySymbol(
+            name="zero",
+            kind=SymbolKind.Variable,
+            range=(3, 4, 3, 20),
+        )
+        parent = IvySymbol(
+            name="bit",
+            kind=SymbolKind.Module,
+            range=(2, 0, 6, 1),
+            children=[child],
+        )
+        table = SymbolTable()
+        table.add_symbol(parent)
+
+        # 'zero' is not a top-level name, only a child
+        assert table.lookup("zero") == []
+        result = table.lookup_unqualified("zero")
+        assert len(result) == 1
+        assert result[0].name == "zero"
+
+    def test_prefers_direct_lookup(self):
+        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+
+        sym = IvySymbol(
+            name="cid",
+            kind=SymbolKind.Class,
+            range=(2, 0, 2, 8),
+        )
+        table = SymbolTable()
+        table.add_symbol(sym)
+
+        # Direct lookup succeeds, so lookup_unqualified returns same
+        result = table.lookup_unqualified("cid")
+        assert len(result) == 1
+        assert result[0] is sym
+
+    def test_finds_deeply_nested(self):
+        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+
+        deep = IvySymbol(
+            name="largest_acked",
+            kind=SymbolKind.Variable,
+            range=(15, 8, 15, 30),
+        )
+        ack = IvySymbol(
+            name="ack",
+            kind=SymbolKind.Module,
+            range=(10, 4, 18, 5),
+            children=[deep],
+        )
+        frame = IvySymbol(
+            name="frame",
+            kind=SymbolKind.Module,
+            range=(5, 0, 25, 1),
+            children=[ack],
+        )
+        table = SymbolTable()
+        table.add_symbol(frame)
+
+        result = table.lookup_unqualified("largest_acked")
+        assert len(result) == 1
+        assert result[0].name == "largest_acked"
+
+    def test_no_match_returns_empty(self):
+        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+
+        sym = IvySymbol(
+            name="frame",
+            kind=SymbolKind.Module,
+            range=(5, 0, 25, 1),
+        )
+        table = SymbolTable()
+        table.add_symbol(sym)
+
+        assert table.lookup_unqualified("nonexistent") == []
+
+
+class TestCatchAllLogging:
+    """Verify the catch-all branch logs unknown decl types."""
+
+    def test_unknown_decl_type_logged(self):
+        from ivy_lsp.parsing.ast_to_symbols import _convert_decl
+
+        class FakeDecl:
+            """A declaration type with no converter."""
+
+            pass
+
+        target_logger = logging.getLogger("ivy_lsp.parsing.ast_to_symbols")
+        with CaptureHandler(target_logger) as handler:
+            result = _convert_decl(FakeDecl(), "test.ivy", "")
+            assert result == []
+            assert any(
+                "No converter for FakeDecl" in r.message for r in handler.records
+            )
+
+
+class CaptureHandler(logging.Handler):
+    """Minimal log handler that captures records for assertions."""
+
+    def __init__(self, target_logger):
+        super().__init__(level=logging.DEBUG)
+        self._logger = target_logger
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+    def __enter__(self):  # noqa: D105
+        self._logger.addHandler(self)
+        self._old_level = self._logger.level
+        self._logger.setLevel(logging.DEBUG)
+        return self
+
+    def __exit__(self, *args):  # noqa: D105
+        self._logger.removeHandler(self)
+        self._logger.setLevel(self._old_level)

@@ -135,7 +135,7 @@ action next(e:cid) returns (r:cid) = {
         symbols = _full_pipeline(source)
         sym = _find_symbol(symbols, "next")
         assert sym is not None, "Expected symbol 'next'"
-        assert sym.kind == SymbolKind.Function
+        assert sym.kind == SymbolKind.Method
         assert sym.detail is not None, "Action should have param detail"
         assert "e" in sym.detail
 

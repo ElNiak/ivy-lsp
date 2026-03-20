@@ -111,7 +111,7 @@ def worker_parse_file(
     return WorkerResult(
         filepath=filepath,
         success=False,
-        symbols=[s.to_dict() for s in symbols],
+        symbols=[s.to_dict() for s in symbols if s.detail != "include"],
         errors=[],
     )
 

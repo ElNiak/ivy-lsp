@@ -133,9 +133,9 @@ object bit = {
 
 
 class TestActionDecl:
-    """Action declarations produce SymbolKind.Function with detail."""
+    """Action declarations produce SymbolKind.Method (stateful procedures)."""
 
-    def test_action_is_function(self):
+    def test_action_is_method(self):
         source = """\
 #lang ivy1.7
 
@@ -148,7 +148,7 @@ action send(src:cid, dst:cid) returns (result:cid) = {
         symbols = _parse_and_convert(source)
         sym = _find_symbol(symbols, "send")
         assert sym is not None
-        assert sym.kind == SymbolKind.Function
+        assert sym.kind == SymbolKind.Method
 
     def test_action_detail_contains_params(self):
         source = """\
@@ -204,6 +204,31 @@ relation connected(X:cid, Y:cid)
         sym = _find_symbol(symbols, "connected")
         assert sym is not None
         assert sym.kind == SymbolKind.Function
+
+
+# ---------------------------------------------------------------------------
+# Test: Function keyword (pure function, not action)
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionKeyword:
+    """function keyword produces pure Function, distinct from action Method."""
+
+    def test_function_is_function_not_method(self):
+        source = """\
+#lang ivy1.7
+
+type t
+function f(X:t) : t
+"""
+        symbols = _parse_and_convert(source)
+        # function keyword parses as ConstantDecl or DerivedDecl, not ActionDecl
+        # It should be Variable (ConstantDecl) or Function (if has args), NOT Method
+        sym = _find_symbol(symbols, "f")
+        assert sym is not None
+        assert (
+            sym.kind != SymbolKind.Method
+        ), f"Pure function should NOT be Method (that's for actions), got {sym.kind}"
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +524,7 @@ class TestRobustness:
         for sym in symbols:
             assert isinstance(sym, IvySymbol)
 
-    def test_mixin_declarations_skipped(self):
+    def test_mixin_declarations_produce_method(self):
         source = """\
 #lang ivy1.7
 
@@ -514,12 +539,15 @@ before foo.step {
 }
 """
         symbols = _parse_and_convert(source)
-        # Mixins should not produce symbols
-        # The before/after decls should be skipped
         sym_names = [s.name for s in symbols]
-        # Should have 't' and 'foo' but not a mixin symbol
+        # Should have 't', 'foo', and the mixin target 'foo.step'
         assert "t" in sym_names
         assert "foo" in sym_names
+        # Mixin should produce a Method symbol for the mixee (action monitor)
+        mixin_sym = _find_symbol(symbols, "step", SymbolKind.Method)
+        assert (
+            mixin_sym is not None
+        ), f"Expected mixin Method symbol, got: {[(s.name, s.kind) for s in symbols]}"
 
 
 # ---------------------------------------------------------------------------
@@ -603,3 +631,121 @@ class TestQuicTypesIntegration:
                 check_file_path(sym.children, path_str)
 
         check_file_path(symbols, str(quic_types_path))
+
+
+# ---------------------------------------------------------------------------
+# Test: Export declaration name without prefix
+# ---------------------------------------------------------------------------
+
+
+class TestExportDecl:
+    """Export declarations produce SymbolKind.Event with clean name."""
+
+    def test_export_name_without_prefix(self):
+        source = """\
+#lang ivy1.7
+
+type t
+
+action send(x:t)
+
+export send
+"""
+        symbols = _parse_and_convert(source)
+        export_syms = [s for s in symbols if s.kind == SymbolKind.Event]
+        assert (
+            len(export_syms) >= 1
+        ), f"Expected at least 1 Event symbol, got: {[(s.name, s.kind) for s in symbols]}"
+        # Name should be 'send', not 'export send'
+        assert (
+            export_syms[0].name == "send"
+        ), f"Expected name='send', got name='{export_syms[0].name}'"
+        # Detail should carry the export prefix
+        assert export_syms[0].detail is not None
+        assert "export" in export_syms[0].detail
+
+
+# ---------------------------------------------------------------------------
+# Test: Alias has correct range (not matching comment)
+# ---------------------------------------------------------------------------
+
+
+class TestAliasRange:
+    """Alias declarations should point to the actual declaration line."""
+
+    def test_alias_has_correct_range(self):
+        source = """\
+#lang ivy1.7
+
+type cid
+# alias aid mentioned in a comment
+alias aid = cid
+"""
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "aid")
+        assert sym is not None
+        # 'alias aid = cid' is on line 5 (1-based), so line_idx=4 (0-based)
+        assert (
+            sym.range[0] == 4
+        ), f"Expected alias on line 4 (0-based), got {sym.range[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Test: Module has non-zero range
+# ---------------------------------------------------------------------------
+
+
+class TestModuleRange:
+    """Module declarations should have non-zero ranges."""
+
+    def test_module_has_nonzero_range(self):
+        source = """\
+#lang ivy1.7
+
+module counter(t) = {
+    individual val : t
+}
+"""
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "counter")
+        assert sym is not None
+        # Should not be all zeros
+        assert sym.range != (
+            0,
+            0,
+            0,
+            0,
+        ), f"Expected non-zero range for module, got {sym.range}"
+
+
+# ---------------------------------------------------------------------------
+# Test: Attribute declaration
+# ---------------------------------------------------------------------------
+
+
+class TestAttributeDecl:
+    """Attribute declarations produce SymbolKind.Constant."""
+
+    def test_attribute_produces_constant_symbol(self):
+        source = "#lang ivy1.7\n\nattribute radix = 16\n"
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
+        assert (
+            sym is not None
+        ), f"Expected Constant symbol 'radix', got: {[(s.name, s.kind) for s in symbols]}"
+        assert sym.kind == SymbolKind.Constant
+
+    def test_attribute_detail_contains_value(self):
+        source = "#lang ivy1.7\n\nattribute radix = 16\n"
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
+        assert sym is not None
+        assert sym.detail is not None
+        assert "attribute radix = 16" in sym.detail
+
+    def test_attribute_file_path(self):
+        source = "#lang ivy1.7\n\nattribute radix = 16\n"
+        symbols = _parse_and_convert(source, "my_file.ivy")
+        sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
+        assert sym is not None
+        assert sym.file_path == "my_file.ivy"
