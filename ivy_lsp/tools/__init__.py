@@ -198,6 +198,7 @@ def _timeout_response(tool_name: str, timeout: float) -> dict:
 # Markdown formatting layer
 # ---------------------------------------------------------------------------
 
+from ivy_lsp.sidecar_client import get_sidecar_client, set_sidecar_client
 from ivy_lsp.tools.formatters import format_error, format_tool_result
 
 
@@ -299,6 +300,22 @@ def safe_tool(fn):
 
     @functools.wraps(fn)
     async def _wrapper(*args, **kwargs):
+        # --- Sidecar delegation (lazy bridge) ---
+        # Check BEFORE semaphore/timeout — sidecar handles its own concurrency
+        _client = get_sidecar_client()
+        if _client is not None:
+            try:
+                result = await _client.call_tool(fn.__name__, kwargs)
+                return result  # verbatim from sidecar, no local formatting
+            except Exception:
+                logger.warning(
+                    "[DOWNGRADED] Sidecar call to %s failed, using local",
+                    fn.__name__,
+                )
+                set_sidecar_client(None)
+                # Fall through to local handling
+
+        # --- Original local handling below (unchanged) ---
         from ivy_lsp.config import get_config
         from ivy_lsp.session_observability import get_session_logger
 
@@ -442,6 +459,8 @@ def safe_tool(fn):
         "_format_result": _format_result,
         "_truncate_if_needed": _truncate_if_needed,
         "_summarize_for_log": _summarize_for_log,
+        "get_sidecar_client": get_sidecar_client,
+        "set_sidecar_client": set_sidecar_client,
     }
     patched_globals = {**fn.__globals__, **_injected_names}
 
