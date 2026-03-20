@@ -71,6 +71,42 @@ def _remove_port_file(root: str) -> None:
         logger.debug("Failed to remove MCP port file: %s", exc)
 
 
+def _health_middleware_factory(ctx: Any, start_time: float) -> Any:
+    """Create an ASGI middleware that handles /health requests.
+
+    Returns an async callable(scope, receive, send) that responds to
+    ``GET /health`` with JSON containing status, uptime, tool count,
+    model status, and workspace_root.
+    """
+
+    async def _health_handler(scope: dict, receive: Any, send: Any) -> None:
+        model_status = "unknown"
+        if ctx is not None and hasattr(ctx, "get_model_status"):
+            try:
+                model_status = ctx.get_model_status().get("state", "unknown")
+            except Exception:
+                model_status = "error"
+        body = _json.dumps(
+            {
+                "status": "ok",
+                "uptime_seconds": round(_time.monotonic() - start_time, 1),
+                "tools_registered": 13,
+                "model_status": model_status,
+                "workspace_root": getattr(ctx, "root", ""),
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [[b"content-type", b"application/json"]],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    return _health_handler
+
+
 def start_mcp_http_thread(
     lsp_server: Any,
     port: int = 0,
@@ -163,32 +199,12 @@ async def _serve_mcp_http(
 
     # Wrap the ASGI app with a health-check middleware
     sidecar_start_time = _time.monotonic()
+    _health_handler = _health_middleware_factory(ctx, start_time=sidecar_start_time)
 
     async def _health_middleware(scope: dict, receive: Any, send: Any) -> None:
         """ASGI middleware that intercepts /health requests."""
         if scope["type"] == "http" and scope["path"] == "/health":
-            model_status = "unknown"
-            if ctx is not None and hasattr(ctx, "get_model_status"):
-                try:
-                    model_status = ctx.get_model_status().get("state", "unknown")
-                except Exception:
-                    model_status = "error"
-            body = _json.dumps(
-                {
-                    "status": "ok",
-                    "uptime_seconds": round(_time.monotonic() - sidecar_start_time, 1),
-                    "tools_registered": 13,
-                    "model_status": model_status,
-                }
-            ).encode()
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [[b"content-type", b"application/json"]],
-                }
-            )
-            await send({"type": "http.response.body", "body": body})
+            await _health_handler(scope, receive, send)
             return
         await asgi_app(scope, receive, send)
 
