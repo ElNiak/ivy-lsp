@@ -62,27 +62,65 @@ class BulkOrchestrationMixin:
             logger.warning("Failed to send ivy/modelReady notification", exc_info=True)
 
     def _write_shared_cache(self) -> None:
-        """Persist SemanticModel + RequirementGraph to shared disk cache.
+        """Persist SemanticModel to .ivy-index/ per-protocol directories.
 
         Called after bulk T1+T2 analysis completes so the MCP process can
-        reuse the built model instead of rebuilding from scratch.
-        """
-        try:
-            from ivy_lsp.indexer.shared_cache import (
-                compute_freshness_key,
-                write_model_cache,
-            )
+        load the model from .ivy-index/ instead of rebuilding from scratch.
 
+        Uses fcntl file locking to avoid races with concurrent indexing.
+        """
+        import fcntl
+        import glob as glob_mod
+        import gzip
+        import pickle
+
+        try:
             indexer = self._indexer
-            if indexer is None:
+            if indexer is None or self._semantic_model is None:
                 return
             root = indexer._workspace_root
-            ivy_files = indexer.get_all_ivy_file_paths()
-            freshness = compute_freshness_key(root, ivy_files)
-            graph = indexer.requirement_graph
-            write_model_cache(root, self._semantic_model, graph, freshness)
+
+            # Find all .ivy-index/ directories under protocol-testing/*/
+            pattern = os.path.join(root, "protocol-testing", "*", ".ivy-index")
+            index_dirs = [d for d in glob_mod.glob(pattern) if os.path.isdir(d)]
+
+            # Also include workspace-level .ivy-index/ if it exists
+            ws_index = os.path.join(root, ".ivy-index")
+            if os.path.isdir(ws_index):
+                index_dirs.append(ws_index)
+
+            if not index_dirs:
+                logger.debug("No .ivy-index/ directories found, skipping write")
+                return
+
+            for index_dir in index_dirs:
+                lock_path = os.path.join(index_dir, ".build.lock")
+                try:
+                    lock_fd = open(lock_path, "w")
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        out_path = os.path.join(index_dir, "semantic_model.pickle.gz")
+                        with gzip.open(out_path, "wb") as f:
+                            pickle.dump(
+                                self._semantic_model,
+                                f,
+                                protocol=pickle.HIGHEST_PROTOCOL,
+                            )
+                        logger.info("Wrote model to %s", out_path)
+                    except BlockingIOError:
+                        logger.debug(
+                            "Index lock held for %s, skipping write", index_dir
+                        )
+                    finally:
+                        try:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                        except Exception:
+                            pass
+                        lock_fd.close()
+                except OSError:
+                    logger.debug("Cannot write to %s", index_dir, exc_info=True)
         except Exception:
-            logger.debug("Shared cache write skipped", exc_info=True)
+            logger.debug("Model write to .ivy-index/ skipped", exc_info=True)
 
     def _send_server_ready_notification(self, init_start: float) -> None:
         """Send ``ivy/serverReady`` notification after initialization completes."""

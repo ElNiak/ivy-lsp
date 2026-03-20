@@ -559,50 +559,84 @@ def start_mcp(
             }
         return {"state": "not_built"}
 
+    def _write_model_to_index(model):
+        """Write a SemanticModel to .ivy-index/ per-protocol directories.
+
+        Uses fcntl file locking (same pattern as IndexBuilder._write_pickle()).
+        Creates output files alongside existing index artifacts so subsequent
+        MCP startups can load them via Strategy 1.
+        """
+        try:
+            import fcntl
+            import gzip
+            import pickle
+
+            if ctx.workspace_context is None:
+                return
+
+            # Write to each protocol's .ivy-index/ directory
+            for proto, idx in ctx.workspace_context.protocol_indexes.items():
+                index_dir = idx.index_dir
+                if not index_dir or not os.path.isdir(index_dir):
+                    continue
+                lock_path = os.path.join(index_dir, ".build.lock")
+                try:
+                    lock_fd = open(lock_path, "w")
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        out_path = os.path.join(index_dir, "semantic_model.pickle.gz")
+                        with gzip.open(out_path, "wb") as f:
+                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
+                        logger.info("Wrote model to %s", out_path)
+                    except BlockingIOError:
+                        logger.debug("Index lock held for %s, skipping write", proto)
+                    finally:
+                        try:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                        except Exception:
+                            pass
+                        lock_fd.close()
+                except OSError:
+                    logger.debug("Cannot write to %s index dir", proto, exc_info=True)
+
+            # Also try workspace-level .ivy-index/ if it exists
+            ws_index = os.path.join(root, ".ivy-index")
+            if os.path.isdir(ws_index):
+                lock_path = os.path.join(ws_index, ".build.lock")
+                try:
+                    lock_fd = open(lock_path, "w")
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        out_path = os.path.join(ws_index, "semantic_model.pickle.gz")
+                        with gzip.open(out_path, "wb") as f:
+                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
+                        logger.info("Wrote model to %s", out_path)
+                    except BlockingIOError:
+                        pass
+                    finally:
+                        try:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                        except Exception:
+                            pass
+                        lock_fd.close()
+                except OSError:
+                    pass
+        except Exception:
+            logger.debug("Failed to write model to .ivy-index/", exc_info=True)
+
     def _build_model():
         """Build a lightweight semantic model from workspace files.
 
-        Tries three strategies in order:
-        1. Shared disk cache (written by LSP or previous MCP run)
-        2. Offline index merge (per-protocol models from .ivy-index/)
-        3. Full rebuild via TieredExtractor
+        Tries two strategies in order:
+        1. Offline index merge (per-protocol models from .ivy-index/)
+        2. Full rebuild via TieredExtractor
 
-        Returns the model on success, or ``None`` when a required
-        dependency is missing (logged at WARNING).  The caller
-        (``_get_model``) is responsible for caching the result and
-        assigning the ``semantic_model`` nonlocal under the lock.
+        After a successful build, writes the model back to .ivy-index/
+        per-protocol directories so subsequent startups are instant.
         """
         nonlocal _req_graph
 
-        # Shared cache imports — used by cache read, offline merge write,
-        # and full rebuild write paths.
-        try:
-            from ivy_lsp.indexer.shared_cache import (
-                compute_freshness_key,
-                read_model_cache,
-                write_model_cache,
-            )
-
-            _has_cache_module = True
-        except ImportError:
-            _has_cache_module = False
-
-        # --- Strategy 1: Shared disk cache ---
-        if _has_cache_module:
-            try:
-                ivy_files = _find_ivy_files_cached(root)
-                freshness = compute_freshness_key(root, ivy_files)
-                cached_model, cached_graph = read_model_cache(root, freshness)
-                if cached_model is not None:
-                    logger.info("Loaded semantic model from shared cache")
-                    if cached_graph is not None and _req_graph is None:
-                        _req_graph = cached_graph
-                        logger.info("Loaded requirement graph from shared cache")
-                    return cached_model
-            except Exception:
-                logger.debug("Shared cache lookup failed", exc_info=True)
-
-        # --- Strategy 2: Merge per-protocol models from offline index ---
+        # --- Strategy 1: Merge per-protocol models from offline index ---
         try:
             if ctx.workspace_context is not None and ctx.workspace_context.has_index():
                 from ivy_lsp.semantic.model import SemanticModel
@@ -628,16 +662,6 @@ def start_mcp(
                         ", ".join(used_protos),
                         ", ".join(skipped_protos) or "none",
                     )
-                    # Write merged model to shared cache for next startup
-                    if _has_cache_module:
-                        try:
-                            ivy_files = _find_ivy_files_cached(root)
-                            freshness = compute_freshness_key(root, ivy_files)
-                            write_model_cache(root, merged, _req_graph, freshness)
-                        except Exception:
-                            logger.debug(
-                                "Failed to write merged model cache", exc_info=True
-                            )
                     return merged
                 elif skipped_protos:
                     logger.info(
@@ -651,7 +675,7 @@ def start_mcp(
                 exc_info=True,
             )
 
-        # --- Strategy 3: Full rebuild from scratch ---
+        # --- Strategy 2: Full rebuild from scratch ---
         from ivy_lsp.semantic.model_builder import build_semantic_model
 
         model = build_semantic_model(
@@ -663,16 +687,9 @@ def start_mcp(
             stdlib_modules=discovered_stdlib,
         )
 
-        # Write to shared cache so subsequent MCP startups can skip rebuild
-        if model is not None and _has_cache_module:
-            try:
-                ivy_files = _find_ivy_files_cached(root)
-                freshness = compute_freshness_key(root, ivy_files)
-                written = write_model_cache(root, model, _req_graph, freshness)
-                if written:
-                    logger.info("Wrote semantic model to shared cache")
-            except Exception:
-                logger.debug("Failed to write model cache", exc_info=True)
+        # Write rebuilt model to .ivy-index/ so next startup uses Strategy 1
+        if model is not None:
+            _write_model_to_index(model)
 
         return model
 
@@ -801,25 +818,21 @@ def start_mcp(
     def _build_requirement_graph():
         """Build a RequirementGraph from workspace .ivy files.
 
-        Tries the shared disk cache first (written by the LSP process).
-        Falls back to a full build using the light-mode extractor.
+        Tries the offline index first (per-protocol requirement graphs
+        from .ivy-index/), then falls back to a full build using the
+        light-mode extractor.
         """
-        # Try shared cache before doing the expensive build
+        # Try offline index before doing the expensive build
         try:
-            from ivy_lsp.indexer.shared_cache import (
-                compute_freshness_key,
-                read_model_cache,
-            )
-
-            ivy_files = _find_ivy_files_cached(root)
-            freshness = compute_freshness_key(root, ivy_files)
-            _cached_model, cached_graph = read_model_cache(root, freshness)
-            if cached_graph is not None:
-                logger.info("Loaded requirement graph from shared cache")
-                return cached_graph
+            if ctx.workspace_context is not None and ctx.workspace_context.has_index():
+                for _proto, idx in ctx.workspace_context.protocol_indexes.items():
+                    if idx.requirement_graph is not None:
+                        logger.info("Loaded requirement graph from offline index")
+                        return idx.requirement_graph
         except Exception:
             logger.debug(
-                "Shared cache lookup failed for requirement graph", exc_info=True
+                "Offline index lookup failed for requirement graph",
+                exc_info=True,
             )
 
         try:
