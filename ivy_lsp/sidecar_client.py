@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # --- Global sidecar client state ---
 _sidecar_client: Any | None = None
+_sidecar_port: int | None = None  # Discovered port (set by monitor thread)
 
 
 def get_sidecar_client() -> Any | None:
@@ -36,6 +37,17 @@ def set_sidecar_client(client: Any | None) -> None:
     """Swap the sidecar client reference (atomic under CPython GIL)."""
     global _sidecar_client
     _sidecar_client = client
+
+
+def get_sidecar_port() -> int | None:
+    """Read the discovered sidecar port. Set by the monitor thread."""
+    return _sidecar_port
+
+
+def set_sidecar_port(port: int | None) -> None:
+    """Store the discovered sidecar port (monitor thread writes, safe_tool reads)."""
+    global _sidecar_port
+    _sidecar_port = port
 
 
 def workspace_hash(root: str) -> str:

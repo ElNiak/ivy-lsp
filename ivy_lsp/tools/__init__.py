@@ -43,6 +43,7 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "ivy_verification_dashboard": 30.0,
     "ivy_health_check": 10.0,
     "ivy_index": 300.0,
+    "ivy_workspace": 10.0,
 }
 
 _DEFAULT_TIMEOUT: float = 60.0
@@ -98,6 +99,7 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
     },
     "ivy_health_check": {"cost": "low", "category": "analysis", "needs_model": False},
     "ivy_index": {"cost": "high", "category": "analysis", "needs_model": False},
+    "ivy_workspace": {"cost": "low", "category": "workspace", "needs_model": False},
 }
 
 
@@ -301,8 +303,26 @@ def safe_tool(fn):
     @functools.wraps(fn)
     async def _wrapper(*args, **kwargs):
         # --- Sidecar delegation (lazy bridge) ---
-        # Check BEFORE semaphore/timeout — sidecar handles its own concurrency
+        # Check BEFORE semaphore/timeout — sidecar handles its own concurrency.
+        #
+        # Connection is established here (in the MCP server's event loop),
+        # NOT in the monitor thread.  The monitor only discovers the port;
+        # we connect lazily on first tool call so the ClientSession is bound
+        # to the correct asyncio event loop.
         _client = get_sidecar_client()
+        if _client is None:
+            from ivy_lsp.sidecar_client import connect_to_sidecar, get_sidecar_port
+
+            _port = get_sidecar_port()
+            if _port is not None:
+                _client = await connect_to_sidecar(_port)
+                if _client is not None:
+                    set_sidecar_client(_client)
+                    logger.info(
+                        "[UPGRADED] Connected to sidecar on port %d from MCP event loop",
+                        _port,
+                    )
+
         if _client is not None:
             try:
                 result = await _client.call_tool(fn.__name__, kwargs)
@@ -481,6 +501,7 @@ from ivy_lsp.tools.quality import register_quality_tools
 from ivy_lsp.tools.traceability import register_traceability_tools
 from ivy_lsp.tools.verification import register_verification_tools
 from ivy_lsp.tools.visualization import register_visualization_tools
+from ivy_lsp.tools.workspace import register_workspace_tools
 
 if TYPE_CHECKING:
     from ivy_lsp.mcp_server import ToolContext
@@ -494,6 +515,7 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_visualization_tools(mcp, ctx)
     register_pattern_tools(mcp, ctx)
     register_quality_tools(mcp, ctx)
+    register_workspace_tools(mcp, ctx)
 
 
 __all__ = [
@@ -502,5 +524,6 @@ __all__ = [
     "get_tool_metadata",
     "get_tool_metrics",
     "register_all_tools",
+    "register_workspace_tools",
     "safe_tool",
 ]

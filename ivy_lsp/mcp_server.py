@@ -98,6 +98,10 @@ class ToolContext:
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
     include_resolver: Any = None
 
+    # Active workspace management
+    active_workspace: Any = None  # Optional[ActiveWorkspace]
+    workspace_groups: dict = field(default_factory=dict)  # From .ivyworkspace
+
     # Workspace context (loaded from .ivy-index/, shared with LSP)
     workspace_context: Any = None
 
@@ -314,11 +318,15 @@ async def _sidecar_monitor(
             logger.debug("[SIDECAR-MONITOR] Workspace mismatch, skipping")
             continue
 
-        client = await sidecar_client.connect_to_sidecar(port)
-        if client is not None:
-            sidecar_client.set_sidecar_client(client)
-            logger.info("[UPGRADED] Delegating tools to LSP sidecar on port %d", port)
-            poll = 30.0
+        # Only store the port — actual connection happens in safe_tool's
+        # event loop to avoid cross-event-loop ClientSession issues.
+        sidecar_client.set_sidecar_port(port)
+        logger.info(
+            "[SIDECAR-DISCOVERED] Sidecar validated on port %d "
+            "(connection deferred to first tool call)",
+            port,
+        )
+        poll = 30.0
 
 
 _MCP_INSTRUCTIONS = (
@@ -1110,6 +1118,10 @@ def start_mcp(
     ctx.get_basename_cache = _get_basename_cache
     ctx.make_resolve_callback = _make_resolve_callback
     ctx.include_resolver = _resolver
+
+    # Populate workspace_groups from ws_config (if available)
+    if ws_config is not None and hasattr(ws_config, "workspace_groups"):
+        ctx.workspace_groups = ws_config.workspace_groups or {}
 
     # Load workspace context from .ivy-index/ if available
     try:
