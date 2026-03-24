@@ -218,8 +218,10 @@ class IncludeResolver:
     def resolve(self, include_name: str, from_file: str) -> Optional[str]:
         """Resolve an include name to an absolute file path.
 
-        Thread-safe: acquires ``_staging_lock`` to prevent concurrent reads
-        during a staging rebuild triggered by :meth:`set_active_workspace`.
+        Thread-safe: snapshots staging state under a brief lock so that
+        concurrent :meth:`set_active_workspace` calls can proceed without
+        starving.  The actual resolution uses the snapshot and does not
+        hold the lock.
 
         Args:
             include_name: The bare name from ``include X`` (without .ivy).
@@ -228,130 +230,141 @@ class IncludeResolver:
         Returns:
             Absolute path to the resolved .ivy file, or None if not found.
         """
+        # Snapshot mutable staging state under brief lock (microseconds).
+        # This prevents starvation: the deep-indexer thread calls resolve()
+        # in tight loops, but each call only holds the lock for the copy.
         with self._staging_lock:
-            fname = include_name + ".ivy"
-            from_file_real = os.path.realpath(from_file)
+            _staging_dir = self._staging_dir
+            _partition_staging = dict(self._partition_staging)
+            _file_to_partition = dict(self._file_to_partition)
+            _file_to_layer = dict(self._file_to_layer)
+            _collision_map = self._collision_map
+            _layer_by_id = getattr(self, "_layer_by_id", {})
 
-            # 1. Same directory as the including file
-            from_dir = os.path.dirname(from_file_real)
-            candidate = os.path.join(from_dir, fname)
-            if os.path.isfile(candidate):
-                return os.path.realpath(candidate)
+        # --- Resolution uses snapshots only, no lock held ---
+        fname = include_name + ".ivy"
+        from_file_real = os.path.realpath(from_file)
 
-            # 2. Layer-aware staging (when active, replaces flat staging for
-            #    colliding basenames)
-            if self._partition_staging and self._file_to_partition:
-                abs_from = from_file_real
-                layer_id = self._file_to_partition.get(abs_from)
-                if layer_id and layer_id in self._partition_staging:
-                    candidate = os.path.join(self._partition_staging[layer_id], fname)
-                    if os.path.isfile(candidate):
-                        return os.path.realpath(candidate)
-                    # Layer found but file not in layer staging dir
-                    logger.warning(
-                        "Layer staging miss: '%s' not found in layer '%s' dir %s (from %s)",
-                        fname,
-                        layer_id,
-                        self._partition_staging[layer_id],
-                        os.path.relpath(from_file, self._workspace_root),
-                    )
-                    # Cross-layer dependency fallback: try dependency layers
-                    layer_obj = self._layer_by_id.get(layer_id)
-                    if layer_obj and layer_obj.depends_on:
-                        for dep_id in layer_obj.depends_on:
-                            dep_staging = self._partition_staging.get(dep_id)
-                            if dep_staging:
-                                candidate = os.path.join(dep_staging, fname)
-                                if os.path.isfile(candidate):
-                                    return os.path.realpath(candidate)
+        # 1. Same directory as the including file
+        from_dir = os.path.dirname(from_file_real)
+        candidate = os.path.join(from_dir, fname)
+        if os.path.isfile(candidate):
+            return os.path.realpath(candidate)
 
-                    # Broader priority-ordered layer fallback with proximity scoring
-                    cross_candidates = []
-                    for lid in self._partition_staging:
-                        if lid == layer_id:
-                            continue
-                        cand = os.path.join(self._partition_staging[lid], fname)
-                        if os.path.isfile(cand):
-                            cross_candidates.append((lid, cand))
-
-                    if cross_candidates:
-                        if len(cross_candidates) == 1:
-                            _lid, _cand = cross_candidates[0]
-                            logger.debug(
-                                "Cross-layer resolve: '%s' found in layer '%s' (from layer '%s')",
-                                include_name,
-                                _lid,
-                                layer_id,
-                            )
-                            return os.path.realpath(_cand)
-
-                        # Multiple candidates: score by path proximity to from_file
-                        def _proximity(item):
-                            _item_lid, _item_cand = item
-                            real = os.path.realpath(_item_cand)
-                            common = os.path.commonpath([from_file_real, real])
-                            return len(common)
-
-                        best_lid, best_cand = max(cross_candidates, key=_proximity)
-                        logger.debug(
-                            "Cross-layer resolve (proximity): '%s' -> layer '%s' "
-                            "(from layer '%s', %d candidates)",
-                            include_name,
-                            best_lid,
-                            layer_id,
-                            len(cross_candidates),
-                        )
-                        return os.path.realpath(best_cand)
-
-                elif not layer_id and self._file_to_layer:
-                    # File should be in a layer but isn't in _file_to_partition
-                    # Log WARNING on first occurrence per file, then DEBUG
-                    _rel = os.path.relpath(from_file, self._workspace_root)
-                    if _rel not in self._warned_routing_miss:
-                        self._warned_routing_miss.add(_rel)
-                        logger.warning(
-                            "Layer routing miss: %s not in _file_to_partition (%d entries). "
-                            "abs_from=%s",
-                            _rel,
-                            len(self._file_to_partition),
-                            abs_from[-80:],
-                        )
-                    else:
-                        logger.debug("Layer routing miss (repeat): %s", _rel)
-
-            # 3. Flat staging directory
-            if self._staging_dir:
-                candidate = os.path.join(self._staging_dir, fname)
-                if os.path.isfile(candidate):
-                    basename = os.path.basename(fname)
-                    # Refuse to resolve colliding basenames via flat staging
-                    # when layers are active — the correct variant can only be
-                    # determined through layer routing (step 2).
-                    # Fall through to workspace root / stdlib as last resort.
-                    if self._file_to_layer and basename in self._collision_map:
-                        logger.warning(
-                            "Ambiguous include '%s' from %s: basename has %d variants "
-                            "across layers — skipping flat staging, trying workspace root",
-                            include_name,
-                            os.path.relpath(from_file, self._workspace_root),
-                            len(self._collision_map[basename]),
-                        )
-                    else:
-                        return os.path.realpath(candidate)
-
-            # 4. Workspace root
-            candidate = os.path.join(self._workspace_root, fname)
-            if os.path.isfile(candidate):
-                return os.path.realpath(candidate)
-
-            # 5. Standard library
-            std_dir = self._get_std_include_dir()
-            if std_dir is not None:
-                candidate = os.path.join(std_dir, fname)
+        # 2. Layer-aware staging (when active, replaces flat staging for
+        #    colliding basenames)
+        if _partition_staging and _file_to_partition:
+            abs_from = from_file_real
+            layer_id = _file_to_partition.get(abs_from)
+            if layer_id and layer_id in _partition_staging:
+                candidate = os.path.join(_partition_staging[layer_id], fname)
                 if os.path.isfile(candidate):
                     return os.path.realpath(candidate)
+                # Layer found but file not in layer staging dir
+                logger.warning(
+                    "Layer staging miss: '%s' not found in layer '%s' dir %s (from %s)",
+                    fname,
+                    layer_id,
+                    _partition_staging[layer_id],
+                    os.path.relpath(from_file, self._workspace_root),
+                )
+                # Cross-layer dependency fallback: try dependency layers
+                layer_obj = _layer_by_id.get(layer_id)
+                if layer_obj and layer_obj.depends_on:
+                    for dep_id in layer_obj.depends_on:
+                        dep_staging = _partition_staging.get(dep_id)
+                        if dep_staging:
+                            candidate = os.path.join(dep_staging, fname)
+                            if os.path.isfile(candidate):
+                                return os.path.realpath(candidate)
 
-            return None
+                # Broader priority-ordered layer fallback with proximity scoring
+                cross_candidates = []
+                for lid in _partition_staging:
+                    if lid == layer_id:
+                        continue
+                    cand = os.path.join(_partition_staging[lid], fname)
+                    if os.path.isfile(cand):
+                        cross_candidates.append((lid, cand))
+
+                if cross_candidates:
+                    if len(cross_candidates) == 1:
+                        _lid, _cand = cross_candidates[0]
+                        logger.debug(
+                            "Cross-layer resolve: '%s' found in layer '%s' (from layer '%s')",
+                            include_name,
+                            _lid,
+                            layer_id,
+                        )
+                        return os.path.realpath(_cand)
+
+                    # Multiple candidates: score by path proximity to from_file
+                    def _proximity(item):
+                        _item_lid, _item_cand = item
+                        real = os.path.realpath(_item_cand)
+                        common = os.path.commonpath([from_file_real, real])
+                        return len(common)
+
+                    best_lid, best_cand = max(cross_candidates, key=_proximity)
+                    logger.debug(
+                        "Cross-layer resolve (proximity): '%s' -> layer '%s' "
+                        "(from layer '%s', %d candidates)",
+                        include_name,
+                        best_lid,
+                        layer_id,
+                        len(cross_candidates),
+                    )
+                    return os.path.realpath(best_cand)
+
+            elif not layer_id and _file_to_layer:
+                # File should be in a layer but isn't in _file_to_partition
+                # Log WARNING on first occurrence per file, then DEBUG
+                _rel = os.path.relpath(from_file, self._workspace_root)
+                if _rel not in self._warned_routing_miss:
+                    self._warned_routing_miss.add(_rel)
+                    logger.warning(
+                        "Layer routing miss: %s not in _file_to_partition (%d entries). "
+                        "abs_from=%s",
+                        _rel,
+                        len(_file_to_partition),
+                        abs_from[-80:],
+                    )
+                else:
+                    logger.debug("Layer routing miss (repeat): %s", _rel)
+
+        # 3. Flat staging directory
+        if _staging_dir:
+            candidate = os.path.join(_staging_dir, fname)
+            if os.path.isfile(candidate):
+                basename = os.path.basename(fname)
+                # Refuse to resolve colliding basenames via flat staging
+                # when layers are active — the correct variant can only be
+                # determined through layer routing (step 2).
+                # Fall through to workspace root / stdlib as last resort.
+                if _file_to_layer and basename in _collision_map:
+                    logger.warning(
+                        "Ambiguous include '%s' from %s: basename has %d variants "
+                        "across layers — skipping flat staging, trying workspace root",
+                        include_name,
+                        os.path.relpath(from_file, self._workspace_root),
+                        len(_collision_map[basename]),
+                    )
+                else:
+                    return os.path.realpath(candidate)
+
+        # 4. Workspace root
+        candidate = os.path.join(self._workspace_root, fname)
+        if os.path.isfile(candidate):
+            return os.path.realpath(candidate)
+
+        # 5. Standard library
+        std_dir = self._get_std_include_dir()
+        if std_dir is not None:
+            candidate = os.path.join(std_dir, fname)
+            if os.path.isfile(candidate):
+                return os.path.realpath(candidate)
+
+        return None
 
     def _find_source_files(self, search_root: Optional[str] = None) -> List[str]:
         """Walk the directory tree and return all .ivy file paths, sorted.
