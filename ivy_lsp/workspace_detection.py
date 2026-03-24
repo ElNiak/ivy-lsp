@@ -50,6 +50,9 @@ class WorkspaceConfig:
     scope_detection: str = "auto"  # auto, explicit
     standard_library: Optional[str] = None  # e.g. "ivy/include/1.7"
     workspace_layers: list[WorkspaceLayer] = field(default_factory=list)
+    workspace_groups: dict[str, list[str]] = field(default_factory=dict)
+    protocol_id: Optional[str] = None
+    workspace_root_offset: Optional[str] = None
 
 
 def _read_marker(marker_path: str) -> Optional[dict]:
@@ -100,8 +103,21 @@ def _apply_marker(marker_path: str, data: dict) -> Optional[WorkspaceConfig]:
     for layer in layers:
         flat_include_paths.extend(layer.include_paths)
 
+    # Resolve workspace_root: apply offset relative to marker_dir when present
+    workspace_root_offset = data.get("workspace_root_offset")
+    if workspace_root_offset is not None:
+        workspace_root = os.path.normpath(
+            os.path.join(marker_dir, workspace_root_offset)
+        )
+    else:
+        workspace_root = marker_dir
+
+    # Parse new optional fields
+    workspace_groups = data.get("workspace_groups", {})
+    protocol_id = data.get("protocol_id")
+
     return WorkspaceConfig(
-        workspace_root=marker_dir,
+        workspace_root=workspace_root,
         include_paths=flat_include_paths or data.get("include_paths", []),
         exclude_paths=data.get("exclude_paths", []),
         detected_by="marker",
@@ -109,6 +125,9 @@ def _apply_marker(marker_path: str, data: dict) -> Optional[WorkspaceConfig]:
         scope_detection=data.get("scope_detection", "auto"),
         standard_library=data.get("standard_library"),
         workspace_layers=layers,
+        workspace_groups=workspace_groups,
+        protocol_id=protocol_id,
+        workspace_root_offset=workspace_root_offset,
     )
 
 

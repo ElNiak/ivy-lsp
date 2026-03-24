@@ -450,3 +450,124 @@ class TestPantherHeuristicV3:
         assert config.workspace_layers[0].id == "standard"
         assert config.workspace_layers[1].id == "apt"
         assert config.project_type == "panther"
+
+
+# ---------------------------------------------------------------------------
+# Task 2: workspace_groups, protocol_id, workspace_root_offset
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceConfigNewFields:
+    def test_workspace_config_has_workspace_groups(self):
+        """WorkspaceConfig must have workspace_groups defaulting to empty dict."""
+        config = WorkspaceConfig(workspace_root="/tmp/test")
+        assert hasattr(config, "workspace_groups")
+        assert config.workspace_groups == {}
+
+    def test_workspace_config_has_protocol_id(self):
+        """WorkspaceConfig must have protocol_id defaulting to None."""
+        config = WorkspaceConfig(workspace_root="/tmp/test")
+        assert hasattr(config, "protocol_id")
+        assert config.protocol_id is None
+
+    def test_workspace_config_has_workspace_root_offset(self):
+        """WorkspaceConfig must have workspace_root_offset defaulting to None."""
+        config = WorkspaceConfig(workspace_root="/tmp/test")
+        assert hasattr(config, "workspace_root_offset")
+        assert config.workspace_root_offset is None
+
+
+class TestApplyMarkerNewFields:
+    def test_apply_marker_parses_workspace_groups(self, tmp_workspace):
+        """_apply_marker must parse workspace_groups from JSON."""
+        from ivy_lsp.workspace_detection import _apply_marker
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["src"]}],
+            "workspace_groups": {
+                "quic": ["protocol-testing/quic"],
+                "minip": ["protocol-testing/minip"],
+            },
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.workspace_groups == {
+            "quic": ["protocol-testing/quic"],
+            "minip": ["protocol-testing/minip"],
+        }
+
+    def test_apply_marker_parses_protocol_id(self, tmp_workspace):
+        """_apply_marker must parse protocol_id from JSON."""
+        from ivy_lsp.workspace_detection import _apply_marker
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["src"]}],
+            "protocol_id": "quic",
+            "workspace_root_offset": "../..",
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.protocol_id == "quic"
+
+    def test_workspace_root_offset_resolves_correctly(self, tmp_workspace):
+        """workspace_root_offset must shift workspace_root relative to marker dir."""
+        import os
+
+        from ivy_lsp.workspace_detection import _apply_marker
+
+        # Simulate: marker lives at tmp/protocol-testing/quic/.ivyworkspace
+        # offset "../.." should resolve to tmp/ (the panther_ivy root)
+        protocol_dir = tmp_workspace / "protocol-testing" / "quic"
+        protocol_dir.mkdir(parents=True)
+        offset = "../.."
+        expected_root = os.path.normpath(str(protocol_dir) + "/" + offset)
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [{"id": "quic", "include_paths": ["."]}],
+            "protocol_id": "quic",
+            "workspace_root_offset": offset,
+        }
+        marker_path = protocol_dir / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.workspace_root == expected_root
+        assert config.workspace_root_offset == offset
+
+    def test_apply_marker_backward_compat(self, tmp_workspace):
+        """Existing markers without new fields must parse correctly with defaults."""
+        from ivy_lsp.workspace_detection import _apply_marker
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [
+                {"id": "standard", "include_paths": ["protocol-testing/quic"]}
+            ],
+            "exclude_paths": ["test"],
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.workspace_groups == {}
+        assert config.protocol_id is None
+        assert config.workspace_root_offset is None
+        # Existing fields unaffected
+        assert config.workspace_root == str(tmp_workspace)
+        assert "protocol-testing/quic" in config.include_paths
+        assert config.exclude_paths == ["test"]
