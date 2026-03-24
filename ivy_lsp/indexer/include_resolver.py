@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -161,6 +162,10 @@ class IncludeResolver:
         self._layer_by_id: Dict[str, Any] = {}
         # Track files we've already warned about (dedup layer routing warnings)
         self._warned_routing_miss: set = set()
+        # Thread safety: protects staging rebuild during set_active_workspace
+        self._staging_lock = threading.Lock()
+        # Currently active layers (empty set = all layers active)
+        self._active_layers: set = set()
 
     @property
     def collision_map(self) -> Dict[str, List[str]]:
@@ -213,6 +218,9 @@ class IncludeResolver:
     def resolve(self, include_name: str, from_file: str) -> Optional[str]:
         """Resolve an include name to an absolute file path.
 
+        Thread-safe: acquires ``_staging_lock`` to prevent concurrent reads
+        during a staging rebuild triggered by :meth:`set_active_workspace`.
+
         Args:
             include_name: The bare name from ``include X`` (without .ivy).
             from_file: Absolute path of the file containing the include.
@@ -220,129 +228,130 @@ class IncludeResolver:
         Returns:
             Absolute path to the resolved .ivy file, or None if not found.
         """
-        fname = include_name + ".ivy"
-        from_file_real = os.path.realpath(from_file)
+        with self._staging_lock:
+            fname = include_name + ".ivy"
+            from_file_real = os.path.realpath(from_file)
 
-        # 1. Same directory as the including file
-        from_dir = os.path.dirname(from_file_real)
-        candidate = os.path.join(from_dir, fname)
-        if os.path.isfile(candidate):
-            return os.path.realpath(candidate)
-
-        # 2. Layer-aware staging (when active, replaces flat staging for
-        #    colliding basenames)
-        if self._partition_staging and self._file_to_partition:
-            abs_from = from_file_real
-            layer_id = self._file_to_partition.get(abs_from)
-            if layer_id and layer_id in self._partition_staging:
-                candidate = os.path.join(self._partition_staging[layer_id], fname)
-                if os.path.isfile(candidate):
-                    return os.path.realpath(candidate)
-                # Layer found but file not in layer staging dir
-                logger.warning(
-                    "Layer staging miss: '%s' not found in layer '%s' dir %s (from %s)",
-                    fname,
-                    layer_id,
-                    self._partition_staging[layer_id],
-                    os.path.relpath(from_file, self._workspace_root),
-                )
-                # Cross-layer dependency fallback: try dependency layers
-                layer_obj = self._layer_by_id.get(layer_id)
-                if layer_obj and layer_obj.depends_on:
-                    for dep_id in layer_obj.depends_on:
-                        dep_staging = self._partition_staging.get(dep_id)
-                        if dep_staging:
-                            candidate = os.path.join(dep_staging, fname)
-                            if os.path.isfile(candidate):
-                                return os.path.realpath(candidate)
-
-                # Broader priority-ordered layer fallback with proximity scoring
-                cross_candidates = []
-                for lid in self._partition_staging:
-                    if lid == layer_id:
-                        continue
-                    cand = os.path.join(self._partition_staging[lid], fname)
-                    if os.path.isfile(cand):
-                        cross_candidates.append((lid, cand))
-
-                if cross_candidates:
-                    if len(cross_candidates) == 1:
-                        _lid, _cand = cross_candidates[0]
-                        logger.debug(
-                            "Cross-layer resolve: '%s' found in layer '%s' (from layer '%s')",
-                            include_name,
-                            _lid,
-                            layer_id,
-                        )
-                        return os.path.realpath(_cand)
-
-                    # Multiple candidates: score by path proximity to from_file
-                    def _proximity(item):
-                        _item_lid, _item_cand = item
-                        real = os.path.realpath(_item_cand)
-                        common = os.path.commonpath([from_file_real, real])
-                        return len(common)
-
-                    best_lid, best_cand = max(cross_candidates, key=_proximity)
-                    logger.debug(
-                        "Cross-layer resolve (proximity): '%s' -> layer '%s' "
-                        "(from layer '%s', %d candidates)",
-                        include_name,
-                        best_lid,
-                        layer_id,
-                        len(cross_candidates),
-                    )
-                    return os.path.realpath(best_cand)
-
-            elif not layer_id and self._file_to_layer:
-                # File should be in a layer but isn't in _file_to_partition
-                # Log WARNING on first occurrence per file, then DEBUG
-                _rel = os.path.relpath(from_file, self._workspace_root)
-                if _rel not in self._warned_routing_miss:
-                    self._warned_routing_miss.add(_rel)
-                    logger.warning(
-                        "Layer routing miss: %s not in _file_to_partition (%d entries). "
-                        "abs_from=%s",
-                        _rel,
-                        len(self._file_to_partition),
-                        abs_from[-80:],
-                    )
-                else:
-                    logger.debug("Layer routing miss (repeat): %s", _rel)
-
-        # 3. Flat staging directory
-        if self._staging_dir:
-            candidate = os.path.join(self._staging_dir, fname)
-            if os.path.isfile(candidate):
-                basename = os.path.basename(fname)
-                # Refuse to resolve colliding basenames via flat staging
-                # when layers are active — the correct variant can only be
-                # determined through layer routing (step 2).
-                # Fall through to workspace root / stdlib as last resort.
-                if self._file_to_layer and basename in self._collision_map:
-                    logger.warning(
-                        "Ambiguous include '%s' from %s: basename has %d variants "
-                        "across layers — skipping flat staging, trying workspace root",
-                        include_name,
-                        os.path.relpath(from_file, self._workspace_root),
-                        len(self._collision_map[basename]),
-                    )
-                else:
-                    return os.path.realpath(candidate)
-
-        # 4. Workspace root
-        candidate = os.path.join(self._workspace_root, fname)
-        if os.path.isfile(candidate):
-            return os.path.realpath(candidate)
-
-        # 5. Standard library
-        std_dir = self._get_std_include_dir()
-        if std_dir is not None:
-            candidate = os.path.join(std_dir, fname)
+            # 1. Same directory as the including file
+            from_dir = os.path.dirname(from_file_real)
+            candidate = os.path.join(from_dir, fname)
             if os.path.isfile(candidate):
                 return os.path.realpath(candidate)
 
-        return None
+            # 2. Layer-aware staging (when active, replaces flat staging for
+            #    colliding basenames)
+            if self._partition_staging and self._file_to_partition:
+                abs_from = from_file_real
+                layer_id = self._file_to_partition.get(abs_from)
+                if layer_id and layer_id in self._partition_staging:
+                    candidate = os.path.join(self._partition_staging[layer_id], fname)
+                    if os.path.isfile(candidate):
+                        return os.path.realpath(candidate)
+                    # Layer found but file not in layer staging dir
+                    logger.warning(
+                        "Layer staging miss: '%s' not found in layer '%s' dir %s (from %s)",
+                        fname,
+                        layer_id,
+                        self._partition_staging[layer_id],
+                        os.path.relpath(from_file, self._workspace_root),
+                    )
+                    # Cross-layer dependency fallback: try dependency layers
+                    layer_obj = self._layer_by_id.get(layer_id)
+                    if layer_obj and layer_obj.depends_on:
+                        for dep_id in layer_obj.depends_on:
+                            dep_staging = self._partition_staging.get(dep_id)
+                            if dep_staging:
+                                candidate = os.path.join(dep_staging, fname)
+                                if os.path.isfile(candidate):
+                                    return os.path.realpath(candidate)
+
+                    # Broader priority-ordered layer fallback with proximity scoring
+                    cross_candidates = []
+                    for lid in self._partition_staging:
+                        if lid == layer_id:
+                            continue
+                        cand = os.path.join(self._partition_staging[lid], fname)
+                        if os.path.isfile(cand):
+                            cross_candidates.append((lid, cand))
+
+                    if cross_candidates:
+                        if len(cross_candidates) == 1:
+                            _lid, _cand = cross_candidates[0]
+                            logger.debug(
+                                "Cross-layer resolve: '%s' found in layer '%s' (from layer '%s')",
+                                include_name,
+                                _lid,
+                                layer_id,
+                            )
+                            return os.path.realpath(_cand)
+
+                        # Multiple candidates: score by path proximity to from_file
+                        def _proximity(item):
+                            _item_lid, _item_cand = item
+                            real = os.path.realpath(_item_cand)
+                            common = os.path.commonpath([from_file_real, real])
+                            return len(common)
+
+                        best_lid, best_cand = max(cross_candidates, key=_proximity)
+                        logger.debug(
+                            "Cross-layer resolve (proximity): '%s' -> layer '%s' "
+                            "(from layer '%s', %d candidates)",
+                            include_name,
+                            best_lid,
+                            layer_id,
+                            len(cross_candidates),
+                        )
+                        return os.path.realpath(best_cand)
+
+                elif not layer_id and self._file_to_layer:
+                    # File should be in a layer but isn't in _file_to_partition
+                    # Log WARNING on first occurrence per file, then DEBUG
+                    _rel = os.path.relpath(from_file, self._workspace_root)
+                    if _rel not in self._warned_routing_miss:
+                        self._warned_routing_miss.add(_rel)
+                        logger.warning(
+                            "Layer routing miss: %s not in _file_to_partition (%d entries). "
+                            "abs_from=%s",
+                            _rel,
+                            len(self._file_to_partition),
+                            abs_from[-80:],
+                        )
+                    else:
+                        logger.debug("Layer routing miss (repeat): %s", _rel)
+
+            # 3. Flat staging directory
+            if self._staging_dir:
+                candidate = os.path.join(self._staging_dir, fname)
+                if os.path.isfile(candidate):
+                    basename = os.path.basename(fname)
+                    # Refuse to resolve colliding basenames via flat staging
+                    # when layers are active — the correct variant can only be
+                    # determined through layer routing (step 2).
+                    # Fall through to workspace root / stdlib as last resort.
+                    if self._file_to_layer and basename in self._collision_map:
+                        logger.warning(
+                            "Ambiguous include '%s' from %s: basename has %d variants "
+                            "across layers — skipping flat staging, trying workspace root",
+                            include_name,
+                            os.path.relpath(from_file, self._workspace_root),
+                            len(self._collision_map[basename]),
+                        )
+                    else:
+                        return os.path.realpath(candidate)
+
+            # 4. Workspace root
+            candidate = os.path.join(self._workspace_root, fname)
+            if os.path.isfile(candidate):
+                return os.path.realpath(candidate)
+
+            # 5. Standard library
+            std_dir = self._get_std_include_dir()
+            if std_dir is not None:
+                candidate = os.path.join(std_dir, fname)
+                if os.path.isfile(candidate):
+                    return os.path.realpath(candidate)
+
+            return None
 
     def _find_source_files(self, search_root: Optional[str] = None) -> List[str]:
         """Walk the directory tree and return all .ivy file paths, sorted.
@@ -804,14 +813,21 @@ class IncludeResolver:
     # Layer-aware staging (v3 workspace layers)
     # ------------------------------------------------------------------
 
-    def _find_source_files_by_layer(self) -> Dict[str, List[str]]:
+    def _find_source_files_by_layer(
+        self, layers: Optional[List] = None
+    ) -> Dict[str, List[str]]:
         """Walk each layer's include paths independently and return files grouped by layer.
+
+        Args:
+            layers: Optional list of layers to scan.  When *None*, uses
+                ``self._workspace_layers``.
 
         Returns:
             Mapping of layer_id -> list of absolute .ivy file paths.
         """
+        _layers = layers if layers is not None else self._workspace_layers
         layer_files: Dict[str, List[str]] = {}
-        for layer in self._workspace_layers:
+        for layer in _layers:
             roots = [
                 os.path.join(self._workspace_root, ip) for ip in layer.include_paths
             ]
@@ -891,7 +907,7 @@ class IncludeResolver:
                     return False
         return True
 
-    def build_layered_staging(self) -> None:
+    def build_layered_staging(self, layers: Optional[List] = None) -> None:
         """Build per-layer staging directories when workspace layers are configured.
 
         Each layer gets its own staging subdirectory. Collisions within a layer
@@ -902,8 +918,13 @@ class IncludeResolver:
         When a layer declares ``depends_on``, files from the dependency layers
         are injected as symlinks into the dependent layer's staging directory.
         The layer's own files take precedence over injected files.
+
+        Args:
+            layers: Optional list of layers to build staging for.  When *None*,
+                uses ``self._workspace_layers``.
         """
-        if not self._workspace_layers:
+        _layers = layers if layers is not None else self._workspace_layers
+        if not _layers:
             logger.info("No workspace layers -- layered staging not needed")
             return
 
@@ -912,7 +933,7 @@ class IncludeResolver:
             return
 
         # Validate dependency graph before proceeding
-        has_deps = any(l.depends_on for l in self._workspace_layers)
+        has_deps = any(l.depends_on for l in _layers)
         deps_valid = True
         if has_deps:
             deps_valid = self._validate_layer_deps()
@@ -922,9 +943,9 @@ class IncludeResolver:
                     "dependency injection will be skipped"
                 )
 
-        layer_files = self._find_source_files_by_layer()
+        layer_files = self._find_source_files_by_layer(layers=_layers)
 
-        for layer in self._workspace_layers:
+        for layer in _layers:
             layer_id = layer.id
             layer_dir = os.path.join(self._staging_dir, f"layer_{layer_id}")
             os.makedirs(layer_dir, exist_ok=True)
@@ -964,9 +985,9 @@ class IncludeResolver:
 
         # Inject dependency files from depends_on layers.
         # Own files (already symlinked above) take precedence.
-        self._layer_by_id = {l.id: l for l in self._workspace_layers}
+        self._layer_by_id = {l.id: l for l in _layers}
         if has_deps and deps_valid:
-            for layer in self._workspace_layers:
+            for layer in _layers:
                 if not layer.depends_on:
                     continue
                 layer_dir = self._partition_staging[layer.id]
@@ -1008,7 +1029,7 @@ class IncludeResolver:
                 if not fn.endswith(".ivy"):
                     continue
                 src = os.path.join(std_dir, fn)
-                for layer in self._workspace_layers:
+                for layer in _layers:
                     link_path = os.path.join(self._partition_staging[layer.id], fn)
                     if os.path.lexists(link_path):
                         continue  # Layer's own file takes precedence
@@ -1021,7 +1042,7 @@ class IncludeResolver:
                 logger.info(
                     "Stdlib staging: %d symlinks across %d layers (from %s)",
                     stdlib_staged,
-                    len(self._workspace_layers),
+                    len(_layers),
                     std_dir,
                 )
 
@@ -1034,6 +1055,61 @@ class IncludeResolver:
             len(self._partition_staging),
             len(self._file_to_partition),
         )
+
+    def set_active_workspace(self, active_layers: set) -> None:
+        """Rebuild staging with only the specified layers active.
+
+        Thread-safe: acquires ``_staging_lock`` during rebuild so that
+        concurrent :meth:`resolve` calls on the deep-indexer thread do
+        not observe a half-built staging directory.
+
+        Passing an empty set restores all layers (clears the restriction).
+
+        Invariant 3: if ``_file_to_layer`` is empty (pre-indexing), the
+        call is a no-op with a warning — there is nothing to filter.
+
+        Args:
+            active_layers: Set of layer IDs to activate.  Empty set means
+                "all layers" (no restriction).
+        """
+        with self._staging_lock:
+            # Invariant 3 guard
+            if not self._file_to_layer and active_layers:
+                logger.warning("set_active_workspace called before indexing; ignoring")
+                return
+
+            self._active_layers = set(active_layers)
+
+            if active_layers:
+                filtered = [l for l in self._workspace_layers if l.id in active_layers]
+            else:
+                filtered = list(self._workspace_layers)
+
+            # Clear stale state (CRITICAL — without this, old layer entries
+            # persist and resolve() routes to phantom staging dirs)
+            self._partition_staging.clear()
+            self._file_to_partition.clear()
+            self._file_to_layer.clear()
+            self._collision_map.clear()
+
+            # Rebuild staging with only active layers
+            self.cleanup_staging()
+            if filtered:
+                # Create a fresh staging directory (minimal: just the temp dir
+                # needed by build_layered_staging — skip full
+                # create_staging_directory which would re-discover ALL layers
+                # via _find_source_files_by_layer using self._workspace_layers).
+                staging = tempfile.mkdtemp(prefix="ivy-lsp-stage-")
+                atexit.register(lambda d=staging: shutil.rmtree(d, ignore_errors=True))
+                self._staging_dir = staging
+                self._staged_files.clear()
+                self.build_layered_staging(layers=filtered)
+
+            logger.info(
+                "Active workspace set: %d layers (%s)",
+                len(filtered),
+                ", ".join(l.id for l in filtered),
+            )
 
     def staging_health(self) -> Dict[str, Any]:
         """Return a summary of staging directory health.
