@@ -240,6 +240,9 @@ class IncludeResolver:
             _file_to_layer = dict(self._file_to_layer)
             _collision_map = self._collision_map
             _layer_by_id = getattr(self, "_layer_by_id", {})
+        # Active layers filter (set atomically by set_active_workspace,
+        # no lock needed — Python set assignment is atomic).
+        _active_layers = self._active_layers
 
         # --- Resolution uses snapshots only, no lock held ---
         fname = include_name + ".ivy"
@@ -272,6 +275,8 @@ class IncludeResolver:
                 layer_obj = _layer_by_id.get(layer_id)
                 if layer_obj and layer_obj.depends_on:
                     for dep_id in layer_obj.depends_on:
+                        if _active_layers and dep_id not in _active_layers:
+                            continue  # Skip non-active dependency layers
                         dep_staging = _partition_staging.get(dep_id)
                         if dep_staging:
                             candidate = os.path.join(dep_staging, fname)
@@ -283,6 +288,8 @@ class IncludeResolver:
                 for lid in _partition_staging:
                     if lid == layer_id:
                         continue
+                    if _active_layers and lid not in _active_layers:
+                        continue  # Skip non-active layers
                     cand = os.path.join(_partition_staging[lid], fname)
                     if os.path.isfile(cand):
                         cross_candidates.append((lid, cand))
@@ -1070,59 +1077,38 @@ class IncludeResolver:
         )
 
     def set_active_workspace(self, active_layers: set) -> None:
-        """Rebuild staging with only the specified layers active.
+        """Set which workspace layers are visible to :meth:`resolve`.
 
-        Thread-safe: acquires ``_staging_lock`` during rebuild so that
-        concurrent :meth:`resolve` calls on the deep-indexer thread do
-        not observe a half-built staging directory.
+        This is a **filter-only** operation — no staging rebuild.  The
+        staging directories (built once at startup for ALL layers) remain
+        unchanged.  :meth:`resolve` skips layers not in *active_layers*
+        at query time, which is O(1) per layer check.
 
         Passing an empty set restores all layers (clears the restriction).
-
-        Invariant 3: if ``_file_to_layer`` is empty (pre-indexing), the
-        call is a no-op with a warning — there is nothing to filter.
 
         Args:
             active_layers: Set of layer IDs to activate.  Empty set means
                 "all layers" (no restriction).
         """
-        with self._staging_lock:
-            # Invariant 3 guard
-            if not self._file_to_layer and active_layers:
-                logger.warning("set_active_workspace called before indexing; ignoring")
-                return
-
-            self._active_layers = set(active_layers)
-
-            if active_layers:
-                filtered = [l for l in self._workspace_layers if l.id in active_layers]
-            else:
-                filtered = list(self._workspace_layers)
-
-            # Clear stale state (CRITICAL — without this, old layer entries
-            # persist and resolve() routes to phantom staging dirs)
-            self._partition_staging.clear()
-            self._file_to_partition.clear()
-            self._file_to_layer.clear()
-            self._collision_map.clear()
-
-            # Rebuild staging with only active layers
-            self.cleanup_staging()
-            if filtered:
-                # Create a fresh staging directory (minimal: just the temp dir
-                # needed by build_layered_staging — skip full
-                # create_staging_directory which would re-discover ALL layers
-                # via _find_source_files_by_layer using self._workspace_layers).
-                staging = tempfile.mkdtemp(prefix="ivy-lsp-stage-")
-                atexit.register(lambda d=staging: shutil.rmtree(d, ignore_errors=True))
-                self._staging_dir = staging
-                self._staged_files.clear()
-                self.build_layered_staging(layers=filtered)
-
-            logger.info(
-                "Active workspace set: %d layers (%s)",
-                len(filtered),
-                ", ".join(l.id for l in filtered),
+        prev = self._active_layers
+        if active_layers == prev:
+            logger.debug(
+                "Active layers unchanged (%s), skipping", sorted(prev) or "all"
             )
+            return
+
+        # Atomic set swap — Python set assignment is thread-safe.
+        # resolve() reads _active_layers WITHOUT holding _staging_lock,
+        # so this update is immediately visible to concurrent calls.
+        self._active_layers = set(active_layers)
+
+        if active_layers:
+            layer_names = sorted(active_layers)
+        else:
+            layer_names = ["all"]
+        logger.info(
+            "Active workspace set: %s (was: %s)", layer_names, sorted(prev) or "all"
+        )
 
     def staging_health(self) -> Dict[str, Any]:
         """Return a summary of staging directory health.

@@ -6,7 +6,6 @@ scoped symbol resolution, diagnostic filtering, and coverage tools.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import Any, Literal
@@ -107,15 +106,12 @@ async def _handle_set(ctx: Any, target: str | None, roles: str | None) -> dict:
     state_path = os.path.join(ctx.root, ".ivy-workspace-state.json")
     ws.save(state_path)
 
-    # In-process mutation: update resolver (run in executor to avoid blocking
-    # the MCP event loop — staging rebuild involves filesystem I/O)
+    # In-process mutation: update resolver active-layer filter (instant,
+    # no filesystem I/O — just sets a filter flag).
     if ctx.include_resolver is not None and hasattr(
         ctx.include_resolver, "set_active_workspace"
     ):
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None, ctx.include_resolver.set_active_workspace, ws.active_layers
-        )
+        ctx.include_resolver.set_active_workspace(ws.active_layers)
 
     # Store on context
     ctx.active_workspace = ws

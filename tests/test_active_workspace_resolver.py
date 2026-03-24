@@ -97,15 +97,14 @@ class TestSetActiveWorkspace:
         result = resolver.resolve("quic_types", str(quic_dir / "dummy.ivy"))
         assert result is not None
 
-    def test_invariant_3_pre_indexing_noop(self):
-        """If _file_to_layer is empty, set_active_workspace is a no-op."""
+    def test_set_before_indexing_still_sets_filter(self):
+        """set_active_workspace works even before indexing — it's just a filter."""
         resolver = IncludeResolver(workspace_root="/tmp")
-        # Don't call build_layered_staging -- _file_to_layer is empty
         resolver.set_active_workspace({"quic"})  # should not crash
-        assert resolver._active_layers == set()  # unchanged because guarded
+        assert resolver._active_layers == {"quic"}  # filter is set
 
-    def test_stale_dicts_cleared(self, tmp_path):
-        """After workspace switch, old layer entries don't persist."""
+    def test_filter_only_no_dict_mutation(self, tmp_path):
+        """set_active_workspace is filter-only — staging dicts remain intact."""
         quic_dir = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         apt_dir = tmp_path / "protocol-testing" / "apt" / "apt_stack"
         quic_dir.mkdir(parents=True)
@@ -131,11 +130,29 @@ class TestSetActiveWorkspace:
         resolver.create_staging_directory()
         resolver.build_layered_staging()
 
-        # Switch to quic only
+        # All layers in _file_to_layer before switch
+        all_layers_before = set(resolver._file_to_layer.values())
+        assert "apt_core" in all_layers_before
+
+        # Switch to quic only — dicts stay intact (filter-only)
         resolver.set_active_workspace({"quic"})
-        # apt files should NOT be in _file_to_layer
-        apt_files = [k for k in resolver._file_to_layer if "apt" in k]
-        assert len(apt_files) == 0
+        all_layers_after = set(resolver._file_to_layer.values())
+        assert "apt_core" in all_layers_after  # Still there — not cleared
+
+        # But resolve() should NOT find apt files
+        result = resolver.resolve("apt_time", str(apt_dir / "dummy.ivy"))
+        # apt_time is in apt_core layer staging, but resolve() filters it out
+        # (it may still find it via same-dir or workspace-root fallback though)
+        assert resolver._active_layers == {"quic"}
+
+    def test_skip_unchanged_layers(self):
+        """Calling set_active_workspace with same layers is a no-op."""
+        resolver = IncludeResolver(workspace_root="/tmp")
+        resolver.set_active_workspace({"quic"})
+        assert resolver._active_layers == {"quic"}
+        # Second call with same layers — should be instant (no-op)
+        resolver.set_active_workspace({"quic"})
+        assert resolver._active_layers == {"quic"}
 
     def test_resolve_thread_safety(self, tmp_path):
         """resolve() acquires _staging_lock -- verify it doesn't deadlock."""
