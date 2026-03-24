@@ -28,6 +28,7 @@ import pickle
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
+from ivy_lsp.active_workspace import ActiveWorkspace
 from ivy_lsp.analysis.test_scope import ExportImportInfo, TestScope
 from ivy_lsp.parsing.symbols import IncludeGraph
 from ivy_lsp.session_overlay import SessionOverlay, TestScopeView
@@ -106,6 +107,7 @@ class WorkspaceContext:
         self.protocol_indexes: Dict[str, ProtocolIndex] = protocol_indexes or {}
         self.overlay = SessionOverlay()
         self.active_views: Dict[str, TestScopeView] = {}
+        self.active_workspace: ActiveWorkspace = ActiveWorkspace.cleared()
 
     # -- Factory methods ----------------------------------------------------
 
@@ -187,6 +189,50 @@ class WorkspaceContext:
             "has_index": ctx.has_index(),
             "staleness": staleness_map,
         }
+
+    # -- Active workspace state -------------------------------------------
+
+    def load_active_workspace(
+        self,
+        state_file_path: str,
+        detected_protocol_id: Optional[str] = None,
+    ) -> None:
+        """Load workspace state with RF-5 tiebreak logic.
+
+        Priority rules:
+
+        - Persisted state with ``set_by="explicit"`` ALWAYS wins over any
+          auto-detection result.
+        - Persisted state with ``set_by="marker"`` is overridden by a new marker
+          detection **only** when the marker's ``protocol_id`` differs from the
+          persisted ``active_group``.
+        - No persisted state (file missing or cleared): workspace stays cleared.
+          A subsequent call to the ``ivy_workspace`` MCP tool will activate it.
+
+        Args:
+            state_file_path: Path to the ``.ivy-workspace-state.json`` file.
+            detected_protocol_id: The ``protocol_id`` from the freshly detected
+                :class:`~ivy_lsp.workspace_detection.WorkspaceConfig`, or
+                ``None`` when detection did not produce a protocol ID.
+        """
+        persisted = ActiveWorkspace.load(state_file_path)
+
+        if persisted.is_set():
+            if persisted.set_by == "explicit":
+                # Explicit always wins over auto-detection
+                self.active_workspace = persisted
+                return
+            if persisted.set_by == "marker" and detected_protocol_id is not None:
+                if persisted.active_group != detected_protocol_id:
+                    # New marker detection overrides old marker state;
+                    # the workspace tool will set the correct state later.
+                    self.active_workspace = ActiveWorkspace.cleared()
+                    return
+            self.active_workspace = persisted
+            return
+
+        # No persisted state — stay cleared
+        self.active_workspace = ActiveWorkspace.cleared()
 
     # -- Index loading (private) -------------------------------------------
 

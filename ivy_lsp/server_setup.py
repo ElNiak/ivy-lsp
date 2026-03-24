@@ -98,6 +98,35 @@ class ServerSetupMixin:
                 ),
             )
 
+        # Load active workspace state with RF-5 tiebreak logic.
+        # workspace_config comes from the WorkspaceContext that was just loaded;
+        # protocol_id is set when a .ivyworkspace marker declares one.
+        try:
+            _ws_cfg = getattr(self._workspace_context, "workspace_config", None)
+            _detected_protocol_id = (
+                getattr(_ws_cfg, "protocol_id", None) if _ws_cfg is not None else None
+            )
+            _state_file = os.path.join(
+                self._workspace_context.workspace_root,
+                ".ivy-workspace-state.json",
+            )
+            if hasattr(self._workspace_context, "load_active_workspace"):
+                self._workspace_context.load_active_workspace(
+                    _state_file,
+                    detected_protocol_id=_detected_protocol_id,
+                )
+                logger.debug(
+                    "Active workspace loaded: set=%s, group=%s, set_by=%s",
+                    self._workspace_context.active_workspace.is_set(),
+                    self._workspace_context.active_workspace.active_group,
+                    self._workspace_context.active_workspace.set_by,
+                )
+        except Exception:
+            logger.debug(
+                "load_active_workspace failed; proceeding with cleared state",
+                exc_info=True,
+            )
+
         resolver, ws_root = self._create_resolver(ws_root)
         if resolver is None:
             return
