@@ -128,6 +128,19 @@ async def connect_to_sidecar(port: int) -> Any:
         await session.__aenter__()
         await session.initialize()
 
+        # Pre-populate tool output schema cache to prevent deadlock.
+        # Without this, the first call_tool() triggers _validate_tool_result()
+        # which calls list_tools() on the SAME SSE connection that's still
+        # streaming the tool response — causing a transport deadlock.
+        try:
+            await session.list_tools()
+            logger.debug(
+                "[SIDECAR-CLIENT] Pre-cached %d tool schemas",
+                len(session._tool_output_schemas),
+            )
+        except Exception:
+            logger.debug("[SIDECAR-CLIENT] list_tools pre-cache failed", exc_info=True)
+
         session._transport_ctx = transport_ctx  # type: ignore[attr-defined]
         logger.info("[SIDECAR-CLIENT] Connected to sidecar on port %d", port)
         return session
