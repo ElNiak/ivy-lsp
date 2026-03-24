@@ -500,3 +500,93 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 logger.debug("WorkspaceContext reload failed", exc_info=True)
 
         return _tc.finish({"summaries": summaries})
+
+
+# ---------------------------------------------------------------------------
+# Collision diagnostics helper (used by ivy_diagnostics mode="collisions")
+# ---------------------------------------------------------------------------
+
+
+async def _handle_collisions_mode(ctx: Any) -> dict:
+    """Report include-name collisions classified by layer relationship.
+
+    Examines the resolver's ``_collision_map`` and classifies each collision
+    by whether the files involved span layer boundaries and whether those
+    layers fall within the currently active workspace.
+
+    Classification rules:
+
+    - ``"intra-layer"`` / severity ``"error"``: two files with the same
+      basename belong to the *same* layer — this is a build-system bug.
+    - ``"cross-layer-in-scope"`` / severity ``"warning"``: the collision
+      spans multiple layers and at least one of those layers is in the
+      active workspace.
+    - ``"cross-boundary"`` / severity ``"info"``: the collision spans
+      multiple layers and none of the layers are active (safely isolated by
+      the workspace boundary).
+
+    Returns a dict with keys:
+        - ``total_collisions``: int
+        - ``by_severity``: dict with counts for "error", "warning", "info"
+        - ``collisions``: list of collision entries sorted errors-first
+
+    Args:
+        ctx: MCP ``ToolContext`` (must have ``include_resolver`` attribute).
+
+    Returns:
+        Collision report dict, or ``{"error": ..., "collisions": []}`` on
+        failure.
+    """
+    resolver = ctx.include_resolver
+    if not resolver or not hasattr(resolver, "_collision_map"):
+        return {"collisions": [], "error": "Resolver not available"}
+
+    collision_map = resolver._collision_map
+    file_to_layer = getattr(resolver, "_file_to_layer", {})
+    active_layers = getattr(resolver, "_active_layers", set())
+
+    results = []
+    for basename, paths in collision_map.items():
+        layers_involved: set = set()
+        for p in paths:
+            real_p = os.path.realpath(p)
+            layer = file_to_layer.get(real_p, "unknown")
+            layers_involved.add(layer)
+
+        # Classify severity based on layer relationship
+        if len(layers_involved) <= 1:
+            # All variants in the same layer — this is a real problem
+            severity = "error"
+            classification = "intra-layer"
+        elif active_layers and layers_involved & active_layers:
+            # At least one layer involved is currently active
+            severity = "warning"
+            classification = "cross-layer-in-scope"
+        else:
+            # Collision across an inactive boundary — safely isolated
+            severity = "info"
+            classification = "cross-boundary"
+
+        results.append(
+            {
+                "basename": basename,
+                "paths": list(paths),
+                "layers": sorted(layers_involved),
+                "severity": severity,
+                "classification": classification,
+            }
+        )
+
+    # Sort: errors first, then warnings, then info
+    _severity_order = {"error": 0, "warning": 1, "info": 2}
+    results.sort(key=lambda r: _severity_order.get(r["severity"], 3))
+
+    return {
+        "total_collisions": len(results),
+        "by_severity": {
+            "error": sum(1 for r in results if r["severity"] == "error"),
+            "warning": sum(1 for r in results if r["severity"] == "warning"),
+            "info": sum(1 for r in results if r["severity"] == "info"),
+        },
+        "collisions": results,
+    }

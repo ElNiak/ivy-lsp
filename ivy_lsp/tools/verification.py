@@ -572,20 +572,26 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         min_severity: str | None = None,
         scope: str = "",
     ) -> dict:
-        """Diagnostic analysis of an Ivy file.
+        """Diagnostic analysis of an Ivy file or workspace.
 
-        Supports two modes:
+        Supports three modes:
         - "structural": Fast structural lint only (milliseconds, no subprocess).
           Checks missing #lang header, unmatched braces, unresolved includes.
           Replaces the former ivy_lint tool.
         - "full": All 5 diagnostic layers (structural, lexer, semantic,
           coverage, pattern). More thorough but may take longer on first
           call (lazy model/graph building). Default.
+        - "collisions": Workspace-level include-name collision report.
+          Classifies basename collisions by layer relationship: intra-layer
+          (error), cross-layer-in-scope (warning), cross-boundary (info).
+          Does not require a file path (relative_path is ignored).
 
         Args:
             relative_path: Relative path to the .ivy file to diagnose.
+                Ignored when mode="collisions".
             mode: Diagnostic mode — "structural" for fast lint (replaces
-                ivy_lint), "full" for all layers (default).
+                ivy_lint), "full" for all layers (default), "collisions"
+                for workspace-level collision analysis.
             layers: Optional list of layers to run (full mode only).
                 Valid values: structural, lexer, semantic, coverage, pattern.
                 Defaults to all layers.
@@ -628,12 +634,19 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "scope": scope,
             },
         )
-        if mode not in ("structural", "full"):
+        if mode not in ("structural", "full", "collisions"):
             return _tc.finish(
                 error_response(
-                    f"Unknown mode '{mode}'. Valid modes: ['structural', 'full']"
+                    f"Unknown mode '{mode}'. Valid modes: ['structural', 'full', 'collisions']"
                 )
             )
+
+        # collisions mode: workspace-level, does not need a file path
+        if mode == "collisions":
+            from ivy_lsp.tools.analysis import _handle_collisions_mode
+
+            collision_result = await _handle_collisions_mode(ctx)
+            return _tc.finish(collision_result)
 
         try:
             abs_path = ctx.validate_path(relative_path)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -145,16 +146,49 @@ def compute_workspace_symbols(
     indexer,
     query: str,
     active_filepath: Optional[str] = None,
+    active_workspace=None,
 ) -> List[lsp.WorkspaceSymbol]:
     """Query the workspace indexer and return matching LSP WorkspaceSymbols.
 
     When *active_filepath* is provided and the indexer supports mirror
     scoping, results from the active file's scope are ranked first.
+
+    When *active_workspace* is provided and :meth:`~ActiveWorkspace.is_set`
+    returns ``True``, symbols are pre-filtered to only include those whose
+    source files belong to the active layers or are Ivy stdlib files
+    (path contains ``ivy/include``).  Symbols with no file path, or whose
+    file is not tracked in any layer, are included (fail-open).
     """
     if indexer is None:
         return []
     all_syms = indexer.lookup_all_symbols()
     flat = flatten_symbols(all_syms)
+
+    # Filter to active workspace layers + stdlib
+    if (
+        active_workspace is not None
+        and active_workspace.is_set()
+        and hasattr(indexer, "resolver")
+    ):
+        file_to_layer = indexer.resolver._file_to_layer
+        stdlib_marker = os.sep + os.path.join("ivy", "include")
+        flat = [
+            f
+            for f in flat
+            if (
+                # stdlib is always included
+                (f.file_path and stdlib_marker in f.file_path)
+                # file whose layer is in the active set
+                or file_to_layer.get(
+                    os.path.normpath(os.path.abspath(f.file_path or ""))
+                )
+                in active_workspace.active_layers
+                # file with no path or not in any layer: fail-open
+                or not f.file_path
+                or os.path.normpath(os.path.abspath(f.file_path)) not in file_to_layer
+            )
+        ]
+
     matches = search_symbols(flat, query)
 
     # Scope-aware ranking: in-scope symbols sort before out-of-scope.
@@ -163,8 +197,6 @@ def compute_workspace_symbols(
         scope_files = indexer.get_scope_files_for_file(active_filepath)
 
     if scope_files is not None:
-        import os
-
         q_lower = query.lower()
 
         resolver = getattr(indexer, "resolver", None)
@@ -210,8 +242,6 @@ def compute_workspace_symbols(
         ws = to_workspace_symbol(f)
         # Add container name from endpoint mirror scope.
         if scope_files is not None and f.file_path:
-            import os
-
             abs_fp = os.path.abspath(f.file_path)
             if abs_fp in scope_files and hasattr(
                 indexer, "get_endpoint_mirrors_for_file"
@@ -260,19 +290,31 @@ def register(server) -> None:
 
             active_filepath = uri_to_path(last_uri)
 
+        # Retrieve active workspace from server's workspace context (if any).
+        active_workspace = None
+        ws_ctx = getattr(server, "_workspace_context", None)
+        if ws_ctx is not None:
+            active_workspace = getattr(ws_ctx, "active_workspace", None)
+
         logger.info(
-            "workspace/symbol: query=%r, active_uri=%r",
+            "workspace/symbol: query=%r, active_uri=%r, active_workspace=%r",
             params.query,
             last_uri,
+            active_workspace.active_group if active_workspace is not None else None,
         )
 
         loop = asyncio.get_running_loop()
+        import functools
+
         result = await loop.run_in_executor(
             None,
-            compute_workspace_symbols,
-            server.indexer,
-            params.query or "",
-            active_filepath,
+            functools.partial(
+                compute_workspace_symbols,
+                server.indexer,
+                params.query or "",
+                active_filepath,
+                active_workspace,
+            ),
         )
 
         from ivy_lsp.debug_trace import get_tracer
