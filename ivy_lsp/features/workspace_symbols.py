@@ -240,7 +240,7 @@ def register(server) -> None:
                 return [
                     lsp.WorkspaceSymbol(
                         name="[Ivy LSP is still indexing...]",
-                        kind=lsp.SymbolKind.Null,
+                        kind=lsp.SymbolKind.Namespace,
                         location=lsp.Location(
                             uri="",
                             range=lsp.Range(

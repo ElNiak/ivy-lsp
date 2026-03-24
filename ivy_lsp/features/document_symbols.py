@@ -107,7 +107,7 @@ def _status_document_symbol(message: str, detail: str) -> lsp.DocumentSymbol:
     This gives clients an actionable hint when symbol extraction is not ready
     (e.g. startup indexing) or otherwise unavailable.
     """
-    kind = getattr(lsp.SymbolKind, "Null", lsp.SymbolKind.Namespace)
+    kind = lsp.SymbolKind.Namespace
     r = make_range(0, 0, 0, 0)
     return lsp.DocumentSymbol(
         name=f"[ivy-lsp] {message}",
