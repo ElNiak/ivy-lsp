@@ -77,12 +77,13 @@ class ServerSetupMixin:
                     },
                 )
             else:
-                slog.debug(
-                    "No offline index found; will use live indexing",
+                slog.info(
+                    "No offline index found at %s; will use live indexing",
+                    ws_root,
                     extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "offline_index")},
                 )
         except Exception:
-            logger.debug(
+            logger.warning(
                 "WorkspaceContext loading failed; proceeding without offline index",
                 exc_info=True,
             )
