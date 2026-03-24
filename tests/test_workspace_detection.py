@@ -11,6 +11,7 @@ from ivy_lsp.config import reset_config
 from ivy_lsp.workspace_detection import (
     WorkspaceConfig,
     WorkspaceLayer,
+    _discover_protocols,
     _panther_heuristic,
     _read_marker,
     _resolve_git_worktree,
@@ -434,7 +435,11 @@ class TestV3LayerParsing:
 
 class TestPantherHeuristicV3:
     def test_heuristic_returns_layers(self, tmp_workspace):
-        """PANTHER heuristic should return v3-compatible WorkspaceConfig with layers."""
+        """PANTHER heuristic should return v3-compatible WorkspaceConfig with layers.
+
+        When no per-protocol .ivyworkspace markers exist the heuristic falls back to
+        the legacy hardcoded protocol list (quic, minip, apt) — one layer per protocol.
+        """
         panther_ivy = (
             tmp_workspace
             / "panther"
@@ -446,9 +451,10 @@ class TestPantherHeuristicV3:
         (panther_ivy / "protocol-testing").mkdir(parents=True)
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
-        assert len(config.workspace_layers) == 2
-        assert config.workspace_layers[0].id == "standard"
-        assert config.workspace_layers[1].id == "apt"
+        # Falls back to legacy 3-protocol list: quic, minip, apt
+        assert len(config.workspace_layers) == 3
+        layer_ids = {layer.id for layer in config.workspace_layers}
+        assert layer_ids == {"quic", "minip", "apt"}
         assert config.project_type == "panther"
 
 
@@ -571,3 +577,94 @@ class TestApplyMarkerNewFields:
         assert config.workspace_root == str(tmp_workspace)
         assert "protocol-testing/quic" in config.include_paths
         assert config.exclude_paths == ["test"]
+
+
+# ---------------------------------------------------------------------------
+# Task 13: _discover_protocols dynamic discovery
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverProtocols:
+    def test_discover_protocols_from_markers(self, tmp_path):
+        """Protocols with .ivyworkspace markers are discovered; those without are not."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "apt").mkdir()
+        (pt / "apt" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "no_marker").mkdir()  # No marker — should not be discovered
+
+        protocols = _discover_protocols(str(pt))
+        assert "quic" in protocols
+        assert "apt" in protocols
+        assert "no_marker" not in protocols
+
+    def test_discover_protocols_sorted(self, tmp_path):
+        """Discovered protocol list is sorted alphabetically."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        for name in ["zzz", "aaa", "mmm"]:
+            (pt / name).mkdir()
+            (pt / name / ".ivyworkspace").write_text('{"version": 3}')
+
+        protocols = _discover_protocols(str(pt))
+        assert protocols == sorted(protocols)
+
+    def test_discover_protocols_nonexistent_dir(self, tmp_path):
+        """Non-existent protocol-testing dir returns empty list."""
+        protocols = _discover_protocols(str(tmp_path / "no-such-dir"))
+        assert protocols == []
+
+    def test_discover_protocols_empty_dir(self, tmp_path):
+        """Empty protocol-testing dir returns empty list."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        protocols = _discover_protocols(str(pt))
+        assert protocols == []
+
+    def test_discover_protocols_files_ignored(self, tmp_path):
+        """Regular files (not dirs) are not returned, even if named like protocols."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        (pt / "README.md").write_text("not a protocol dir")
+        protocols = _discover_protocols(str(pt))
+        assert protocols == []
+
+
+class TestPantherHeuristicDynamicDiscovery:
+    def test_heuristic_uses_discovered_protocols(self, tmp_path):
+        """PANTHER heuristic discovers protocols via per-protocol markers."""
+        panther_ivy = (
+            tmp_path / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        )
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "bgp").mkdir()
+        (pt / "bgp" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "no_marker").mkdir()  # No marker — must be excluded
+
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.project_type == "panther"
+        assert any("protocol-testing/quic" in p for p in config.include_paths)
+        assert any("protocol-testing/bgp" in p for p in config.include_paths)
+        assert not any("no_marker" in p for p in config.include_paths)
+
+    def test_heuristic_falls_back_to_legacy_when_no_markers(self, tmp_path):
+        """PANTHER heuristic falls back to legacy protocol list when no markers found."""
+        panther_ivy = (
+            tmp_path / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        )
+        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        # No per-protocol .ivyworkspace markers
+
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.project_type == "panther"
+        # Legacy hardcoded protocols must still appear
+        legacy = {"quic", "minip", "apt"}
+        discovered = {p.split("/")[-1] for p in config.include_paths}
+        assert legacy == discovered

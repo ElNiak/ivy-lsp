@@ -224,80 +224,97 @@ def _resolve_git_worktree(start_dir: str) -> Optional[str]:
     return None
 
 
+def _discover_protocols(protocol_testing_dir: str) -> list[str]:
+    """Discover protocols by scanning for per-protocol ``.ivyworkspace`` markers.
+
+    Returns a sorted list of protocol names (subdirectory names under
+    *protocol_testing_dir*) that contain a ``.ivyworkspace`` file.
+
+    Falls back to an empty list if *protocol_testing_dir* does not exist.
+    """
+    protocols = []
+    if not os.path.isdir(protocol_testing_dir):
+        return protocols
+    for entry in sorted(os.listdir(protocol_testing_dir)):
+        entry_path = os.path.join(protocol_testing_dir, entry)
+        if os.path.isdir(entry_path):
+            marker = os.path.join(entry_path, _IVYWORKSPACE_FILENAME)
+            if os.path.exists(marker):
+                protocols.append(entry)
+    return protocols
+
+
+def _build_panther_workspace(
+    panther_ivy_root: str,
+) -> WorkspaceConfig:
+    """Build a WorkspaceConfig for a PANTHER panther_ivy root directory.
+
+    Dynamically discovers protocols via per-protocol ``.ivyworkspace`` markers.
+    Falls back to the legacy hardcoded list (``quic``, ``minip``, ``apt``) when no
+    markers are found, so the heuristic remains functional on uninitialized repos.
+    """
+    protocol_testing_dir = os.path.join(panther_ivy_root, "protocol-testing")
+    discovered = _discover_protocols(protocol_testing_dir)
+
+    # Fallback to legacy hardcoded protocols when no per-protocol markers exist
+    if not discovered:
+        logger.debug(
+            "No per-protocol .ivyworkspace markers found under %s; "
+            "falling back to legacy hardcoded protocol list",
+            protocol_testing_dir,
+        )
+        discovered = ["quic", "minip", "apt"]
+
+    include_paths = [f"protocol-testing/{p}" for p in discovered]
+
+    # Build one layer per protocol for a lightweight heuristic config.
+    # (The root .ivyworkspace, if present, will already provide richer layer data
+    # via the marker pipeline; this only runs when no marker was found.)
+    layers = [
+        WorkspaceLayer(
+            id=p,
+            include_paths=[f"protocol-testing/{p}"],
+            priority=i + 1,
+        )
+        for i, p in enumerate(discovered)
+    ]
+
+    return WorkspaceConfig(
+        workspace_root=panther_ivy_root,
+        workspace_layers=layers,
+        include_paths=include_paths,
+        exclude_paths=[
+            "submodules",
+            "test",
+            "doc",
+            "examples",
+            "notebooks",
+            "patches",
+        ],
+        detected_by="heuristic",
+        project_type="panther",
+    )
+
+
 def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
-    """Detect PANTHER project by looking for ``protocol-testing/`` with ``.ivy`` files."""
+    """Detect PANTHER project by looking for ``protocol-testing/`` with ``.ivy`` files.
+
+    When per-protocol ``.ivyworkspace`` markers are present under
+    ``protocol-testing/``, protocols are discovered dynamically via
+    :func:`_discover_protocols` instead of using a hardcoded list.
+    """
     current = os.path.abspath(start_dir)
     for _ in range(10):
         candidate = os.path.join(
             current, "panther", "plugins", "services", "testers", "panther_ivy"
         )
         if os.path.isdir(os.path.join(candidate, "protocol-testing")):
-            return WorkspaceConfig(
-                workspace_root=candidate,
-                workspace_layers=[
-                    WorkspaceLayer(
-                        id="standard",
-                        include_paths=[
-                            "protocol-testing/quic",
-                            "protocol-testing/minip",
-                        ],
-                        priority=1,
-                    ),
-                    WorkspaceLayer(
-                        id="apt", include_paths=["protocol-testing/apt"], priority=2
-                    ),
-                ],
-                include_paths=[
-                    "protocol-testing/quic",
-                    "protocol-testing/minip",
-                    "protocol-testing/apt",
-                ],
-                exclude_paths=[
-                    "submodules",
-                    "test",
-                    "doc",
-                    "examples",
-                    "notebooks",
-                    "patches",
-                ],
-                detected_by="heuristic",
-                project_type="panther",
-            )
+            return _build_panther_workspace(candidate)
         # Maybe CWD is inside panther_ivy
         if os.path.isdir(os.path.join(current, "protocol-testing")) and os.path.isfile(
             os.path.join(current, "panther_ivy.py")
         ):
-            return WorkspaceConfig(
-                workspace_root=current,
-                workspace_layers=[
-                    WorkspaceLayer(
-                        id="standard",
-                        include_paths=[
-                            "protocol-testing/quic",
-                            "protocol-testing/minip",
-                        ],
-                        priority=1,
-                    ),
-                    WorkspaceLayer(
-                        id="apt", include_paths=["protocol-testing/apt"], priority=2
-                    ),
-                ],
-                include_paths=[
-                    "protocol-testing/quic",
-                    "protocol-testing/minip",
-                    "protocol-testing/apt",
-                ],
-                exclude_paths=[
-                    "submodules",
-                    "test",
-                    "doc",
-                    "examples",
-                    "notebooks",
-                    "patches",
-                ],
-                detected_by="heuristic",
-                project_type="panther",
-            )
+            return _build_panther_workspace(current)
         parent = os.path.dirname(current)
         if parent == current:
             break
