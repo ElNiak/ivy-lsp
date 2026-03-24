@@ -119,6 +119,7 @@ class IndexBuilder:
             workspace_root=self.workspace_root,
             exclude_paths=self.workspace_config.exclude_paths,
             include_paths=[protocol_rel],
+            workspace_layers=self.workspace_config.workspace_layers,
         )
         # Create staging so resolver.resolve() can find cross-directory includes
         try:
@@ -164,6 +165,8 @@ class IndexBuilder:
         includes_raw: Dict[str, List[str]] = {}
         exports_map: Dict[str, dict] = {}
         requirements_map: Dict[str, list] = {}
+        tier_counts: Dict[str, int] = {"ast": 0, "lexer": 0, "regex": 0, "unknown": 0}
+        tier1_failures: List[Dict[str, str]] = []
 
         for filepath in ivy_files:
             rel_path = os.path.relpath(filepath, protocol_dir)
@@ -230,13 +233,26 @@ class IndexBuilder:
             except OSError:
                 stat = None
                 sha = ""
+            tier_label = _tier_label(result.tier_used)
             manifest_files[rel_path] = {
                 "mtime": stat.st_mtime if stat else 0.0,
                 "size": stat.st_size if stat else 0,
                 "sha256": sha,
                 "completeness": completeness,
-                "parse_tier": _tier_label(result.tier_used),
+                "parse_tier": tier_label,
             }
+            tier_counts[tier_label] = tier_counts.get(tier_label, 0) + 1
+
+            # Collect tier-1 failure details for CLI reporting
+            for tier_err in result.errors:
+                if tier_err.tier == 1:
+                    tier1_failures.append(
+                        {
+                            "file": rel_path,
+                            "error_type": tier_err.error_type,
+                            "message": tier_err.message,
+                        }
+                    )
 
         # -- 5. Build IncludeGraph from resolved includes ------------------
         include_graph = IncludeGraph()
@@ -393,6 +409,31 @@ class IndexBuilder:
             elapsed,
         )
 
+        # Summarize tier-1 failures by category for actionable output
+        failure_summary: List[Dict[str, Any]] = []
+        if tier1_failures:
+            # Group by error message to deduplicate
+            from collections import Counter
+
+            msg_counts: Counter = Counter()
+            msg_files: Dict[str, List[str]] = {}
+            for f in tier1_failures:
+                msg = f["message"]
+                msg_counts[msg] += 1
+                msg_files.setdefault(msg, []).append(f["file"])
+            for msg, count in msg_counts.most_common():
+                files_sample = msg_files[msg][:3]
+                failure_summary.append(
+                    {
+                        "reason": msg,
+                        "count": count,
+                        "files_sample": files_sample,
+                    }
+                )
+
+        # Remove zero-count tiers for cleaner output
+        tier_counts_clean = {k: v for k, v in tier_counts.items() if v > 0}
+
         return {
             "protocol": protocol,
             "files": len(ivy_files),
@@ -400,6 +441,8 @@ class IndexBuilder:
             "elapsed_ms": round(elapsed, 1),
             "status": "ok",
             "errors": errors if errors else None,
+            "parse_tiers": tier_counts_clean,
+            "tier1_failures": failure_summary if failure_summary else None,
         }
 
     def build_all(self) -> List[dict]:
