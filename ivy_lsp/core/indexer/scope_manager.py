@@ -3,7 +3,7 @@
 Extracts requirement graph wiring, test scope computation, incremental
 re-indexing, and scope-aware symbol queries.  All methods operate on
 ``self`` which is a
-:class:`~ivy_lsp.indexer.workspace_indexer.WorkspaceIndexer` instance at
+:class:`~ivy_lsp.core.indexer.workspace_indexer.WorkspaceIndexer` instance at
 runtime.
 """
 

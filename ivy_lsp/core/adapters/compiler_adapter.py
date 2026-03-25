@@ -33,7 +33,7 @@ class CompilerSession:
 
     Saves and restores ``ivy_module``, ``ivy_logic``, and ``ivy_compiler``
     globals in addition to the parser globals already handled by
-    :class:`~ivy_lsp.parsing.parser_session.ParserSession`.
+    :class:`~ivy_lsp.core.parsing.parser_session.ParserSession`.
 
     Args:
         timeout: Seconds to wait for the parser lock.  Passed through to
@@ -87,7 +87,7 @@ class CompilerSession:
 class CompilerAdapter:
     """Wraps the Ivy compiler with state isolation.
 
-    Implements :class:`~ivy_lsp.adapters.protocols.ICompilerAdapter`.
+    Implements :class:`~ivy_lsp.core.adapters.protocols.ICompilerAdapter`.
     When a :class:`CompilerManager` is provided, delegates compilation
     to a subprocess for full isolation.
     """

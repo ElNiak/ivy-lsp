@@ -174,7 +174,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
             # 5. Behavior/monitor files exist
             # Note: _monitor_re, _export_re, _tag_re below intentionally use regex
             # for quality-gate counting — not symbol extraction.
-            # See ivy_lsp.parsing.tiered_extractor for the symbol extraction cascade.
+            # See ivy_lsp.core.parsing.tiered_extractor for the symbol extraction cascade.
             behavior_files = [
                 f for f in prot_files if "_behavior" in os.path.basename(f)
             ]

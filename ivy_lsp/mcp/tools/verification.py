@@ -25,7 +25,7 @@ _CACHE_MAX_SIZE = 100
 
 # These patterns intentionally use regex — they perform semantic diagnostic
 # checks and tool output parsing, not symbol extraction.  See
-# ivy_lsp.parsing.tiered_extractor for the symbol extraction cascade.
+# ivy_lsp.core.parsing.tiered_extractor for the symbol extraction cascade.
 _ASSERTION_RE = re.compile(
     r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
 )

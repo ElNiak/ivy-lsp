@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.workspace.detection module."""
+"""Tests for ivy_lsp.core.workspace.detection module."""
 
 import json
 import shutil

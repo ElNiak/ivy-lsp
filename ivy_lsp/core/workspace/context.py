@@ -212,7 +212,7 @@ class WorkspaceContext:
         Args:
             state_file_path: Path to the ``.ivy-workspace-state.json`` file.
             detected_protocol_id: The ``protocol_id`` from the freshly detected
-                :class:`~ivy_lsp.workspace.detection.WorkspaceConfig`, or
+                :class:`~ivy_lsp.core.workspace.detection.WorkspaceConfig`, or
                 ``None`` when detection did not produce a protocol ID.
         """
         persisted = ActiveWorkspace.load(state_file_path)

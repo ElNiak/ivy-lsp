@@ -2,7 +2,7 @@
 
 Extracts background full-parse methods that upgrade shallow-indexed symbols
 to AST quality.  All methods operate on ``self`` which is a
-:class:`~ivy_lsp.indexer.workspace_indexer.WorkspaceIndexer` instance at
+:class:`~ivy_lsp.core.indexer.workspace_indexer.WorkspaceIndexer` instance at
 runtime.
 """
 

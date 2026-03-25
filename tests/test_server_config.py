@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.config.ServerConfig."""
+"""Tests for ivy_lsp.infra.config.ServerConfig."""
 
 from __future__ import annotations
 

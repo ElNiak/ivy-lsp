@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.workspace.session_overlay."""
+"""Tests for ivy_lsp.core.workspace.session_overlay."""
 
 from __future__ import annotations
 

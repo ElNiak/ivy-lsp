@@ -1382,7 +1382,7 @@ class TestSharedRankByScope:
     """Phase 2.9: rank_by_scope shared utility works standalone."""
 
     def test_import_from_shared_module(self, tmp_path):
-        """rank_by_scope is importable from ivy_lsp.utils.scope_ranking."""
+        """rank_by_scope is importable from ivy_lsp.infra.utils.scope_ranking."""
         from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")

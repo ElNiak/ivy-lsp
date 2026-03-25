@@ -57,7 +57,7 @@ def build_semantic_model(
     except ImportError:
         logger.warning(
             "Semantic model unavailable: required modules "
-            "(ivy_lsp.semantic.model or ivy_lsp.semantic.rfc_annotations) "
+            "(ivy_lsp.core.semantic.model or ivy_lsp.core.semantic.rfc_annotations) "
             "could not be imported. Install ivy-lsp[semantic] to enable "
             "traceability tools.",
             exc_info=True,

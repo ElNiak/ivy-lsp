@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.utils.async_subprocess."""
+"""Tests for ivy_lsp.infra.utils.async_subprocess."""
 
 from __future__ import annotations
 

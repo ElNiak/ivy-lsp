@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.utils.path_normalize."""
+"""Tests for ivy_lsp.infra.utils.path_normalize."""
 
 import os
 import sys

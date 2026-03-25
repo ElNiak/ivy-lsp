@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.parsing.tiered_extractor and symbol_to_model."""
+"""Tests for ivy_lsp.core.parsing.tiered_extractor and symbol_to_model."""
 
 from __future__ import annotations
 

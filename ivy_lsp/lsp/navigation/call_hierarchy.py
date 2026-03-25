@@ -10,7 +10,7 @@ In Ivy:
 * **Outgoing calls** from action ``foo`` are: action names referenced in
   ``foo``'s body and in its associated ``before``/``after`` blocks.
 
-When a :class:`~ivy_lsp.semantic.model.SemanticModel` is available the
+When a :class:`~ivy_lsp.core.semantic.model.SemanticModel` is available the
 handlers first query ``CALLS`` / ``MONITORS`` edges and only fall back to
 the brute-force regex scanning when the model path yields no results.
 """

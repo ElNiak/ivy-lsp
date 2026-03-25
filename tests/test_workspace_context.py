@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.workspace.context module."""
+"""Tests for ivy_lsp.core.workspace.context module."""
 
 from __future__ import annotations
 

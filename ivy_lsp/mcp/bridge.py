@@ -7,7 +7,7 @@ responses back to stdout.
 Includes automatic reconnection with exponential backoff and
 a standalone fallback if the sidecar becomes permanently unavailable.
 
-Usage: python -m ivy_lsp.mcp_bridge 19847 [port_file]
+Usage: python -m ivy_lsp.mcp.bridge 19847 [port_file]
 """
 
 from __future__ import annotations
@@ -372,7 +372,7 @@ async def run(port: int, port_file: str | None = None) -> None:
 
 
 def main() -> None:
-    """Entry point for ``python -m ivy_lsp.mcp_bridge [port] [port_file]``."""
+    """Entry point for ``python -m ivy_lsp.mcp.bridge [port] [port_file]``."""
     import glob as _glob
 
     log_level = os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper()

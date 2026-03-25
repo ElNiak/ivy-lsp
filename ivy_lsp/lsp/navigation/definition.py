@@ -126,7 +126,7 @@ def _rank_by_scope(
 ) -> list:
     """Rank definition results by scope relevance.
 
-    Delegates to the shared :func:`ivy_lsp.utils.scope_ranking.rank_by_scope`.
+    Delegates to the shared :func:`ivy_lsp.infra.utils.scope_ranking.rank_by_scope`.
     """
     from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 

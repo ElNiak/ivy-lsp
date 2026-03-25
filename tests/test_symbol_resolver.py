@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.utils.symbol_resolver shared helpers."""
+"""Tests for ivy_lsp.infra.utils.symbol_resolver shared helpers."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.analysis.formula_analyzer module.
+"""Tests for ivy_lsp.core.analysis.formula_analyzer module.
 
 Covers both text-based extraction (extract_state_var_references_text) and
 AST-based extraction (extract_state_var_references).  Uses lightweight mock

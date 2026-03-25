@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.index_builder module."""
+"""Tests for ivy_lsp.lsp.index_builder module."""
 
 from __future__ import annotations
 

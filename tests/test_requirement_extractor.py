@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.analysis.requirement_extractor module.
+"""Tests for ivy_lsp.core.analysis.requirement_extractor module.
 
 Tests the full AST-based requirement extraction and the helper functions
 that do not depend on the ivy package.

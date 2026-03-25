@@ -23,8 +23,8 @@ from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 
 # Re-export verification functions so that external code and tests that patch
-# ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
-# tool handlers were moved to ``ivy_lsp.tools.*``.
+# ``ivy_lsp.mcp.server.shared_ivy_check`` (etc.) continue to work after the
+# tool handlers were moved to ``ivy_lsp.mcp.tools.*``.
 from ivy_lsp.mcp import client as sidecar_client
 
 # Extracted in Phase 5a — re-export for backward compatibility so that
@@ -39,7 +39,7 @@ from ivy_lsp.mcp.context import (  # noqa: F401
 logger = logging.getLogger(__name__)
 
 # Note: Symbol/type extraction regex patterns formerly defined here have been
-# relocated to ivy_lsp.parsing.tiered_extractor (Tier 3 fallback).  The
+# relocated to ivy_lsp.core.parsing.tiered_extractor (Tier 3 fallback).  The
 # _build_model() function now uses TieredExtractor for parser -> lexer -> regex
 # cascade.  Include extraction is also handled by TieredExtractor.
 

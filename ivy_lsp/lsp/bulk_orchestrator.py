@@ -1,7 +1,7 @@
 """Mixin providing bulk analysis and compilation orchestration.
 
 Methods on this mixin operate on ``self`` attributes from
-:class:`~ivy_lsp.server.IvyLanguageServer` via Python's MRO.
+:class:`~ivy_lsp.lsp.server.IvyLanguageServer` via Python's MRO.
 """
 
 import logging

@@ -23,7 +23,7 @@ class AstEnrichmentAdapter:
     Walks declarations to extract sort names, enum variants,
     formal parameters with sorts, and return sorts.
 
-    Implements :class:`~ivy_lsp.adapters.protocols.IAstEnrichmentAdapter`.
+    Implements :class:`~ivy_lsp.core.adapters.protocols.IAstEnrichmentAdapter`.
     """
 
     def extract_type_info(
