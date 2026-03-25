@@ -455,7 +455,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         try:
             from ivy_lsp.index_builder import IndexBuilder
-            from ivy_lsp.workspace_detection import detect_ivy_workspace
+            from ivy_lsp.workspace.detection import detect_ivy_workspace
         except ImportError as exc:
             return _tc.finish(
                 error_response(
@@ -498,7 +498,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         ws_ctx = getattr(ctx, "workspace_context", None)
         if ws_ctx is not None:
             try:
-                from ivy_lsp.workspace_context import WorkspaceContext
+                from ivy_lsp.workspace.context import WorkspaceContext
 
                 ctx.workspace_context = WorkspaceContext.load(ctx.root)
                 logger.info("Reloaded WorkspaceContext after index build")

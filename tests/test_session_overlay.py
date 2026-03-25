@@ -1,11 +1,11 @@
-"""Tests for ivy_lsp.session_overlay."""
+"""Tests for ivy_lsp.workspace.session_overlay."""
 
 from __future__ import annotations
 
 import threading
 import time
 
-from ivy_lsp.session_overlay import OverlayEntry, SessionOverlay
+from ivy_lsp.workspace.session_overlay import OverlayEntry, SessionOverlay
 
 # ---------------------------------------------------------------------------
 # Helpers

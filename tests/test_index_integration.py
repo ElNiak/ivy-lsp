@@ -20,8 +20,8 @@ import time
 import pytest
 
 from ivy_lsp.index_builder import IndexBuilder
-from ivy_lsp.workspace_context import WorkspaceContext
-from ivy_lsp.workspace_detection import WorkspaceConfig
+from ivy_lsp.workspace.context import WorkspaceContext
+from ivy_lsp.workspace.detection import WorkspaceConfig
 
 # ---------------------------------------------------------------------------
 # Fixture: force Tier 3 (regex) when ivy module unavailable

@@ -7,7 +7,7 @@ files instead of the entire repository.
 
 Typical usage::
 
-    from ivy_lsp.active_workspace import ActiveWorkspace
+    from ivy_lsp.workspace.active_workspace import ActiveWorkspace
 
     # Set the active workspace from a test file
     ws = ActiveWorkspace.from_test_file(
@@ -156,7 +156,7 @@ class ActiveWorkspace:
             file_to_layer: Mapping of absolute file path → layer ID.
             workspace_groups: Mapping of group name → list of layer IDs.
             workspace_layers: Optional list of
-                :class:`~ivy_lsp.workspace_detection.WorkspaceLayer` objects
+                :class:`~ivy_lsp.workspace.detection.WorkspaceLayer` objects
                 used to resolve ``depends_on`` chains during fallback.
 
         Returns:
@@ -325,7 +325,7 @@ def _resolve_layer_with_deps(
     """Collect *layer_id* and all of its transitive ``depends_on`` layers.
 
     Performs a BFS/iterative resolution over the ``depends_on`` field of each
-    :class:`~ivy_lsp.workspace_detection.WorkspaceLayer`.
+    :class:`~ivy_lsp.workspace.detection.WorkspaceLayer`.
 
     Args:
         layer_id: The seed layer to start from.

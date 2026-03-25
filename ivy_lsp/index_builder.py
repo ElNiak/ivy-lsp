@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import ivy_lsp
-from ivy_lsp.workspace_detection import detect_ivy_workspace
+from ivy_lsp.workspace.detection import detect_ivy_workspace
 
 logger = logging.getLogger(__name__)
 

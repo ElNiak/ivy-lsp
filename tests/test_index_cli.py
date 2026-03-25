@@ -66,7 +66,7 @@ class TestDetectSubcommand:
             "staleness": {},
         }
         with patch(
-            "ivy_lsp.workspace_context.WorkspaceContext.detect",
+            "ivy_lsp.workspace.context.WorkspaceContext.detect",
             return_value=detect_result,
         ) as mock_detect:
             with pytest.raises(SystemExit) as exc_info:

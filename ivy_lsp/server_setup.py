@@ -71,7 +71,7 @@ class ServerSetupMixin:
 
         # Load offline index context (graceful fallback to empty context)
         try:
-            from ivy_lsp.workspace_context import WorkspaceContext
+            from ivy_lsp.workspace.context import WorkspaceContext
 
             self._workspace_context = WorkspaceContext.load(ws_root)
             if self._workspace_context.has_index():
@@ -99,8 +99,8 @@ class ServerSetupMixin:
                 "WorkspaceContext loading failed; proceeding without offline index",
                 exc_info=True,
             )
-            from ivy_lsp.workspace_context import WorkspaceContext
-            from ivy_lsp.workspace_detection import WorkspaceConfig
+            from ivy_lsp.workspace.context import WorkspaceContext
+            from ivy_lsp.workspace.detection import WorkspaceConfig
 
             self._workspace_context = WorkspaceContext(
                 workspace_root=ws_root,
@@ -220,7 +220,7 @@ class ServerSetupMixin:
             (resolver, refined_ws_root) on success, (None, ws_root) on failure.
         """
         from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace_detection import detect_ivy_workspace
+        from ivy_lsp.workspace.detection import detect_ivy_workspace
 
         ws_config = detect_ivy_workspace(start_dir=ws_root)
         ws_root = ws_config.workspace_root

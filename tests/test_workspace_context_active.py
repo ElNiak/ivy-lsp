@@ -13,9 +13,9 @@ import os
 
 import pytest
 
-from ivy_lsp.active_workspace import ActiveWorkspace
-from ivy_lsp.workspace_context import WorkspaceContext
-from ivy_lsp.workspace_detection import WorkspaceConfig
+from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+from ivy_lsp.workspace.context import WorkspaceContext
+from ivy_lsp.workspace.detection import WorkspaceConfig
 
 # ---------------------------------------------------------------------------
 # Helpers

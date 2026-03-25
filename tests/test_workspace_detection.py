@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.workspace_detection module."""
+"""Tests for ivy_lsp.workspace.detection module."""
 
 import json
 import shutil
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ivy_lsp.config import reset_config
-from ivy_lsp.workspace_detection import (
+from ivy_lsp.workspace.detection import (
     WorkspaceConfig,
     WorkspaceLayer,
     _discover_protocols,
@@ -486,7 +486,7 @@ class TestWorkspaceConfigNewFields:
 class TestApplyMarkerNewFields:
     def test_apply_marker_parses_workspace_groups(self, tmp_workspace):
         """_apply_marker must parse workspace_groups from JSON."""
-        from ivy_lsp.workspace_detection import _apply_marker
+        from ivy_lsp.workspace.detection import _apply_marker
 
         marker_data = {
             "version": 3,
@@ -509,7 +509,7 @@ class TestApplyMarkerNewFields:
 
     def test_apply_marker_parses_protocol_id(self, tmp_workspace):
         """_apply_marker must parse protocol_id from JSON."""
-        from ivy_lsp.workspace_detection import _apply_marker
+        from ivy_lsp.workspace.detection import _apply_marker
 
         marker_data = {
             "version": 3,
@@ -529,7 +529,7 @@ class TestApplyMarkerNewFields:
         """workspace_root_offset must shift workspace_root relative to marker dir."""
         import os
 
-        from ivy_lsp.workspace_detection import _apply_marker
+        from ivy_lsp.workspace.detection import _apply_marker
 
         # Simulate: marker lives at tmp/protocol-testing/quic/.ivyworkspace
         # offset "../.." should resolve to tmp/ (the panther_ivy root)
@@ -555,7 +555,7 @@ class TestApplyMarkerNewFields:
 
     def test_apply_marker_backward_compat(self, tmp_workspace):
         """Existing markers without new fields must parse correctly with defaults."""
-        from ivy_lsp.workspace_detection import _apply_marker
+        from ivy_lsp.workspace.detection import _apply_marker
 
         marker_data = {
             "version": 3,

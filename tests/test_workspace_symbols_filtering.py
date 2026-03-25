@@ -12,13 +12,13 @@ import os
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.active_workspace import ActiveWorkspace
 from ivy_lsp.features.workspace_symbols import (
     FlatSymbol,
     compute_workspace_symbols,
     flatten_symbols,
 )
 from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.workspace.active_workspace import ActiveWorkspace
 
 # ---------------------------------------------------------------------------
 # Helpers / Mock objects

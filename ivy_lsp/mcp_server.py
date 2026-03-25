@@ -474,7 +474,7 @@ def start_mcp(
 
         # Use passed-in ws_config; only re-detect if not provided
         if ws_config is None:
-            from ivy_lsp.workspace_detection import detect_ivy_workspace
+            from ivy_lsp.workspace.detection import detect_ivy_workspace
 
             ws_config = detect_ivy_workspace(start_dir=root)
             logger.info(
@@ -1162,7 +1162,7 @@ def start_mcp(
 
     # Load workspace context from .ivy-index/ if available
     try:
-        from ivy_lsp.workspace_context import WorkspaceContext
+        from ivy_lsp.workspace.context import WorkspaceContext
 
         ctx.workspace_context = WorkspaceContext.load(root)
         if ctx.workspace_context.has_index():

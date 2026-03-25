@@ -10,8 +10,8 @@ from lsprotocol.types import SymbolKind
 
 from ivy_lsp.analysis.test_scope import TestScope
 from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.session_overlay import SessionOverlay, TestScopeView
-from ivy_lsp.workspace_context import WorkspaceContext
+from ivy_lsp.workspace.context import WorkspaceContext
+from ivy_lsp.workspace.session_overlay import SessionOverlay, TestScopeView
 
 # ---------------------------------------------------------------------------
 # Helpers

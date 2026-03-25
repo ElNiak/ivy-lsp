@@ -597,7 +597,7 @@ class TestLayerAwareFileDiscovery:
 
     def _make_workspace_with_layers(self, tmp_path):
         """Create a workspace with two layers (standard + apt) sharing basenames."""
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         quic.mkdir(parents=True)
@@ -667,7 +667,7 @@ class TestLayerAwareFileDiscovery:
         import logging
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         # Create a single layer with duplicate basenames
         sub1 = tmp_path / "proto" / "dir1"
@@ -842,7 +842,7 @@ class TestLayerAwareFileDiscovery:
         import logging
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         sub1 = tmp_path / "proto" / "dir1"
         sub1.mkdir(parents=True)
@@ -875,7 +875,7 @@ class TestDiagnosticLogging:
 
     def _make_two_layer_workspace(self, tmp_path):
         """Create a workspace with two layers sharing a colliding basename."""
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         quic.mkdir(parents=True)
@@ -969,7 +969,7 @@ class TestDiagnosticLogging:
         import logging
 
         from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         # Create workspace with one layer and a stdlib directory
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
@@ -1269,7 +1269,7 @@ class TestLayerGuardPreventsPartitionOverwrite:
     """Phase 2.7: build_partitioned_staging() must not overwrite layer partitions."""
 
     def _make_two_layer_workspace(self, tmp_path):
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         quic.mkdir(parents=True)

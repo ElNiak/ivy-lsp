@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.workspace_context module."""
+"""Tests for ivy_lsp.workspace.context module."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from ivy_lsp.workspace_context import (
+from ivy_lsp.workspace.context import (
     ProtocolIndex,
     StalenessInfo,
     WorkspaceContext,

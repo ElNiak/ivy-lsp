@@ -3,7 +3,7 @@
 import os
 
 from ivy_lsp.indexer.include_resolver import IncludeResolver
-from ivy_lsp.workspace_detection import WorkspaceLayer
+from ivy_lsp.workspace.detection import WorkspaceLayer
 
 
 def _make_layer_workspace(tmp_path):

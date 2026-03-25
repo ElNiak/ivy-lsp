@@ -83,7 +83,7 @@ class TestLayerScopedReferences:
         from ivy_lsp.indexer.include_resolver import IncludeResolver
         from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
         from ivy_lsp.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.workspace_detection import WorkspaceLayer
+        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         quic_dir = tmp_path / "quic"
         quic_dir.mkdir()

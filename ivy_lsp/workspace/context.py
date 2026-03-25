@@ -28,11 +28,11 @@ import pickle
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
-from ivy_lsp.active_workspace import ActiveWorkspace
 from ivy_lsp.analysis.test_scope import ExportImportInfo, TestScope
 from ivy_lsp.parsing.symbols import IncludeGraph
-from ivy_lsp.session_overlay import SessionOverlay, TestScopeView
-from ivy_lsp.workspace_detection import WorkspaceConfig, detect_ivy_workspace
+from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+from ivy_lsp.workspace.detection import WorkspaceConfig, detect_ivy_workspace
+from ivy_lsp.workspace.session_overlay import SessionOverlay, TestScopeView
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,7 @@ class WorkspaceContext:
         Args:
             state_file_path: Path to the ``.ivy-workspace-state.json`` file.
             detected_protocol_id: The ``protocol_id`` from the freshly detected
-                :class:`~ivy_lsp.workspace_detection.WorkspaceConfig`, or
+                :class:`~ivy_lsp.workspace.detection.WorkspaceConfig`, or
                 ``None`` when detection did not produce a protocol ID.
         """
         persisted = ActiveWorkspace.load(state_file_path)
