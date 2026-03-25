@@ -158,7 +158,6 @@ class McpServerState:
         include_paths: list[str] | None = None,
         exclude_dirs: frozenset[str] = frozenset(),
         executor: Any = None,
-        ws_config: Any = None,
         base_path: str | None = None,
     ):
         """Initialise server state from the same arguments ``start_mcp()`` receives."""
@@ -205,9 +204,6 @@ class McpServerState:
 
         # Workspace context — set after build_tool_context() by start_mcp()
         self.workspace_context: Any = None
-
-        # The ToolContext wired to this state (set by build_tool_context)
-        self._tool_context: ToolContext | None = None
 
     # --- File finding ---
 
@@ -903,7 +899,6 @@ class McpServerState:
         ctx.make_resolve_callback = self.make_resolve_callback
         ctx.include_resolver = self._resolver
 
-        self._tool_context = ctx
         return ctx
 
 
@@ -956,7 +951,8 @@ def start_mcp(
             through this directory (flat symlinks for CWD-relative includes).
         _return_app: Internal flag for testing. When True, returns the FastMCP
             instance without starting the server.
-        ws_config: Optional workspace configuration object.
+        ws_config: Optional workspace configuration object.  Used locally for
+            include/exclude path extraction and resolver setup; not stored.
     """
     with timed_phase(
         logger,
@@ -1067,7 +1063,6 @@ def start_mcp(
         include_paths=_include_paths,
         exclude_dirs=_extra_exclude_dirs,
         executor=executor,
-        ws_config=ws_config,
         base_path=base_path,
     )
 
