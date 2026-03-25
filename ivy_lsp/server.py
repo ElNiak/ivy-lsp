@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from typing import TYPE_CHECKING, Any, Optional
 
 from lsprotocol import types as lsp
@@ -14,8 +15,15 @@ import ivy_lsp.pygls_patches  # noqa: F401
 from ivy_lsp import __version__
 from ivy_lsp.bulk_orchestrator import BulkOrchestrationMixin
 from ivy_lsp.features.status import ServerStateTracker
+from ivy_lsp.observability import (
+    LogCategory,
+    LogEvent,
+    StructuredLogAdapter,
+    call_context,
+    get_call_id,
+    get_session_logger,
+)
 from ivy_lsp.server_setup import ServerSetupMixin
-from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 if TYPE_CHECKING:
     from ivy_lsp.compilation.compiler_manager import CompilerManager
@@ -78,64 +86,96 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
         server_ref = self
 
         def _audited_handle_request(msg_id, method_name, params):
-            server_ref._request_counts[method_name] = (
-                server_ref._request_counts.get(method_name, 0) + 1
+            base_call_id = (
+                f"req-{method_name.replace('/', '_')}-{uuid.uuid4().hex[:10]}"
             )
-            t0 = time.time()
-            try:
-                result = _original_handle_request(msg_id, method_name, params)
-                duration_ms = round((time.time() - t0) * 1000, 1)
-                slog.info(
-                    "LSP request",
-                    extra={
-                        "event": LogEvent(
-                            LogCategory.ACTIVITY,
-                            "audit",
-                            {
-                                "method": method_name,
-                                "duration_ms": duration_ms,
-                            },
-                        )
-                    },
+            with call_context(base_call_id):
+                server_ref._request_counts[method_name] = (
+                    server_ref._request_counts.get(method_name, 0) + 1
                 )
-                if method_name == "textDocument/diagnostic":
-                    server_ref._diagnostic_pull_count += 1
-                return result
-            except Exception:
-                duration_ms = round((time.time() - t0) * 1000, 1)
-                slog.warning(
-                    "LSP request failed",
-                    extra={
-                        "event": LogEvent(
-                            LogCategory.ACTIVITY,
-                            "audit",
-                            {
-                                "method": method_name,
-                                "duration_ms": duration_ms,
-                                "error": True,
-                            },
-                        )
-                    },
-                )
-                raise
-
-        def _audited_handle_notification(method_name, params):
-            server_ref._request_counts[method_name] = (
-                server_ref._request_counts.get(method_name, 0) + 1
-            )
-            slog.debug(
-                "LSP notification",
-                extra={
-                    "event": LogEvent(
-                        LogCategory.ACTIVITY,
-                        "audit",
-                        {
-                            "method": method_name,
+                t0 = time.time()
+                try:
+                    result = _original_handle_request(msg_id, method_name, params)
+                    duration_ms = round((time.time() - t0) * 1000, 1)
+                    get_session_logger().log_event(
+                        channel="lsp",
+                        event_type="request",
+                        name=method_name,
+                        status="ok",
+                        duration_ms=duration_ms,
+                        call_id=get_call_id(),
+                    )
+                    slog.info(
+                        "LSP request",
+                        extra={
+                            "event": LogEvent(
+                                LogCategory.ACTIVITY,
+                                "audit",
+                                {
+                                    "call_id": get_call_id(),
+                                    "method": method_name,
+                                    "duration_ms": duration_ms,
+                                },
+                            )
                         },
                     )
-                },
-            )
-            return _original_handle_notification(method_name, params)
+                    if method_name == "textDocument/diagnostic":
+                        server_ref._diagnostic_pull_count += 1
+                    return result
+                except Exception:
+                    duration_ms = round((time.time() - t0) * 1000, 1)
+                    get_session_logger().log_event(
+                        channel="lsp",
+                        event_type="request",
+                        name=method_name,
+                        status="error",
+                        duration_ms=duration_ms,
+                        call_id=get_call_id(),
+                    )
+                    slog.warning(
+                        "LSP request failed",
+                        extra={
+                            "event": LogEvent(
+                                LogCategory.ACTIVITY,
+                                "audit",
+                                {
+                                    "call_id": get_call_id(),
+                                    "method": method_name,
+                                    "duration_ms": duration_ms,
+                                    "error": True,
+                                },
+                            )
+                        },
+                    )
+                    raise
+
+        def _audited_handle_notification(method_name, params):
+            call_id = f"notif-{method_name.replace('/', '_')}-{uuid.uuid4().hex[:10]}"
+            with call_context(call_id):
+                server_ref._request_counts[method_name] = (
+                    server_ref._request_counts.get(method_name, 0) + 1
+                )
+                slog.debug(
+                    "LSP notification",
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.ACTIVITY,
+                            "audit",
+                            {
+                                "call_id": get_call_id(),
+                                "method": method_name,
+                            },
+                        )
+                    },
+                )
+                get_session_logger().log_event(
+                    channel="lsp",
+                    event_type="notification",
+                    name=method_name,
+                    status="ok",
+                    call_id=get_call_id(),
+                )
+                return _original_handle_notification(method_name, params)
 
         protocol._handle_request = _audited_handle_request  # type: ignore[assignment]
         protocol._handle_notification = _audited_handle_notification  # type: ignore[assignment]
@@ -163,6 +203,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
                                 LogCategory.DIAGNOSTIC,
                                 "publish",
                                 {
+                                    "call_id": get_call_id(),
                                     "uri": params.uri,
                                     "count": diag_count,
                                     "errors": error_count,

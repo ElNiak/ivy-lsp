@@ -13,7 +13,7 @@ import uuid
 from lsprotocol import types as lsp
 
 from ivy_lsp.config import get_config
-from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.observability import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})

@@ -30,8 +30,8 @@ from ivy_lsp.analysis.test_scope import (
 from ivy_lsp.config import get_config
 from ivy_lsp.indexer.file_cache import FileCache
 from ivy_lsp.indexer.include_resolver import IncludeResolver
+from ivy_lsp.observability import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
-from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})

@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any
 
-from ivy_lsp.debug_trace import ToolTraceContext
+from ivy_lsp.observability import ToolTraceContext
 from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)

@@ -203,7 +203,7 @@ def register(server) -> None:
                 ),
             )
 
-            from ivy_lsp.debug_trace import get_tracer
+            from ivy_lsp.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:

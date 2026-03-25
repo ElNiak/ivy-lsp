@@ -22,6 +22,7 @@ from ivy_lsp.adapters.protocols import (
     IParserAdapter,
 )
 from ivy_lsp.config import get_config
+from ivy_lsp.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.semantic.edges import SemanticEdgeType
 from ivy_lsp.semantic.model import SemanticModel
 from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
@@ -159,15 +160,31 @@ class AnalysisPipeline:
         to run_tier2 via the *rfc_annotations* kwarg, avoiding a redundant
         re-parse of the same source text.
         """
-        edges: List[Tuple[str, SemanticEdgeType, str]] = []
+        with timed_phase(
+            logger,
+            category=LogCategory.PERFORMANCE,
+            phase="tier1",
+            name="analysis_tier1",
+            channel="analysis",
+            payload={"filepath": filepath},
+        ):
+            edges: List[Tuple[str, SemanticEdgeType, str]] = []
 
-        # RFC annotation parsing from comments
-        annotations = parse_file_rfc_annotations(source, filepath)
+            # RFC annotation parsing from comments
+            annotations = parse_file_rfc_annotations(source, filepath)
 
-        self._model.update_file(filepath, list(annotations), edges, "tier1")
+            self._model.update_file(filepath, list(annotations), edges, "tier1")
         with self._state_lock:
             self._file_generation[filepath] = self._file_generation.get(filepath, 0) + 1
             self._tier1_files.add(filepath)
+        log_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="tier1",
+            message="Tier 1 complete",
+            data={"filepath": filepath, "annotations": len(annotations)},
+            level=logging.INFO,
+        )
         logger.debug("Tier 1 complete for %s: %d nodes", filepath, len(annotations))
         return annotations
 
@@ -192,76 +209,92 @@ class AnalysisPipeline:
 
         Returns the ParseResult so callers can reuse it (avoiding double parse).
         """
-        nodes: List[Any] = []
-        edges: List[Tuple[str, SemanticEdgeType, str]] = []
-
-        # Parse (reuse pre-parsed result if provided)
-        if (
-            parse_result is not None
-            and parse_result.success
-            and parse_result.ast is not None
+        with timed_phase(
+            logger,
+            category=LogCategory.PERFORMANCE,
+            phase="tier2",
+            name="analysis_tier2",
+            channel="analysis",
+            payload={"filepath": filepath},
         ):
-            result = parse_result
-        else:
-            result = self._parser.parse(source, filepath)
+            nodes: List[Any] = []
+            edges: List[Tuple[str, SemanticEdgeType, str]] = []
 
-        if not result.success or result.ast is None:
-            logger.debug("Tier 2 parse failure for %s, RFC-only mode", filepath)
-        if result.success and result.ast is not None:
-            # Extract type info
-            type_annotations = self._enrichment.extract_type_info(
-                result.ast, filepath, source
-            )
-            for ta in type_annotations:
-                if ta.is_enum or ta.sort_name != "action":
-                    node: Any = TypeNode(
-                        id=f"{filepath}:{ta.line}:{ta.name}",
-                        name=ta.name,
-                        qualified_name=ta.qualified_name,
-                        file=filepath,
-                        line=ta.line,
-                        sort_name=ta.sort_name,
-                        is_enum=ta.is_enum,
-                        variants=ta.variants,
-                        tier="tier2",
-                    )
-                else:
-                    node = SymbolNode(
-                        id=f"{filepath}:{ta.line}:{ta.name}",
-                        name=ta.name,
-                        qualified_name=ta.qualified_name,
-                        kind="action",
-                        file=filepath,
-                        line=ta.line,
-                        sort_name=ta.sort_name,
-                        arity=ta.arity,
-                        params=ta.params,
-                        return_sort=ta.return_sort,
-                        tier="tier2",
-                    )
-                nodes.append(node)
+            # Parse (reuse pre-parsed result if provided)
+            if (
+                parse_result is not None
+                and parse_result.success
+                and parse_result.ast is not None
+            ):
+                result = parse_result
+            else:
+                result = self._parser.parse(source, filepath)
 
-                # Wire HAS_PARAM edges for actions with parameters
-                if hasattr(node, "params") and node.params:
-                    for param in node.params:
-                        # param format: "name:sort"
-                        if ":" in param:
-                            sort_part = param.split(":", 1)[1]
-                            edges.append(
-                                (node.id, SemanticEdgeType.HAS_PARAM, sort_part)
-                            )
+            if not result.success or result.ast is None:
+                logger.debug("Tier 2 parse failure for %s, RFC-only mode", filepath)
+            if result.success and result.ast is not None:
+                # Extract type info
+                type_annotations = self._enrichment.extract_type_info(
+                    result.ast, filepath, source
+                )
+                for ta in type_annotations:
+                    if ta.is_enum or ta.sort_name != "action":
+                        node: Any = TypeNode(
+                            id=f"{filepath}:{ta.line}:{ta.name}",
+                            name=ta.name,
+                            qualified_name=ta.qualified_name,
+                            file=filepath,
+                            line=ta.line,
+                            sort_name=ta.sort_name,
+                            is_enum=ta.is_enum,
+                            variants=ta.variants,
+                            tier="tier2",
+                        )
+                    else:
+                        node = SymbolNode(
+                            id=f"{filepath}:{ta.line}:{ta.name}",
+                            name=ta.name,
+                            qualified_name=ta.qualified_name,
+                            kind="action",
+                            file=filepath,
+                            line=ta.line,
+                            sort_name=ta.sort_name,
+                            arity=ta.arity,
+                            params=ta.params,
+                            return_sort=ta.return_sort,
+                            tier="tier2",
+                        )
+                    nodes.append(node)
 
-        # Reuse RFC annotations from T1 when provided; otherwise re-parse.
-        if rfc_annotations is not None:
-            annotations = rfc_annotations
-        else:
-            annotations = parse_file_rfc_annotations(source, filepath)
-        for ann in annotations:
-            nodes.append(ann)
+                    # Wire HAS_PARAM edges for actions with parameters
+                    if hasattr(node, "params") and node.params:
+                        for param in node.params:
+                            # param format: "name:sort"
+                            if ":" in param:
+                                sort_part = param.split(":", 1)[1]
+                                edges.append(
+                                    (node.id, SemanticEdgeType.HAS_PARAM, sort_part)
+                                )
 
-        self._model.update_file(filepath, nodes, edges, "tier2")
+            # Reuse RFC annotations from T1 when provided; otherwise re-parse.
+            if rfc_annotations is not None:
+                annotations = rfc_annotations
+            else:
+                annotations = parse_file_rfc_annotations(source, filepath)
+            for ann in annotations:
+                nodes.append(ann)
+
+            self._model.update_file(filepath, nodes, edges, "tier2")
         with self._state_lock:
             self._tier2_files.add(filepath)
+        log_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="tier2",
+            message="Tier 2 complete",
+            data={"filepath": filepath, "nodes": len(nodes), "edges": len(edges)},
+            level=logging.INFO,
+        )
         logger.debug(
             "Tier 2 complete for %s: %d nodes, %d edges",
             filepath,
@@ -425,39 +458,61 @@ class AnalysisPipeline:
         Returns:
             A :class:`BulkAnalysisResult` summarising outcomes.
         """
-        with self._state_lock:
-            if include_t2:
-                remaining = [f for f in filepaths if f not in self._tier2_files]
-            else:
-                remaining = [f for f in filepaths if f not in self._tier1_files]
-            self._bulk.running = True
-            self._bulk.total = len(remaining)
-            self._bulk.completed = 0
-
-        result = BulkAnalysisResult(total=len(remaining))
-
-        num_workers = get_config().bulk_workers
-        try:
-            if num_workers > 1 and len(remaining) > 3:
-                self._run_bulk_parallel_t1(
-                    remaining,
-                    result,
-                    progress_callback,
-                    cancel_event,
-                    include_t2,
-                )
-            else:
-                self._run_bulk_sequential(
-                    remaining,
-                    result,
-                    progress_callback,
-                    cancel_event,
-                    include_t2,
-                )
-        finally:
+        with timed_phase(
+            logger,
+            category=LogCategory.PERFORMANCE,
+            phase="bulk",
+            name="run_bulk_t1_t2",
+            channel="analysis",
+            payload={"files": len(filepaths), "include_t2": include_t2},
+        ):
             with self._state_lock:
-                self._bulk.running = False
+                if include_t2:
+                    remaining = [f for f in filepaths if f not in self._tier2_files]
+                else:
+                    remaining = [f for f in filepaths if f not in self._tier1_files]
+                self._bulk.running = True
+                self._bulk.total = len(remaining)
+                self._bulk.completed = 0
 
+            result = BulkAnalysisResult(total=len(remaining))
+
+            num_workers = get_config().bulk_workers
+            try:
+                if num_workers > 1 and len(remaining) > 3:
+                    self._run_bulk_parallel_t1(
+                        remaining,
+                        result,
+                        progress_callback,
+                        cancel_event,
+                        include_t2,
+                    )
+                else:
+                    self._run_bulk_sequential(
+                        remaining,
+                        result,
+                        progress_callback,
+                        cancel_event,
+                        include_t2,
+                    )
+            finally:
+                with self._state_lock:
+                    self._bulk.running = False
+
+        log_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="bulk",
+            message="Bulk T1/T2 analysis complete",
+            data={
+                "total": result.total,
+                "t1_completed": result.t1_completed,
+                "t2_completed": result.t2_completed,
+                "errors": len(result.errors),
+                "cancelled": result.cancelled,
+            },
+            level=logging.INFO,
+        )
         logger.info(
             "Bulk analysis: %d/%d T1, %d/%d T2, %d errors, cancelled=%s",
             result.t1_completed,

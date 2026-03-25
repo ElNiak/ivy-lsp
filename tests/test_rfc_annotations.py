@@ -161,6 +161,20 @@ class TestFindManifests:
         with tempfile.TemporaryDirectory() as tmpdir:
             assert find_manifests(tmpdir) == []
 
+    def test_finds_manifests_in_protocol_dir_directly(self):
+        """IndexBuilder passes protocol_dir (e.g. protocol-testing/quic).
+
+        Which has no protocol-testing/ child.  find_manifests should fall
+        back to searching the root itself.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest = os.path.join(tmpdir, "rfc9000_requirements.yaml")
+            with open(manifest, "w") as f:
+                f.write("rfc: RFC9000\nrequirements: {}\n")
+            results = find_manifests(tmpdir)
+            assert len(results) == 1
+            assert results[0] == manifest
+
 
 class TestComputeCoverage:
     def test_full_coverage(self):

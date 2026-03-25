@@ -17,9 +17,12 @@ import json
 import logging
 import os
 import sys
+import time
 from typing import Any
 
 import anyio
+
+from ivy_lsp.observability import LogCategory, log_phase
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +30,21 @@ logger = logging.getLogger(__name__)
 _MAX_RECONNECT_ATTEMPTS = 5
 _BACKOFF_SCHEDULE = [2.0, 4.0, 8.0, 16.0, 30.0]
 _HEALTH_CHECK_INTERVAL = 15.0
+_TIMEOUT_CHECK_INTERVAL = 5.0
 
 # Sentinel value to signal stdin EOF
 _EOF_SENTINEL = None
+
+
+def _get_bridge_timeout() -> float:
+    """Read per-request timeout from env (default 120s)."""
+    raw = os.environ.get("IVY_LSP_BRIDGE_TIMEOUT")
+    if raw:
+        try:
+            return max(10.0, float(raw))
+        except (ValueError, TypeError):
+            pass
+    return 120.0
 
 
 def _read_port_from_file(port_file: str) -> int | None:
@@ -79,6 +94,18 @@ def _synthesize_errors(
         }
         sys.stdout.write(json.dumps(error) + "\n")
         sys.stdout.flush()
+    log_phase(
+        logger,
+        category=LogCategory.DIAGNOSTIC,
+        phase="mcp-bridge",
+        message="Synthesized MCP bridge errors for pending requests",
+        data={
+            "pending_count": len(pending),
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+        },
+        level=logging.WARNING,
+    )
     pending.clear()
 
 
@@ -121,10 +148,10 @@ async def _forward_to_sidecar(
                 logger.debug("_forward_to_sidecar received EOF sentinel")
                 break
             try:
-                # Track request IDs so we can synthesize errors on disconnect
+                # Track request IDs with timestamps for timeout detection
                 parsed = json.loads(item)
                 if "id" in parsed and "method" in parsed:
-                    pending[parsed["id"]] = True
+                    pending[parsed["id"]] = time.monotonic()
             except (json.JSONDecodeError, TypeError):
                 pass
             msg = JSONRPCMessage.model_validate_json(item)
@@ -206,6 +233,14 @@ async def _fallback_standalone(stdin_queue: asyncio.Queue) -> None:  # type: ign
         """Forward subprocess stderr to our stderr."""
         assert proc.stderr is not None
         try:
+            log_phase(
+                logger,
+                category=LogCategory.ACTIVITY,
+                phase="mcp-bridge",
+                message="Standalone MCP stderr relay started",
+                data={"workspace": workspace},
+                level=logging.DEBUG,
+            )
             async for line in proc.stderr:
                 sys.stderr.buffer.write(line)
                 sys.stderr.buffer.flush()
@@ -220,6 +255,46 @@ async def _fallback_standalone(stdin_queue: asyncio.Queue) -> None:  # type: ign
     await proc.wait()
 
 
+async def _timeout_watchdog(
+    pending: dict[str | int, Any],
+    timeout: float,
+) -> None:
+    """Periodically check for requests that have exceeded the timeout.
+
+    Synthesizes JSON-RPC error responses for timed-out requests so that
+    the client (Claude) does not hang indefinitely.
+    """
+    while True:
+        await asyncio.sleep(_TIMEOUT_CHECK_INTERVAL)
+        now = time.monotonic()
+        timed_out = [
+            req_id
+            for req_id, start_time in list(pending.items())
+            if isinstance(start_time, (int, float)) and (now - start_time) > timeout
+        ]
+        for req_id in timed_out:
+            elapsed = now - pending.pop(req_id, now)
+            error = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32603,
+                    "message": (
+                        f"Ivy MCP tool timed out after {elapsed:.0f}s "
+                        f"(limit: {timeout:.0f}s). Run /nct-health to diagnose."
+                    ),
+                },
+            }
+            sys.stdout.write(json.dumps(error) + "\n")
+            sys.stdout.flush()
+            logger.warning(
+                "Request %s timed out after %.1fs (limit: %.0fs)",
+                req_id,
+                elapsed,
+                timeout,
+            )
+
+
 async def run(port: int, port_file: str | None = None) -> None:
     """Bridge stdin/stdout to the MCP HTTP sidecar on *port*.
 
@@ -231,11 +306,16 @@ async def run(port: int, port_file: str | None = None) -> None:
 
     # Decouple stdin reading from forwarding so buffered input survives reconnects
     stdin_queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # type: ignore[type-arg]
-    # Track in-flight request IDs for error synthesis on disconnect
+    # Track in-flight request IDs (value = monotonic timestamp) for timeout detection
     pending_requests: dict[str | int, Any] = {}
+    bridge_timeout = _get_bridge_timeout()
 
     # Start the stdin reader once — it feeds the queue across reconnects
     stdin_task = asyncio.ensure_future(_relay_stdin(stdin_queue))
+    # Start the timeout watchdog once — it runs across reconnects
+    watchdog_task = asyncio.ensure_future(
+        _timeout_watchdog(pending_requests, bridge_timeout)
+    )
 
     for attempt in range(_MAX_RECONNECT_ATTEMPTS + 1):
         current_port = port
@@ -279,6 +359,7 @@ async def run(port: int, port_file: str | None = None) -> None:
             if attempt >= _MAX_RECONNECT_ATTEMPTS:
                 logger.error("All reconnection attempts exhausted")
                 stdin_task.cancel()
+                watchdog_task.cancel()
                 await _fallback_standalone(stdin_queue)
                 return
             continue
@@ -287,6 +368,7 @@ async def run(port: int, port_file: str | None = None) -> None:
         break
 
     stdin_task.cancel()
+    watchdog_task.cancel()
 
 
 def main() -> None:

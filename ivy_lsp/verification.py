@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any
 
+from ivy_lsp.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 
@@ -83,21 +84,27 @@ async def run_ivy_check(
     If staging_dir is provided, resolves the filepath through it
     so that include resolution works correctly.
     """
-    resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
-    cmd = ["ivy_check"]
-    if isolate:
-        cmd.append(f"isolate={isolate}")
-    cmd.append(resolved)
+    with timed_phase(
+        log,
+        category=LogCategory.PERFORMANCE,
+        phase="verification",
+        name="ivy_check",
+        channel="tool",
+        payload={"filepath": filepath, "isolate": isolate},
+    ):
+        resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
+        cmd = ["ivy_check"]
+        if isolate:
+            cmd.append(f"isolate={isolate}")
+        cmd.append(resolved)
 
-    result = await run_ivy_subprocess(
-        cmd, timeout=timeout, cwd=os.path.dirname(resolved)
-    )
-    raw_output = "\n".join(result.output_lines)
-    # Use the unified parser so all three functions return diagnostics
-    # with a consistent schema (including the "source" field).
-    diagnostics = parse_ivy_output(raw_output)
+        result = await run_ivy_subprocess(
+            cmd, timeout=timeout, cwd=os.path.dirname(resolved)
+        )
+        raw_output = "\n".join(result.output_lines)
+        diagnostics = parse_ivy_output(raw_output)
 
-    return {
+    response = {
         "success": result.success
         and not any(d["severity"] == "error" for d in diagnostics),
         "diagnostics": diagnostics,
@@ -106,6 +113,20 @@ async def run_ivy_check(
         "raw_output": raw_output.strip(),
         "duration_seconds": round(result.duration, 2),
     }
+    log_phase(
+        log,
+        category=LogCategory.DIAGNOSTIC,
+        phase="verification",
+        message="ivy_check completed",
+        data={
+            "filepath": filepath,
+            "isolate": isolate,
+            "success": response["success"],
+            "diagnostic_count": response["diagnostic_count"],
+        },
+        level=logging.INFO,
+    )
+    return response
 
 
 async def run_ivy_compile(
@@ -118,19 +139,27 @@ async def run_ivy_compile(
     resolver: Any | None = None,
 ) -> dict[str, Any]:
     """Run ivyc and return compilation result with structured diagnostics."""
-    resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
-    cmd = ["ivyc", f"target={target}"]
-    if isolate:
-        cmd.append(f"isolate={isolate}")
-    cmd.append(resolved)
+    with timed_phase(
+        log,
+        category=LogCategory.PERFORMANCE,
+        phase="verification",
+        name="ivyc",
+        channel="tool",
+        payload={"filepath": filepath, "target": target, "isolate": isolate},
+    ):
+        resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
+        cmd = ["ivyc", f"target={target}"]
+        if isolate:
+            cmd.append(f"isolate={isolate}")
+        cmd.append(resolved)
 
-    result = await run_ivy_subprocess(
-        cmd, timeout=timeout, cwd=os.path.dirname(resolved)
-    )
-    raw_output = "\n".join(result.output_lines).strip()
-    diagnostics = parse_ivy_output(raw_output)
+        result = await run_ivy_subprocess(
+            cmd, timeout=timeout, cwd=os.path.dirname(resolved)
+        )
+        raw_output = "\n".join(result.output_lines).strip()
+        diagnostics = parse_ivy_output(raw_output)
 
-    return {
+    response = {
         "success": result.success
         and not any(d["severity"] == "error" for d in diagnostics),
         "diagnostics": diagnostics,
@@ -140,6 +169,21 @@ async def run_ivy_compile(
         "target": target,
         "duration_seconds": round(result.duration, 2),
     }
+    log_phase(
+        log,
+        category=LogCategory.DIAGNOSTIC,
+        phase="verification",
+        message="ivyc completed",
+        data={
+            "filepath": filepath,
+            "target": target,
+            "isolate": isolate,
+            "success": response["success"],
+            "diagnostic_count": response["diagnostic_count"],
+        },
+        level=logging.INFO,
+    )
+    return response
 
 
 async def run_ivy_show(
@@ -151,22 +195,30 @@ async def run_ivy_show(
     resolver: Any | None = None,
 ) -> dict[str, Any]:
     """Run ivy_show and return model info with structured diagnostics."""
-    resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
-    cmd = ["ivy_show"]
-    if isolate:
-        cmd.append(f"isolate={isolate}")
-    cmd.append(resolved)
+    with timed_phase(
+        log,
+        category=LogCategory.PERFORMANCE,
+        phase="verification",
+        name="ivy_show",
+        channel="tool",
+        payload={"filepath": filepath, "isolate": isolate},
+    ):
+        resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
+        cmd = ["ivy_show"]
+        if isolate:
+            cmd.append(f"isolate={isolate}")
+        cmd.append(resolved)
 
-    result = await run_ivy_subprocess(
-        cmd,
-        timeout=timeout,
-        cwd=os.path.dirname(resolved),
-        use_semaphore=False,
-    )
-    raw_output = "\n".join(result.output_lines).strip()
-    diagnostics = parse_ivy_output(raw_output)
+        result = await run_ivy_subprocess(
+            cmd,
+            timeout=timeout,
+            cwd=os.path.dirname(resolved),
+            use_semaphore=False,
+        )
+        raw_output = "\n".join(result.output_lines).strip()
+        diagnostics = parse_ivy_output(raw_output)
 
-    return {
+    response = {
         "success": result.success
         and not any(d["severity"] == "error" for d in diagnostics),
         "diagnostics": diagnostics,
@@ -175,3 +227,17 @@ async def run_ivy_show(
         "raw_output": raw_output,
         "duration_seconds": round(result.duration, 2),
     }
+    log_phase(
+        log,
+        category=LogCategory.DIAGNOSTIC,
+        phase="verification",
+        message="ivy_show completed",
+        data={
+            "filepath": filepath,
+            "isolate": isolate,
+            "success": response["success"],
+            "diagnostic_count": response["diagnostic_count"],
+        },
+        level=logging.INFO,
+    )
+    return response

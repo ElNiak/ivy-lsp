@@ -14,6 +14,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
 from ivy_lsp.config import get_config
+from ivy_lsp.observability import (
+    LogCategory,
+    ensure_call_id,
+    get_call_id,
+    log_phase,
+    timed_phase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,23 +93,33 @@ async def run_ivy_subprocess(
         lines, duration, and return code.
     """
     start = time.monotonic()
+    cmd_name = cmd[0] if cmd else "unknown"
+    call_id = ensure_call_id("subproc")
 
     async def _run() -> SubprocessResult:
         nonlocal start
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-        except FileNotFoundError:
-            return SubprocessResult(
-                success=False,
-                message=f"{cmd[0]} not found on PATH",
-                duration=time.monotonic() - start,
-            )
+        with timed_phase(
+            logger,
+            category=LogCategory.PERFORMANCE,
+            phase="subprocess",
+            name=f"spawn:{cmd_name}",
+            channel="tool",
+            payload={"call_id": call_id, "cwd": cwd, "cmd": list(cmd)},
+        ):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                )
+            except FileNotFoundError:
+                return SubprocessResult(
+                    success=False,
+                    message=f"{cmd[0]} not found on PATH",
+                    duration=time.monotonic() - start,
+                )
 
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -135,6 +152,37 @@ async def run_ivy_subprocess(
         )
 
     if use_semaphore:
+        queue_t0 = time.monotonic()
         async with get_tool_semaphore():
-            return await _run()
-    return await _run()
+            wait_ms = (time.monotonic() - queue_t0) * 1000
+            log_phase(
+                logger,
+                category=LogCategory.PERFORMANCE,
+                phase="subprocess",
+                message="Subprocess semaphore acquired",
+                data={
+                    "call_id": get_call_id(),
+                    "cmd": list(cmd),
+                    "wait_ms": round(wait_ms, 2),
+                },
+                level=logging.DEBUG,
+            )
+            result = await _run()
+    else:
+        result = await _run()
+
+    log_phase(
+        logger,
+        category=LogCategory.PERFORMANCE,
+        phase="subprocess",
+        message="Subprocess finished",
+        data={
+            "call_id": get_call_id(),
+            "cmd": list(cmd),
+            "success": result.success,
+            "returncode": result.returncode,
+            "duration_ms": round(result.duration * 1000, 2),
+        },
+        level=logging.INFO,
+    )
+    return result

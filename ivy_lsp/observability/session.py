@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -107,6 +108,76 @@ def resolve_session_log_dir(
     return Path("/tmp/ivy-observability") / "sessions" / session_id
 
 
+# --- Error reporting helper ---
+
+_error_count = 0
+_last_error_report = 0.0
+_ERROR_REPORT_INTERVAL = 60.0  # seconds
+
+
+def _report_logging_error(exc: Exception, context: str) -> None:
+    """Report a logging subsystem error without disrupting the caller.
+
+    Rate-limited to at most one stderr message per 60 seconds.
+    Always increments the error counter (queryable via get_error_count).
+    """
+    global _error_count, _last_error_report
+    _error_count += 1
+    now = time.monotonic()
+    if (now - _last_error_report) >= _ERROR_REPORT_INTERVAL:
+        _last_error_report = now
+        try:
+            sys.stderr.write(
+                f"[ivy-lsp-logging] {context}: {type(exc).__name__}: {exc} "
+                f"(total errors: {_error_count})\n"
+            )
+            sys.stderr.flush()
+        except Exception:
+            pass  # stderr itself is broken
+
+
+def get_error_count() -> int:
+    """Return the total number of silenced logging errors."""
+    return _error_count
+
+
+def _maybe_rotate(
+    filepath: Path,
+    max_bytes: int = 5 * 1024 * 1024,  # 5 MB
+    backup_count: int = 5,
+) -> None:
+    """Rotate filepath when it exceeds max_bytes (POSIX-atomic, lock-free).
+
+    Safe with concurrent writers that use open/close per write (no cached
+    file handles).  Worst-case race: one extra rotation cycle, zero data loss.
+    """
+    try:
+        size = filepath.stat().st_size
+    except OSError:
+        return
+    if size < max_bytes:
+        return
+    # Shift existing backups: .5 -> delete, .4 -> .5, ..., .1 -> .2
+    for i in range(backup_count, 0, -1):
+        src = filepath.parent / f"{filepath.name}.{i}"
+        if i == backup_count:
+            try:
+                src.unlink()
+            except OSError:
+                pass
+        else:
+            dst = filepath.parent / f"{filepath.name}.{i + 1}"
+            try:
+                src.rename(dst)
+            except OSError:
+                pass
+    # Rename current file to .1 — next append creates a fresh file
+    try:
+        filepath.rename(filepath.parent / f"{filepath.name}.1")
+    except OSError:
+        pass
+
+
 @dataclass(frozen=True)
 class _LoggerKey:
     session_id: str
@@ -133,6 +204,7 @@ class SessionEventLogger:
             observability_dir=observability_dir,
             workspace_root=workspace_root,
         )
+        self._drop_count: int = 0
 
     @property
     def log_dir(self) -> Path:
@@ -143,6 +215,11 @@ class SessionEventLogger:
     def events_file(self) -> Path:
         """Return the path to the JSONL events file."""
         return self._log_dir / "events.jsonl"
+
+    @property
+    def drop_count(self) -> int:
+        """Return the number of events dropped due to write errors."""
+        return self._drop_count
 
     def log_event(
         self,
@@ -164,6 +241,7 @@ class SessionEventLogger:
 
         try:
             self._log_dir.mkdir(parents=True, exist_ok=True)
+            _maybe_rotate(self.events_file)
             event: dict[str, Any] = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "session_id": self._session_id,
@@ -183,7 +261,9 @@ class SessionEventLogger:
             with open(self.events_file, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(event, default=str) + "\n")
             return self.events_file
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError) as exc:
+            self._drop_count += 1
+            _report_logging_error(exc, "session JSONL write")
             return None
 
 
@@ -194,9 +274,20 @@ _jsonl_handler: logging.Handler | None = None
 
 
 class SessionJsonLogHandler(logging.Handler):
-    """Logging handler that mirrors Python log records into session JSONL."""
+    """Logging handler that mirrors Python log records into session JSONL.
+
+    Uses a thread-local re-entrance guard to prevent recursion when
+    instrumented functions trigger log records during ``timed_phase``.
+    """
+
+    _guard = threading.local()
 
     def emit(self, record: logging.LogRecord) -> None:  # noqa: D102
+        # Re-entrance guard: prevent recursion from instrumented call chains
+        # (e.g., get_session_logger -> get_config -> timed_phase -> log -> emit)
+        if getattr(self._guard, "emitting", False):
+            return
+        self._guard.emitting = True
         try:
             logger = get_session_logger()
             payload = {
@@ -220,9 +311,12 @@ class SessionJsonLogHandler(logging.Handler):
                     "message": record.getMessage(),
                 },
             )
-        except Exception:
+        except Exception as exc:
             # Never propagate logging failures.
+            _report_logging_error(exc, "session JSONL handler")
             return
+        finally:
+            self._guard.emitting = False
 
 
 def install_session_jsonl_handler() -> None:

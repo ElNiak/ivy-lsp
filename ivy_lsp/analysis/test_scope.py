@@ -101,15 +101,35 @@ def detect_test_role(
     """Derive tester role from included behavior files.
 
     Uses Ivy role inversion: testing a server means tester is client.
+    Only files with ``_behavior`` in the basename are role signals —
+    entity files (``ivy_quic_mim.ivy``) and shim files are ignored.
+
+    When multiple role signals exist, MIM takes precedence over
+    client/server because real MIM tests legitimately include both
+    MIM behavior and a client or server behavior file.
     """
+    has_client = False
+    has_server = False
+    has_mim = False
+
     for f in include_closure:
         basename = os.path.basename(f).replace(".ivy", "")
+        if "_behavior" not in basename:
+            continue
+
         if "server_behavior" in basename:
-            return "client"
-        if "client_behavior" in basename:
-            return "server"
-        if "mim" in basename:
-            return "mim"
+            has_client = True  # role inversion
+        elif "client_behavior" in basename:
+            has_server = True  # role inversion
+        elif "mim_behavior" in basename or "man_in_the_middle" in basename:
+            has_mim = True
+
+    if has_mim:
+        return "mim"
+    if has_client and not has_server:
+        return "client"
+    if has_server and not has_client:
+        return "server"
     return "unknown"
 
 

@@ -231,7 +231,7 @@ def register(server) -> None:
 
             result_summary = f"{len(result)} symbols"
 
-            from ivy_lsp.debug_trace import get_tracer
+            from ivy_lsp.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:
@@ -245,7 +245,7 @@ def register(server) -> None:
         except Exception as exc:
             status = "error"
             result_summary = f"error: {type(exc).__name__}"
-            from ivy_lsp.debug_trace import get_tracer
+            from ivy_lsp.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:

@@ -1,24 +1,130 @@
-"""Shared observability primitives for logging and timing.
+"""Shared observability primitives: correlation, structured logging, timing, and instrumentation.
 
-This module keeps instrumentation logic centralized so handlers and core
-pipelines can emit consistent structured and session-level events.
+Consolidates ivy_lsp.correlation, ivy_lsp.structured_logging, and the
+original ivy_lsp.observability into a single module with a lightweight
+logger factory for per-subsystem verbosity control.
 """
 
 from __future__ import annotations
 
+import contextvars
 import importlib
 import inspect
+import json
 import logging
 import pkgutil
 import threading
 import time
+import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Generator, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    MutableMapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    cast,
+)
 
-from ivy_lsp.correlation import ensure_call_id, get_call_id
-from ivy_lsp.session_observability import get_session_logger
-from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+# ---------------------------------------------------------------------------
+# 1. Correlation context
+# ---------------------------------------------------------------------------
+
+_call_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "ivy_lsp_call_id",
+    default=None,
+)
+
+
+def get_call_id() -> str | None:
+    """Return the current correlation id, if one is set."""
+    return _call_id_var.get()
+
+
+def ensure_call_id(prefix: str = "call") -> str:
+    """Return the active correlation id, creating one if missing."""
+    current = _call_id_var.get()
+    if current:
+        return current
+    created = f"{prefix}-{uuid.uuid4().hex[:12]}"
+    _call_id_var.set(created)
+    return created
+
+
+@contextmanager
+def call_context(
+    call_id: str | None = None, *, prefix: str = "call"
+) -> Generator[str, None, None]:
+    """Temporarily set the current correlation id within a context."""
+    resolved = call_id or f"{prefix}-{uuid.uuid4().hex[:12]}"
+    token = _call_id_var.set(resolved)
+    try:
+        yield resolved
+    finally:
+        _call_id_var.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# 2. Structured logging primitives
+# ---------------------------------------------------------------------------
+
+
+class LogCategory(str, Enum):
+    """Categories used to classify structured log events."""
+
+    MILESTONE = "MIL"
+    ACTIVITY = "ACT"
+    DIAGNOSTIC = "DIA"
+    PERFORMANCE = "PER"
+
+
+@dataclass
+class LogEvent:
+    """A structured log event carrying a category, phase, and data payload."""
+
+    category: LogCategory
+    phase: str = ""
+    data: Dict[str, Any] = field(default_factory=dict)
+
+
+class StructuredLogAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
+    """Logging adapter that formats messages with category and phase prefixes."""
+
+    def process(
+        self, msg: str, kwargs: MutableMapping[str, Any]
+    ) -> Tuple[str, MutableMapping[str, Any]]:
+        """Prepend category/phase prefix and append JSON data to msg."""
+        extra = kwargs.get("extra", {})
+        event: Optional[LogEvent] = extra.pop("event", None)
+        if event is None:
+            return msg, kwargs
+
+        if event.phase:
+            prefix = f"[{event.category.value}:{event.phase}]"
+        else:
+            prefix = f"[{event.category.value}]"
+
+        if event.data:
+            try:
+                data_str = json.dumps(event.data, default=str)
+            except (TypeError, ValueError):
+                data_str = str(event.data)
+            formatted = f"{prefix} {msg} | {data_str}"
+        else:
+            formatted = f"{prefix} {msg}"
+
+        return formatted, kwargs
+
+
+# ---------------------------------------------------------------------------
+# 3. Observability helpers (timing, instrumentation)
+# ---------------------------------------------------------------------------
 
 F = TypeVar("F", bound=Callable[..., Any])
 _WRAPPED_ATTR = "__ivy_lsp_instrumented__"
@@ -35,6 +141,8 @@ def _log_session_event(
     call_id: str | None = None,
 ) -> None:
     try:
+        from ivy_lsp.observability.session import get_session_logger
+
         get_session_logger().log_event(
             channel=channel,
             event_type=event_type,
@@ -163,7 +271,12 @@ def instrument_function(
     phase: str = "function",
     channel: str = "core",
 ) -> Callable[[F], F]:
-    """Decorator that emits timing + status for sync and async callables."""
+    """Decorator that emits timing + status for sync and async callables.
+
+    Uses a thread-local depth counter to prevent cross-function recursion:
+    only the outermost instrumented call emits ``timed_phase``; nested
+    instrumented calls execute directly without timing/logging overhead.
+    """
 
     def _decorator(func: F) -> F:
         module_logger = logging.getLogger(func.__module__)
@@ -173,9 +286,10 @@ def instrument_function(
 
             @wraps(func)
             async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                if getattr(_instrument_tls, "active", False):
+                depth = getattr(_instrument_tls, "depth", 0)
+                if depth > 0:
                     return await cast(Callable[..., Any], func)(*args, **kwargs)
-                _instrument_tls.active = True
+                _instrument_tls.depth = depth + 1
                 try:
                     with timed_phase(
                         module_logger,
@@ -186,15 +300,16 @@ def instrument_function(
                     ):
                         return await cast(Callable[..., Any], func)(*args, **kwargs)
                 finally:
-                    _instrument_tls.active = False
+                    _instrument_tls.depth = depth
 
             return cast(F, _async_wrapper)
 
         @wraps(func)
         def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            if getattr(_instrument_tls, "active", False):
+            depth = getattr(_instrument_tls, "depth", 0)
+            if depth > 0:
                 return cast(Callable[..., Any], func)(*args, **kwargs)
-            _instrument_tls.active = True
+            _instrument_tls.depth = depth + 1
             try:
                 with timed_phase(
                     module_logger,
@@ -205,7 +320,7 @@ def instrument_function(
                 ):
                     return cast(Callable[..., Any], func)(*args, **kwargs)
             finally:
-                _instrument_tls.active = False
+                _instrument_tls.depth = depth
 
         return cast(F, _sync_wrapper)
 
@@ -300,12 +415,10 @@ def enable_package_instrumentation(
     _skip = frozenset(
         {
             f"{package_name}.observability",
-            f"{package_name}.correlation",
-            f"{package_name}.session_observability",
-            f"{package_name}.structured_logging",
+            f"{package_name}.observability.core",
+            f"{package_name}.observability.session",
+            f"{package_name}.observability.handlers",
             f"{package_name}.config",
-            f"{package_name}.lsp_log_handler",
-            f"{package_name}.debug_trace",
         }
     )
 
@@ -345,3 +458,90 @@ def enable_package_instrumentation(
         )
 
     return {"modules": modules_scanned, "wrapped": callables_wrapped}
+
+
+# ---------------------------------------------------------------------------
+# 4. Logger factory and diagnostics
+# ---------------------------------------------------------------------------
+
+# Subsystem detection map
+SUBSYSTEM_MAP = {
+    "parsing": "ivy_lsp.parsing",
+    "indexer": "ivy_lsp.indexer",
+    "compilation": "ivy_lsp.compilation",
+    "semantic": "ivy_lsp.semantic",
+    "features": "ivy_lsp.features",
+    "tools": "ivy_lsp.tools",
+    "mcp": "ivy_lsp.mcp",
+    "analysis": "ivy_lsp.analysis",
+    "rfc": "ivy_lsp.rfc",
+    "adapters": "ivy_lsp.adapters",
+}
+
+# Reverse map for auto-detection
+_PREFIX_TO_SUBSYSTEM: dict[str, str] = {}
+for _sub, _prefix in SUBSYSTEM_MAP.items():
+    _PREFIX_TO_SUBSYSTEM[_prefix] = _sub
+
+
+def _detect_subsystem(name: str) -> str | None:
+    """Auto-detect subsystem from a logger name like 'ivy_lsp.parsing.tiered_extractor'."""
+    for prefix, subsystem in _PREFIX_TO_SUBSYSTEM.items():
+        if name == prefix or name.startswith(prefix + "."):
+            return subsystem
+    return None
+
+
+_logger_cache: dict[str, logging.Logger] = {}
+
+
+def get_logger(name: str, *, subsystem: str | None = None) -> logging.Logger:
+    """Return a configured logger for the ivy-lsp package.
+
+    Uses Python's standard hierarchy (propagate=True) so root handlers
+    (rotating file, LspLogHandler, SessionJsonLogHandler, DedupFilter)
+    all see the events. Only sets the effective level per subsystem.
+    """
+    if name in _logger_cache:
+        return _logger_cache[name]
+
+    logger = logging.getLogger(name)
+    resolved_subsystem = subsystem or _detect_subsystem(name)
+    if resolved_subsystem:
+        from ivy_lsp.config import get_config
+
+        try:
+            level_str = get_config().subsystem_levels.get(resolved_subsystem)
+            if level_str:
+                logger.setLevel(getattr(logging, level_str.upper(), logging.NOTSET))
+        except Exception:
+            pass  # Config not yet initialized
+
+    _logger_cache[name] = logger
+    return logger
+
+
+# Backward-compatible alias
+IvyLogAdapter = StructuredLogAdapter
+
+
+def describe_logging_config() -> dict[str, Any]:
+    """Return a summary of all active logging configuration for diagnostics."""
+    from ivy_lsp.config import get_config
+    from ivy_lsp.observability.session import get_session_id, resolve_session_log_dir
+
+    cfg = get_config()
+    session_id = get_session_id()
+    return {
+        "log_level": cfg.log_level,
+        "activity_level": cfg.activity_level,
+        "subsystem_levels": dict(cfg.subsystem_levels),
+        "debug_log": cfg.debug_log,
+        "debug_log_path": cfg.debug_log_path,
+        "observability_enabled": cfg.observability_enabled,
+        "observability_dir": cfg.observability_dir,
+        "trace_all_functions": cfg.trace_all_functions,
+        "handlers": [type(h).__name__ for h in logging.getLogger().handlers],
+        "session_id": session_id,
+        "session_log_dir": str(resolve_session_log_dir(session_id)),
+    }

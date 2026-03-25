@@ -13,8 +13,13 @@ from typing import TYPE_CHECKING, Optional, Tuple
 from lsprotocol import types as lsp
 
 from ivy_lsp.config import get_config
-from ivy_lsp.lsp_log_handler import LspLogHandler
-from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.observability import (
+    LogCategory,
+    LogEvent,
+    LspLogHandler,
+    StructuredLogAdapter,
+    timed_phase,
+)
 from ivy_lsp.utils import uri_to_path
 
 if TYPE_CHECKING:
@@ -49,7 +54,14 @@ class ServerSetupMixin:
         4. _create_indexer --- indexer construction + workspace scan
         5. _setup_analysis_pipeline --- semantic model + adapters + pipeline
         """
-        self._configure_activity_logging()
+        with timed_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="setup",
+            name="configure_activity_logging",
+            channel="lsp",
+        ):
+            self._configure_activity_logging()
 
         ws_folders = self.workspace.folders
         if ws_folders:
@@ -128,16 +140,63 @@ class ServerSetupMixin:
                 exc_info=True,
             )
 
-        resolver, ws_root = self._create_resolver(ws_root)
+        with timed_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="setup",
+            name="create_resolver",
+            channel="lsp",
+        ):
+            resolver, ws_root = self._create_resolver(ws_root)
         if resolver is None:
             return
 
-        self._create_parser(resolver)
+        with timed_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="setup",
+            name="create_parser",
+            channel="lsp",
+        ):
+            self._create_parser(resolver)
 
-        if not self._create_indexer(ws_root, resolver):
-            return
+        # Tier diagnostic: probe parsing tier availability at startup
+        try:
+            from ivy_lsp.parsing.tiered_extractor import TieredExtractor
 
-        self._setup_analysis_pipeline()
+            tier_info = TieredExtractor().probe_tiers()
+            best = tier_info.get("best_available", 0)
+            if best == 1:
+                logger.info("Parsing tier: 1 (ast/parser) — full accuracy")
+            elif best == 2:
+                logger.warning(
+                    "Parsing tier: 2 (lexer) — Tier 1 unavailable: %s",
+                    tier_info.get("tier_1_error", "unknown"),
+                )
+            else:
+                logger.warning("Parsing tier: 3 (regex) — Tier 1/2 unavailable")
+        except Exception:
+            logger.debug("Tier probe failed", exc_info=True)
+
+        with timed_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="setup",
+            name="create_indexer",
+            channel="lsp",
+            payload={"workspace_root": ws_root},
+        ):
+            if not self._create_indexer(ws_root, resolver):
+                return
+
+        with timed_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="setup",
+            name="setup_analysis_pipeline",
+            channel="lsp",
+        ):
+            self._setup_analysis_pipeline()
 
     def _configure_activity_logging(self) -> None:
         """Configure ivy_lsp log level from IVY_LSP_ACTIVITY_LEVEL env var."""

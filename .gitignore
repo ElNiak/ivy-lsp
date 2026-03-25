@@ -13,3 +13,5 @@ tmp*/
 .pre-commit-cache/
 *.coverage*
 coverage.xml
+.observability/
+*.log

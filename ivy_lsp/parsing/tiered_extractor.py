@@ -133,16 +133,57 @@ class TieredExtractor:
 
     # -- Public API ---------------------------------------------------------
 
+    def probe_tiers(self) -> dict:
+        """Test which parsing tiers are available without caching failures.
+
+        Returns a dict with keys ``tier_1``, ``tier_2``, ``tier_3`` (always True)
+        and ``best_available`` (int).
+        """
+        result: dict = {"tier_1": False, "tier_2": False, "tier_3": True}
+
+        # Tier 1: try importing parser (same imports as _try_parser)
+        try:
+            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols  # noqa: F401
+            from ivy_lsp.parsing.parser_session import IvyParserWrapper  # noqa: F401
+
+            result["tier_1"] = True
+        except ImportError as exc:
+            result["tier_1_error"] = str(exc)
+
+        # Tier 2: try importing lexer (same imports as _try_lexer)
+        try:
+            from ivy_lsp.parsing.fallback_scanner import fallback_scan  # noqa: F401
+
+            result["tier_2"] = True
+        except ImportError as exc:
+            result["tier_2_error"] = str(exc)
+
+        if result["tier_1"]:
+            result["best_available"] = 1
+        elif result["tier_2"]:
+            result["best_available"] = 2
+        else:
+            result["best_available"] = 3
+
+        return result
+
     def extract(
         self,
         source: str,
         filepath: str,
+        *,
+        force_tier: int = 0,
     ) -> ExtractionResult:
         """Extract symbols and includes from Ivy source using the best tier.
 
         Attempts Tier 1 (parser), then Tier 2 (lexer), then Tier 3 (regex).
         Returns an ``ExtractionResult`` with the symbols, includes, which
         tier succeeded, timing, and any errors from failed tiers.
+
+        Args:
+            source: The Ivy source code text to extract from.
+            filepath: Path to the source file (used for cache keys and diagnostics).
+            force_tier: If 1/2/3, skip tiers above the forced one. 0 = auto.
         """
         if not source or not source.strip():
             return ExtractionResult(tier_used=0, timing_ms=0.0)
@@ -150,7 +191,7 @@ class TieredExtractor:
         errors: List[TierError] = []
 
         # -- Tier 1: Parser ------------------------------------------------
-        if self._parser_available is not False:
+        if self._parser_available is not False and force_tier in (0, 1):
             t0 = time.monotonic()
             try:
                 symbols, includes, references = self._try_parser(source, filepath)
@@ -196,7 +237,7 @@ class TieredExtractor:
                 )
 
         # -- Tier 2: Lexer -------------------------------------------------
-        if self._lexer_available is not False:
+        if self._lexer_available is not False and force_tier in (0, 2):
             t0 = time.monotonic()
             try:
                 symbols, includes, references = self._try_lexer(source, filepath)
@@ -266,7 +307,7 @@ class TieredExtractor:
     @staticmethod
     def _trace_result(filepath: str, result: ExtractionResult) -> None:
         """Send extraction result to the debug tracer (no-op when disabled)."""
-        from ivy_lsp.debug_trace import get_tracer
+        from ivy_lsp.observability import get_tracer
 
         tracer = get_tracer()
         if tracer is not None:
@@ -292,10 +333,11 @@ class TieredExtractor:
         result = wrapper.parse(source, filename=filepath, timeout=self._parser_timeout)
 
         if not result.success or result.ast is None:
-            error_msgs = [str(e) for e in result.errors[:3]]
+            from ivy_lsp.utils.ivy_output import format_ivy_errors
+
+            formatted = format_ivy_errors(list(result.errors))
             raise RuntimeError(
-                f"Parse failed with {len(result.errors)} error(s): "
-                + "; ".join(error_msgs)
+                f"Parse failed with {len(result.errors)} error(s): {formatted}"
             )
 
         symbols = ast_to_symbols(result.ast, filepath, source)

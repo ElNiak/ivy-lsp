@@ -223,21 +223,31 @@ def _format_location_chain(loc: Any) -> str:
 def format_ivy_error(error: Any) -> str:
     """Format a single Ivy parse error for human consumption.
 
-    Handles three cases:
+    Handles four cases:
 
     1. **Error objects** with ``.msg`` attribute (IvyError instances):
        returns the message directly.
-    2. **Raw tuples** from Ivy's parser error_list, shaped as
+    2. **PLY parser tuples** shaped as ``(line, token, message)`` where
+       line is an int — typically LALR syntax errors.
+    3. **Raw tuples** from Ivy's parser error_list, shaped as
        ``(symbol_name, location1, location2, ...)``, where each
        location is either ``None`` or a nested ``(file, line, ...)``
        tuple representing an include chain.
-    3. **Anything else** (strings, generic exceptions): ``str(error)``.
+    4. **Anything else** (strings, generic exceptions): ``str(error)``.
     """
     # Case 1: Ivy error objects with structured attributes
     if hasattr(error, "msg"):
         return str(error.msg)
 
-    # Case 2: Raw parser tuples — (symbol_name, loc1, loc2, ...)
+    # Case 2: PLY parser error tuples or ParseError objects with .args
+    args = error if isinstance(error, tuple) else getattr(error, "args", None)
+    if isinstance(args, tuple) and len(args) >= 2 and isinstance(args[0], int):
+        line = args[0]
+        token = args[1] if len(args) > 1 else "?"
+        msg = args[2] if len(args) > 2 else "parse error"
+        return f"line {line}: {msg} (unexpected token '{token}')"
+
+    # Case 3: Raw parser tuples — (symbol_name, loc1, loc2, ...)
     if isinstance(error, tuple) and len(error) >= 1 and isinstance(error[0], str):
         symbol = error[0]
         locations = error[1:]
@@ -251,7 +261,7 @@ def format_ivy_error(error: Any) -> str:
             return f"Duplicate '{symbol}': {', '.join(formatted)}"
         return f"Conflict '{symbol}': {formatted[0]}"
 
-    # Case 3: fallback
+    # Case 4: fallback
     return str(error)
 
 

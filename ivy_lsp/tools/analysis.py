@@ -8,7 +8,7 @@ import os
 import shutil
 from typing import Any
 
-from ivy_lsp.debug_trace import ToolTraceContext
+from ivy_lsp.observability import ToolTraceContext
 from ivy_lsp.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.tools import error_response, safe_tool
 
@@ -243,7 +243,8 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     @mcp.tool()
     @safe_tool
     async def ivy_capabilities() -> dict:
-        """Report which Ivy CLI tools are available on PATH, MCP tools, and staging health."""
+        """Report which Ivy CLI tools are available on PATH, MCP tools, staging health, and parsing tier."""
+        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
         from ivy_lsp.tools import get_tool_metadata
 
         _tc = ToolTraceContext("ivy_capabilities", {})
@@ -267,6 +268,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             },
             "mcp_tool_count": len(get_tool_metadata()),
         }
+        # Parsing tier availability
+        try:
+            result["parsing_tiers"] = TieredExtractor().probe_tiers()
+        except Exception:
+            result["parsing_tiers"] = {"error": "probe failed"}
         if ctx.include_resolver is not None and hasattr(
             ctx.include_resolver, "staging_health"
         ):
