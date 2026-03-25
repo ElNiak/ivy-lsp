@@ -1,1 +1,3 @@
-"""Unified semantic model for the Ivy LSP analysis pipeline."""
+"""Backward-compat shim."""
+
+from ivy_lsp.core.semantic import *  # noqa: F401,F403
