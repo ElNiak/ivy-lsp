@@ -248,3 +248,13 @@ class IncludeGraph:
             for to_file in to_files:
                 graph.add_edge(from_file, to_file)
         return graph
+
+
+def is_monitor_symbol(detail: str) -> bool:
+    """Check if a symbol detail indicates a monitor (before/after/around).
+
+    The check is case-insensitive and strips leading/trailing whitespace
+    to match how the fallback scanner emits detail strings.
+    """
+    d = detail.strip().lower()
+    return d.startswith("before ") or d.startswith("after ") or d.startswith("around ")

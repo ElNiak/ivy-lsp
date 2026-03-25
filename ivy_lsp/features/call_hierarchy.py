@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.parsing.symbols import is_monitor_symbol
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
 from ivy_lsp.utils.symbol_resolver import lookup_with_dotted_fallback
@@ -60,16 +61,6 @@ def _find_containing_symbol(symbols: List, target_line: int):
     return best
 
 
-def _is_monitor_symbol(sym) -> bool:
-    """Return True if *sym* is a before/after/around monitor."""
-    detail = (sym.detail or "").strip().lower()
-    return (
-        detail.startswith("before ")
-        or detail.startswith("after ")
-        or detail.startswith("around ")
-    )
-
-
 def _is_action_symbol(sym) -> bool:
     """Return True if *sym* is an action/relation/function declaration (not a monitor).
 
@@ -81,7 +72,7 @@ def _is_action_symbol(sym) -> bool:
 
     if sym.kind not in (SymbolKind.Function, SymbolKind.Method):
         return False
-    return not _is_monitor_symbol(sym)
+    return not is_monitor_symbol(sym.detail or "")
 
 
 def _get_action_symbols(indexer) -> Dict[str, List]:
@@ -296,8 +287,8 @@ def _get_incoming_calls_regex(
                 if container is None:
                     continue
                 # Skip if the container IS the target symbol itself.
-                if container.name == last_component and not _is_monitor_symbol(
-                    container
+                if container.name == last_component and not is_monitor_symbol(
+                    container.detail or ""
                 ):
                     continue
 
