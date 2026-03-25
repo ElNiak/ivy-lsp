@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from ivy_lsp.core.analysis.mirror import Mirror, MirrorId, MirrorRole
+from ivy_lsp.core.analysis.mirror import Mirror, MirrorId, MirrorRegistry, MirrorRole
 
 
 class TestMirrorId:
@@ -138,3 +138,138 @@ class TestMirror:
         assert roundtripped.entry_file == sample_mirror.entry_file
         assert roundtripped.include_closure == sample_mirror.include_closure
         assert roundtripped.role == sample_mirror.role
+
+
+class TestMirrorRegistry:
+    @pytest.fixture
+    def registry(self):
+        return MirrorRegistry()
+
+    @pytest.fixture
+    def mirror_a(self):
+        return Mirror(
+            id=MirrorId(protocol="quic", entry_stem="server_test"),
+            entry_file="/ws/server_test.ivy",
+            include_closure=frozenset(
+                {
+                    "/ws/server_test.ivy",
+                    "/ws/types.ivy",
+                    "/ws/frame.ivy",
+                }
+            ),
+            exported_actions=frozenset({"send"}),
+            imported_actions=frozenset({"recv"}),
+            role=MirrorRole.CLIENT,
+        )
+
+    @pytest.fixture
+    def mirror_b(self):
+        return Mirror(
+            id=MirrorId(protocol="quic", entry_stem="client_test"),
+            entry_file="/ws/client_test.ivy",
+            include_closure=frozenset(
+                {
+                    "/ws/client_test.ivy",
+                    "/ws/types.ivy",
+                    "/ws/connection.ivy",
+                }
+            ),
+            exported_actions=frozenset({"recv"}),
+            imported_actions=frozenset({"send"}),
+            role=MirrorRole.SERVER,
+        )
+
+    def test_register_and_get(self, registry, mirror_a):
+        registry.register(mirror_a)
+        assert registry.get(mirror_a.id) is mirror_a
+
+    def test_get_missing_returns_none(self, registry):
+        mid = MirrorId(protocol="quic", entry_stem="nonexistent")
+        assert registry.get(mid) is None
+
+    def test_get_by_entry_file(self, registry, mirror_a):
+        registry.register(mirror_a)
+        assert registry.get_by_entry_file("/ws/server_test.ivy") is mirror_a
+        assert registry.get_by_entry_file("/ws/nonexistent.ivy") is None
+
+    def test_get_mirrors_for_file_shared(self, registry, mirror_a, mirror_b):
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        # types.ivy is in both mirrors
+        mirrors = registry.get_mirrors_for_file("/ws/types.ivy")
+        ids = {m.id for m in mirrors}
+        assert ids == {mirror_a.id, mirror_b.id}
+
+    def test_get_mirrors_for_file_exclusive(self, registry, mirror_a, mirror_b):
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        # frame.ivy only in mirror_a
+        mirrors = registry.get_mirrors_for_file("/ws/frame.ivy")
+        assert len(mirrors) == 1
+        assert mirrors[0].id == mirror_a.id
+
+    def test_get_mirrors_for_file_unknown(self, registry, mirror_a):
+        registry.register(mirror_a)
+        assert registry.get_mirrors_for_file("/ws/unknown.ivy") == []
+
+    def test_get_mirrors_for_protocol(self, registry, mirror_a, mirror_b):
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        quic = registry.get_mirrors_for_protocol("quic")
+        assert len(quic) == 2
+        assert registry.get_mirrors_for_protocol("minip") == []
+
+    def test_all_mirrors(self, registry, mirror_a, mirror_b):
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        assert len(registry.all_mirrors()) == 2
+
+    def test_invalidate_file(self, registry, mirror_a, mirror_b):
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        # types.ivy is shared — both mirrors affected
+        affected = registry.invalidate_file("/ws/types.ivy")
+        assert affected == {mirror_a.id, mirror_b.id}
+
+    def test_invalidate_file_exclusive(self, registry, mirror_a, mirror_b):
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        affected = registry.invalidate_file("/ws/frame.ivy")
+        assert affected == {mirror_a.id}
+
+    def test_invalidate_file_unknown(self, registry):
+        assert registry.invalidate_file("/ws/unknown.ivy") == set()
+
+    def test_clear(self, registry, mirror_a):
+        registry.register(mirror_a)
+        registry.clear()
+        assert registry.all_mirrors() == []
+        assert registry.get(mirror_a.id) is None
+
+    def test_reregister_cleans_stale_reverse_index(self, registry, mirror_a):
+        """C1 fix: re-registering with changed closure removes stale entries."""
+        registry.register(mirror_a)  # closure includes /ws/frame.ivy
+        updated = Mirror(
+            id=mirror_a.id,
+            entry_file=mirror_a.entry_file,
+            include_closure=frozenset({"/ws/server_test.ivy", "/ws/types.ivy"}),
+            exported_actions=mirror_a.exported_actions,
+            imported_actions=mirror_a.imported_actions,
+            role=mirror_a.role,
+        )
+        registry.register(updated)
+        # frame.ivy was removed from closure — should not be found
+        assert registry.get_mirrors_for_file("/ws/frame.ivy") == []
+        # types.ivy still in closure — should still be found
+        assert len(registry.get_mirrors_for_file("/ws/types.ivy")) == 1
+
+    def test_to_snapshot_dict(self, registry, mirror_a, mirror_b):
+        """H3 fix: snapshot extraction for Plan 2 IndexSnapshot."""
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        snap = registry.to_snapshot_dict()
+        assert len(snap) == 2
+        assert mirror_a.id in snap
+        # Snapshot is a copy — mutations don't affect registry
+        snap.clear()
+        assert len(registry.all_mirrors()) == 2

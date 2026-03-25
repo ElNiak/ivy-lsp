@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import FrozenSet, Optional
+from typing import Dict, FrozenSet, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +122,82 @@ class Mirror:
             role=role,
             protocol_version=protocol_version,
         )
+
+
+class MirrorRegistry:
+    """Thread-safe registry of all known NCT mirrors.
+
+    Provides reverse-index lookups: file -> mirrors, protocol -> mirrors.
+    Replaces the scoping responsibilities split between
+    ScopedRequirementModel._test_scopes and WorkspaceContext.protocol_indexes.
+    """
+
+    def __init__(self) -> None:  # noqa: D107
+        self._mirrors: Dict[MirrorId, Mirror] = {}
+        self._by_entry_file: Dict[str, Mirror] = {}
+        self._file_to_mirrors: Dict[str, Set[MirrorId]] = defaultdict(set)
+        self._lock = threading.RLock()
+
+    def register(self, mirror: Mirror) -> None:
+        """Register a mirror, updating all indexes.
+
+        If a mirror with the same ID was previously registered, its stale
+        reverse-index entries are cleaned before adding the new ones.
+        """
+        with self._lock:
+            old = self._mirrors.get(mirror.id)
+            if old is not None:
+                # Remove stale reverse-index entries from old closure
+                for f in old.include_closure:
+                    s = self._file_to_mirrors.get(f)
+                    if s is not None:
+                        s.discard(mirror.id)
+                        if not s:
+                            del self._file_to_mirrors[f]
+                if old.entry_file in self._by_entry_file:
+                    del self._by_entry_file[old.entry_file]
+            self._mirrors[mirror.id] = mirror
+            self._by_entry_file[mirror.entry_file] = mirror
+            for f in mirror.include_closure:
+                self._file_to_mirrors[f].add(mirror.id)
+
+    def get(self, mirror_id: MirrorId) -> Optional[Mirror]:
+        """Get a mirror by its ID, or None."""
+        return self._mirrors.get(mirror_id)
+
+    def get_by_entry_file(self, entry_file: str) -> Optional[Mirror]:
+        """Get a mirror by its entry file path, or None."""
+        return self._by_entry_file.get(entry_file)
+
+    def get_mirrors_for_file(self, filepath: str) -> List[Mirror]:
+        """All mirrors whose include closure contains filepath."""
+        with self._lock:
+            ids = self._file_to_mirrors.get(filepath, set())
+            return [self._mirrors[mid] for mid in ids if mid in self._mirrors]
+
+    def get_mirrors_for_protocol(self, protocol: str) -> List[Mirror]:
+        """All mirrors for a given protocol."""
+        with self._lock:
+            return [m for m in self._mirrors.values() if m.protocol == protocol]
+
+    def all_mirrors(self) -> List[Mirror]:
+        """All registered mirrors."""
+        with self._lock:
+            return list(self._mirrors.values())
+
+    def invalidate_file(self, filepath: str) -> Set[MirrorId]:
+        """Return mirror IDs affected by a change to filepath."""
+        with self._lock:
+            return set(self._file_to_mirrors.get(filepath, set()))
+
+    def to_snapshot_dict(self) -> Dict[MirrorId, Mirror]:
+        """Return an immutable copy for IndexSnapshot (Plan 2)."""
+        with self._lock:
+            return dict(self._mirrors)
+
+    def clear(self) -> None:
+        """Remove all mirrors and indexes."""
+        with self._lock:
+            self._mirrors.clear()
+            self._by_entry_file.clear()
+            self._file_to_mirrors.clear()
