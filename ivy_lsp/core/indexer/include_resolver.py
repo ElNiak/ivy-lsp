@@ -255,12 +255,6 @@ class IncludeResolver:
         if os.path.isfile(candidate):
             return os.path.realpath(candidate)
 
-        # 1a. Delegate to strategy if available (enables VirtualStagingStrategy)
-        if self._staging_strategy is not None:
-            result = self._staging_strategy.resolve(include_name, from_file_real)
-            if result is not None:
-                return result
-
         # 2. Layer-aware staging (when active, replaces flat staging for
         #    colliding basenames)
         if _partition_staging and _file_to_partition:
@@ -346,25 +340,27 @@ class IncludeResolver:
                 else:
                     logger.debug("Layer routing miss (repeat): %s", _rel)
 
-        # 3. Flat staging directory
-        if _staging_dir:
+        # 3. Flat staging directory (via strategy or direct)
+        # Refuse to resolve colliding basenames via flat staging when layers
+        # are active — the correct variant can only be determined through
+        # layer routing (step 2). Fall through to workspace root / stdlib.
+        basename = os.path.basename(fname)
+        if _file_to_layer and basename in _collision_map:
+            logger.warning(
+                "Ambiguous include '%s' from %s: basename has %d variants "
+                "across layers — skipping flat staging, trying workspace root",
+                include_name,
+                os.path.relpath(from_file, self._workspace_root),
+                len(_collision_map[basename]),
+            )
+        elif self._staging_strategy is not None:
+            result = self._staging_strategy.resolve(include_name, from_file_real)
+            if result is not None:
+                return result
+        elif _staging_dir:
             candidate = os.path.join(_staging_dir, fname)
             if os.path.isfile(candidate):
-                basename = os.path.basename(fname)
-                # Refuse to resolve colliding basenames via flat staging
-                # when layers are active — the correct variant can only be
-                # determined through layer routing (step 2).
-                # Fall through to workspace root / stdlib as last resort.
-                if _file_to_layer and basename in _collision_map:
-                    logger.warning(
-                        "Ambiguous include '%s' from %s: basename has %d variants "
-                        "across layers — skipping flat staging, trying workspace root",
-                        include_name,
-                        os.path.relpath(from_file, self._workspace_root),
-                        len(_collision_map[basename]),
-                    )
-                else:
-                    return os.path.realpath(candidate)
+                return os.path.realpath(candidate)
 
         # 4. Workspace root
         candidate = os.path.join(self._workspace_root, fname)
@@ -518,6 +514,35 @@ class IncludeResolver:
                     len(paths),
                     [os.path.relpath(p, self._workspace_root) for p in paths],
                 )
+
+        # Per-file collision logging (preserves existing test expectations)
+        for basename, paths in result.collision_map.items():
+            winner = self._staged_files.get(basename)
+            skipped = [p for p in paths if p != winner]
+            for skip_path in skipped:
+                if self._file_to_layer:
+                    logger.debug(
+                        "Staging collision (layer-handled): %s (keeping %s, skipping %s)",
+                        basename,
+                        (
+                            os.path.relpath(winner, self._workspace_root)
+                            if winner
+                            else "?"
+                        ),
+                        os.path.relpath(skip_path, self._workspace_root),
+                    )
+                else:
+                    logger.warning(
+                        "Staging collision (ambiguous): %s (keeping %s, skipping %s) "
+                        "— include resolution for this basename may be wrong",
+                        basename,
+                        (
+                            os.path.relpath(winner, self._workspace_root)
+                            if winner
+                            else "?"
+                        ),
+                        os.path.relpath(skip_path, self._workspace_root),
+                    )
 
         logger.info(
             "Staged %d files (%d collisions, %d unique basenames affected)",
