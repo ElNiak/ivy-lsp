@@ -273,3 +273,42 @@ class TestMirrorRegistry:
         # Snapshot is a copy — mutations don't affect registry
         snap.clear()
         assert len(registry.all_mirrors()) == 2
+
+
+class TestMirrorIntegration:
+    """Test that _compute_test_scopes populates the mirror registry."""
+
+    def test_compute_test_scopes_populates_registry(self, tmp_path):
+        """Verify mirror registry populated after _compute_test_scopes.
+
+        Tests at the ScopeManagerMixin level to avoid needing a full parser.
+        We construct a WorkspaceIndexer with a None parser (fast-index only).
+        """
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+
+        # Create a minimal workspace with a test file that has exports
+        test_file = tmp_path / "my_test.ivy"
+        test_file.write_text(
+            "#lang ivy1.7\n\nexport action step\nimport action recv\n"
+            "action step\naction recv\n"
+        )
+        types_file = tmp_path / "types.ivy"
+        types_file.write_text("#lang ivy1.7\n\ntype t\n")
+
+        resolver = IncludeResolver(str(tmp_path))
+        indexer = WorkspaceIndexer(
+            workspace_root=str(tmp_path),
+            parser=None,  # No deep parsing needed
+            resolver=resolver,
+        )
+        indexer.index_workspace()
+
+        # The mirror registry should have been populated
+        registry = indexer.mirror_registry
+        assert registry is not None
+        mirrors = registry.all_mirrors()
+        # At least one mirror should exist (for the test file with exports)
+        assert len(mirrors) >= 1
+        # Protocol defaults to "unknown" (resolved by NctWorkspace in Plan 3)
+        assert all(m.protocol == "unknown" for m in mirrors)

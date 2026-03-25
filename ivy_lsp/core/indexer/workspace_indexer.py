@@ -16,6 +16,7 @@ from ivy_lsp.core.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
+from ivy_lsp.core.analysis.mirror import MirrorRegistry
 from ivy_lsp.core.analysis.test_scope import ExportImportInfo, ScopedRequirementModel
 from ivy_lsp.core.indexer.deep_indexer import DeepIndexMixin
 from ivy_lsp.core.indexer.file_cache import FileCache
@@ -156,6 +157,7 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
         # Selectively invalidated when dirty_files is provided to
         # _compute_test_scopes; fully cleared on initial/full rebuilds.
         self._mirror_scope_cache: Dict[str, List[IvySymbol]] = {}
+        self._mirror_registry = MirrorRegistry()
 
     # -- Public accessors (Phase 3.2) ----------------------------------------
 
@@ -173,6 +175,11 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
     def resolver(self):
         """Public accessor for the include resolver."""
         return self._resolver
+
+    @property
+    def mirror_registry(self) -> MirrorRegistry:
+        """Registry of NCT mirrors computed from test scopes."""
+        return self._mirror_registry
 
     def lookup_all_symbols(self):
         """Return all symbols in the symbol table."""

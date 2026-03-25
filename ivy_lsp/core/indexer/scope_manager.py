@@ -18,6 +18,7 @@ from ivy_lsp.core.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
+from ivy_lsp.core.analysis.mirror import Mirror
 from ivy_lsp.core.analysis.requirement_extractor import (
     extract_exports_imports_full,
     extract_requirements_full,
@@ -263,6 +264,7 @@ class ScopeManagerMixin:
                 entries for files in the transitive scope of dirty files'
                 test scopes. If None, clear the entire cache (full rebuild).
         """
+        self._mirror_registry.clear()
         with self._exports_lock:
             export_items = list(self._file_export_imports.items())
         for filepath, info in export_items:
@@ -289,6 +291,8 @@ class ScopeManagerMixin:
                 tester_role=detect_test_role(frozen_closure),
             )
             self._requirement_graph.register_test_scope(scope)
+            mirror = Mirror.from_test_scope(scope, protocol="unknown")
+            self._mirror_registry.register(mirror)
 
         # Selective or full cache invalidation
         if dirty_files is not None:
