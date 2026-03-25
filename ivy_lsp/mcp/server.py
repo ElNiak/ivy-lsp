@@ -15,6 +15,7 @@ import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
@@ -45,6 +46,20 @@ logger = logging.getLogger(__name__)
 
 from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
 from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_files_raw
+
+# --- Visualization proxy dataclasses (module-level) ---
+
+
+@dataclass
+class _IndexerProxy:
+    requirement_graph: Any
+
+
+@dataclass
+class _ServerProxy:
+    indexer: _IndexerProxy
+    initializing: bool = False
+    workspace_root: str = ""  # H3: for relative path output
 
 
 async def _sidecar_monitor(
@@ -118,6 +133,776 @@ _MCP_INSTRUCTIONS = (
     "ivy_pattern_scaffold; "
     "ivy_quality (mode: suggestions|gate)."
 )
+
+
+# ---------------------------------------------------------------------------
+# McpServerState — replaces the nonlocal closures formerly in start_mcp()
+# ---------------------------------------------------------------------------
+
+
+class McpServerState:
+    """Mutable state for the MCP server.
+
+    Replaces the 15+ nonlocal closures in ``start_mcp()`` with a proper
+    class whose methods reference ``self.*`` instead of closure-captured
+    ``nonlocal`` variables.
+    """
+
+    def __init__(
+        self,
+        root: str,
+        staging_dir: str | None = None,
+        semantic_model: Any = None,
+        requirement_graph: Any = None,
+        resolver: Any = None,
+        include_paths: list[str] | None = None,
+        exclude_dirs: frozenset[str] = frozenset(),
+        executor: Any = None,
+        ws_config: Any = None,
+        base_path: str | None = None,
+    ):
+        """Initialise server state from the same arguments ``start_mcp()`` receives."""
+        # Workspace root
+        self.root = root
+        self.staging_dir = staging_dir
+        self.base_path = base_path
+
+        # Lazy SemanticModel
+        self.semantic_model = semantic_model
+        self._model_lock = asyncio.Lock()
+        self._model_build_attempted: float = 0.0
+        self._model_build_error: str | None = None
+        self._model_building: bool = False
+
+        # Lazy RequirementGraph
+        self._req_graph: Any = requirement_graph
+        self._req_graph_lock = asyncio.Lock()
+        self._req_graph_import_failed = False
+        self._req_graph_last_failure: float = 0.0
+
+        # Config-driven timeouts/cooldowns
+        _cfg = get_config()
+        self._MODEL_RETRY_COOLDOWN = _cfg.model_retry_cooldown
+        self._MODEL_BUILD_TIMEOUT = _cfg.model_build_timeout
+        self._REQ_GRAPH_COOLDOWN = _cfg.req_graph_cooldown
+
+        # File caches
+        self._cached_ivy_files: list[str] | None = None
+        self._cached_ivy_files_lock = threading.Lock()
+        self._basename_cache: dict[str, list[str]] | None = None
+        self._basename_cache_lock = threading.Lock()
+
+        # Include resolution
+        self._resolver = resolver
+        self._include_paths = include_paths or []
+        self._effective_exclude_dirs = DEFAULT_EXCLUDE_DIRS | exclude_dirs
+
+        # Executor (Docker-aware compilation)
+        self.executor = executor
+
+        # Stdlib modules — populated after construction via discover_stdlib_modules()
+        self.discovered_stdlib: frozenset[str] = frozenset()
+
+        # Workspace context — set after build_tool_context() by start_mcp()
+        self.workspace_context: Any = None
+
+        # The ToolContext wired to this state (set by build_tool_context)
+        self._tool_context: ToolContext | None = None
+
+    # --- File finding ---
+
+    def find_ivy_files(self, search_root: str) -> list[str]:
+        """Find .ivy files respecting workspace include/exclude paths.
+
+        When include_paths is set, walks only those subdirectories instead
+        of scanning the entire workspace tree and post-filtering.
+        """
+        if self._include_paths:
+            results: list[str] = []
+            for ip in self._include_paths:
+                sub = os.path.join(search_root, ip)
+                if os.path.isdir(sub):
+                    for rel in _find_ivy_files_raw(sub, self._effective_exclude_dirs):
+                        results.append(os.path.join(ip, rel))
+            return sorted(set(results))
+        return _find_ivy_files_raw(search_root, self._effective_exclude_dirs)
+
+    def find_ivy_files_cached(self, search_root: str) -> list[str]:
+        """Return cached file list, building on first call."""
+        if self._cached_ivy_files is not None:
+            return self._cached_ivy_files
+        with self._cached_ivy_files_lock:
+            if self._cached_ivy_files is not None:
+                return self._cached_ivy_files
+            self._cached_ivy_files = self.find_ivy_files(search_root)
+            return self._cached_ivy_files
+
+    # --- Basename cache ---
+
+    def get_basename_cache(self) -> dict[str, list[str]]:
+        """Build (or return cached) basename->[relative_paths] map for all .ivy files."""
+        if self._basename_cache is not None:
+            return self._basename_cache
+
+        with self._basename_cache_lock:
+            if self._basename_cache is not None:
+                return self._basename_cache
+            cache: dict[str, list[str]] = {}
+            for rel_path in self.find_ivy_files_cached(self.root):
+                basename = os.path.basename(rel_path)[:-4]  # strip .ivy
+                cache.setdefault(basename, []).append(rel_path)
+            self._basename_cache = cache
+            return cache
+
+    def make_resolve_callback(self):
+        """Create a resolve callback for structural lint include checking."""
+        cache = self.get_basename_cache()
+
+        def _resolve(inc_name: str, from_file: str) -> str | None:
+            # Accept known stdlib modules
+            if inc_name in self.discovered_stdlib:
+                return f"<stdlib>/{inc_name}.ivy"
+            # Check workspace file index
+            candidates = cache.get(inc_name)
+            if candidates:
+                return candidates[0]  # first match is sufficient for lint
+            return None
+
+        return _resolve
+
+    # --- Lazy SemanticModel construction ---
+
+    async def get_model(self):
+        """Return the semantic model, building one if needed."""
+        # Fast path: model already built
+        if self.semantic_model is not None:
+            return self.semantic_model
+        # Fast path: previous build failed and cooldown has not elapsed
+        if (
+            self._model_build_attempted
+            and (time.monotonic() - self._model_build_attempted)
+            < self._MODEL_RETRY_COOLDOWN
+        ):
+            return None
+        # Early return if another coroutine is already building the model
+        if self._model_building:
+            return None
+
+        async with self._model_lock:
+            # Double-check after acquiring lock
+            if self.semantic_model is not None:
+                return self.semantic_model
+            if (
+                self._model_build_attempted
+                and (time.monotonic() - self._model_build_attempted)
+                < self._MODEL_RETRY_COOLDOWN
+            ):
+                return None
+
+            self._model_building = True
+            try:
+                model = await asyncio.wait_for(
+                    asyncio.to_thread(self._build_model),
+                    timeout=self._MODEL_BUILD_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Model build timed out after %.0fs", self._MODEL_BUILD_TIMEOUT
+                )
+                self._model_build_attempted = time.monotonic()
+                self._model_build_error = (
+                    f"Build timed out after {self._MODEL_BUILD_TIMEOUT:.0f}s"
+                )
+                return None
+            except Exception as exc:
+                logger.error("Model build failed: %s", exc, exc_info=True)
+                self._model_build_attempted = time.monotonic()
+                self._model_build_error = str(exc)
+                return None
+            finally:
+                self._model_building = False
+            if model is not None:
+                self.semantic_model = model
+            else:
+                self._model_build_attempted = time.monotonic()
+                self._model_build_error = (
+                    "Build returned empty model (missing dependencies?)"
+                )
+            return model
+
+    def get_model_status(self) -> dict:
+        """Return the current model build status for error surfacing."""
+        if self.semantic_model is not None:
+            return {"state": "ready"}
+        if self._model_building:
+            return {"state": "building"}
+        if self._model_build_error:
+            elapsed = time.monotonic() - self._model_build_attempted
+            remaining = max(0, self._MODEL_RETRY_COOLDOWN - elapsed)
+            return {
+                "state": "failed",
+                "error": self._model_build_error,
+                "retry_in_seconds": round(remaining),
+            }
+        return {"state": "not_built"}
+
+    async def get_model_or_none(self, timeout: float = 5.0):
+        """Return the model if ready, or wait briefly if building. Never blocks long.
+
+        Unlike get_model(), this will NOT trigger a full build. If the model
+        hasn't started building yet, it kicks off a background build and returns
+        None immediately. If it's currently building, waits up to *timeout*
+        seconds for it to finish.
+        """
+        if self.semantic_model is not None:
+            return self.semantic_model
+        if not self._model_building:
+            # Kick off background build, but don't wait for it
+            asyncio.ensure_future(self.get_model())
+            return None
+        # Model is currently building — wait briefly
+        deadline = time.monotonic() + timeout
+        while self._model_building and time.monotonic() < deadline:
+            await asyncio.sleep(0.5)
+        return self.semantic_model  # may still be None
+
+    def _write_model_to_index(self, model):
+        """Write a SemanticModel to .ivy-index/ per-protocol directories.
+
+        Uses fcntl file locking (same pattern as IndexBuilder._write_pickle()).
+        Creates output files alongside existing index artifacts so subsequent
+        MCP startups can load them via Strategy 1.
+        """
+        try:
+            import fcntl
+            import gzip
+            import pickle
+
+            if self.workspace_context is None:
+                return
+
+            # Write to each protocol's .ivy-index/ directory
+            for proto, idx in self.workspace_context.protocol_indexes.items():
+                index_dir = idx.index_dir
+                if not index_dir or not os.path.isdir(index_dir):
+                    continue
+                lock_path = os.path.join(index_dir, ".build.lock")
+                try:
+                    lock_fd = open(lock_path, "w")
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        out_path = os.path.join(index_dir, "semantic_model.pickle.gz")
+                        with gzip.open(out_path, "wb") as f:
+                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
+                        logger.info("Wrote model to %s", out_path)
+                    except BlockingIOError:
+                        logger.debug("Index lock held for %s, skipping write", proto)
+                    finally:
+                        try:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                        except Exception:
+                            pass
+                        lock_fd.close()
+                except OSError:
+                    logger.debug("Cannot write to %s index dir", proto, exc_info=True)
+
+            # Also try workspace-level .ivy-index/ if it exists
+            ws_index = os.path.join(self.root, ".ivy-index")
+            if os.path.isdir(ws_index):
+                lock_path = os.path.join(ws_index, ".build.lock")
+                try:
+                    lock_fd = open(lock_path, "w")
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        out_path = os.path.join(ws_index, "semantic_model.pickle.gz")
+                        with gzip.open(out_path, "wb") as f:
+                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
+                        logger.info("Wrote model to %s", out_path)
+                    except BlockingIOError:
+                        pass
+                    finally:
+                        try:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                        except Exception:
+                            pass
+                        lock_fd.close()
+                except OSError:
+                    pass
+        except Exception:
+            logger.debug("Failed to write model to .ivy-index/", exc_info=True)
+
+    def _build_model(self):
+        """Build a lightweight semantic model from workspace files.
+
+        Tries two strategies in order:
+        1. Offline index merge (per-protocol models from .ivy-index/)
+        2. Full rebuild via TieredExtractor
+
+        After a successful build, writes the model back to .ivy-index/
+        per-protocol directories so subsequent startups are instant.
+        """
+        # --- Strategy 1: Merge per-protocol models from offline index ---
+        try:
+            if (
+                self.workspace_context is not None
+                and self.workspace_context.has_index()
+            ):
+                from ivy_lsp.core.semantic.model import SemanticModel
+
+                merged = SemanticModel()
+                used_protos: list[str] = []
+                skipped_protos: list[str] = []
+                for proto, idx in self.workspace_context.protocol_indexes.items():
+                    if idx.semantic_model is None:
+                        skipped_protos.append(f"{proto}(no model)")
+                        continue
+                    if idx.staleness.status not in ("fresh", "stale_minor"):
+                        skipped_protos.append(f"{proto}({idx.staleness.status})")
+                        continue
+                    merged.merge_from(idx.semantic_model)
+                    used_protos.append(proto)
+
+                if used_protos and merged.node_count() > 0:
+                    logger.info(
+                        "Loaded semantic model from offline index: "
+                        "%d nodes from %s (skipped: %s)",
+                        merged.node_count(),
+                        ", ".join(used_protos),
+                        ", ".join(skipped_protos) or "none",
+                    )
+                    return merged
+                elif skipped_protos:
+                    logger.info(
+                        "Offline index incomplete, falling back to full build "
+                        "(skipped: %s)",
+                        ", ".join(skipped_protos),
+                    )
+        except Exception:
+            logger.debug(
+                "Offline index merge failed, falling back to full build",
+                exc_info=True,
+            )
+
+        # --- Strategy 2: Full rebuild from scratch ---
+        from ivy_lsp.core.semantic.model_builder import build_semantic_model
+
+        model = build_semantic_model(
+            root=self.root,
+            find_files_fn=self.find_ivy_files_cached,
+            include_resolver=(
+                self._resolver.resolve
+                if self._resolver
+                else self.make_resolve_callback()
+            ),
+            stdlib_modules=self.discovered_stdlib,
+        )
+
+        # Write rebuilt model to .ivy-index/ so next startup uses Strategy 1
+        if model is not None:
+            self._write_model_to_index(model)
+
+        return model
+
+    # --- Lazy RequirementGraph construction ---
+
+    async def get_req_graph(self):
+        """Return the requirement graph, lazily building one if needed."""
+        if self._req_graph is not None:
+            return self._req_graph
+        # Permanent failure: missing dependency
+        if self._req_graph_import_failed:
+            return None
+        # Transient failure: respect cooldown
+        if self._req_graph_last_failure and (
+            time.monotonic() - self._req_graph_last_failure < self._REQ_GRAPH_COOLDOWN
+        ):
+            return None
+
+        async with self._req_graph_lock:
+            if self._req_graph is not None:
+                return self._req_graph
+            if self._req_graph_import_failed:
+                return None
+            if self._req_graph_last_failure and (
+                time.monotonic() - self._req_graph_last_failure
+                < self._REQ_GRAPH_COOLDOWN
+            ):
+                return None
+
+            try:
+                logger.info(
+                    "Building requirement graph (first call, may take 1-2 min)..."
+                )
+                graph = await asyncio.to_thread(self._build_requirement_graph)
+            except ImportError as exc:
+                logger.warning(
+                    "Requirement graph unavailable (missing dependency): %s",
+                    exc,
+                )
+                self._req_graph_import_failed = True
+                return None
+            except Exception as exc:
+                logger.warning(
+                    "Requirement graph build failed (will retry in %ds): %s",
+                    self._REQ_GRAPH_COOLDOWN,
+                    exc,
+                )
+                self._req_graph_last_failure = time.monotonic()
+                return None
+
+            if graph is not None:
+                self._req_graph = graph
+            else:
+                self._req_graph_last_failure = time.monotonic()
+            return graph
+
+    def _populate_semantic_model_from_graph(self, graph: Any) -> None:
+        """Mirror RequirementGraph nodes and edges into the SemanticModel.
+
+        This bridges the domain-specific RequirementGraph data into the
+        unified SemanticModel so that both models stay consistent.
+        The RequirementGraph is kept as a compatibility layer — this
+        function only *adds* to the SemanticModel, never replaces it.
+
+        If the SemanticModel has not been built yet, this is a no-op.
+        """
+        if self.semantic_model is None:
+            logger.debug(
+                "SemanticModel not yet built; skipping requirement "
+                "graph bridge (data will be available via "
+                "RequirementGraph only)"
+            )
+            return
+
+        try:
+            from ivy_lsp.core.analysis.requirement_graph import EdgeType
+            from ivy_lsp.core.semantic.edges import SemanticEdgeType
+
+            # Map RequirementGraph EdgeType -> SemanticEdgeType
+            _edge_type_map = {
+                EdgeType.READS: SemanticEdgeType.READS,
+                EdgeType.WRITES: SemanticEdgeType.WRITES,
+                EdgeType.CONSTRAINS: SemanticEdgeType.CONSTRAINS,
+                EdgeType.DEPENDS_ON: SemanticEdgeType.DEPENDS_ON,
+                EdgeType.PROPAGATED_FROM: SemanticEdgeType.PROPAGATED_FROM,
+                EdgeType.COVERS: SemanticEdgeType.COVERS,
+            }
+
+            model = self.semantic_model
+
+            # Add nodes: requirements, actions, state vars, properties
+            for req in graph.requirements.values():
+                model.add_node(req)
+            for action in graph.actions.values():
+                model.add_node(action)
+            for sv in graph.state_vars.values():
+                model.add_node(sv)
+            for prop in graph.properties.values():
+                model.add_node(prop)
+
+            # Add edges, translating EdgeType -> SemanticEdgeType
+            for src, etype, dst in graph.edges:
+                sem_etype = _edge_type_map.get(etype)
+                if sem_etype is not None:
+                    model.add_edge(src, sem_etype, dst)
+                else:
+                    logger.debug(
+                        "Unmapped edge type %s in requirement graph; skipping",
+                        etype,
+                    )
+
+            logger.info(
+                "Bridged requirement graph into SemanticModel: "
+                "%d requirements, %d actions, %d state vars, %d edges",
+                len(graph.requirements),
+                len(graph.actions),
+                len(graph.state_vars),
+                len(graph.edges),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to bridge requirement graph into SemanticModel",
+                exc_info=True,
+            )
+
+    def _build_requirement_graph(self):
+        """Build a RequirementGraph from workspace .ivy files.
+
+        Tries the offline index first (per-protocol requirement graphs
+        from .ivy-index/), then falls back to a full build using the
+        light-mode extractor.
+        """
+        # Try offline index before doing the expensive build
+        try:
+            if (
+                self.workspace_context is not None
+                and self.workspace_context.has_index()
+            ):
+                for _proto, idx in self.workspace_context.protocol_indexes.items():
+                    if idx.requirement_graph is not None:
+                        logger.info("Loaded requirement graph from offline index")
+                        return idx.requirement_graph
+        except Exception:
+            logger.debug(
+                "Offline index lookup failed for requirement graph",
+                exc_info=True,
+            )
+
+        try:
+            from ivy_lsp.core.analysis.light_mode_extractor import (
+                extract_requirements_light,
+            )
+            from ivy_lsp.core.analysis.requirement_graph import (
+                ActionNode,
+                RequirementGraph,
+                StateVarNode,
+            )
+
+            t0 = time.monotonic()
+            graph = RequirementGraph()
+            all_writes: list[tuple[str, str, int]] = []
+            known_vars: set[str] = set()
+
+            discovered = self.find_ivy_files_cached(self.root)
+            logger.info(
+                "Requirement graph: discovered %d .ivy files "
+                "(root=%s, include_paths=%s)",
+                len(discovered),
+                self.root,
+                self._include_paths or "(all)",
+            )
+            if not discovered:
+                logger.warning(
+                    "Requirement graph: no .ivy files found — graph will be empty. "
+                    "Check workspace root and include_paths."
+                )
+                return None
+
+            files_scanned = 0
+            for rel_path in discovered:
+                abs_path = os.path.join(self.root, rel_path)
+                try:
+                    with open(abs_path, encoding="utf-8", errors="replace") as f:
+                        source = f.read()
+                except OSError as exc:
+                    logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
+                    continue
+
+                files_scanned += 1
+                reqs, writes = extract_requirements_light(source, abs_path)
+                if not reqs and not writes:
+                    continue
+
+                # Bulk-add requirements + CONSTRAINS edges for this file
+                graph.add_file_requirements(abs_path, reqs, writes)
+
+                # Collect write targets as known state vars
+                for var_name, _fp, _line in writes:
+                    known_vars.add(var_name)
+                all_writes.extend(writes)
+
+            t1 = time.monotonic()
+            logger.info(
+                "Requirement graph: file indexing done — %d files in %.1fs",
+                files_scanned,
+                t1 - t0,
+            )
+
+            # Create ActionNodes from monitor_action references
+            for req in graph.requirements.values():
+                if req.monitor_action:
+                    graph.add_action_if_absent(
+                        ActionNode(
+                            id=req.monitor_action,
+                            name=req.monitor_action.rsplit(".", 1)[-1],
+                            qualified_name=req.monitor_action,
+                            file=req.file,
+                            line=req.line,
+                        )
+                    )
+
+            # Create StateVarNodes from write targets
+            for var_name, filepath_w, line_w in all_writes:
+                if var_name not in graph.state_vars:
+                    graph.add_state_var(
+                        StateVarNode(
+                            id=var_name,
+                            name=var_name.rsplit(".", 1)[-1],
+                            qualified_name=var_name,
+                            file=filepath_w,
+                            line=line_w,
+                        )
+                    )
+
+            # Wire READS edges from requirements to state vars
+            if known_vars:
+                try:
+                    graph.wire_state_var_edges(known_vars)
+                except ImportError:
+                    logger.debug(
+                        "formula_analyzer unavailable; " "skipping READS edge wiring"
+                    )
+
+            t2 = time.monotonic()
+            logger.info(
+                "Requirement graph: edge wiring done — %d vars in %.1fs",
+                len(known_vars),
+                t2 - t1,
+            )
+
+            # Load RFC requirement manifests and wire COVERS edges
+            try:
+                from ivy_lsp.core.semantic.rfc_annotations import (
+                    find_manifests,
+                    load_requirement_manifest,
+                )
+
+                for manifest_path in find_manifests(self.root):
+                    reqs_dict = load_requirement_manifest(manifest_path)
+                    for rfc_req in reqs_dict.values():
+                        graph.add_rfc_requirement(rfc_req)
+
+                if graph.rfc_requirements:
+                    graph.wire_coverage_edges()
+            except ImportError:
+                logger.debug("rfc_annotations unavailable; skipping manifest loading")
+
+            t3 = time.monotonic()
+            total = len(graph.requirements) + len(graph.actions) + len(graph.state_vars)
+            logger.info(
+                "Built requirement graph in %.1fs: %d requirements, %d actions, "
+                "%d state vars, %d edges "
+                "(indexing=%.1fs, wiring=%.1fs, manifests=%.1fs)",
+                t3 - t0,
+                len(graph.requirements),
+                len(graph.actions),
+                len(graph.state_vars),
+                len(graph.edges),
+                t1 - t0,
+                t2 - t1,
+                t3 - t2,
+            )
+
+            # --- Populate SemanticModel with the same data (compatibility bridge) ---
+            # The SemanticModel may already be built (via get_model); if so, mirror
+            # the RequirementGraph nodes and edges into it.  If the model hasn't been
+            # built yet, we skip — the requirement graph remains the source of truth
+            # until the model is constructed.
+            self._populate_semantic_model_from_graph(graph)
+
+            if total == 0:
+                logger.warning(
+                    "Requirement graph built but empty: %d files scanned, "
+                    "0 requirements/actions/vars extracted. "
+                    "Files may lack monitors or RFC annotations.",
+                    files_scanned,
+                )
+                return None
+            return graph
+        except ImportError as exc:
+            logger.warning(
+                "Requirement graph build failed (missing dependency): %s", exc
+            )
+            return None
+        except Exception:
+            logger.warning(
+                "Failed to build requirement graph",
+                exc_info=True,
+            )
+            return None
+
+    # --- Visualization server proxy ---
+
+    async def make_viz_server_proxy(self):
+        """Create a minimal server-like object for visualization handlers.
+
+        The visualization handlers in features/visualization.py expect a
+        server object with ``server.indexer.requirement_graph``.  This
+        lazily builds the requirement graph on first use and returns a
+        lightweight proxy that satisfies that contract.
+        """
+        graph = await self.get_req_graph()
+        return _ServerProxy(
+            indexer=_IndexerProxy(requirement_graph=graph),
+            workspace_root=self.root,
+        )
+
+    # --- Pre-warming ---
+
+    def prewarm(self) -> None:
+        """Pre-warm model and graph in background thread."""
+        _cfg = get_config()
+        _prewarm_model = _cfg.prewarm_model
+        _prewarm_graph = os.environ.get("IVY_LSP_PREWARM_GRAPH", "1") != "0"
+
+        if not (_prewarm_model or _prewarm_graph):
+            return
+
+        def _prewarm_fn():
+            """Pre-warm model and graph in background thread."""
+            import asyncio as _asyncio
+
+            loop = _asyncio.new_event_loop()
+            try:
+                if _prewarm_model:
+                    logger.info("[INDEX-PREWARM] Starting model pre-warm...")
+                    model = loop.run_until_complete(self.get_model())
+                    if model is not None:
+                        logger.info("[INDEX-MODEL-READY] SemanticModel pre-warmed")
+                    else:
+                        logger.warning(
+                            "[INDEX-MODEL-READY] Model pre-warm returned None"
+                        )
+                if _prewarm_graph:
+                    logger.info("[INDEX-PREWARM] Starting graph pre-warm...")
+                    graph = loop.run_until_complete(self.get_req_graph())
+                    if graph is not None:
+                        logger.info("[INDEX-GRAPH-READY] RequirementGraph pre-warmed")
+                    else:
+                        logger.warning(
+                            "[INDEX-GRAPH-READY] Graph pre-warm returned None"
+                        )
+            except Exception:
+                logger.error("[INDEX-PREWARM] Pre-warming failed", exc_info=True)
+            else:
+                logger.info("[MCP-PREWARM-DONE] Background pre-warming complete")
+            finally:
+                loop.close()
+
+        _prewarm_thread = threading.Thread(
+            target=_prewarm_fn, name="mcp-prewarm", daemon=True
+        )
+        _prewarm_thread.start()
+        logger.info("[INDEX-PREWARM] Background pre-warming started")
+
+    # --- ToolContext construction ---
+
+    def build_tool_context(self) -> ToolContext:
+        """Build a ToolContext wired to this state's methods."""
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
+
+        self.discovered_stdlib = discover_stdlib_modules()
+
+        ctx = ToolContext(
+            root=self.root,
+            staging_dir=self.staging_dir,
+            executor=self.executor,
+            base_path=self.base_path,
+            stdlib_modules=self.discovered_stdlib,
+        )
+        # Wire up callables backed by this state's methods
+        ctx.find_ivy_files = self.find_ivy_files_cached
+        ctx.get_model = self.get_model
+        ctx.get_model_or_none = self.get_model_or_none
+        ctx.get_model_status = self.get_model_status
+        ctx.get_req_graph = self.get_req_graph
+        ctx.make_viz_server_proxy = self.make_viz_server_proxy
+        ctx.get_basename_cache = self.get_basename_cache
+        ctx.make_resolve_callback = self.make_resolve_callback
+        ctx.include_resolver = self._resolver
+
+        self._tool_context = ctx
+        return ctx
 
 
 def create_mcp_app(ctx: ToolContext) -> Any:
@@ -205,38 +990,6 @@ def start_mcp(
         _cfg = get_config()
         _include_paths = _cfg.include_paths
         _extra_exclude_dirs = frozenset(_cfg.exclude_paths)
-    _effective_exclude_dirs = DEFAULT_EXCLUDE_DIRS | _extra_exclude_dirs
-
-    def _find_ivy_files(search_root: str) -> list[str]:
-        """Find .ivy files respecting workspace include/exclude paths.
-
-        When include_paths is set, walks only those subdirectories instead
-        of scanning the entire workspace tree and post-filtering.
-        """
-        if _include_paths:
-            results: list[str] = []
-            for ip in _include_paths:
-                sub = os.path.join(search_root, ip)
-                if os.path.isdir(sub):
-                    for rel in _find_ivy_files_raw(sub, _effective_exclude_dirs):
-                        results.append(os.path.join(ip, rel))
-            return sorted(set(results))
-        return _find_ivy_files_raw(search_root, _effective_exclude_dirs)
-
-    # --- Cached file list (avoids redundant directory traversals) ---
-    _cached_ivy_files: list[str] | None = None
-    _cached_ivy_files_lock = threading.Lock()
-
-    def _find_ivy_files_cached(search_root: str) -> list[str]:
-        """Return cached file list, building on first call."""
-        nonlocal _cached_ivy_files
-        if _cached_ivy_files is not None:
-            return _cached_ivy_files
-        with _cached_ivy_files_lock:
-            if _cached_ivy_files is not None:
-                return _cached_ivy_files
-            _cached_ivy_files = _find_ivy_files(search_root)
-            return _cached_ivy_files
 
     if _include_paths:
         logger.info("Workspace include paths: %s", _include_paths)
@@ -300,639 +1053,23 @@ def start_mcp(
                 "panther_ivy.api.executor not available; "
                 "falling back to native subprocess"
             )
-    _model_lock = asyncio.Lock()
-    _model_build_attempted: float = 0.0  # timestamp of last failed attempt
-    _model_build_error: str | None = None
-    _model_building: bool = False  # True while a build is in progress
-    _cfg = get_config()
-    _MODEL_RETRY_COOLDOWN = _cfg.model_retry_cooldown
-    _MODEL_BUILD_TIMEOUT = _cfg.model_build_timeout
 
-    _req_graph_lock = asyncio.Lock()
-    _req_graph: Any = requirement_graph  # may be pre-populated or None
-    _req_graph_import_failed = False  # permanent flag for ImportError
-    _req_graph_last_failure: float = 0.0  # timestamp of last non-import failure
-    _REQ_GRAPH_COOLDOWN = _cfg.req_graph_cooldown
+    # --- Build McpServerState with all mutable state ---
 
-    # --- Workspace-aware include resolution cache ---
-
-    _basename_cache: dict[str, list[str]] | None = None
-    _basename_cache_lock = threading.Lock()
-
-    def _get_basename_cache() -> dict[str, list[str]]:
-        """Build (or return cached) basename->[relative_paths] map for all .ivy files."""
-        nonlocal _basename_cache
-        if _basename_cache is not None:
-            return _basename_cache
-
-        with _basename_cache_lock:
-            if _basename_cache is not None:
-                return _basename_cache
-            cache: dict[str, list[str]] = {}
-            for rel_path in _find_ivy_files_cached(root):
-                basename = os.path.basename(rel_path)[:-4]  # strip .ivy
-                cache.setdefault(basename, []).append(rel_path)
-            _basename_cache = cache
-            return cache
-
-    def _make_resolve_callback():
-        """Create a resolve callback for structural lint include checking."""
-        cache = _get_basename_cache()
-
-        def _resolve(inc_name: str, from_file: str) -> str | None:
-            # Accept known stdlib modules
-            if inc_name in ctx.stdlib_modules:
-                return f"<stdlib>/{inc_name}.ivy"
-            # Check workspace file index
-            candidates = cache.get(inc_name)
-            if candidates:
-                return candidates[0]  # first match is sufficient for lint
-            return None
-
-        return _resolve
-
-    # --- Lazy SemanticModel construction ---
-
-    async def _get_model():
-        """Return the semantic model, building one if needed."""
-        nonlocal semantic_model, _model_build_attempted, _model_build_error, _model_building
-        # Fast path: model already built
-        if semantic_model is not None:
-            return semantic_model
-        # Fast path: previous build failed and cooldown has not elapsed
-        if (
-            _model_build_attempted
-            and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN
-        ):
-            return None
-        # Early return if another coroutine is already building the model
-        if _model_building:
-            return None
-
-        async with _model_lock:
-            # Double-check after acquiring lock
-            if semantic_model is not None:
-                return semantic_model
-            if (
-                _model_build_attempted
-                and (time.monotonic() - _model_build_attempted) < _MODEL_RETRY_COOLDOWN
-            ):
-                return None
-
-            _model_building = True
-            try:
-                model = await asyncio.wait_for(
-                    asyncio.to_thread(_build_model),
-                    timeout=_MODEL_BUILD_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                logger.error("Model build timed out after %.0fs", _MODEL_BUILD_TIMEOUT)
-                _model_build_attempted = time.monotonic()
-                _model_build_error = (
-                    f"Build timed out after {_MODEL_BUILD_TIMEOUT:.0f}s"
-                )
-                return None
-            except Exception as exc:
-                logger.error("Model build failed: %s", exc, exc_info=True)
-                _model_build_attempted = time.monotonic()
-                _model_build_error = str(exc)
-                return None
-            finally:
-                _model_building = False
-            if model is not None:
-                semantic_model = model
-            else:
-                _model_build_attempted = time.monotonic()
-                _model_build_error = (
-                    "Build returned empty model (missing dependencies?)"
-                )
-            return model
-
-    def _get_model_status() -> dict:
-        """Return the current model build status for error surfacing."""
-        if semantic_model is not None:
-            return {"state": "ready"}
-        if _model_building:
-            return {"state": "building"}
-        if _model_build_error:
-            elapsed = time.monotonic() - _model_build_attempted
-            remaining = max(0, _MODEL_RETRY_COOLDOWN - elapsed)
-            return {
-                "state": "failed",
-                "error": _model_build_error,
-                "retry_in_seconds": round(remaining),
-            }
-        return {"state": "not_built"}
-
-    async def _get_model_or_none(timeout: float = 5.0):
-        """Return the model if ready, or wait briefly if building. Never blocks long.
-
-        Unlike _get_model(), this will NOT trigger a full build. If the model
-        hasn't started building yet, it kicks off a background build and returns
-        None immediately. If it's currently building, waits up to *timeout*
-        seconds for it to finish.
-        """
-        if semantic_model is not None:
-            return semantic_model
-        if not _model_building:
-            # Kick off background build, but don't wait for it
-            asyncio.ensure_future(_get_model())
-            return None
-        # Model is currently building — wait briefly
-        deadline = time.monotonic() + timeout
-        while _model_building and time.monotonic() < deadline:
-            await asyncio.sleep(0.5)
-        return semantic_model  # may still be None
-
-    def _write_model_to_index(model):
-        """Write a SemanticModel to .ivy-index/ per-protocol directories.
-
-        Uses fcntl file locking (same pattern as IndexBuilder._write_pickle()).
-        Creates output files alongside existing index artifacts so subsequent
-        MCP startups can load them via Strategy 1.
-        """
-        try:
-            import fcntl
-            import gzip
-            import pickle
-
-            if ctx.workspace_context is None:
-                return
-
-            # Write to each protocol's .ivy-index/ directory
-            for proto, idx in ctx.workspace_context.protocol_indexes.items():
-                index_dir = idx.index_dir
-                if not index_dir or not os.path.isdir(index_dir):
-                    continue
-                lock_path = os.path.join(index_dir, ".build.lock")
-                try:
-                    lock_fd = open(lock_path, "w")
-                    try:
-                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        out_path = os.path.join(index_dir, "semantic_model.pickle.gz")
-                        with gzip.open(out_path, "wb") as f:
-                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
-                        logger.info("Wrote model to %s", out_path)
-                    except BlockingIOError:
-                        logger.debug("Index lock held for %s, skipping write", proto)
-                    finally:
-                        try:
-                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                        except Exception:
-                            pass
-                        lock_fd.close()
-                except OSError:
-                    logger.debug("Cannot write to %s index dir", proto, exc_info=True)
-
-            # Also try workspace-level .ivy-index/ if it exists
-            ws_index = os.path.join(root, ".ivy-index")
-            if os.path.isdir(ws_index):
-                lock_path = os.path.join(ws_index, ".build.lock")
-                try:
-                    lock_fd = open(lock_path, "w")
-                    try:
-                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        out_path = os.path.join(ws_index, "semantic_model.pickle.gz")
-                        with gzip.open(out_path, "wb") as f:
-                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
-                        logger.info("Wrote model to %s", out_path)
-                    except BlockingIOError:
-                        pass
-                    finally:
-                        try:
-                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                        except Exception:
-                            pass
-                        lock_fd.close()
-                except OSError:
-                    pass
-        except Exception:
-            logger.debug("Failed to write model to .ivy-index/", exc_info=True)
-
-    def _build_model():
-        """Build a lightweight semantic model from workspace files.
-
-        Tries two strategies in order:
-        1. Offline index merge (per-protocol models from .ivy-index/)
-        2. Full rebuild via TieredExtractor
-
-        After a successful build, writes the model back to .ivy-index/
-        per-protocol directories so subsequent startups are instant.
-        """
-        nonlocal _req_graph
-
-        # --- Strategy 1: Merge per-protocol models from offline index ---
-        try:
-            if ctx.workspace_context is not None and ctx.workspace_context.has_index():
-                from ivy_lsp.core.semantic.model import SemanticModel
-
-                merged = SemanticModel()
-                used_protos: list[str] = []
-                skipped_protos: list[str] = []
-                for proto, idx in ctx.workspace_context.protocol_indexes.items():
-                    if idx.semantic_model is None:
-                        skipped_protos.append(f"{proto}(no model)")
-                        continue
-                    if idx.staleness.status not in ("fresh", "stale_minor"):
-                        skipped_protos.append(f"{proto}({idx.staleness.status})")
-                        continue
-                    merged.merge_from(idx.semantic_model)
-                    used_protos.append(proto)
-
-                if used_protos and merged.node_count() > 0:
-                    logger.info(
-                        "Loaded semantic model from offline index: "
-                        "%d nodes from %s (skipped: %s)",
-                        merged.node_count(),
-                        ", ".join(used_protos),
-                        ", ".join(skipped_protos) or "none",
-                    )
-                    return merged
-                elif skipped_protos:
-                    logger.info(
-                        "Offline index incomplete, falling back to full build "
-                        "(skipped: %s)",
-                        ", ".join(skipped_protos),
-                    )
-        except Exception:
-            logger.debug(
-                "Offline index merge failed, falling back to full build",
-                exc_info=True,
-            )
-
-        # --- Strategy 2: Full rebuild from scratch ---
-        from ivy_lsp.core.semantic.model_builder import build_semantic_model
-
-        model = build_semantic_model(
-            root=root,
-            find_files_fn=_find_ivy_files_cached,
-            include_resolver=(
-                _resolver.resolve if _resolver else _make_resolve_callback()
-            ),
-            stdlib_modules=discovered_stdlib,
-        )
-
-        # Write rebuilt model to .ivy-index/ so next startup uses Strategy 1
-        if model is not None:
-            _write_model_to_index(model)
-
-        return model
-
-    # --- Lazy RequirementGraph construction ---
-
-    async def _get_req_graph():
-        """Return the requirement graph, lazily building one if needed."""
-        nonlocal _req_graph, _req_graph_import_failed, _req_graph_last_failure
-        if _req_graph is not None:
-            return _req_graph
-        # Permanent failure: missing dependency
-        if _req_graph_import_failed:
-            return None
-        # Transient failure: respect cooldown
-        if _req_graph_last_failure and (
-            time.monotonic() - _req_graph_last_failure < _REQ_GRAPH_COOLDOWN
-        ):
-            return None
-
-        async with _req_graph_lock:
-            if _req_graph is not None:
-                return _req_graph
-            if _req_graph_import_failed:
-                return None
-            if _req_graph_last_failure and (
-                time.monotonic() - _req_graph_last_failure < _REQ_GRAPH_COOLDOWN
-            ):
-                return None
-
-            try:
-                logger.info(
-                    "Building requirement graph (first call, may take 1-2 min)..."
-                )
-                graph = await asyncio.to_thread(_build_requirement_graph)
-            except ImportError as exc:
-                logger.warning(
-                    "Requirement graph unavailable (missing dependency): %s",
-                    exc,
-                )
-                _req_graph_import_failed = True
-                return None
-            except Exception as exc:
-                logger.warning(
-                    "Requirement graph build failed (will retry in %ds): %s",
-                    _REQ_GRAPH_COOLDOWN,
-                    exc,
-                )
-                _req_graph_last_failure = time.monotonic()
-                return None
-
-            if graph is not None:
-                _req_graph = graph
-            else:
-                _req_graph_last_failure = time.monotonic()
-            return graph
-
-    def _populate_semantic_model_from_graph(graph: Any) -> None:
-        """Mirror RequirementGraph nodes and edges into the SemanticModel.
-
-        This bridges the domain-specific RequirementGraph data into the
-        unified SemanticModel so that both models stay consistent.
-        The RequirementGraph is kept as a compatibility layer — this
-        function only *adds* to the SemanticModel, never replaces it.
-
-        If the SemanticModel has not been built yet, this is a no-op.
-        """
-        if semantic_model is None:
-            logger.debug(
-                "SemanticModel not yet built; skipping requirement "
-                "graph bridge (data will be available via "
-                "RequirementGraph only)"
-            )
-            return
-
-        try:
-            from ivy_lsp.core.analysis.requirement_graph import EdgeType
-            from ivy_lsp.core.semantic.edges import SemanticEdgeType
-
-            # Map RequirementGraph EdgeType -> SemanticEdgeType
-            _edge_type_map = {
-                EdgeType.READS: SemanticEdgeType.READS,
-                EdgeType.WRITES: SemanticEdgeType.WRITES,
-                EdgeType.CONSTRAINS: SemanticEdgeType.CONSTRAINS,
-                EdgeType.DEPENDS_ON: SemanticEdgeType.DEPENDS_ON,
-                EdgeType.PROPAGATED_FROM: SemanticEdgeType.PROPAGATED_FROM,
-                EdgeType.COVERS: SemanticEdgeType.COVERS,
-            }
-
-            model = semantic_model
-
-            # Add nodes: requirements, actions, state vars, properties
-            for req in graph.requirements.values():
-                model.add_node(req)
-            for action in graph.actions.values():
-                model.add_node(action)
-            for sv in graph.state_vars.values():
-                model.add_node(sv)
-            for prop in graph.properties.values():
-                model.add_node(prop)
-
-            # Add edges, translating EdgeType -> SemanticEdgeType
-            for src, etype, dst in graph.edges:
-                sem_etype = _edge_type_map.get(etype)
-                if sem_etype is not None:
-                    model.add_edge(src, sem_etype, dst)
-                else:
-                    logger.debug(
-                        "Unmapped edge type %s in requirement graph; skipping",
-                        etype,
-                    )
-
-            logger.info(
-                "Bridged requirement graph into SemanticModel: "
-                "%d requirements, %d actions, %d state vars, %d edges",
-                len(graph.requirements),
-                len(graph.actions),
-                len(graph.state_vars),
-                len(graph.edges),
-            )
-        except Exception:
-            logger.warning(
-                "Failed to bridge requirement graph into SemanticModel",
-                exc_info=True,
-            )
-
-    def _build_requirement_graph():
-        """Build a RequirementGraph from workspace .ivy files.
-
-        Tries the offline index first (per-protocol requirement graphs
-        from .ivy-index/), then falls back to a full build using the
-        light-mode extractor.
-        """
-        # Try offline index before doing the expensive build
-        try:
-            if ctx.workspace_context is not None and ctx.workspace_context.has_index():
-                for _proto, idx in ctx.workspace_context.protocol_indexes.items():
-                    if idx.requirement_graph is not None:
-                        logger.info("Loaded requirement graph from offline index")
-                        return idx.requirement_graph
-        except Exception:
-            logger.debug(
-                "Offline index lookup failed for requirement graph",
-                exc_info=True,
-            )
-
-        try:
-            from ivy_lsp.core.analysis.light_mode_extractor import (
-                extract_requirements_light,
-            )
-            from ivy_lsp.core.analysis.requirement_graph import (
-                ActionNode,
-                RequirementGraph,
-                StateVarNode,
-            )
-
-            t0 = time.monotonic()
-            graph = RequirementGraph()
-            all_writes: list[tuple[str, str, int]] = []
-            known_vars: set[str] = set()
-
-            discovered = _find_ivy_files_cached(root)
-            logger.info(
-                "Requirement graph: discovered %d .ivy files (root=%s, include_paths=%s)",
-                len(discovered),
-                root,
-                _include_paths or "(all)",
-            )
-            if not discovered:
-                logger.warning(
-                    "Requirement graph: no .ivy files found — graph will be empty. "
-                    "Check workspace root and include_paths."
-                )
-                return None
-
-            files_scanned = 0
-            for rel_path in discovered:
-                abs_path = os.path.join(root, rel_path)
-                try:
-                    with open(abs_path, encoding="utf-8", errors="replace") as f:
-                        source = f.read()
-                except OSError as exc:
-                    logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
-                    continue
-
-                files_scanned += 1
-                reqs, writes = extract_requirements_light(source, abs_path)
-                if not reqs and not writes:
-                    continue
-
-                # Bulk-add requirements + CONSTRAINS edges for this file
-                graph.add_file_requirements(abs_path, reqs, writes)
-
-                # Collect write targets as known state vars
-                for var_name, _fp, _line in writes:
-                    known_vars.add(var_name)
-                all_writes.extend(writes)
-
-            t1 = time.monotonic()
-            logger.info(
-                "Requirement graph: file indexing done — %d files in %.1fs",
-                files_scanned,
-                t1 - t0,
-            )
-
-            # Create ActionNodes from monitor_action references
-            for req in graph.requirements.values():
-                if req.monitor_action:
-                    graph.add_action_if_absent(
-                        ActionNode(
-                            id=req.monitor_action,
-                            name=req.monitor_action.rsplit(".", 1)[-1],
-                            qualified_name=req.monitor_action,
-                            file=req.file,
-                            line=req.line,
-                        )
-                    )
-
-            # Create StateVarNodes from write targets
-            for var_name, filepath_w, line_w in all_writes:
-                if var_name not in graph.state_vars:
-                    graph.add_state_var(
-                        StateVarNode(
-                            id=var_name,
-                            name=var_name.rsplit(".", 1)[-1],
-                            qualified_name=var_name,
-                            file=filepath_w,
-                            line=line_w,
-                        )
-                    )
-
-            # Wire READS edges from requirements to state vars
-            if known_vars:
-                try:
-                    graph.wire_state_var_edges(known_vars)
-                except ImportError:
-                    logger.debug(
-                        "formula_analyzer unavailable; skipping READS edge wiring"
-                    )
-
-            t2 = time.monotonic()
-            logger.info(
-                "Requirement graph: edge wiring done — %d vars in %.1fs",
-                len(known_vars),
-                t2 - t1,
-            )
-
-            # Load RFC requirement manifests and wire COVERS edges
-            try:
-                from ivy_lsp.core.semantic.rfc_annotations import (
-                    find_manifests,
-                    load_requirement_manifest,
-                )
-
-                for manifest_path in find_manifests(root):
-                    reqs_dict = load_requirement_manifest(manifest_path)
-                    for rfc_req in reqs_dict.values():
-                        graph.add_rfc_requirement(rfc_req)
-
-                if graph.rfc_requirements:
-                    graph.wire_coverage_edges()
-            except ImportError:
-                logger.debug("rfc_annotations unavailable; skipping manifest loading")
-
-            t3 = time.monotonic()
-            total = len(graph.requirements) + len(graph.actions) + len(graph.state_vars)
-            logger.info(
-                "Built requirement graph in %.1fs: %d requirements, %d actions, "
-                "%d state vars, %d edges "
-                "(indexing=%.1fs, wiring=%.1fs, manifests=%.1fs)",
-                t3 - t0,
-                len(graph.requirements),
-                len(graph.actions),
-                len(graph.state_vars),
-                len(graph.edges),
-                t1 - t0,
-                t2 - t1,
-                t3 - t2,
-            )
-
-            # --- Populate SemanticModel with the same data (compatibility bridge) ---
-            # The SemanticModel may already be built (via _get_model); if so, mirror
-            # the RequirementGraph nodes and edges into it.  If the model hasn't been
-            # built yet, we skip — the requirement graph remains the source of truth
-            # until the model is constructed.
-            _populate_semantic_model_from_graph(graph)
-
-            if total == 0:
-                logger.warning(
-                    "Requirement graph built but empty: %d files scanned, "
-                    "0 requirements/actions/vars extracted. "
-                    "Files may lack monitors or RFC annotations.",
-                    files_scanned,
-                )
-                return None
-            return graph
-        except ImportError as exc:
-            logger.warning(
-                "Requirement graph build failed (missing dependency): %s", exc
-            )
-            return None
-        except Exception:
-            logger.warning(
-                "Failed to build requirement graph",
-                exc_info=True,
-            )
-            return None
-
-    # --- Visualization server proxy ---
-
-    from dataclasses import dataclass as _dc
-
-    @_dc
-    class _IndexerProxy:
-        requirement_graph: Any
-
-    @_dc
-    class _ServerProxy:
-        indexer: _IndexerProxy
-        initializing: bool = False
-        workspace_root: str = ""  # H3: for relative path output
-
-    async def _make_viz_server_proxy():
-        """Create a minimal server-like object for visualization handlers.
-
-        The visualization handlers in features/visualization.py expect a
-        server object with ``server.indexer.requirement_graph``.  This
-        lazily builds the requirement graph on first use and returns a
-        lightweight proxy that satisfies that contract.
-        """
-        graph = await _get_req_graph()
-        return _ServerProxy(
-            indexer=_IndexerProxy(requirement_graph=graph),
-            workspace_root=root,
-        )
-
-    # --- Build ToolContext and register tools from sub-modules ---
-
-    from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
-
-    discovered_stdlib = discover_stdlib_modules()
-
-    ctx = ToolContext(
+    state = McpServerState(
         root=root,
         staging_dir=staging_dir,
+        semantic_model=semantic_model,
+        requirement_graph=requirement_graph,
+        resolver=_resolver,
+        include_paths=_include_paths,
+        exclude_dirs=_extra_exclude_dirs,
         executor=executor,
+        ws_config=ws_config,
         base_path=base_path,
-        stdlib_modules=discovered_stdlib,
     )
-    # Wire up callables that close over start_mcp's local state
-    ctx.find_ivy_files = _find_ivy_files_cached
-    ctx.get_model = _get_model
-    ctx.get_model_or_none = _get_model_or_none
-    ctx.get_model_status = _get_model_status
-    ctx.get_req_graph = _get_req_graph
-    ctx.make_viz_server_proxy = _make_viz_server_proxy
-    ctx.get_basename_cache = _get_basename_cache
-    ctx.make_resolve_callback = _make_resolve_callback
-    ctx.include_resolver = _resolver
+
+    ctx = state.build_tool_context()
 
     # Populate workspace_groups from ws_config (if available)
     if ws_config is not None and hasattr(ws_config, "workspace_groups"):
@@ -942,11 +1079,13 @@ def start_mcp(
     try:
         from ivy_lsp.core.workspace.context import WorkspaceContext
 
-        ctx.workspace_context = WorkspaceContext.load(root)
-        if ctx.workspace_context.has_index():
+        ws_ctx = WorkspaceContext.load(root)
+        ctx.workspace_context = ws_ctx
+        state.workspace_context = ws_ctx
+        if ws_ctx.has_index():
             logger.info(
                 "MCP loaded offline index for: %s",
-                ", ".join(ctx.workspace_context.list_protocols()),
+                ", ".join(ws_ctx.list_protocols()),
             )
     except Exception:
         logger.debug("WorkspaceContext loading failed in MCP", exc_info=True)
@@ -965,48 +1104,7 @@ def start_mcp(
         return mcp
 
     # --- Background pre-warming (non-blocking) ---
-    _prewarm_model = _cfg.prewarm_model
-    _prewarm_graph = os.environ.get("IVY_LSP_PREWARM_GRAPH", "1") != "0"
-
-    if _prewarm_model or _prewarm_graph:
-        import threading as _threading
-
-        def _prewarm():
-            """Pre-warm model and graph in background thread."""
-            import asyncio as _asyncio
-
-            loop = _asyncio.new_event_loop()
-            try:
-                if _prewarm_model:
-                    logger.info("[INDEX-PREWARM] Starting model pre-warm...")
-                    model = loop.run_until_complete(_get_model())
-                    if model is not None:
-                        logger.info("[INDEX-MODEL-READY] SemanticModel pre-warmed")
-                    else:
-                        logger.warning(
-                            "[INDEX-MODEL-READY] Model pre-warm returned None"
-                        )
-                if _prewarm_graph:
-                    logger.info("[INDEX-PREWARM] Starting graph pre-warm...")
-                    graph = loop.run_until_complete(_get_req_graph())
-                    if graph is not None:
-                        logger.info("[INDEX-GRAPH-READY] RequirementGraph pre-warmed")
-                    else:
-                        logger.warning(
-                            "[INDEX-GRAPH-READY] Graph pre-warm returned None"
-                        )
-            except Exception:
-                logger.error("[INDEX-PREWARM] Pre-warming failed", exc_info=True)
-            else:
-                logger.info("[MCP-PREWARM-DONE] Background pre-warming complete")
-            finally:
-                loop.close()
-
-        _prewarm_thread = _threading.Thread(
-            target=_prewarm, name="mcp-prewarm", daemon=True
-        )
-        _prewarm_thread.start()
-        logger.info("[INDEX-PREWARM] Background pre-warming started")
+    state.prewarm()
 
     # Start sidecar upgrade monitor in a daemon thread
     # (FastMCP's run() blocks the main event loop, so we use a separate thread)
