@@ -164,6 +164,7 @@ class IncludeResolver:
         self._warned_routing_miss: set = set()
         # Thread safety: protects staging rebuild during set_active_workspace
         self._staging_lock = threading.Lock()
+        self._staging_strategy: Optional["FlatStagingStrategy"] = None
         # Currently active layers (empty set = all layers active)
         self._active_layers: set = set()
 
@@ -253,6 +254,12 @@ class IncludeResolver:
         candidate = os.path.join(from_dir, fname)
         if os.path.isfile(candidate):
             return os.path.realpath(candidate)
+
+        # 1a. Delegate to strategy if available (enables VirtualStagingStrategy)
+        if self._staging_strategy is not None:
+            result = self._staging_strategy.resolve(include_name, from_file_real)
+            if result is not None:
+                return result
 
         # 2. Layer-aware staging (when active, replaces flat staging for
         #    colliding basenames)
@@ -467,49 +474,24 @@ class IncludeResolver:
     def create_staging_directory(self) -> str:
         """Create a flat temp directory with one symlink per .ivy file.
 
-        Mirrors how ``ivyc`` prepares ``include/1.7/`` -- a flat directory
-        where each basename maps to exactly one file.  When multiple source
-        files share the same basename, the first one (sorted path order) wins.
-
-        Also builds ``_collision_map`` tracking all basename collisions so
-        downstream scope-partitioning can use the data.
+        Delegates to FlatStagingStrategy for the actual staging work.
+        Collision classification logging stays here because it needs
+        ``_file_to_layer`` context that the strategy doesn't have.
 
         Returns:
             Absolute path to the staging directory.
         """
-        # Cleanup stale staging directories
-        tmpdir = tempfile.gettempdir()
-        now = time.time()
-        for entry in os.scandir(tmpdir):
-            if entry.name.startswith("ivy-lsp-stage-") and entry.is_dir(
-                follow_symlinks=False
-            ):
-                try:
-                    if now - entry.stat().st_mtime > _STALE_THRESHOLD_SECS:
-                        shutil.rmtree(entry.path, ignore_errors=True)
-                        logger.debug("Cleaned stale staging dir: %s", entry.name)
-                except OSError:
-                    pass
+        from ivy_lsp.core.staging.flat import FlatStagingStrategy
 
-        staging = tempfile.mkdtemp(prefix="ivy-lsp-stage-")
-        atexit.register(lambda d=staging: shutil.rmtree(d, ignore_errors=True))
-        self._staging_dir = staging
-        self._staged_files.clear()
-        self._collision_map.clear()
+        self._staging_strategy = FlatStagingStrategy()
         source_files = self._find_source_files()
+        result = self._staging_strategy.prepare(source_files, self._workspace_root)
+        self._staging_dir = result.staging_dir
+        self._staged_files = dict(result.staged_files)
+        self._collision_map = dict(result.collision_map)
 
-        # First pass: build collision map (basename → all source paths).
-        basename_to_paths: Dict[str, List[str]] = {}
-        for filepath in source_files:
-            basename = os.path.basename(filepath)
-            basename_to_paths.setdefault(basename, []).append(filepath)
-
-        # Record only actual collisions (2+ files sharing a basename).
-        for basename, paths in basename_to_paths.items():
-            if len(paths) <= 1:
-                continue
-            self._collision_map[basename] = list(paths)
-            # Classify: intra-layer (real problem) vs cross-layer (expected)
+        # Collision classification logging (needs _file_to_layer context)
+        for basename, paths in result.collision_map.items():
             if self._file_to_layer:
                 layers_involved = {
                     self._file_to_layer.get(os.path.realpath(p), "unknown")
@@ -517,8 +499,7 @@ class IncludeResolver:
                 }
                 if len(layers_involved) <= 1:
                     logger.warning(
-                        "Intra-layer collision: %s has %d variants in layer '%s': %s "
-                        "— this MUST be fixed (duplicate basenames within same protocol)",
+                        "Intra-layer collision: %s has %d variants in layer '%s': %s",
                         basename,
                         len(paths),
                         next(iter(layers_involved)),
@@ -538,60 +519,27 @@ class IncludeResolver:
                     [os.path.relpath(p, self._workspace_root) for p in paths],
                 )
 
-        # Second pass: create symlinks (first sorted path wins, as before).
-        collisions = 0
-        for filepath in source_files:
-            basename = os.path.basename(filepath)
-            link_path = os.path.join(staging, basename)
-            if os.path.lexists(link_path):
-                collisions += 1
-                if self._file_to_layer:
-                    # Cross-layer collisions handled by layer staging — audit only
-                    logger.debug(
-                        "Staging collision (layer-handled): %s (keeping %s, skipping %s)",
-                        basename,
-                        os.path.relpath(
-                            self._staged_files[basename], self._workspace_root
-                        ),
-                        os.path.relpath(filepath, self._workspace_root),
-                    )
-                else:
-                    # No layers → collision is a real ambiguity problem
-                    logger.warning(
-                        "Staging collision (ambiguous): %s (keeping %s, skipping %s) "
-                        "— include resolution for this basename may be wrong",
-                        basename,
-                        os.path.relpath(
-                            self._staged_files[basename], self._workspace_root
-                        ),
-                        os.path.relpath(filepath, self._workspace_root),
-                    )
-                continue
-            try:
-                os.symlink(filepath, link_path)
-            except OSError as exc:
-                logger.warning("Failed to create symlink for %s: %s", filepath, exc)
-                continue
-            self._staged_files[basename] = filepath
         logger.info(
-            "Staged %d files in %s (%d collisions, %d unique basenames affected)",
+            "Staged %d files (%d collisions, %d unique basenames affected)",
             len(self._staged_files),
-            staging,
-            collisions,
-            len(self._collision_map),
+            sum(len(v) for v in result.collision_map.values()),
+            len(result.collision_map),
         )
-        return staging
+        return self._staging_dir
 
     def cleanup_staging(self) -> None:
         """Remove the staging directory and clear the staged file map."""
-        if self._staging_dir and os.path.isdir(self._staging_dir):
+        if self._staging_strategy:
+            self._staging_strategy.cleanup()
+            self._staging_strategy = None
+        elif self._staging_dir and os.path.isdir(self._staging_dir):
 
             def _on_error(func, path, exc_info):
                 logger.warning("Staging cleanup error: %s on %s", func.__name__, path)
 
             shutil.rmtree(self._staging_dir, onerror=_on_error)
-            self._staging_dir = None
-            self._staged_files.clear()
+        self._staging_dir = None
+        self._staged_files.clear()
 
     def get_staged_path(self, filepath: str) -> Optional[str]:
         """Return the staging symlink path for a file, or None.

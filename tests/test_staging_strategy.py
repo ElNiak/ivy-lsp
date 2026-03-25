@@ -139,3 +139,58 @@ class TestFlatStagingStrategy:
         result = strategy.prepare(source_files, str(workspace))
         assert result.collision_map == {}
         strategy.cleanup()
+
+
+class TestIncludeResolverIntegration:
+    """Test that IncludeResolver delegates to FlatStagingStrategy."""
+
+    def test_create_staging_populates_strategy(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype t\n")
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+
+        # The resolver should have a staging strategy
+        assert hasattr(resolver, "_staging_strategy")
+        assert resolver._staging_strategy is not None
+        assert resolver._staging_strategy.is_active
+        resolver.cleanup_staging()
+
+    def test_cleanup_staging_when_no_strategy(self, tmp_path):
+        """Cleanup should not crash when create_staging was never called."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.cleanup_staging()  # Should not raise
+
+    def test_delegation_collision_map_matches(self, tmp_path):
+        """Behavioral equivalence: collision_map populated correctly."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "proto_a").mkdir()
+        (tmp_path / "proto_a" / "types.ivy").write_text("# a\n")
+        (tmp_path / "proto_b").mkdir()
+        (tmp_path / "proto_b" / "types.ivy").write_text("# b\n")
+        (tmp_path / "proto_a" / "unique.ivy").write_text("# u\n")
+
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+
+        assert "types.ivy" in resolver._collision_map
+        assert len(resolver._collision_map["types.ivy"]) == 2
+        assert "unique.ivy" not in resolver._collision_map
+        resolver.cleanup_staging()
+
+    def test_resolve_still_works_after_injection(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype t\n")
+        (tmp_path / "main.ivy").write_text("#lang ivy1.7\ninclude types\n")
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+
+        resolved = resolver.resolve("types", str(tmp_path / "main.ivy"))
+        assert resolved is not None
+        assert resolved.endswith("types.ivy")
+        resolver.cleanup_staging()
