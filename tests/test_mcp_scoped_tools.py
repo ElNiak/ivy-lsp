@@ -29,7 +29,7 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)
@@ -107,11 +107,11 @@ class TestVerifyScope:
         ws.get_test_scope.return_value = None
         ctx = _make_ctx(str(tmp_path), ws)
 
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
-        with caplog.at_level(logging.WARNING, logger="ivy_lsp.tools.verification"):
+        with caplog.at_level(logging.WARNING, logger="ivy_lsp.mcp.tools.verification"):
             result = await mcp.call_tool(
                 "ivy_verify",
                 {"relative_path": "model.ivy", "scope": "nonexistent_scope"},
@@ -134,7 +134,7 @@ class TestVerifyScope:
             include_closure=frozenset({str(ivy_file)}),
         )
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
         result = await mcp.call_tool(
@@ -205,7 +205,7 @@ class TestDiagnosticsScope:
             include_closure=frozenset({str(tmp_path / "test.ivy")}),
         )
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
@@ -235,7 +235,7 @@ class TestDiagnosticsScope:
             include_closure=frozenset({str(ivy_file)}),
         )
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
@@ -261,11 +261,11 @@ class TestDiagnosticsScope:
         ws = MagicMock()
         ws.get_test_scope.return_value = None
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
-        with caplog.at_level(logging.WARNING, logger="ivy_lsp.tools.verification"):
+        with caplog.at_level(logging.WARNING, logger="ivy_lsp.mcp.tools.verification"):
             result = await mcp.call_tool(
                 "ivy_diagnostics",
                 {
@@ -318,7 +318,7 @@ class TestIncludeGraphScope:
             ),
         )
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
@@ -359,7 +359,7 @@ class TestCoverageScope:
             include_closure=frozenset({str(test_ivy)}),
         )
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
@@ -377,11 +377,11 @@ class TestCoverageScope:
         ws = MagicMock()
         ws.get_test_scope.return_value = None
         ctx = _make_ctx(str(tmp_path), ws)
-        from ivy_lsp.mcp_server import create_mcp_app
+        from ivy_lsp.mcp.server import create_mcp_app
 
         mcp = create_mcp_app(ctx)
 
-        with caplog.at_level(logging.WARNING, logger="ivy_lsp.tools.traceability"):
+        with caplog.at_level(logging.WARNING, logger="ivy_lsp.mcp.tools.traceability"):
             result = await mcp.call_tool(
                 "ivy_coverage", {"mode": "stats", "scope": "unknown_scope"}
             )
@@ -403,7 +403,7 @@ def _make_ctx(root: str, workspace_context=None):
     Also provides proper async stubs for get_model / get_req_graph.
     """
     from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_raw
-    from ivy_lsp.mcp_server import ToolContext
+    from ivy_lsp.mcp.server import ToolContext
 
     ctx = ToolContext(
         root=root,

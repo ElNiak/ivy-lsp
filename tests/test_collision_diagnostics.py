@@ -26,7 +26,7 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)
@@ -71,7 +71,7 @@ class TestCollisionClassification:
     def _call_handle_collisions(self, collision_map, file_to_layer, active_layers=None):
         """Directly invoke the handler via the MCP tool and return parsed result."""
         # We test the underlying logic via the analysis module
-        from ivy_lsp.tools import analysis as analysis_mod
+        from ivy_lsp.mcp.tools import analysis as analysis_mod
 
         ctx = MagicMock()
         resolver = _make_mock_resolver(collision_map, file_to_layer, active_layers)
@@ -214,7 +214,7 @@ class TestCollisionClassification:
         """When resolver is not available, returns error response."""
         import asyncio
 
-        from ivy_lsp.tools import analysis as analysis_mod
+        from ivy_lsp.mcp.tools import analysis as analysis_mod
 
         ctx = MagicMock()
         ctx.include_resolver = None
@@ -226,7 +226,7 @@ class TestCollisionClassification:
         """When resolver has no _collision_map, returns error response."""
         import asyncio
 
-        from ivy_lsp.tools import analysis as analysis_mod
+        from ivy_lsp.mcp.tools import analysis as analysis_mod
 
         ctx = MagicMock()
         ctx.include_resolver = MagicMock(spec=[])  # No _collision_map attribute

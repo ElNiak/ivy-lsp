@@ -15,13 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ivy_lsp import sidecar_client
+from ivy_lsp.mcp import client as sidecar_client
 
 
 @pytest.mark.asyncio
 async def test_full_upgrade_downgrade_cycle():
     """Simulate: standalone -> upgrade -> downgrade -> standalone."""
-    from ivy_lsp.mcp_server import _sidecar_monitor
+    from ivy_lsp.mcp.server import _sidecar_monitor
 
     old = sidecar_client.get_sidecar_client()
     try:
@@ -32,7 +32,7 @@ async def test_full_upgrade_downgrade_cycle():
         mock_client = AsyncMock()
 
         # Phase 1: No port file -> stays standalone
-        with patch("ivy_lsp.mcp_server.sidecar_client") as mock_sc:
+        with patch("ivy_lsp.mcp.server.sidecar_client") as mock_sc:
             mock_sc.workspace_hash.return_value = "test123"
             mock_sc.read_port_file.return_value = None
             mock_sc.get_sidecar_client = sidecar_client.get_sidecar_client
@@ -50,7 +50,7 @@ async def test_full_upgrade_downgrade_cycle():
         assert sidecar_client.get_sidecar_client() is None  # Still standalone
 
         # Phase 2: Port file appears -> upgrade
-        with patch("ivy_lsp.mcp_server.sidecar_client") as mock_sc:
+        with patch("ivy_lsp.mcp.server.sidecar_client") as mock_sc:
             mock_sc.workspace_hash.return_value = "test123"
             mock_sc.read_port_file.return_value = 19847
             mock_sc.validate_sidecar_workspace = AsyncMock(return_value=True)
@@ -80,7 +80,7 @@ async def test_full_upgrade_downgrade_cycle():
 @pytest.mark.asyncio
 async def test_disable_upgrade_env_var():
     """IVY_MCP_DISABLE_UPGRADE=1 prevents monitor from running."""
-    from ivy_lsp.mcp_server import _sidecar_monitor
+    from ivy_lsp.mcp.server import _sidecar_monitor
 
     old = sidecar_client.get_sidecar_client()
     try:

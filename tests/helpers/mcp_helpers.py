@@ -6,9 +6,9 @@ from __future__ import annotations
 def get_mcp_app(workspace_root: str | None = None):
     """Create a FastMCP app for testing.
 
-    Uses start_mcp(_return_app=True) from ivy_lsp.mcp_server.
+    Uses start_mcp(_return_app=True) from ivy_lsp.mcp.server.
     """
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)

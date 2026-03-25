@@ -66,7 +66,7 @@ def _make_ctx(tmp_path: Path, groups: dict | None = None) -> MockToolContext:
 @pytest.mark.asyncio
 async def test_set_workspace_protocol(tmp_path):
     """Setting a workspace by protocol name activates the group's layers."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {
         "quic": ["quic_stack", "quic_tests", "tls_stack"],
@@ -104,7 +104,7 @@ async def test_set_workspace_protocol(tmp_path):
 @pytest.mark.asyncio
 async def test_set_workspace_unknown_target(tmp_path):
     """Setting an unknown target returns an error listing available groups."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {"quic": ["quic_stack"], "minip": ["minip_stack"]}
     ctx = _make_ctx(tmp_path, groups)
@@ -134,7 +134,7 @@ async def test_set_workspace_unknown_target(tmp_path):
 @pytest.mark.asyncio
 async def test_get_workspace(tmp_path):
     """Get action returns current workspace state."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {"quic": ["quic_stack", "quic_tests"]}
     ctx = _make_ctx(tmp_path, groups)
@@ -167,7 +167,7 @@ async def test_get_workspace(tmp_path):
 @pytest.mark.asyncio
 async def test_get_workspace_not_set(tmp_path):
     """Get action when no workspace is set returns appropriate message."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     ctx = _make_ctx(tmp_path)
     mcp = MagicMock()
@@ -194,7 +194,7 @@ async def test_get_workspace_not_set(tmp_path):
 @pytest.mark.asyncio
 async def test_list_workspaces(tmp_path):
     """List action returns available groups and current workspace."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {
         "quic": ["quic_stack", "quic_tests"],
@@ -231,7 +231,7 @@ async def test_list_workspaces(tmp_path):
 @pytest.mark.asyncio
 async def test_clear_workspace(tmp_path):
     """Clear action resets workspace state."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {"quic": ["quic_stack", "quic_tests"]}
     ctx = _make_ctx(tmp_path, groups)
@@ -268,7 +268,7 @@ async def test_clear_workspace(tmp_path):
 @pytest.mark.asyncio
 async def test_set_workspace_persists(tmp_path):
     """State file is written to disk after set."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {"quic": ["quic_stack", "quic_tests"]}
     ctx = _make_ctx(tmp_path, groups)
@@ -300,7 +300,7 @@ async def test_set_workspace_persists(tmp_path):
 @pytest.mark.asyncio
 async def test_set_workspace_with_roles(tmp_path):
     """Setting workspace with roles filters to role_pair granularity."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     groups = {"quic": ["quic_stack", "quic_tests", "tls_stack"]}
     ctx = _make_ctx(tmp_path, groups)
@@ -328,7 +328,7 @@ async def test_set_workspace_with_roles(tmp_path):
 @pytest.mark.asyncio
 async def test_invalid_action(tmp_path):
     """An unrecognized action returns an error."""
-    from ivy_lsp.tools.workspace import register_workspace_tools
+    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
     ctx = _make_ctx(tmp_path)
     mcp = MagicMock()

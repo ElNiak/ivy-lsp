@@ -39,7 +39,7 @@ def test_no_scoping_returns_all(workspace):
     """Without env vars, all .ivy files are returned."""
     env_patch = {"IVY_LSP_INCLUDE_PATHS": "", "IVY_LSP_EXCLUDE_PATHS": ""}
     with patch.dict(os.environ, env_patch, clear=False):
-        from ivy_lsp.mcp_server import start_mcp
+        from ivy_lsp.mcp.server import start_mcp
 
         app = start_mcp(workspace_root=str(workspace), _return_app=True)
 
@@ -107,7 +107,7 @@ def test_mcp_start_with_scoping_env(workspace):
         "IVY_LSP_EXCLUDE_PATHS": "doc,examples",
     }
     with patch.dict(os.environ, env_patch, clear=False):
-        from ivy_lsp.mcp_server import start_mcp
+        from ivy_lsp.mcp.server import start_mcp
 
         app = start_mcp(workspace_root=str(workspace), _return_app=True)
     assert app is not None

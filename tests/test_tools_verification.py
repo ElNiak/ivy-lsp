@@ -27,7 +27,7 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)
@@ -60,7 +60,7 @@ def _extract_text(result) -> str:
 class TestIsolateStatusPattern:
     def test_isolate_status_regex_matches(self):
         """The isolate status regex matches expected output lines."""
-        from ivy_lsp.tools.verification import _ISOLATE_STATUS_RE
+        from ivy_lsp.mcp.tools.verification import _ISOLATE_STATUS_RE
 
         output = (
             "  isolate quic_server_test_stream: PASS\n"
@@ -78,7 +78,7 @@ class TestIsolateStatusPattern:
 class TestCacheMaxSize:
     def test_cache_max_size_constant_exists(self):
         """The _CACHE_MAX_SIZE constant should be defined at module level."""
-        from ivy_lsp.tools.verification import _CACHE_MAX_SIZE
+        from ivy_lsp.mcp.tools.verification import _CACHE_MAX_SIZE
 
         assert _CACHE_MAX_SIZE == 100
 
@@ -104,7 +104,7 @@ class TestDockerCompileFallback:
             "raw_output": "",
         }
         with patch(
-            "ivy_lsp.tools.verification.shared_ivy_compile",
+            "ivy_lsp.mcp.tools.verification.shared_ivy_compile",
             new_callable=AsyncMock,
             return_value=mock_result,
         ):

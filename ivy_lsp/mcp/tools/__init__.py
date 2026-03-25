@@ -192,8 +192,8 @@ def error_response(message: str) -> dict:
 # Markdown formatting layer
 # ---------------------------------------------------------------------------
 
+from ivy_lsp.mcp.client import get_sidecar_client, set_sidecar_client
 from ivy_lsp.mcp.tools.formatters import format_error, format_tool_result
-from ivy_lsp.sidecar_client import get_sidecar_client, set_sidecar_client
 
 
 def _truncate_if_needed(result_str: str) -> str:
@@ -338,7 +338,7 @@ def safe_tool(fn):
         # to the correct asyncio event loop.
         _client = get_sidecar_client()
         if _client is None:
-            from ivy_lsp.sidecar_client import connect_to_sidecar, get_sidecar_port
+            from ivy_lsp.mcp.client import connect_to_sidecar, get_sidecar_port
 
             _port = get_sidecar_port()
             if _port is not None:
@@ -569,7 +569,7 @@ from ivy_lsp.mcp.tools.visualization import register_visualization_tools
 from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
 if TYPE_CHECKING:
-    from ivy_lsp.mcp_server import ToolContext
+    from ivy_lsp.mcp.server import ToolContext
 
 
 def register_all_tools(mcp: Any, ctx: ToolContext) -> None:

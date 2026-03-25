@@ -24,7 +24,7 @@ def _reset_server_config():
 def _raw_json_for_legacy_tests(request):
     """Enable raw JSON output for tests that parse tool results as JSON.
 
-    The markdown formatter layer (ivy_lsp.tools.formatters) converts tool
+    The markdown formatter layer (ivy_lsp.mcp.tools.formatters) converts tool
     output from JSON to markdown.  Legacy tests that call ``json.loads``
     on tool results need the raw JSON.  Set ``IVY_LSP_RAW_JSON=1`` for
     every test **except** those in ``test_formatters.py`` (which test the

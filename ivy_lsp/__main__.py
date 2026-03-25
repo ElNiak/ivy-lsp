@@ -274,7 +274,7 @@ def _main_impl(startup_t0: float) -> None:
         # Standalone MCP server mode (backward compat): stdio transport
         try:
             from ivy_lsp.core.workspace.detection import detect_ivy_workspace
-            from ivy_lsp.mcp_server import start_mcp
+            from ivy_lsp.mcp.server import start_mcp
 
             workspace = None
             docker_image = os.environ.get("IVY_DOCKER_IMAGE")

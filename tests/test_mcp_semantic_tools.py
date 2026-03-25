@@ -447,7 +447,7 @@ class TestSemanticEdgeWiring:
 
         env_patch = {"IVY_LSP_INCLUDE_PATHS": "", "IVY_LSP_EXCLUDE_PATHS": ""}
         with patch.dict(os.environ, env_patch, clear=False):
-            from ivy_lsp.mcp_server import start_mcp
+            from ivy_lsp.mcp.server import start_mcp
 
             app = start_mcp(workspace_root=str(tmp_path), _return_app=True)
 

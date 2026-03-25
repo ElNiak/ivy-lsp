@@ -6,7 +6,7 @@ import json
 
 def test_health_response_includes_workspace_root():
     """The /health endpoint must return workspace_root for validation."""
-    from ivy_lsp.mcp_sidecar import _health_middleware_factory
+    from ivy_lsp.mcp.sidecar import _health_middleware_factory
 
     class MockCtx:
         root = "/tmp/test-workspace"

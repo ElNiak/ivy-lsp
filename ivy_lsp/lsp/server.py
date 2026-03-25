@@ -282,7 +282,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
             port: Desired port (0 = default 19847). Auto-increments on conflict.
         """
         try:
-            from ivy_lsp.mcp_sidecar import start_mcp_http_thread
+            from ivy_lsp.mcp.sidecar import start_mcp_http_thread
 
             thread, actual_port = start_mcp_http_thread(self, port=port)
             self._mcp_sidecar_thread = thread
@@ -302,7 +302,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
         if self._mcp_sidecar_thread is None:
             return
         try:
-            from ivy_lsp.mcp_sidecar import _remove_port_file
+            from ivy_lsp.mcp.sidecar import _remove_port_file
 
             # Get workspace root for port file cleanup
             ws_root = ""

@@ -128,7 +128,7 @@ def start_mcp_http_thread(
     Raises:
         RuntimeError: If no port is available or dependencies are missing.
     """
-    from ivy_lsp.mcp_server import ToolContext, create_mcp_app
+    from ivy_lsp.mcp.server import ToolContext, create_mcp_app
 
     with timed_phase(
         logger,

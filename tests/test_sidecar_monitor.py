@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ivy_lsp import sidecar_client
+from ivy_lsp.mcp import client as sidecar_client
 
 
 @pytest.mark.asyncio
 async def test_monitor_skips_when_disabled():
     """Monitor exits immediately when IVY_MCP_DISABLE_UPGRADE=1."""
-    from ivy_lsp.mcp_server import _sidecar_monitor
+    from ivy_lsp.mcp.server import _sidecar_monitor
 
     with patch.dict("os.environ", {"IVY_MCP_DISABLE_UPGRADE": "1"}):
         task = asyncio.create_task(_sidecar_monitor("/workspace"))
@@ -22,7 +22,7 @@ async def test_monitor_skips_when_disabled():
 @pytest.mark.asyncio
 async def test_monitor_sets_client_on_valid_sidecar():
     """Monitor sets sidecar_client when sidecar is validated."""
-    from ivy_lsp.mcp_server import _sidecar_monitor
+    from ivy_lsp.mcp.server import _sidecar_monitor
 
     mock_client = MagicMock()
 
@@ -30,7 +30,7 @@ async def test_monitor_sets_client_on_valid_sidecar():
     try:
         sidecar_client.set_sidecar_client(None)
 
-        with patch("ivy_lsp.mcp_server.sidecar_client") as mock_sc:
+        with patch("ivy_lsp.mcp.server.sidecar_client") as mock_sc:
             mock_sc.workspace_hash.return_value = "abc123"
             mock_sc.read_port_file.return_value = 19847
             mock_sc.validate_sidecar_workspace = AsyncMock(return_value=True)
@@ -56,13 +56,13 @@ async def test_monitor_sets_client_on_valid_sidecar():
 @pytest.mark.asyncio
 async def test_monitor_skips_workspace_mismatch():
     """Monitor does not upgrade when workspace doesn't match."""
-    from ivy_lsp.mcp_server import _sidecar_monitor
+    from ivy_lsp.mcp.server import _sidecar_monitor
 
     old = sidecar_client.get_sidecar_client()
     try:
         sidecar_client.set_sidecar_client(None)
 
-        with patch("ivy_lsp.mcp_server.sidecar_client") as mock_sc:
+        with patch("ivy_lsp.mcp.server.sidecar_client") as mock_sc:
             mock_sc.workspace_hash.return_value = "abc123"
             mock_sc.read_port_file.return_value = 19847
             mock_sc.validate_sidecar_workspace = AsyncMock(return_value=False)

@@ -22,7 +22,7 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)

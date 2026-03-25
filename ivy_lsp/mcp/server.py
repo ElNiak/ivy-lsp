@@ -18,13 +18,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-# Re-export verification functions so that external code and tests that patch
-# ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
-# tool handlers were moved to ``ivy_lsp.tools.*``.
-from ivy_lsp import sidecar_client
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
+
+# Re-export verification functions so that external code and tests that patch
+# ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
+# tool handlers were moved to ``ivy_lsp.tools.*``.
+from ivy_lsp.mcp import client as sidecar_client
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +361,7 @@ def create_mcp_app(ctx: ToolContext) -> Any:
 
     mcp = FastMCP("ivy-lsp", instructions=_MCP_INSTRUCTIONS)
 
-    from ivy_lsp.tools import register_all_tools
+    from ivy_lsp.mcp.tools import register_all_tools
 
     register_all_tools(mcp, ctx)
     return mcp

@@ -44,7 +44,7 @@ def ground_truth():
 
 @pytest.fixture(scope="module")
 def mcp_app():
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     return start_mcp(workspace_root=str(IVY_ROOT), _return_app=True)
 

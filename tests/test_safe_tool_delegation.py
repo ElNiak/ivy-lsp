@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp.types import CallToolResult, TextContent
 
-from ivy_lsp import sidecar_client
-from ivy_lsp.tools import _cancel_safe_wait_for, _error_result
+from ivy_lsp.mcp import client as sidecar_client
+from ivy_lsp.mcp.tools import _cancel_safe_wait_for, _error_result
 
 
 @pytest.mark.asyncio

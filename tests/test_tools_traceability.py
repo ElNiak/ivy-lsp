@@ -23,7 +23,7 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.server import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)
@@ -195,7 +195,7 @@ class TestUncoveredIdsFull:
         # This is a structural test ensuring the field exists in the result schema.
         # A more thorough integration test would need a semantic model.
         # For now, verify the code path exists.
-        from ivy_lsp.tools import traceability
+        from ivy_lsp.mcp.tools import traceability
 
         source = Path(traceability.__file__).read_text()
         assert "_uncovered_ids_full" in source
@@ -233,7 +233,7 @@ class TestCoverageStatsScoping:
 class TestSummaryCountAlignment:
     def test_coverage_gaps_has_m9_overlay_code(self):
         """The M9 fix code should exist in the _ivy_coverage_gaps function."""
-        from ivy_lsp.tools import traceability
+        from ivy_lsp.mcp.tools import traceability
 
         source = Path(traceability.__file__).read_text()
         # M9 fix adds totalRfcReqs override in the C4 overlay block
@@ -248,7 +248,7 @@ class TestSummaryCountAlignment:
 class TestImpactAnalysisNote:
     def test_impact_analysis_no_edges_message(self):
         """The impact analysis fallback note should reflect edge availability."""
-        from ivy_lsp.tools import traceability
+        from ivy_lsp.mcp.tools import traceability
 
         source = Path(traceability.__file__).read_text()
         assert "No cross-reference edges found for this symbol" in source

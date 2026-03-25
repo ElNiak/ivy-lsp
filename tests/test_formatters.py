@@ -1,8 +1,12 @@
-"""Tests for ivy_lsp.tools.formatters — markdown formatting layer."""
+"""Tests for ivy_lsp.mcp.tools.formatters — markdown formatting layer."""
 
 from __future__ import annotations
 
-from ivy_lsp.tools.formatters import _format_generic, format_error, format_tool_result
+from ivy_lsp.mcp.tools.formatters import (
+    _format_generic,
+    format_error,
+    format_tool_result,
+)
 
 # ---------------------------------------------------------------------------
 # format_error
