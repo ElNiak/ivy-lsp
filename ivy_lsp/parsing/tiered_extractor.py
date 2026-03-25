@@ -1,6 +1,12 @@
-"""Backward-compat shim — re-exports all names including private."""
+"""Backward-compat shim — delegates to ivy_lsp.core.parsing.tiered_extractor."""
 
-from ivy_lsp.core.parsing import tiered_extractor as _real  # noqa: E402
+import importlib
+import sys
 
-globals().update({k: v for k, v in _real.__dict__.items() if not k.startswith("__")})
-del _real
+_real = importlib.import_module("ivy_lsp.core.parsing.tiered_extractor")
+sys.modules[__name__] = _real
+
+# Preserve old logger name for tests that use caplog with it.
+import logging
+
+_real.logger = logging.getLogger("ivy_lsp.parsing.tiered_extractor")

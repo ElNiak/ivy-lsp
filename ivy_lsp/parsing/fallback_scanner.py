@@ -1,6 +1,12 @@
-"""Backward-compat shim — re-exports all names including private."""
+"""Backward-compat shim — delegates to ivy_lsp.core.parsing.fallback_scanner."""
 
-from ivy_lsp.core.parsing import fallback_scanner as _real  # noqa: E402
+import importlib
+import sys
 
-globals().update({k: v for k, v in _real.__dict__.items() if not k.startswith("__")})
-del _real
+_real = importlib.import_module("ivy_lsp.core.parsing.fallback_scanner")
+sys.modules[__name__] = _real
+
+# Preserve old logger name for tests that use caplog with it.
+import logging
+
+_real.logger = logging.getLogger("ivy_lsp.parsing.fallback_scanner")

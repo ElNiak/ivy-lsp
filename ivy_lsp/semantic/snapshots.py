@@ -1,6 +1,7 @@
-"""Backward-compat shim — re-exports all names including private."""
+"""Backward-compat shim — delegates to ivy_lsp.core.semantic.snapshots."""
 
-from ivy_lsp.core.semantic import snapshots as _real  # noqa: E402
+import importlib
+import sys
 
-globals().update({k: v for k, v in _real.__dict__.items() if not k.startswith("__")})
-del _real
+_real = importlib.import_module("ivy_lsp.core.semantic.snapshots")
+sys.modules[__name__] = _real

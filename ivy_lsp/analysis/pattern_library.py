@@ -1,6 +1,12 @@
-"""Backward-compat shim — re-exports all names including private."""
+"""Backward-compat shim — delegates to ivy_lsp.core.analysis.pattern_library."""
 
-from ivy_lsp.core.analysis import pattern_library as _real  # noqa: E402
+import importlib
+import sys
 
-globals().update({k: v for k, v in _real.__dict__.items() if not k.startswith("__")})
-del _real
+_real = importlib.import_module("ivy_lsp.core.analysis.pattern_library")
+sys.modules[__name__] = _real
+
+# Preserve old logger name for tests that use caplog with it.
+import logging
+
+_real.logger = logging.getLogger("ivy_lsp.analysis.pattern_library")
