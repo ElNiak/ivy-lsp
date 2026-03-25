@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple
 from lsprotocol import types as lsp
 
 if TYPE_CHECKING:
-    from ivy_lsp.server import IvyLanguageServer
+    from ivy_lsp.lsp.server import IvyLanguageServer
 
 
 # --- LSP Log Handler ---
