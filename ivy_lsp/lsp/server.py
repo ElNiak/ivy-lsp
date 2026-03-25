@@ -319,27 +319,26 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
 
     def __init_features(self):
         # -- Feature registration (below) ---
-        from ivy_lsp.features import (
-            call_hierarchy,
+        from ivy_lsp.lsp import (
             code_action,
-            code_lens,
             commands,
             completion,
-            definition,
-            diagnostics,
             document_highlight,
             document_symbols,
-            folding_range,
-            hover,
-            implementation,
-            monitoring,
-            references,
             rename,
-            selection_range,
             signature_help,
             visualization,
             workspace_symbols,
         )
+        from ivy_lsp.lsp.diagnostics import publisher as diagnostics
+        from ivy_lsp.lsp.navigation import (
+            call_hierarchy,
+            definition,
+            hover,
+            implementation,
+            references,
+        )
+        from ivy_lsp.lsp.ui import code_lens, folding_range, monitoring, selection_range
 
         document_symbols.register(self)
         workspace_symbols.register(self)

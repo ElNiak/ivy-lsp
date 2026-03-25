@@ -370,7 +370,7 @@ async def _handle_recompile_all(server: Any, params: Any = None) -> Dict[str, An
 def register_extended_commands(server: Any) -> None:
     """Register extended Ivy command handlers on *server*.
 
-    Called from :func:`ivy_lsp.features.commands.register` after the
+    Called from :func:`ivy_lsp.lsp.commands.register` after the
     core commands have been registered.
     """
 

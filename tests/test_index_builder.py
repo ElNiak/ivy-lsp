@@ -598,7 +598,7 @@ class TestCliIndex:
         )
         # Monkeypatch workspace detection to return our test workspace
         monkeypatch.setattr(
-            "ivy_lsp.index_builder.detect_ivy_workspace",
+            "ivy_lsp.lsp.index_builder.detect_ivy_workspace",
             lambda start_dir: _make_workspace_config(ws_root),
         )
 
@@ -617,7 +617,7 @@ class TestCliIndex:
             {"test.ivy": SAMPLE_IVY_TYPES},
         )
         monkeypatch.setattr(
-            "ivy_lsp.index_builder.detect_ivy_workspace",
+            "ivy_lsp.lsp.index_builder.detect_ivy_workspace",
             lambda start_dir: _make_workspace_config(ws_root),
         )
 
@@ -635,7 +635,7 @@ class TestCliIndex:
             {"test.ivy": SAMPLE_IVY_TYPES},
         )
         monkeypatch.setattr(
-            "ivy_lsp.index_builder.detect_ivy_workspace",
+            "ivy_lsp.lsp.index_builder.detect_ivy_workspace",
             lambda start_dir: _make_workspace_config(ws_root),
         )
 
@@ -659,7 +659,7 @@ class TestCliIndex:
 
         ws_root = str(tmp_path)
         monkeypatch.setattr(
-            "ivy_lsp.index_builder.detect_ivy_workspace",
+            "ivy_lsp.lsp.index_builder.detect_ivy_workspace",
             lambda start_dir: _make_workspace_config(ws_root),
         )
 

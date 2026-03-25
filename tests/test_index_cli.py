@@ -26,7 +26,7 @@ class TestIndexSubcommand:
         mock_sys.stderr = sys.stderr
         mock_sys.exit = sys.exit
 
-        with patch("ivy_lsp.index_builder.cli_index", return_value=0) as mock_cli:
+        with patch("ivy_lsp.lsp.index_builder.cli_index", return_value=0) as mock_cli:
             with pytest.raises(SystemExit) as exc_info:
                 from ivy_lsp.__main__ import main
 
@@ -40,7 +40,7 @@ class TestIndexSubcommand:
         mock_sys.stderr = sys.stderr
         mock_sys.exit = sys.exit
 
-        with patch("ivy_lsp.index_builder.cli_index", return_value=1) as mock_cli:
+        with patch("ivy_lsp.lsp.index_builder.cli_index", return_value=1) as mock_cli:
             with pytest.raises(SystemExit) as exc_info:
                 from ivy_lsp.__main__ import main
 

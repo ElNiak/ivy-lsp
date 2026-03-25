@@ -29,9 +29,9 @@ class TestPackageImportable:
         assert ivy_lsp.core.indexer is not None
 
     def test_features_subpackage_importable(self):
-        import ivy_lsp.features
+        import ivy_lsp.lsp
 
-        assert ivy_lsp.features is not None
+        assert ivy_lsp.lsp is not None
 
     def test_utils_subpackage_importable(self):
         import ivy_lsp.infra.utils

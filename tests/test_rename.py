@@ -184,7 +184,7 @@ class TestRenameNotBlocking:
         """Structural: verify the handler awaits run_in_executor."""
         import inspect
 
-        from ivy_lsp.features import rename as rename_mod
+        from ivy_lsp.lsp import rename as rename_mod
 
         source = inspect.getsource(rename_mod.register)
         assert (

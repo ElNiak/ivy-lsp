@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
     from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
     from ivy_lsp.core.semantic.model import SemanticModel
-    from ivy_lsp.features.status import ServerStateTracker
+    from ivy_lsp.lsp.ui.status import ServerStateTracker
 
 
 @runtime_checkable

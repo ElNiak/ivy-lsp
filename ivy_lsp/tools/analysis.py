@@ -455,7 +455,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         try:
             from ivy_lsp.core.workspace.detection import detect_ivy_workspace
-            from ivy_lsp.index_builder import IndexBuilder
+            from ivy_lsp.lsp.index_builder import IndexBuilder
         except ImportError as exc:
             return _tc.finish(
                 error_response(

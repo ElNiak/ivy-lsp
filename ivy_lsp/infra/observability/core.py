@@ -470,7 +470,7 @@ SUBSYSTEM_MAP = {
     "indexer": "ivy_lsp.core.indexer",
     "compilation": "ivy_lsp.core.compilation",
     "semantic": "ivy_lsp.core.semantic",
-    "features": "ivy_lsp.features",
+    "features": "ivy_lsp.lsp",
     "tools": "ivy_lsp.tools",
     "mcp": "ivy_lsp.mcp",
     "analysis": "ivy_lsp.core.analysis",

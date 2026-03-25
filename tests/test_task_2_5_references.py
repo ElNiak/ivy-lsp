@@ -170,7 +170,7 @@ class TestReferencesNotBlocking:
         """Structural: verify the handler uses run_in_executor."""
         import inspect
 
-        from ivy_lsp.features import references as refs_mod
+        from ivy_lsp.lsp.navigation import references as refs_mod
 
         source = inspect.getsource(refs_mod.register)
         assert (
