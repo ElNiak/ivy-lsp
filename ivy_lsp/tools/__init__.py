@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from itertools import islice
 from typing import TYPE_CHECKING, Any
 
+from mcp.types import CallToolResult, TextContent
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -209,6 +211,38 @@ def _truncate_if_needed(result_str: str) -> str:
     return result_str
 
 
+def _error_result(data: dict) -> CallToolResult:
+    """Build a ``CallToolResult`` with ``isError=True`` from an error dict.
+
+    FastMCP's ``convert_result`` passes ``CallToolResult`` through unchanged,
+    so ``isError=True`` is preserved all the way to the JSON-RPC response.
+    """
+    return CallToolResult(
+        content=[TextContent(type="text", text=format_error(data))],
+        isError=True,
+    )
+
+
+async def _cancel_safe_wait_for(coro, timeout):
+    """Like ``asyncio.wait_for`` but prevents ``CancelledError`` from leaking.
+
+    Uses ``asyncio.wait()`` + manual cancel instead of ``wait_for()``, so the
+    cancellation happens on a child task — not on the transport-bound calling
+    task.  This prevents ``CancelledError`` from disrupting the HTTP/SSE
+    connection that delivers the timeout response to the client.
+    """
+    task = asyncio.ensure_future(coro)
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if task in done:
+        return task.result()
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+    raise asyncio.TimeoutError()
+
+
 def _format_result(tool_name: str, result: object) -> str | object:
     """Post-process a tool result into markdown.
 
@@ -292,6 +326,9 @@ def safe_tool(fn):
 
     @functools.wraps(fn)
     async def _wrapper(*args, **kwargs):
+        tool_name = fn.__name__
+        timeout = _get_effective_timeout(tool_name)
+
         # --- Sidecar delegation (lazy bridge) ---
         # Check BEFORE semaphore/timeout — sidecar handles its own concurrency.
         #
@@ -315,22 +352,38 @@ def safe_tool(fn):
 
         if _client is not None:
             try:
-                result = await _client.call_tool(fn.__name__, kwargs)
-                return result  # verbatim from sidecar, no local formatting
+                result = await _cancel_safe_wait_for(
+                    _client.call_tool(tool_name, kwargs),
+                    timeout=timeout,
+                )
+                return result  # verbatim from sidecar
+            except asyncio.TimeoutError:
+                logger.error(
+                    "[SIDECAR-TIMEOUT] %s timed out after %.0fs",
+                    tool_name,
+                    timeout,
+                )
+                set_sidecar_client(None)
+                return _error_result(
+                    {
+                        "success": False,
+                        "message": f"Sidecar tool timed out after {timeout:.0f}s",
+                        "timeout": True,
+                        "tool": tool_name,
+                    }
+                )
             except Exception:
                 logger.warning(
                     "[DOWNGRADED] Sidecar call to %s failed, using local",
-                    fn.__name__,
+                    tool_name,
                 )
                 set_sidecar_client(None)
                 # Fall through to local handling
 
-        # --- Original local handling below (unchanged) ---
+        # --- Original local handling below ---
         from ivy_lsp.config import get_config
         from ivy_lsp.observability import get_session_logger
 
-        tool_name = fn.__name__
-        timeout = _get_effective_timeout(tool_name)
         sem = _ensure_semaphore()
         cfg = get_config()
         call_id = f"{tool_name}-{int(time.time() * 1000)}-{id(asyncio.current_task())}"
@@ -363,7 +416,9 @@ def safe_tool(fn):
                 )
 
             async with sem:
-                result = await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout)
+                result = await _cancel_safe_wait_for(
+                    fn(*args, **kwargs), timeout=timeout
+                )
             result = _format_result(tool_name, result)
 
             if cfg.debug_log:
@@ -408,7 +463,7 @@ def safe_tool(fn):
                     payload={"timeout_s": timeout},
                     call_id=call_id,
                 )
-            return format_error(
+            return _error_result(
                 {
                     "success": False,
                     "message": f"Tool timed out after {timeout:.0f}s",
@@ -426,7 +481,7 @@ def safe_tool(fn):
                     tool_name,
                     exc,
                 )
-                return format_error(
+                return _error_result(
                     {
                         "success": False,
                         "message": f"Internal concurrency error in {tool_name}. Please retry.",
@@ -455,7 +510,7 @@ def safe_tool(fn):
                     },
                     call_id=call_id,
                 )
-            return format_error(
+            return _error_result(
                 {"success": False, "message": f"Internal error in {tool_name}: {exc}"}
             )
         finally:
@@ -487,6 +542,10 @@ def safe_tool(fn):
         "_summarize_for_log": _summarize_for_log,
         "get_sidecar_client": get_sidecar_client,
         "set_sidecar_client": set_sidecar_client,
+        "_error_result": _error_result,
+        "_cancel_safe_wait_for": _cancel_safe_wait_for,
+        "CallToolResult": CallToolResult,
+        "TextContent": TextContent,
     }
     patched_globals = {**fn.__globals__, **_injected_names}
 
