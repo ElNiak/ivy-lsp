@@ -40,7 +40,7 @@ def check_structural_issues(
     indexer: Any = None,
 ) -> List[lsp.Diagnostic]:
     """Check for structural problems without full parsing."""
-    from ivy_lsp.infra.utils.structural_lint import (
+    from ivy_lsp.core.structural_lint import (
         check_structural_issues_raw,
         check_unresolved_includes_raw,
     )

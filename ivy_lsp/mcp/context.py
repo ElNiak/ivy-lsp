@@ -10,13 +10,13 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ivy_lsp.core.structural_lint import (
+    check_structural_issues_raw,
+    check_unresolved_includes_raw,
+)
 from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
 from ivy_lsp.infra.utils.ivy_output import (  # noqa: F401
     find_ivy_files as _find_ivy_files_raw,
-)
-from ivy_lsp.infra.utils.structural_lint import (
-    check_structural_issues_raw,
-    check_unresolved_includes_raw,
 )
 
 

@@ -1,6 +1,6 @@
 """Tests for shared structural lint checks."""
 
-from ivy_lsp.infra.utils.structural_lint import check_structural_issues_raw
+from ivy_lsp.core.structural_lint import check_structural_issues_raw
 
 
 def test_missing_lang_header():

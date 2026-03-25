@@ -427,7 +427,9 @@ class McpServerState:
                             pass
                         lock_fd.close()
                 except OSError:
-                    pass
+                    logger.debug(
+                        "Cannot write to workspace .ivy-index/ dir", exc_info=True
+                    )
         except Exception:
             logger.debug("Failed to write model to .ivy-index/", exc_info=True)
 
