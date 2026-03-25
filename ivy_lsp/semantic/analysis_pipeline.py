@@ -107,47 +107,6 @@ class AnalysisPipeline:
         self._bulk_compile = _TierState()
         self._file_generation: Dict[str, int] = {}
 
-    # -- Convenience factory ---------------------------------------------------
-
-    @staticmethod
-    def build_model_from_files(
-        root: str,
-        find_files_fn: Callable[[str], List[str]],
-        include_resolver: Any = None,
-        stdlib_modules: Optional[frozenset] = None,
-    ) -> Optional[SemanticModel]:
-        """Build a pre-populated SemanticModel from workspace files.
-
-        Delegates to :func:`ivy_lsp.semantic.model_builder.build_semantic_model`,
-        providing a single entry point shared with the MCP server's
-        standalone model builder.
-
-        This is useful for pre-populating a model before constructing an
-        ``AnalysisPipeline``, or for batch re-indexing.
-
-        Parameters
-        ----------
-        root:
-            Workspace root directory.
-        find_files_fn:
-            Callable returning relative ``.ivy`` file paths.
-        include_resolver:
-            Optional resolve callback for parser include resolution.
-        stdlib_modules:
-            Known Ivy stdlib module names (forwarded to the builder).
-
-        Returns:
-            SemanticModel or ``None`` when dependencies are missing.
-        """
-        from ivy_lsp.semantic.model_builder import build_semantic_model
-
-        return build_semantic_model(
-            root=root,
-            find_files_fn=find_files_fn,
-            include_resolver=include_resolver,
-            stdlib_modules=stdlib_modules,
-        )
-
     # -- Tier 1 ----------------------------------------------------------------
 
     def run_tier1(self, source: str, filepath: str) -> List[Any]:

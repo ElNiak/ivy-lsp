@@ -9,54 +9,6 @@ if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 
-class TestHoverProximity:
-    """C6: hover uses proximity-based disambiguation for multi-match symbols."""
-
-    def test_sort_by_proximity_same_file(self):
-        from ivy_lsp.features.hover import _sort_by_proximity
-
-        class FakeResult:
-            def __init__(self, filepath):
-                self.filepath = filepath
-
-        results = [
-            FakeResult("/a/b/other.ivy"),
-            FakeResult("/a/b/current.ivy"),
-            FakeResult("/x/y/far.ivy"),
-        ]
-        sorted_results = _sort_by_proximity(results, "/a/b/current.ivy")
-        assert sorted_results[0].filepath == "/a/b/current.ivy"
-
-    def test_sort_by_proximity_same_dir(self):
-        from ivy_lsp.features.hover import _sort_by_proximity
-
-        class FakeResult:
-            def __init__(self, filepath):
-                self.filepath = filepath
-
-        results = [
-            FakeResult("/x/y/far.ivy"),
-            FakeResult("/a/b/neighbor.ivy"),
-        ]
-        sorted_results = _sort_by_proximity(results, "/a/b/current.ivy")
-        assert sorted_results[0].filepath == "/a/b/neighbor.ivy"
-
-    def test_sort_single_result(self):
-        from ivy_lsp.features.hover import _sort_by_proximity
-
-        class FakeResult:
-            def __init__(self, filepath):
-                self.filepath = filepath
-
-        results = [FakeResult("/a/b.ivy")]
-        assert _sort_by_proximity(results, "/c/d.ivy") == results
-
-    def test_sort_empty(self):
-        from ivy_lsp.features.hover import _sort_by_proximity
-
-        assert _sort_by_proximity([], "/a/b.ivy") == []
-
-
 class TestDefinitionInclude:
     """H5: Include lines should be detected."""
 

@@ -179,34 +179,6 @@ def _enrich_with_semantic_model(
     return content
 
 
-def _sort_by_proximity(results: list, current_filepath: str) -> list:
-    """Sort symbol lookup results by proximity to current file.
-
-    Same-file matches first, then same-directory, then by common path length.
-    Paths are normalized before comparison to handle symlinks and mixed
-    absolute/relative paths.
-    """
-    if len(results) <= 1:
-        return results
-
-    current_norm = os.path.normpath(os.path.abspath(current_filepath))
-    current_dir = os.path.dirname(current_norm)
-
-    def _score(r):
-        rpath = os.path.normpath(os.path.abspath(getattr(r, "filepath", "") or ""))
-        if rpath == current_norm:
-            return (0, 0)
-        if os.path.dirname(rpath) == current_dir:
-            return (1, 0)
-        try:
-            common = os.path.commonpath([current_norm, rpath])
-            return (2, -len(common))
-        except (ValueError, TypeError):
-            return (3, 0)
-
-    return sorted(results, key=_score)
-
-
 def _hover_from_semantic_model(
     word: str,
     filepath: str,

@@ -5,7 +5,6 @@ Re-exports the public API from submodules for convenient single-source imports:
 """
 
 from ivy_lsp.observability.core import (
-    IvyLogAdapter,
     LogCategory,
     LogEvent,
     StructuredLogAdapter,
@@ -26,7 +25,6 @@ from ivy_lsp.observability.handlers import (
     DedupFilter,
     LspLogHandler,
     ToolTraceContext,
-    _LspLogHandler,
     get_tracer,
     init_tracer,
     trace_tool,
@@ -47,7 +45,6 @@ from ivy_lsp.observability.session import (
 
 __all__ = [
     # core
-    "IvyLogAdapter",
     "LogCategory",
     "LogEvent",
     "StructuredLogAdapter",
@@ -67,7 +64,6 @@ __all__ = [
     "DedupFilter",
     "LspLogHandler",
     "ToolTraceContext",
-    "_LspLogHandler",
     "get_tracer",
     "init_tracer",
     "trace_tool",

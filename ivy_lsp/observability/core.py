@@ -521,10 +521,6 @@ def get_logger(name: str, *, subsystem: str | None = None) -> logging.Logger:
     return logger
 
 
-# Backward-compatible alias
-IvyLogAdapter = StructuredLogAdapter
-
-
 def describe_logging_config() -> dict[str, Any]:
     """Return a summary of all active logging configuration for diagnostics."""
     from ivy_lsp.config import get_config

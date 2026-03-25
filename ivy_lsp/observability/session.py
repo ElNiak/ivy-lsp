@@ -207,19 +207,9 @@ class SessionEventLogger:
         self._drop_count: int = 0
 
     @property
-    def log_dir(self) -> Path:
-        """Return the directory where session events are written."""
-        return self._log_dir
-
-    @property
     def events_file(self) -> Path:
         """Return the path to the JSONL events file."""
         return self._log_dir / "events.jsonl"
-
-    @property
-    def drop_count(self) -> int:
-        """Return the number of events dropped due to write errors."""
-        return self._drop_count
 
     def log_event(
         self,

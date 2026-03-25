@@ -823,12 +823,6 @@ class IncludeResolver:
         """Return the partition ID for a file, or None if unpartitioned."""
         return self._file_to_partition.get(os.path.realpath(filepath))
 
-    def get_files_in_partition(self, partition_id: str) -> List[str]:
-        """Return all files assigned to a given partition."""
-        return sorted(
-            f for f, pid in self._file_to_partition.items() if pid == partition_id
-        )
-
     # ------------------------------------------------------------------
     # Layer-aware staging (v3 workspace layers)
     # ------------------------------------------------------------------

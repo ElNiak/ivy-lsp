@@ -234,29 +234,6 @@ class IncludeGraph:
 
         return result
 
-    def get_transitive_included_by(self, f: str) -> Set[str]:
-        """All files that transitively include *f*, with cycle safety.
-
-        Symmetric reverse of :meth:`get_transitive_includes`.  Uses BFS
-        over ``_included_by`` edges.  The starting file *f* is never
-        included in the result.
-        """
-        visited: Set[str] = {f}
-        queue: deque[str] = deque(self._included_by.get(f, set()))
-        result: Set[str] = set()
-
-        while queue:
-            current = queue.popleft()
-            if current in visited:
-                continue
-            visited.add(current)
-            result.add(current)
-            for includer in self._included_by.get(current, set()):
-                if includer not in visited:
-                    queue.append(includer)
-
-        return result
-
     # -- Serialization -----------------------------------------------------
 
     def to_edges(self) -> Dict[str, List[str]]:

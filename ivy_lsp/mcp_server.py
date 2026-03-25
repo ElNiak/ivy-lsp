@@ -25,8 +25,6 @@ from ivy_lsp import sidecar_client
 from ivy_lsp.config import get_config
 from ivy_lsp.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
-from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
-from ivy_lsp.verification import run_ivy_show as shared_ivy_show
 
 logger = logging.getLogger(__name__)
 

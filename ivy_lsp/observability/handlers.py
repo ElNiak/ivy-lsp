@@ -126,10 +126,6 @@ class LspLogHandler(logging.Handler):
             self._tls.sending = False
 
 
-# Backward-compatible alias (was private ``_LspLogHandler`` in server.py).
-_LspLogHandler = LspLogHandler
-
-
 # --- Dedup Filter ---
 
 
@@ -477,11 +473,6 @@ class ToolTraceContext:
     def finish(self, result: Any) -> Any:
         """Log the tool result and return it unchanged (passthrough)."""
         self._record(result)
-        return result
-
-    def finish_error(self, result: Any, error: str) -> Any:
-        """Log the tool error and return the result unchanged."""
-        self._record(result, error=error)
         return result
 
 

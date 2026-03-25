@@ -23,10 +23,7 @@ from ivy_lsp.features.document_symbols import (  # noqa: E402
     get_document_symbols,
     ivy_symbol_to_document_symbol,
 )
-from ivy_lsp.features.hover import (  # noqa: E402
-    _sort_by_proximity,
-    format_hover_content,
-)
+from ivy_lsp.features.hover import format_hover_content  # noqa: E402
 from ivy_lsp.features.references import find_references  # noqa: E402
 from ivy_lsp.parsing.symbols import IvySymbol  # noqa: E402
 
@@ -279,22 +276,6 @@ class TestHoverFormatting:
         assert result is not None
         assert "relation" in result
         assert "connected" in result
-
-
-class TestHoverProximityExtended:
-    def test_sort_by_proximity_common_path(self):
-        """Longer common prefix -> higher priority."""
-
-        class FakeResult:
-            def __init__(self, filepath):
-                self.filepath = filepath
-
-        results = [
-            FakeResult("/a/x/far.ivy"),
-            FakeResult("/a/b/c/near.ivy"),
-        ]
-        sorted_results = _sort_by_proximity(results, "/a/b/c/current.ivy")
-        assert sorted_results[0].filepath == "/a/b/c/near.ivy"
 
 
 # ---------------------------------------------------------------------------

@@ -186,16 +186,6 @@ def error_response(message: str) -> dict:
     return {"success": False, "message": message}
 
 
-def _timeout_response(tool_name: str, timeout: float) -> dict:
-    """Return a response dict for a timed-out tool call."""
-    return {
-        "success": False,
-        "message": f"Tool timed out after {timeout:.0f}s",
-        "timeout": True,
-        "tool": tool_name,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Markdown formatting layer
 # ---------------------------------------------------------------------------
@@ -477,15 +467,13 @@ def safe_tool(fn):
     # The wrapper lives in tools/__init__.py whose globals lack Literal and
     # other imports from tool modules.  Rebuild the wrapper with fn's
     # __globals__ — all names the wrapper body references (logger,
-    # error_response, _timeout_response, _get_effective_timeout,
-    # _ensure_semaphore, _tool_metrics, ToolMetrics, asyncio, time) are
-    # also available there via each tool module's own imports *or* via
-    # closure.  We inject the missing names into fn's globals so the
-    # rebuilt function can find them.
+    # error_response, _get_effective_timeout, _ensure_semaphore,
+    # _tool_metrics, ToolMetrics, asyncio, time) are also available there
+    # via each tool module's own imports *or* via closure.  We inject the
+    # missing names into fn's globals so the rebuilt function can find them.
     _injected_names = {
         "logger": logger,
         "error_response": error_response,
-        "_timeout_response": _timeout_response,
         "_get_effective_timeout": _get_effective_timeout,
         "_ensure_semaphore": _ensure_semaphore,
         "_tool_metrics": _tool_metrics,
