@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 
 def get_mcp_app(workspace_root: str | None = None):
     """Create a FastMCP app for testing.
@@ -43,24 +40,3 @@ def extract_text(result) -> str:
                 parts.append(item)
         return "\n".join(parts)
     return str(result)
-
-
-def extract_json(result) -> dict[str, Any]:
-    """Normalize MCP tool response to a parsed JSON dict.
-
-    Handles both raw JSON strings (legacy) and markdown-formatted output
-    (new formatter layer).  For markdown, extracts JSON from a code fence.
-    """
-    import re
-
-    text = extract_text(result)
-    # Try direct JSON parse first (backward compat)
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        pass
-    # Extract JSON from markdown code fence
-    m = re.search(r"```json\n(.*?)\n```", text, re.DOTALL)
-    if m:
-        return json.loads(m.group(1))
-    raise ValueError(f"Cannot extract JSON from: {text[:200]}")
