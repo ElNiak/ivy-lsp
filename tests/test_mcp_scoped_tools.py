@@ -61,7 +61,7 @@ def _make_mock_workspace_context(
     tester_role: str = "client",
 ):
     """Build a mock WorkspaceContext with a single scope."""
-    from ivy_lsp.analysis.test_scope import TestScope
+    from ivy_lsp.core.analysis.test_scope import TestScope
 
     scope = TestScope(
         test_file=test_file,

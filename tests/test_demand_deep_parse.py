@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.indexer.workspace_indexer import FileIndexStatus, WorkspaceIndexer
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.indexer.workspace_indexer import FileIndexStatus, WorkspaceIndexer
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 
 def _make_indexer(workspace_root="/fake/workspace"):
@@ -41,7 +41,7 @@ class TestDemandDeepParse:
         mock_result.ast = MagicMock()
         parser.parse.return_value = mock_result
         with patch(
-            "ivy_lsp.parsing.ast_to_symbols.ast_to_symbols", return_value=[ast_sym]
+            "ivy_lsp.core.parsing.ast_to_symbols.ast_to_symbols", return_value=[ast_sym]
         ):
             with patch(
                 "builtins.open", unittest.mock.mock_open(read_data="type cid\n")

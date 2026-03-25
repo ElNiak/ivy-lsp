@@ -2,8 +2,8 @@
 
 import os
 
-from ivy_lsp.indexer.include_resolver import IncludeResolver
-from ivy_lsp.workspace.detection import WorkspaceLayer
+from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
 
 def _make_layer_workspace(tmp_path):

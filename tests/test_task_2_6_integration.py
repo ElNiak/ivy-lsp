@@ -19,9 +19,9 @@ class TestPhase2FullPipeline:
     def quic_indexer(self):
         if not QUIC_STACK_DIR.exists():
             pytest.skip("quic_stack not found")
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         resolver = IncludeResolver(str(QUIC_STACK_DIR))
@@ -30,7 +30,7 @@ class TestPhase2FullPipeline:
         return indexer
 
     def test_include_resolution_all_files(self, quic_indexer):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         resolver = IncludeResolver(str(QUIC_STACK_DIR))
         unresolved = []

@@ -12,13 +12,13 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (
+from ivy_lsp.core.analysis.requirement_graph import (
     EdgeType,
     RequirementGraph,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.code_lens import compute_code_lenses
 
 # ---------------------------------------------------------------------------

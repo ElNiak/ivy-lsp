@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.diagnostics.modes import BASIC_MODE, STANDARD_MODE, STRICT_MODE
 from ivy_lsp.diagnostics import (
     DIAGNOSTIC_REGISTRY,
     DiagnosticDescriptor,
@@ -16,7 +17,6 @@ from ivy_lsp.diagnostics import (
     RelatedLocation,
     get_active_mode,
 )
-from ivy_lsp.diagnostics.modes import BASIC_MODE, STANDARD_MODE, STRICT_MODE
 
 # ---------------------------------------------------------------------------
 # Registry tests

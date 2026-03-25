@@ -4,8 +4,8 @@ import time
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.indexer.file_cache import PersistentFileCache
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.indexer.file_cache import PersistentFileCache
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 
 class TestPersistentFileCacheBasic:

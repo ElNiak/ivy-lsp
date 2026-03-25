@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
 from ivy_lsp.features.hover import (
     _enrich_with_semantic_model,
     format_hover_content,
     get_hover_info,
 )
-from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
 
 
 class TestEnrichWithSemanticModel:
@@ -83,7 +83,7 @@ class TestEnrichWithSemanticModel:
 
     def test_adds_cross_reference_count(self):
         model = SemanticModel()
-        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
         sn = SymbolNode(
             id="test.ivy:5:foo",
@@ -112,7 +112,7 @@ class TestGetHoverInfoWithModel:
         """Create a mock indexer that returns the given symbols."""
         indexer = MagicMock()
         if symbols:
-            from ivy_lsp.indexer.workspace_indexer import SymbolLocation
+            from ivy_lsp.core.indexer.workspace_indexer import SymbolLocation
 
             locations = [
                 SymbolLocation(

@@ -2,7 +2,7 @@
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
 
 class TestSymbolTableRemoveFile:

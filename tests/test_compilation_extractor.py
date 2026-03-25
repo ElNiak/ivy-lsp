@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from ivy_lsp.compilation.ir import (
+from ivy_lsp.core.compilation.ir import (
     ActionIR,
     CompiledModuleIR,
     IsolateIR,
@@ -271,7 +271,7 @@ class TestExtractSorts:
     """Verify extraction of sorts from the module signature."""
 
     def test_extracts_enumerated_sort(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sort = _make_mock_sort(
             name="pkt_type",
@@ -295,7 +295,7 @@ class TestExtractSorts:
         assert s.arity == 0
 
     def test_extracts_uninterpreted_sort(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sort = _make_mock_sort(
             name="cid",
@@ -314,7 +314,7 @@ class TestExtractSorts:
         assert s.constructors == ()
 
     def test_extracts_interpreted_sort(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sort = _make_mock_sort(
             name="idx",
@@ -334,7 +334,7 @@ class TestExtractSorts:
         assert s.interpretation == "int"
 
     def test_extracts_multiple_sorts(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sorts = {
             "cid": _make_mock_sort(name="cid", sort_type="UninterpretedSort"),
@@ -358,7 +358,7 @@ class TestExtractSymbols:
     """Verify extraction of symbols from the module signature."""
 
     def test_extracts_relation_symbol(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         dom_sort_a = _NamedObj("cid")
         dom_sort_b = _NamedObj("pkt_type")
@@ -381,7 +381,7 @@ class TestExtractSymbols:
         assert s.is_relation is True
 
     def test_extracts_destructor_symbol(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         rng_sort = _NamedObj("data_t")
         sym = _MockSymbol(
@@ -402,7 +402,7 @@ class TestExtractSymbols:
         assert s.is_destructor is True
 
     def test_extracts_constructor_symbol(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         rng_sort = _NamedObj("pkt")
         sym = _MockSymbol(
@@ -423,7 +423,7 @@ class TestExtractSymbols:
         assert s.is_constructor is True
 
     def test_extracts_symbol_domain_range(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         dom = [_NamedObj("node")]
         rng = _NamedObj("bool")
@@ -445,7 +445,7 @@ class TestExtractActions:
     """Verify extraction of actions from the module."""
 
     def test_extracts_action_with_params(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         action = _MockAction(
             name="send_packet",
@@ -477,7 +477,7 @@ class TestExtractActions:
         assert a.is_exported is True
 
     def test_extracts_imported_action(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         action = _MockAction(name="recv_event")
         sig = _make_mock_sig()
@@ -495,7 +495,7 @@ class TestExtractActions:
         assert a.is_exported is False
 
     def test_extracts_action_no_params(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         action = _MockAction(name="init")
         sig = _make_mock_sig()
@@ -512,7 +512,7 @@ class TestExtractMixins:
     """Verify extraction of mixins from the module."""
 
     def test_extracts_before_mixin(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         mixin = MixinBeforeDef(
             mixer="shim.before_send",
@@ -536,7 +536,7 @@ class TestExtractMixins:
         assert m.kind == "before"
 
     def test_extracts_after_mixin(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         mixin = MixinAfterDef(
             mixer="shim.after_recv",
@@ -556,7 +556,7 @@ class TestExtractMixins:
 
     def test_detects_mixin_kind_from_type(self):
         """Mixin kind is detected from AST class type, not mixer name."""
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         before_mixin = MixinBeforeDef(
             mixer="shim.pre_check",
@@ -581,7 +581,7 @@ class TestExtractMixins:
 
     def test_around_mixin_detected_for_unknown_type(self):
         """A mixin with neither 'Before' nor 'After' in type name -> 'around'."""
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         mixin = _MockMixin(
             mixer="shim.wrap_step",
@@ -604,7 +604,7 @@ class TestExtractIsolates:
     """Verify extraction of isolates from the module."""
 
     def test_extracts_isolate_verified_present(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         isolate = _MockIsolate(
             name="quic_server_test",
@@ -627,7 +627,7 @@ class TestExtractIsolates:
         assert iso.present_components == ("quic_client", "quic_shim")
 
     def test_extracts_empty_isolate(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         isolate = _MockIsolate(name="empty_iso")
         sig = _make_mock_sig()
@@ -647,7 +647,7 @@ class TestExtractLabeledFormulas:
     """Verify extraction of labeled axioms, properties, conjectures, definitions."""
 
     def test_extracts_labeled_axiom(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         axiom = _MockLabeledFormula(
             label="ax1",
@@ -667,7 +667,7 @@ class TestExtractLabeledFormulas:
         assert a.lineno == 10
 
     def test_extracts_labeled_property(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         prop = _MockLabeledFormula(
             label="prop1",
@@ -684,7 +684,7 @@ class TestExtractLabeledFormulas:
         assert p.label == "prop1"
 
     def test_extracts_conjecture(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         conj = _MockLabeledFormula(
             label="conj1",
@@ -702,7 +702,7 @@ class TestExtractLabeledFormulas:
         assert c.temporal is True
 
     def test_extracts_definition(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         defn = _MockLabeledFormula(
             label="def1",
@@ -722,7 +722,7 @@ class TestExtractRequirements:
     """Verify extraction of require/ensure/assume/assert from action bodies."""
 
     def test_extracts_requires_action(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         req = _make_requirement_action("RequiresAction", "conn_established(dst)")
         action = _MockAction(name="send_packet", args=[req])
@@ -738,7 +738,7 @@ class TestExtractRequirements:
         assert r.kind == "require"
 
     def test_extracts_ensures_action(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         ens = _make_requirement_action("EnsuresAction", "packet_sent(dst, pkt)")
         action = _MockAction(name="send_packet", args=[ens])
@@ -752,7 +752,7 @@ class TestExtractRequirements:
         assert reqs[0].action_name == "send_packet"
 
     def test_extracts_assume_action(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         assume = _make_requirement_action("AssumeAction", "valid(x)")
         action = _MockAction(name="recv", args=[assume])
@@ -765,7 +765,7 @@ class TestExtractRequirements:
         assert len(reqs) >= 1
 
     def test_extracts_assert_action(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         assert_act = _make_requirement_action("AssertAction", "ready(self)")
         action = _MockAction(name="init", args=[assert_act])
@@ -783,7 +783,7 @@ class TestMixinKindPropagation:
 
     def test_before_mixer_requirements_tagged_before(self):
         """Requirements in a before-mixer action body get mixin_kind='before'."""
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         req = _make_requirement_action("RequiresAction", "pre(x)")
         mixer_action = _MockAction(name="shim.before_send", args=[req])
@@ -810,7 +810,7 @@ class TestMixinKindPropagation:
 
     def test_after_mixer_requirements_tagged_after(self):
         """Requirements in an after-mixer action body get mixin_kind='after'."""
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         ens = _make_requirement_action("EnsuresAction", "post(y)")
         mixer_action = _MockAction(name="shim.after_recv", args=[ens])
@@ -837,7 +837,7 @@ class TestMixinKindPropagation:
 
     def test_non_mixer_requirements_tagged_direct(self):
         """Requirements in a regular action body (not a mixer) get mixin_kind='direct'."""
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         req = _make_requirement_action("RequiresAction", "valid(x)")
         action = _MockAction(name="server.process", args=[req])
@@ -855,7 +855,7 @@ class TestHandlesExtractionErrorGracefully:
     """Verify the extractor never raises, returning failed IR on errors."""
 
     def test_none_module_returns_failed_ir(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         ir = extract_compiled_module_ir(None, None, "broken.ivy", 0.5)
 
@@ -868,7 +868,7 @@ class TestHandlesExtractionErrorGracefully:
         assert ir.actions == {}
 
     def test_module_with_no_sig_returns_failed_ir(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         mod = _ns(sig=None, actions={}, public_actions=set())
         ir = extract_compiled_module_ir(mod, None, "no_sig.ivy", 0.2)
@@ -878,7 +878,7 @@ class TestHandlesExtractionErrorGracefully:
         assert ir.source_file == "no_sig.ivy"
 
     def test_sort_with_broken_defines_does_not_raise(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         def _broken_defines(self):
             raise RuntimeError("Z3 error")
@@ -902,7 +902,7 @@ class TestHandlesExtractionErrorGracefully:
         assert isinstance(ir, CompiledModuleIR)
 
     def test_symbol_with_broken_sort_does_not_raise(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         class BrokenSymbol:
             name = "bad_sym"
@@ -922,7 +922,7 @@ class TestStructuralMetadata:
     """Verify that structural metadata fields are copied through."""
 
     def test_copies_hierarchy(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sig = _make_mock_sig()
         mod = _make_mock_module(
@@ -936,7 +936,7 @@ class TestStructuralMetadata:
         assert ir.hierarchy["server"] == {"send", "recv"}
 
     def test_copies_exports_imports(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sig = _make_mock_sig()
         mod = _make_mock_module(
@@ -951,7 +951,7 @@ class TestStructuralMetadata:
         assert ir.imports == ("shim.recv",)
 
     def test_copies_aliases_delegates(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sig = _make_mock_sig()
         mod = _make_mock_module(
@@ -966,7 +966,7 @@ class TestStructuralMetadata:
         assert ir.delegates == ("shim",)
 
     def test_copies_orderings(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sig = _make_mock_sig()
         mod = _make_mock_module(
@@ -987,7 +987,7 @@ class TestCompilationMetadata:
     """Verify compilation metadata fields."""
 
     def test_sets_source_file_and_duration(self):
-        from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+        from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
         sig = _make_mock_sig()
         mod = _make_mock_module(sig=sig)

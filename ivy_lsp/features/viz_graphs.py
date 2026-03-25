@@ -7,7 +7,8 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List, Set
 
-from ivy_lsp.analysis.requirement_graph import EdgeType
+from ivy_lsp.core.analysis.requirement_graph import EdgeType
+from ivy_lsp.core.protocols import IvyServerProtocol
 from ivy_lsp.features.visualization import (
     _cap_response,
     _filter_by_protocol,
@@ -15,7 +16,6 @@ from ivy_lsp.features.visualization import (
     _get_requirement_graph,
     _resolve_scope,
 )
-from ivy_lsp.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)
 

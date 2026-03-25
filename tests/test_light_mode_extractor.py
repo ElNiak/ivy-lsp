@@ -7,8 +7,8 @@ text using regex + brace-depth tracking, without the full Ivy parser.
 
 import pytest
 
-from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
-from ivy_lsp.analysis.requirement_graph import RequirementNode
+from ivy_lsp.core.analysis.light_mode_extractor import extract_requirements_light
+from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
 FILEPATH = "test_monitor.ivy"
 
@@ -610,7 +610,7 @@ class TestNativeBlockStringLiterals:
         scan, any C++ braces after that point corrupt the brace depth
         counter — returning the wrong closing brace.
         """
-        from ivy_lsp.analysis.light_mode_extractor import _find_matching_brace
+        from ivy_lsp.core.analysis.light_mode_extractor import _find_matching_brace
 
         # The C++ code has: if(1) { ... ">>>" ... }
         # Without the fix, find(">>>") hits the string literal first,
@@ -640,7 +640,7 @@ class TestNativeBlockStringLiterals:
 
     def test_escaped_quote_inside_native_string(self):
         """Escaped quotes inside C++ strings should not break parsing."""
-        from ivy_lsp.analysis.light_mode_extractor import _find_matching_brace
+        from ivy_lsp.core.analysis.light_mode_extractor import _find_matching_brace
 
         source = r'action foo = { <<< std::string s = "a\">>>b"; >>> }'
         open_pos = source.index("{")
@@ -665,8 +665,10 @@ class TestBracketTagsMatchRfcAnnotationsParser:
         We also locate the actual source line containing the tag comment
         and confirm parse_rfc_tags agrees.
         """
-        from ivy_lsp.analysis.light_mode_extractor import _extract_requirements_regex
-        from ivy_lsp.semantic.rfc_annotations import parse_rfc_tags
+        from ivy_lsp.core.analysis.light_mode_extractor import (
+            _extract_requirements_regex,
+        )
+        from ivy_lsp.core.semantic.rfc_annotations import parse_rfc_tags
 
         source = (
             "after my_action {\n"

@@ -15,8 +15,8 @@ class TestDocumentSymbolsWiring:
     """Verify compute_document_symbols returns real symbols, not empty list."""
 
     def test_valid_source_returns_symbols(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_symbols import compute_document_symbols
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\n\ntype cid\ntype pkt_num\n"
@@ -26,8 +26,8 @@ class TestDocumentSymbolsWiring:
         assert "cid" in names
 
     def test_broken_source_returns_fallback_symbols(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_symbols import compute_document_symbols
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\ntype cid\nobject broken = { @@@ }\ntype pkt_num\n"
@@ -35,18 +35,18 @@ class TestDocumentSymbolsWiring:
         assert len(result) > 0  # Fallback scanner should find 'cid' and/or 'pkt_num'
 
     def test_empty_source_returns_empty_list(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_symbols import compute_document_symbols
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         result = compute_document_symbols(parser, None, "", "empty.ivy")
         assert result == []
 
     def test_no_parser_uses_indexer_fallback(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_symbols import compute_document_symbols
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype cid\n")
         parser = IvyParserWrapper()
@@ -66,8 +66,8 @@ class TestDocumentSymbolsWiring:
         assert result == []
 
     def test_hierarchy_preserved(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_symbols import compute_document_symbols
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = (
@@ -84,8 +84,8 @@ class TestDocumentSymbolsWiring:
         assert len(bit_sym.children) > 0
 
     def test_returns_document_symbol_type(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_symbols import compute_document_symbols
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\ntype cid\n"
@@ -96,9 +96,9 @@ class TestDocumentSymbolsWiring:
 
 def _build_indexer(tmp_path, files: dict):
     """Helper: create .ivy files and build an indexer."""
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.parsing.parser_session import IvyParserWrapper
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
     for name, content in files.items():
         (tmp_path / name).write_text(content)

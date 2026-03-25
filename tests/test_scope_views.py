@@ -8,10 +8,10 @@ import time
 import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.analysis.test_scope import TestScope
-from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.workspace.context import WorkspaceContext
-from ivy_lsp.workspace.session_overlay import SessionOverlay, TestScopeView
+from ivy_lsp.core.analysis.test_scope import TestScope
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.core.workspace.context import WorkspaceContext
+from ivy_lsp.core.workspace.session_overlay import SessionOverlay, TestScopeView
 
 # ---------------------------------------------------------------------------
 # Helpers

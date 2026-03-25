@@ -53,7 +53,7 @@ def register_workspace_tools(mcp: Any, ctx: Any) -> None:
 
 async def _handle_set(ctx: Any, target: str | None, roles: str | None) -> dict:
     """Handle action='set' for ivy_workspace."""
-    from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+    from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
 
     if target is None:
         return error_response("action='set' requires a 'target' parameter.")
@@ -139,7 +139,7 @@ def _handle_get(ctx: Any) -> dict:
     """Handle action='get' for ivy_workspace."""
     ws = ctx.active_workspace
     if ws is None:
-        from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+        from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
 
         ws = ActiveWorkspace.cleared()
 
@@ -167,7 +167,7 @@ def _handle_list(ctx: Any) -> dict:
 
 def _handle_clear(ctx: Any) -> dict:
     """Handle action='clear' for ivy_workspace."""
-    from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+    from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
 
     ws = ActiveWorkspace.cleared()
 

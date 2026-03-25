@@ -14,7 +14,7 @@ class TestResolveScopeFilePath:
 
     def test_file_path_resolves_to_scope(self):
         """When filePath is provided without testFile, scope is derived from file."""
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 
         graph = ScopedRequirementModel()
         scope = TestScope(
@@ -36,7 +36,7 @@ class TestResolveScopeFilePath:
 
     def test_file_path_not_in_any_scope_falls_back_to_active(self):
         """When filePath doesn't match any scope, fall back to active scope."""
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 
         graph = ScopedRequirementModel()
         scope = TestScope(
@@ -59,7 +59,7 @@ class TestResolveScopeFilePath:
 
     def test_file_path_not_in_any_scope_no_active(self):
         """When filePath doesn't match and no active scope, result is unscoped."""
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 
         graph = ScopedRequirementModel()
         scope = TestScope(
@@ -80,7 +80,7 @@ class TestResolveScopeFilePath:
 
     def test_test_file_param_takes_precedence_over_file_path(self):
         """When testFile is provided explicitly, filePath is not used for scope."""
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 
         graph = ScopedRequirementModel()
         scope_a = TestScope(
@@ -113,7 +113,7 @@ class TestResolveScopeFilePath:
 
     def test_empty_file_path_falls_back_to_active(self):
         """Empty filePath string should not attempt file-based resolution."""
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 
         graph = ScopedRequirementModel()
         scope = TestScope(
@@ -165,7 +165,7 @@ class TestSmartSuggestionsContextFiltering:
 
     def test_non_scoped_graph_returns_all_suggestions(self):
         """When graph is not a ScopedRequirementModel, no scoping is applied."""
-        from ivy_lsp.analysis.requirement_graph import RequirementGraph
+        from ivy_lsp.core.analysis.requirement_graph import RequirementGraph
         from ivy_lsp.features.visualization import _resolve_scope
 
         graph = RequirementGraph()

@@ -24,8 +24,8 @@ class TestDiagnosticsImport:
 
 class TestParseDiagnostics:
     def test_valid_file_no_diagnostics(self, tmp_path):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\n\ntype cid\n"
@@ -34,8 +34,8 @@ class TestParseDiagnostics:
         assert len(errors) == 0
 
     def test_syntax_error_produces_diagnostic(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\n\ntype cid\nobject broken = {\n    this is not valid !!!\n}\n"
@@ -44,8 +44,8 @@ class TestParseDiagnostics:
         assert len(errors) > 0
 
     def test_diagnostic_has_message(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\nobject x = { @@@ }\n"
@@ -99,10 +99,10 @@ class TestStructuralDiagnostics:
         assert len(brace_diags) == 0
 
     def test_unresolved_include(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import check_structural_issues
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ninclude nonexistent\n")
         parser = IvyParserWrapper()
@@ -119,10 +119,10 @@ class TestStructuralDiagnostics:
         assert len(include_diags) > 0
 
     def test_resolved_include_no_diagnostic(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import check_structural_issues
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype t\n")
         (tmp_path / "main.ivy").write_text("#lang ivy1.7\ninclude types\n")
@@ -149,8 +149,8 @@ class TestFallbackScannerDiagnostics:
         When the parser fails and the fallback scanner encounters the error,
         a diagnostic is emitted.
         """
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         # Smart quote (U+2019) is an illegal character for the Ivy lexer
@@ -167,8 +167,8 @@ class TestFallbackScannerDiagnostics:
 
 class TestComputeDiagnostics:
     def test_full_pipeline_valid(self):
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         diags = compute_diagnostics(parser, "#lang ivy1.7\ntype cid\n", "a.ivy")
@@ -414,7 +414,7 @@ class TestDiagnosticEndPosition:
         """Coverage hint diagnostics should not use magic 999."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementGraph
         from ivy_lsp.features.diagnostics import compute_diagnostics
 
         graph = RequirementGraph()
@@ -459,7 +459,7 @@ class TestDiagnosticEndPosition:
         """Coverage hint end character should match the actual line length."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementGraph
         from ivy_lsp.features.diagnostics import compute_diagnostics
 
         graph = RequirementGraph()
@@ -727,7 +727,7 @@ class TestFallbackScanDeduplication:
         # Indicate the result already includes lexer diagnostics
         result.lexer_errors = [{"line": 1, "message": "bad char"}]
 
-        with patch("ivy_lsp.parsing.fallback_scanner.fallback_scan") as mock_scan:
+        with patch("ivy_lsp.core.parsing.fallback_scanner.fallback_scan") as mock_scan:
             mock_scan.return_value = ([], None)
             compute_diagnostics(
                 parser=None,
@@ -749,7 +749,7 @@ class TestFallbackScanDeduplication:
         # No lexer_errors attribute (standard ParseResult)
         del result.lexer_errors
 
-        with patch("ivy_lsp.parsing.fallback_scanner.fallback_scan") as mock_scan:
+        with patch("ivy_lsp.core.parsing.fallback_scanner.fallback_scan") as mock_scan:
             mock_scan.return_value = ([], None)
             compute_diagnostics(
                 parser=None,

@@ -17,8 +17,8 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.infra.utils.position_utils import make_range
-from ivy_lsp.parsing.symbols import IvySymbol
 
 logger = logging.getLogger(__name__)
 

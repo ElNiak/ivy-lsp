@@ -2,9 +2,9 @@
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 from ivy_lsp.features.diagnostics import compute_semantic_diagnostics
-from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
 
 class TestComputeSemanticDiagnostics:

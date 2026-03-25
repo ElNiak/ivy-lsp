@@ -199,8 +199,8 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
         # If rfc_source is provided, fetch and optionally filter by section
         if rfc_source:
             try:
-                from ivy_lsp.rfc.fetcher import fetch_rfc
-                from ivy_lsp.rfc.parser import get_section_text, parse_rfc_text
+                from ivy_lsp.core.rfc.fetcher import fetch_rfc
+                from ivy_lsp.core.rfc.parser import get_section_text, parse_rfc_text
 
                 fetch_result = await fetch_rfc(rfc_source)
                 parsed = parse_rfc_text(fetch_result.text)
@@ -285,7 +285,7 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
             {"mode": mode, "protocol": protocol, "rfc_source": rfc_source},
         )
 
-        from ivy_lsp.semantic.rfc_annotations import (
+        from ivy_lsp.core.semantic.rfc_annotations import (
             find_manifests,
             load_manifest_with_metadata,
             validate_manifest,
@@ -384,7 +384,7 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
             )
 
         elif mode == "staleness":
-            from ivy_lsp.rfc.staleness import check_staleness
+            from ivy_lsp.core.rfc.staleness import check_staleness
 
             reports = []
             for mpath in all_manifests:
@@ -457,7 +457,7 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
 
             # Fetch and extract new requirements
             try:
-                from ivy_lsp.rfc.fetcher import fetch_rfc
+                from ivy_lsp.core.rfc.fetcher import fetch_rfc
 
                 fetch_result = await fetch_rfc(rfc_source)
 

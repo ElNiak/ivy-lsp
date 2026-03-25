@@ -22,9 +22,9 @@ from typing import Any, Callable
 # ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.tools.*``.
 from ivy_lsp import sidecar_client
+from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
-from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ class ToolContext:
         Handles ``server._indexer is None`` gracefully — tools that
         need the model/graph already handle None returns.
         """
-        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
         from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
         from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_raw
 
@@ -470,11 +470,11 @@ def start_mcp(
     # --- Include resolver for cross-directory includes ---
     _resolver = None
     try:
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         # Use passed-in ws_config; only re-detect if not provided
         if ws_config is None:
-            from ivy_lsp.workspace.detection import detect_ivy_workspace
+            from ivy_lsp.core.workspace.detection import detect_ivy_workspace
 
             ws_config = detect_ivy_workspace(start_dir=root)
             logger.info(
@@ -748,7 +748,7 @@ def start_mcp(
         # --- Strategy 1: Merge per-protocol models from offline index ---
         try:
             if ctx.workspace_context is not None and ctx.workspace_context.has_index():
-                from ivy_lsp.semantic.model import SemanticModel
+                from ivy_lsp.core.semantic.model import SemanticModel
 
                 merged = SemanticModel()
                 used_protos: list[str] = []
@@ -785,7 +785,7 @@ def start_mcp(
             )
 
         # --- Strategy 2: Full rebuild from scratch ---
-        from ivy_lsp.semantic.model_builder import build_semantic_model
+        from ivy_lsp.core.semantic.model_builder import build_semantic_model
 
         model = build_semantic_model(
             root=root,
@@ -874,8 +874,8 @@ def start_mcp(
             return
 
         try:
-            from ivy_lsp.analysis.requirement_graph import EdgeType
-            from ivy_lsp.semantic.edges import SemanticEdgeType
+            from ivy_lsp.core.analysis.requirement_graph import EdgeType
+            from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
             # Map RequirementGraph EdgeType -> SemanticEdgeType
             _edge_type_map = {
@@ -945,8 +945,10 @@ def start_mcp(
             )
 
         try:
-            from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
-            from ivy_lsp.analysis.requirement_graph import (
+            from ivy_lsp.core.analysis.light_mode_extractor import (
+                extract_requirements_light,
+            )
+            from ivy_lsp.core.analysis.requirement_graph import (
                 ActionNode,
                 RequirementGraph,
                 StateVarNode,
@@ -1045,7 +1047,7 @@ def start_mcp(
 
             # Load RFC requirement manifests and wire COVERS edges
             try:
-                from ivy_lsp.semantic.rfc_annotations import (
+                from ivy_lsp.core.semantic.rfc_annotations import (
                     find_manifests,
                     load_requirement_manifest,
                 )
@@ -1134,7 +1136,7 @@ def start_mcp(
 
     # --- Build ToolContext and register tools from sub-modules ---
 
-    from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+    from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
 
     discovered_stdlib = discover_stdlib_modules()
 
@@ -1162,7 +1164,7 @@ def start_mcp(
 
     # Load workspace context from .ivy-index/ if available
     try:
-        from ivy_lsp.workspace.context import WorkspaceContext
+        from ivy_lsp.core.workspace.context import WorkspaceContext
 
         ctx.workspace_context = WorkspaceContext.load(root)
         if ctx.workspace_context.has_index():

@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.parsing.tiered_extractor import (
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.tiered_extractor import (
     ExtractionResult,
     TieredExtractor,
     TierError,
@@ -205,7 +205,7 @@ class TestTier2Lexer:
     def test_lexer_falls_back_on_import_error(self):
         ext = self._make_extractor()
         with patch(
-            "ivy_lsp.parsing.tiered_extractor.TieredExtractor._try_lexer",
+            "ivy_lsp.core.parsing.tiered_extractor.TieredExtractor._try_lexer",
             side_effect=ImportError("no PLY"),
         ):
             source = "#lang ivy1.7\n\ntype cid\n"
@@ -260,9 +260,9 @@ class TestCascade:
 
 class TestPopulateModelFromSymbols:
     def test_type_node_created(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import TypeNode
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import TypeNode
 
         model = SemanticModel()
         syms = [
@@ -282,9 +282,9 @@ class TestPopulateModelFromSymbols:
         assert nodes[0].tier == "tier2"
 
     def test_enum_type_node(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import TypeNode
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import TypeNode
 
         model = SemanticModel()
         syms = [
@@ -304,9 +304,9 @@ class TestPopulateModelFromSymbols:
         assert "bidir" in nodes[0].variants
 
     def test_action_symbol_node(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         syms = [
@@ -325,9 +325,9 @@ class TestPopulateModelFromSymbols:
         assert nodes[0].kind == "action"
 
     def test_individual_symbol_node(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         syms = [
@@ -346,9 +346,9 @@ class TestPopulateModelFromSymbols:
         assert nodes[0].sort_name == "cid"
 
     def test_object_symbol_node(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         syms = [
@@ -366,8 +366,8 @@ class TestPopulateModelFromSymbols:
         assert nodes[0].kind == "object"
 
     def test_skips_non_model_symbols(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         syms = [
@@ -382,9 +382,9 @@ class TestPopulateModelFromSymbols:
         assert count == 0
 
     def test_nested_children(self):
-        from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+        from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
         model = SemanticModel()
         child = IvySymbol(

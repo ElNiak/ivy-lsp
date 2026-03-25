@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 from lsprotocol.types import SymbolKind
 
+from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
+from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.features.document_symbols import get_document_symbols
 from ivy_lsp.features.workspace_symbols import flatten_symbols, search_symbols
-from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-from ivy_lsp.parsing.fallback_scanner import fallback_scan
-from ivy_lsp.parsing.parser_session import IvyParserWrapper
-from ivy_lsp.parsing.symbols import IvySymbol
 
 logger = logging.getLogger(__name__)
 

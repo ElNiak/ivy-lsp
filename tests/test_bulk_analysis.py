@@ -5,14 +5,14 @@ import tempfile
 import threading
 from unittest.mock import patch
 
-from ivy_lsp.adapters.null_adapter import (
+from ivy_lsp.core.adapters.null_adapter import (
     NullAstEnrichmentAdapter,
     NullCompilerAdapter,
     NullParserAdapter,
 )
+from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
+from ivy_lsp.core.semantic.model import SemanticModel
 from ivy_lsp.infra.config import reset_config
-from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
-from ivy_lsp.semantic.model import SemanticModel
 
 # ---------------------------------------------------------------------------
 # Helpers

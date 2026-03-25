@@ -4,14 +4,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ivy_lsp.infra.utils.async_subprocess import SubprocessResult
-from ivy_lsp.verification import (
+from ivy_lsp.core.verification import (
     detect_isolates_for_file,
     resolve_staging_path,
     run_ivy_check,
     run_ivy_compile,
     run_ivy_show,
 )
+from ivy_lsp.infra.utils.async_subprocess import SubprocessResult
 
 
 def test_resolve_staging_path_with_staging_dir(tmp_path):
@@ -70,7 +70,7 @@ async def test_run_ivy_check_success():
         returncode=0,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_check(
@@ -101,7 +101,7 @@ async def test_run_ivy_check_with_staging_dir(tmp_path):
         duration=0.5,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         await run_ivy_check(
@@ -126,7 +126,7 @@ async def test_run_ivy_check_with_diagnostics():
         returncode=1,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_check(
@@ -152,7 +152,7 @@ async def test_run_ivy_check_with_isolate():
         duration=1.0,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         await run_ivy_check(
@@ -174,7 +174,7 @@ async def test_run_ivy_compile_success():
         duration=5.0,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
@@ -200,7 +200,7 @@ async def test_run_ivy_compile_with_isolate():
         duration=3.0,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
@@ -229,7 +229,7 @@ async def test_run_ivy_show_success():
         duration=0.3,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_show(
@@ -257,7 +257,7 @@ async def test_run_ivy_check_success_false_when_errors_in_output():
         returncode=0,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_check(
@@ -286,7 +286,7 @@ async def test_run_ivy_compile_with_ivy_error_traceback():
         returncode=1,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
@@ -318,7 +318,7 @@ async def test_run_ivy_compile_with_cpp_error():
         returncode=1,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
@@ -347,7 +347,7 @@ async def test_run_ivy_compile_success_false_when_errors_in_output():
         returncode=0,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
@@ -371,7 +371,7 @@ async def test_run_ivy_show_with_error():
         returncode=1,
     )
     with patch(
-        "ivy_lsp.verification.run_ivy_subprocess", new_callable=AsyncMock
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_show(

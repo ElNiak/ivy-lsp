@@ -2,7 +2,7 @@
 
 import pytest
 
-from ivy_lsp.parsing.token_stream import TokenStream, tokenize_ivy
+from ivy_lsp.core.parsing.token_stream import TokenStream, tokenize_ivy
 
 
 class TestTokenizeIvy:

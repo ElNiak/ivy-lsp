@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from ivy_lsp.indexer.include_resolver import IncludeResolver
+from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
 
 def test_collision_guard_falls_through_to_workspace_root(tmp_path):

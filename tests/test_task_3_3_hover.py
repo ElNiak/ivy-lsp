@@ -21,7 +21,7 @@ class TestHoverImport:
 
 class TestFormatHoverContent:
     def _sym(self, name, kind, detail=None, children=None, file_path=None):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         return IvySymbol(
             name=name,
@@ -111,10 +111,10 @@ class TestFormatHoverContent:
 
 class TestGetHoverInfo:
     def test_hover_on_known_symbol(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.hover import get_hover_info
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         parser = IvyParserWrapper()
@@ -129,10 +129,10 @@ class TestGetHoverInfo:
         assert "cid" in result.contents.value
 
     def test_hover_on_unknown_symbol(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.hover import get_hover_info
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()
@@ -146,10 +146,10 @@ class TestGetHoverInfo:
         assert result is None
 
     def test_hover_on_empty_position(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.hover import get_hover_info
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()

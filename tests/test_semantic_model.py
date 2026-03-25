@@ -2,9 +2,14 @@
 
 import threading
 
-from ivy_lsp.semantic.edges import SemanticEdgeType
-from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode, TypeNode
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import (
+    RfcAnnotation,
+    RfcRequirement,
+    SymbolNode,
+    TypeNode,
+)
 
 
 class TestSemanticModelCRUD:
@@ -426,7 +431,7 @@ class TestSemanticModelDomainQueries:
     """Tests for RequirementGraph-compatible domain query methods."""
 
     def test_get_requirements_for_action(self):
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementNode
 
         model = SemanticModel()
         action = ActionNode(
@@ -464,7 +469,10 @@ class TestSemanticModelDomainQueries:
         assert model.get_requirements_for_action("s1") == []
 
     def test_get_state_vars_read_by(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode, StateVarNode
+        from ivy_lsp.core.analysis.requirement_graph import (
+            RequirementNode,
+            StateVarNode,
+        )
 
         model = SemanticModel()
         req = RequirementNode(

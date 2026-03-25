@@ -18,7 +18,7 @@ import logging
 import os
 from typing import Any, Dict
 
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.features.commands import (
     _extract_param,
     _refresh_open_diagnostics_async,

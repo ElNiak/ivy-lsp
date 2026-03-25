@@ -68,15 +68,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         if model is None:
             return _model_unavailable_response()
 
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_with_diagnostics
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_with_diagnostics
 
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
         # Fallback: if semantic model has no requirements, load from manifests
         if not requirements:
-            from ivy_lsp.semantic.rfc_annotations import (
+            from ivy_lsp.core.semantic.rfc_annotations import (
                 find_manifests,
                 load_requirement_manifest,
             )
@@ -171,15 +171,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         if model is None:
             return _model_unavailable_response()
 
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_with_diagnostics
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_with_diagnostics
 
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
         # Fallback: if semantic model has no requirements, load from manifests
         if not requirements:
-            from ivy_lsp.semantic.rfc_annotations import (
+            from ivy_lsp.core.semantic.rfc_annotations import (
                 find_manifests,
                 load_requirement_manifest,
             )
@@ -300,7 +300,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             result["warnings"] = coverage_warnings
 
         # Add manifests summary
-        from ivy_lsp.semantic.rfc_annotations import find_manifests
+        from ivy_lsp.core.semantic.rfc_annotations import find_manifests
 
         workspace_root = ctx.root
         manifests = find_manifests(workspace_root)
@@ -349,7 +349,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             # Build req_map from the semantic model first
             req_map: dict[str, Any] = {}
             if model is not None:
-                from ivy_lsp.semantic.nodes import RfcRequirement
+                from ivy_lsp.core.semantic.nodes import RfcRequirement
 
                 requirements = model.get_nodes_by_type(RfcRequirement)
                 req_map = {r.id: r for r in requirements}

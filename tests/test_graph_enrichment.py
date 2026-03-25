@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ivy_lsp.compilation.ir import (
+from ivy_lsp.core.compilation.ir import (
     ActionIR,
     CompiledModuleIR,
     MixinIR,
@@ -16,8 +16,8 @@ from ivy_lsp.compilation.ir import (
 
 class TestEnrichSemanticModel:
     def test_creates_tier3_type_nodes_from_sorts(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -41,8 +41,8 @@ class TestEnrichSemanticModel:
         assert type_nodes[0].tier == "tier3"
 
     def test_creates_tier3_symbol_nodes_from_symbols(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -66,8 +66,8 @@ class TestEnrichSemanticModel:
         assert sym_nodes[0].sort_name == "cid -> bool"
 
     def test_creates_symbol_nodes_from_actions(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -92,8 +92,8 @@ class TestEnrichSemanticModel:
         assert action_nodes[0].return_sort == "ok:bool"
 
     def test_creates_destructor_kind(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -116,8 +116,8 @@ class TestEnrichSemanticModel:
         assert sym_nodes[0].kind == "destructor"
 
     def test_creates_constructor_kind(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -140,9 +140,9 @@ class TestEnrichSemanticModel:
         assert sym_nodes[0].kind == "constructor"
 
     def test_creates_edges_for_domain_sorts(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -165,8 +165,8 @@ class TestEnrichSemanticModel:
         assert outgoing[0] == (SemanticEdgeType.HAS_PARAM, "cid")
 
     def test_skips_failed_ir(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR.empty("test.ivy", errors=["fail"])
@@ -174,8 +174,8 @@ class TestEnrichSemanticModel:
         assert model.node_count() == 0
 
     def test_multiple_sorts_and_symbols(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -204,8 +204,8 @@ class TestEnrichSemanticModel:
         assert model.node_count() == 3
 
     def test_action_with_no_returns(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -223,9 +223,9 @@ class TestEnrichSemanticModel:
         assert action_nodes[0].arity == 0
 
     def test_creates_monitors_edges_from_mixins(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -250,9 +250,9 @@ class TestEnrichSemanticModel:
         assert monitors_edges[0][1] == "compiled:test.ivy:connect"
 
     def test_creates_contains_edges_from_hierarchy(self):
-        from ivy_lsp.compilation.graph_enrichment import enrich_semantic_model
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_semantic_model
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()
         ir = CompiledModuleIR(
@@ -275,8 +275,8 @@ class TestEnrichSemanticModel:
 
 class TestEnrichRequirementGraph:
     def test_adds_action_nodes_from_ir(self):
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-        from ivy_lsp.compilation.graph_enrichment import enrich_requirement_graph
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_requirement_graph
 
         graph = ScopedRequirementModel()
         ir = CompiledModuleIR(
@@ -290,8 +290,8 @@ class TestEnrichRequirementGraph:
         assert "ext:send" in graph.actions
 
     def test_action_node_fields(self):
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-        from ivy_lsp.compilation.graph_enrichment import enrich_requirement_graph
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_requirement_graph
 
         graph = ScopedRequirementModel()
         ir = CompiledModuleIR(
@@ -313,8 +313,8 @@ class TestEnrichRequirementGraph:
         assert node.line == 0
 
     def test_skips_failed_ir(self):
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-        from ivy_lsp.compilation.graph_enrichment import enrich_requirement_graph
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_requirement_graph
 
         graph = ScopedRequirementModel()
         ir = CompiledModuleIR.empty("test.ivy")
@@ -322,9 +322,9 @@ class TestEnrichRequirementGraph:
         assert len(graph.actions) == 0
 
     def test_does_not_overwrite_existing_action(self):
-        from ivy_lsp.analysis.requirement_graph import ActionNode
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-        from ivy_lsp.compilation.graph_enrichment import enrich_requirement_graph
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_requirement_graph
 
         graph = ScopedRequirementModel()
         # Pre-populate with an existing action at line 42
@@ -350,8 +350,8 @@ class TestEnrichRequirementGraph:
         assert graph.actions["ext:send"].line == 42
 
     def test_multiple_actions(self):
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-        from ivy_lsp.compilation.graph_enrichment import enrich_requirement_graph
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+        from ivy_lsp.core.compilation.graph_enrichment import enrich_requirement_graph
 
         graph = ScopedRequirementModel()
         ir = CompiledModuleIR(

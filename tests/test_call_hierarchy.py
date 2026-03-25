@@ -23,9 +23,9 @@ def _make_workspace(tmp_path: Path, files: dict[str, str]) -> str:
 
 
 def _index(workspace_root: str):
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.parsing.parser_session import IvyParserWrapper
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
     parser = IvyParserWrapper()
     resolver = IncludeResolver(workspace_root)
@@ -201,9 +201,9 @@ class TestModelBasedIncomingCalls:
         """When model has CALLS edges, use them instead of regex."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         s1 = SymbolNode(
@@ -237,9 +237,9 @@ class TestModelBasedIncomingCalls:
         """MONITORS edges should also appear as incoming callers."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import MonitorNode, SymbolNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import MonitorNode, SymbolNode
 
         model = SemanticModel()
         s1 = SymbolNode(
@@ -277,7 +277,7 @@ class TestModelBasedIncomingCalls:
     @pytest.mark.unit
     def test_fallback_to_regex_when_model_empty(self, tmp_path):
         """Empty model (no matching node) falls back to regex."""
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()  # no nodes
 
@@ -297,9 +297,9 @@ class TestModelBasedOutgoingCalls:
         """When model has CALLS edges, use them instead of regex."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         s1 = SymbolNode(
@@ -339,7 +339,7 @@ class TestModelBasedOutgoingCalls:
     @pytest.mark.unit
     def test_fallback_to_regex_when_model_empty(self, tmp_path):
         """Empty model (no matching node) falls back to regex."""
-        from ivy_lsp.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.model import SemanticModel
 
         model = SemanticModel()  # no nodes
 

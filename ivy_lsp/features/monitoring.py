@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from ivy_lsp import __version__
-from ivy_lsp.protocols import IvyServerProtocol
+from ivy_lsp.core.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -297,8 +297,8 @@ def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
         }
         if model_ready:
             try:
-                from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-                from ivy_lsp.semantic.rfc_annotations import compute_coverage
+                from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+                from ivy_lsp.core.semantic.rfc_annotations import compute_coverage
 
                 annotations = server.semantic_model.get_nodes_by_type(RfcAnnotation)
                 reqs_list = server.semantic_model.get_nodes_by_type(RfcRequirement)

@@ -26,12 +26,12 @@ from ivy_lsp.infra.observability import (
 from ivy_lsp.server_setup import ServerSetupMixin
 
 if TYPE_CHECKING:
-    from ivy_lsp.compilation.compiler_manager import CompilerManager
+    from ivy_lsp.core.compilation.compiler_manager import CompilerManager
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
+    from ivy_lsp.core.semantic.model import SemanticModel
     from ivy_lsp.features.diagnostics import DiagnosticCache
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
-    from ivy_lsp.semantic.model import SemanticModel
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})

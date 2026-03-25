@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.infra.utils import uri_to_path

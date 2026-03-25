@@ -21,10 +21,10 @@ class TestRenameImport:
 class TestComputeRename:
     def test_rename_single_file(self, tmp_path):
         """Rename updates all occurrences in a single file."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.rename import compute_rename
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\ntype cid\nrelation r(X:cid)\naction send(dst:cid)\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -50,10 +50,10 @@ class TestComputeRename:
 
     def test_rename_across_files(self, tmp_path):
         """Rename updates occurrences across multiple files."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.rename import compute_rename
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         (tmp_path / "main.ivy").write_text(
@@ -104,10 +104,10 @@ class TestComputeRename:
 
     def test_rename_replaces_correct_text(self, tmp_path):
         """Verify the replacement text is the new name."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.rename import compute_rename
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\ntype cid\n"
         (tmp_path / "a.ivy").write_text(source)

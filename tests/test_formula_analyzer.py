@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from ivy_lsp.analysis.formula_analyzer import (
+from ivy_lsp.core.analysis.formula_analyzer import (
     extract_state_var_references,
     extract_state_var_references_text,
 )

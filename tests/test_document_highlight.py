@@ -42,10 +42,10 @@ class TestBasicHighlight:
 
     def test_definition_marked_as_write(self, tmp_path):
         """The definition occurrence is marked Write, others Read."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.document_highlight import compute_document_highlights
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\ntype cid\nrelation r(X:cid)\n"
         (tmp_path / "a.ivy").write_text(source)

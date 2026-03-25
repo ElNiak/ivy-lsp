@@ -1,8 +1,8 @@
 """Tests for the compiler adapter and snapshots."""
 
-from ivy_lsp.adapters.compiler_adapter import CompilerAdapter, CompilerSession
-from ivy_lsp.adapters.protocols import CompileResult
-from ivy_lsp.semantic.snapshots import (
+from ivy_lsp.core.adapters.compiler_adapter import CompilerAdapter, CompilerSession
+from ivy_lsp.core.adapters.protocols import CompileResult
+from ivy_lsp.core.semantic.snapshots import (
     ModuleSnapshot,
     SignatureSnapshot,
     SortInfo,

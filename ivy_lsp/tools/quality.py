@@ -108,7 +108,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         )
 
         # 2. Includes resolve
-        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
         _inc_extractor = TieredExtractor()
         basenames = {os.path.splitext(os.path.basename(f))[0] for f in prot_files}

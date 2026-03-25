@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import ivy_lsp
-from ivy_lsp.workspace.detection import detect_ivy_workspace
+from ivy_lsp.core.workspace.detection import detect_ivy_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ class IndexBuilder:
         logger.info("Building index for protocol %s at %s", protocol, protocol_dir)
 
         # -- 1. Discover .ivy files ----------------------------------------
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         protocol_rel = os.path.relpath(protocol_dir, self.workspace_root)
         resolver = IncludeResolver(
@@ -145,12 +145,12 @@ class IndexBuilder:
         logger.info("Found %d .ivy files for protocol %s", len(ivy_files), protocol)
 
         # -- 2-4. Parse files, collect artifacts ---------------------------
-        from ivy_lsp.analysis.light_mode_extractor import (
+        from ivy_lsp.core.analysis.light_mode_extractor import (
             extract_exports_imports_light,
             extract_requirements_light,
         )
-        from ivy_lsp.parsing.symbols import IncludeGraph
-        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
         extractor = TieredExtractor(
             resolve_callback=resolver.resolve,
@@ -199,7 +199,7 @@ class IndexBuilder:
                 exports_map[rel_path] = export_info.to_dict()
             except Exception as exc:
                 logger.debug("Export extraction failed for %s: %s", filepath, exc)
-                from ivy_lsp.analysis.test_scope import ExportImportInfo
+                from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
                 export_info = ExportImportInfo(file=filepath)
                 exports_map[rel_path] = export_info.to_dict()
@@ -271,7 +271,7 @@ class IndexBuilder:
                     include_graph.add_edge(rel_path, target_rel)
 
         # -- 6-7. Compute test scopes -------------------------------------
-        from ivy_lsp.analysis.test_scope import (
+        from ivy_lsp.core.analysis.test_scope import (
             ExportImportInfo,
             TestScope,
             detect_test_role,
@@ -315,7 +315,7 @@ class IndexBuilder:
         # -- 8. Optional: SemanticModel ------------------------------------
         semantic_model = None
         try:
-            from ivy_lsp.semantic.model_builder import build_semantic_model
+            from ivy_lsp.core.semantic.model_builder import build_semantic_model
 
             def _find_files(root: str) -> List[str]:
                 return [os.path.relpath(f, root) for f in ivy_files]
@@ -331,8 +331,8 @@ class IndexBuilder:
         # -- 9. Optional: ScopedRequirementModel ---------------------------
         requirement_graph = None
         try:
-            from ivy_lsp.analysis.requirement_graph import RequirementNode
-            from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+            from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+            from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 
             req_graph = ScopedRequirementModel()
             for rel_path, reqs_list in requirements_map.items():

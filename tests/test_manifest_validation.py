@@ -1,6 +1,6 @@
 """Tests for manifest validation (Step 1.5)."""
 
-from ivy_lsp.semantic.rfc_annotations import validate_manifest
+from ivy_lsp.core.semantic.rfc_annotations import validate_manifest
 
 
 class TestValidateManifest:

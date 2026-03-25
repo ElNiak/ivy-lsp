@@ -1,6 +1,6 @@
 """Tests for TestScope serialization (to_dict / from_dict)."""
 
-from ivy_lsp.analysis.test_scope import TestScope
+from ivy_lsp.core.analysis.test_scope import TestScope
 
 
 class TestTestScopeSerialization:

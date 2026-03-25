@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from lsprotocol import types as lsp
 from lsprotocol.types import SymbolKind
 
+from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.infra.utils import uri_to_path
-from ivy_lsp.parsing.symbols import IvySymbol
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +472,7 @@ def compute_semantic_completions(
     if graph is None:
         return []
 
-    from ivy_lsp.analysis.requirement_graph import EdgeType
+    from ivy_lsp.core.analysis.requirement_graph import EdgeType
 
     completions: List[Dict[str, str]] = []
 
@@ -546,7 +546,7 @@ def _enrich_items_from_semantic_model(
     if semantic_model is None or not items:
         return
     try:
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         symbol_nodes = {
             sn.name: sn for sn in semantic_model.get_nodes_by_type(SymbolNode)

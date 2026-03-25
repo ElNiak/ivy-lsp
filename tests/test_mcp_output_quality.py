@@ -14,14 +14,14 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
+from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
     ActionNode,
     EdgeType,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
-from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel  # noqa: E402
+from ivy_lsp.core.semantic.nodes import RfcRequirement  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -466,8 +466,8 @@ class TestP1RequirementCoverageUncoveredIds:
 
     def test_uncovered_ids_present(self):
         """Coverage computation includes uncovered_ids list."""
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         reqs = [
@@ -530,8 +530,8 @@ class TestP1CoveragePerLevelPercent:
 
     def test_by_level_has_coverage_percent(self):
         """Each by_level entry has coverage_percent and uncovered."""
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         reqs = [

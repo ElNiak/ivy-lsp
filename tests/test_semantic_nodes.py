@@ -2,8 +2,8 @@
 
 import pytest
 
-from ivy_lsp.semantic.edges import EdgeType, SemanticEdgeType
-from ivy_lsp.semantic.nodes import (  # Re-exported backward compat
+from ivy_lsp.core.semantic.edges import EdgeType, SemanticEdgeType
+from ivy_lsp.core.semantic.nodes import (  # Re-exported backward compat
     ActionNode,
     MonitorNode,
     PropertyNode,

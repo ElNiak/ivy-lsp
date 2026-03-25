@@ -16,12 +16,12 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
+from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
+from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 from ivy_lsp.features.document_symbols import compute_document_symbols
-from ivy_lsp.indexer.include_resolver import IncludeResolver
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-from ivy_lsp.parsing.fallback_scanner import fallback_scan
-from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
 logger = logging.getLogger(__name__)
 

@@ -27,13 +27,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.parsing.symbols import is_monitor_symbol
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 from ivy_lsp.infra.utils.symbol_resolver import lookup_with_dotted_fallback
-from ivy_lsp.parsing.symbols import is_monitor_symbol
 
 if TYPE_CHECKING:
-    from ivy_lsp.semantic.model import SemanticModel
+    from ivy_lsp.core.semantic.model import SemanticModel
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def _find_symbol_node_id(
     model: SemanticModel, name: str, filepath: str
 ) -> Optional[str]:
     """Find a :class:`SymbolNode` ID in *model* matching *name* and *file*."""
-    from ivy_lsp.semantic.nodes import SymbolNode
+    from ivy_lsp.core.semantic.nodes import SymbolNode
 
     last = name.rsplit(".", 1)[-1] if "." in name else name
     # Prefer match scoped to the file.
@@ -212,7 +212,7 @@ def get_incoming_calls(
     if model is not None:
         node_id = _find_symbol_node_id(model, item_name, item_filepath)
         if node_id is not None:
-            from ivy_lsp.semantic.edges import SemanticEdgeType
+            from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
             results: List[lsp.CallHierarchyIncomingCall] = []
 
@@ -349,7 +349,7 @@ def get_outgoing_calls(
     if model is not None:
         node_id = _find_symbol_node_id(model, item_name, item_filepath)
         if node_id is not None:
-            from ivy_lsp.semantic.edges import SemanticEdgeType
+            from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
             results: List[lsp.CallHierarchyOutgoingCall] = []
 

@@ -12,7 +12,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 from ivy_lsp.features.commands import (
     _detect_isolate_at_position,
     _find_enclosing_test,

@@ -7,13 +7,13 @@ import os
 import time
 from typing import Any, Dict, List, Set
 
-from ivy_lsp.analysis.requirement_graph import EdgeType
+from ivy_lsp.core.analysis.requirement_graph import EdgeType
+from ivy_lsp.core.protocols import IvyServerProtocol
 from ivy_lsp.features.visualization import (
     _cap_response,
     _get_requirement_graph,
     _resolve_scope,
 )
-from ivy_lsp.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
         # --- Pattern coverage gaps (lightweight) ---
         pattern_gaps: dict = {"serdesGaps": [], "monitorGaps": [], "shimGaps": []}
         try:
-            from ivy_lsp.analysis.pattern_library import (
+            from ivy_lsp.core.analysis.pattern_library import (
                 PatternCrossReferencer,
                 analyze_protocol,
             )

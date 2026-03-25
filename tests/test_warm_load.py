@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 
 class TestWarmLoad:
@@ -52,6 +52,6 @@ class TestWarmLoad:
         resolver.find_all_ivy_files.return_value = []
 
         idx = WorkspaceIndexer(str(tmp_path), parser, resolver)
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         assert isinstance(idx._cache, FileCache)

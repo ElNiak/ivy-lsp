@@ -20,9 +20,9 @@ def _make_workspace(tmp_path: Path, files: dict[str, str]) -> str:
 
 
 def _index(workspace_root: str):
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.parsing.parser_session import IvyParserWrapper
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
     parser = IvyParserWrapper()
     resolver = IncludeResolver(workspace_root)

@@ -13,14 +13,14 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestIncludeResolverImport:
     def test_import(self):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         assert IncludeResolver is not None
 
 
 class TestIncludeResolverSameDir:
     def test_resolve_same_dir(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype a\n")
         (tmp_path / "b.ivy").write_text("#lang ivy1.7\ninclude a\n")
@@ -30,7 +30,7 @@ class TestIncludeResolverSameDir:
         assert result == str(tmp_path / "a.ivy")
 
     def test_resolve_nonexistent_returns_none(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "b.ivy").write_text("#lang ivy1.7\n")
         resolver = IncludeResolver(str(tmp_path))
@@ -40,7 +40,7 @@ class TestIncludeResolverSameDir:
 
 class TestIncludeResolverWorkspaceRoot:
     def test_resolve_workspace_root(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         subdir = tmp_path / "subdir"
         subdir.mkdir()
@@ -53,7 +53,7 @@ class TestIncludeResolverWorkspaceRoot:
 
 class TestIncludeResolverStdLib:
     def test_resolve_collections(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "test.ivy").write_text("#lang ivy1.7\n")
         resolver = IncludeResolver(str(tmp_path))
@@ -63,7 +63,7 @@ class TestIncludeResolverStdLib:
         assert "include" in result
 
     def test_resolve_order(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "test.ivy").write_text("#lang ivy1.7\n")
         resolver = IncludeResolver(str(tmp_path))
@@ -74,7 +74,7 @@ class TestIncludeResolverStdLib:
 
 class TestIncludeResolverOverride:
     def test_override_std_lib_path(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         fake_std = tmp_path / "fake_std"
         fake_std.mkdir()
@@ -86,7 +86,7 @@ class TestIncludeResolverOverride:
 
 class TestIncludeResolverPriority:
     def test_same_dir_wins_over_workspace_root(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         sub = tmp_path / "sub"
         sub.mkdir()
@@ -100,7 +100,7 @@ class TestIncludeResolverPriority:
 
 class TestFindAllIvyFiles:
     def test_finds_all_files(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("")
         (tmp_path / "b.ivy").write_text("")
@@ -115,13 +115,13 @@ class TestFindAllIvyFiles:
         assert names == {"a.ivy", "b.ivy", "c.ivy"}
 
     def test_empty_dir(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         resolver = IncludeResolver(str(tmp_path))
         assert resolver.find_all_ivy_files() == []
 
     def test_excludes_build_directory(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "real.ivy").write_text("")
         build = tmp_path / "build" / "lib"
@@ -133,7 +133,7 @@ class TestFindAllIvyFiles:
         assert names == {"real.ivy"}
 
     def test_excludes_git_and_pycache(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "src.ivy").write_text("")
         git_dir = tmp_path / ".git" / "objects"
@@ -148,7 +148,7 @@ class TestFindAllIvyFiles:
         assert files[0].endswith("src.ivy")
 
     def test_excludes_pytest_temp_dirs(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "main.ivy").write_text("")
         pytest_dir = tmp_path / "pytest-of-user"
@@ -165,7 +165,7 @@ class TestFindAllIvyFiles:
 
 class TestIncludeResolverQuicStack:
     def test_quic_frame_includes_resolve(self):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic_stack = (
             Path(__file__).resolve().parent.parent
@@ -185,7 +185,7 @@ class TestIncludeResolverQuicStack:
         assert "include" in result
 
     def test_find_all_ivy_files_quic_stack(self):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic_stack = (
             Path(__file__).resolve().parent.parent
@@ -202,7 +202,7 @@ class TestIncludeResolverQuicStack:
 
 class TestExcludePaths:
     def test_exclude_paths_skips_directory(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "keep.ivy").write_text("")
         excluded = tmp_path / "apt" / "sub"
@@ -214,7 +214,7 @@ class TestExcludePaths:
         assert names == {"keep.ivy"}
 
     def test_exclude_paths_nested(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic = tmp_path / "protocol-testing" / "quic"
         quic.mkdir(parents=True)
@@ -232,7 +232,7 @@ class TestExcludePaths:
         assert any("quic" in f for f in files)
 
     def test_exclude_paths_empty_keeps_all(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("")
         sub = tmp_path / "sub"
@@ -243,7 +243,7 @@ class TestExcludePaths:
         assert len(files) == 2
 
     def test_exclude_submodules_and_test_by_default_basenames(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "real.ivy").write_text("")
         sm = tmp_path / "submodules"
@@ -260,7 +260,7 @@ class TestExcludePaths:
 
 class TestStagingDirectory:
     def test_create_staging_creates_symlinks(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("# file a")
         sub = tmp_path / "stack"
@@ -278,7 +278,7 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_staging_excludes_paths(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "keep.ivy").write_text("")
         apt = tmp_path / "apt"
@@ -291,7 +291,7 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_staging_collision_first_wins(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         d1 = tmp_path / "aa"
         d1.mkdir()
@@ -307,7 +307,7 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_find_all_returns_original_paths_when_staged(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         sub = tmp_path / "stack"
         sub.mkdir()
@@ -320,7 +320,7 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_cleanup_removes_staging(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("")
         resolver = IncludeResolver(str(tmp_path))
@@ -330,7 +330,7 @@ class TestStagingDirectory:
         assert not os.path.isdir(staging)
 
     def test_get_staged_path_returns_symlink(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\n")
         resolver = IncludeResolver(str(tmp_path))
@@ -340,13 +340,13 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_get_staged_path_no_staging(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         resolver = IncludeResolver(str(tmp_path))
         assert resolver.get_staged_path("/foo/a.ivy") is None
 
     def test_get_staged_path_unknown_file(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\n")
         resolver = IncludeResolver(str(tmp_path))
@@ -355,7 +355,7 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_get_staged_path_collision_victim(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         d1 = tmp_path / "aa"
         d1.mkdir()
@@ -372,7 +372,7 @@ class TestStagingDirectory:
         resolver.cleanup_staging()
 
     def test_resolve_uses_staging_for_disambiguation(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic = tmp_path / "quic"
         quic.mkdir()
@@ -393,7 +393,7 @@ class TestStagingDirectory:
 
 class TestIncludePaths:
     def test_include_paths_restricts_to_specified_dirs(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic = tmp_path / "protocol-testing" / "quic"
         quic.mkdir(parents=True)
@@ -411,7 +411,7 @@ class TestIncludePaths:
         assert "quic" in files[0]
 
     def test_include_paths_multiple(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic = tmp_path / "quic"
         quic.mkdir()
@@ -431,7 +431,7 @@ class TestIncludePaths:
         assert names == {"a.ivy", "b.ivy"}
 
     def test_include_paths_empty_includes_all(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         (tmp_path / "a.ivy").write_text("")
         sub = tmp_path / "sub"
@@ -442,7 +442,7 @@ class TestIncludePaths:
         assert len(files) == 2
 
     def test_include_and_exclude_combined(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic = tmp_path / "protocol-testing" / "quic"
         quic.mkdir(parents=True)
@@ -463,7 +463,7 @@ class TestIncludePaths:
         assert "model.ivy" in files[0]
 
     def test_include_paths_with_staging(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         quic = tmp_path / "quic"
         quic.mkdir()
@@ -489,7 +489,7 @@ class TestPartitionedStagingIdempotent:
     """Step 1.1/1.2: Calling build_partitioned_staging() twice must not raise Errno 17."""
 
     def test_partitioned_staging_idempotent(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         # Create workspace with basename collisions (quic/types.ivy vs apt/types.ivy)
         quic = tmp_path / "quic"
@@ -541,7 +541,7 @@ class TestPartitionStaleSymlinkCleanup:
     """Step 1.2: Pre-existing symlinks in partition dirs are cleaned before repopulation."""
 
     def test_partition_stale_symlink_cleanup(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         # Create workspace with collisions
         quic = tmp_path / "quic"
@@ -597,7 +597,7 @@ class TestLayerAwareFileDiscovery:
 
     def _make_workspace_with_layers(self, tmp_path):
         """Create a workspace with two layers (standard + apt) sharing basenames."""
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         quic.mkdir(parents=True)
@@ -624,7 +624,7 @@ class TestLayerAwareFileDiscovery:
         return layers
 
     def test_find_source_files_populates_file_to_layer(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_workspace_with_layers(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -641,13 +641,13 @@ class TestLayerAwareFileDiscovery:
     def test_cross_layer_collision_no_warning(self, tmp_path, caplog):
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_workspace_with_layers(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
 
         with caplog.at_level(
-            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+            logging.WARNING, logger="ivy_lsp.core.indexer.include_resolver"
         ):
             resolver.create_staging_directory()
 
@@ -666,8 +666,8 @@ class TestLayerAwareFileDiscovery:
     def test_intra_layer_collision_warning(self, tmp_path, caplog):
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         # Create a single layer with duplicate basenames
         sub1 = tmp_path / "proto" / "dir1"
@@ -683,7 +683,7 @@ class TestLayerAwareFileDiscovery:
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
 
         with caplog.at_level(
-            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+            logging.WARNING, logger="ivy_lsp.core.indexer.include_resolver"
         ):
             resolver.create_staging_directory()
 
@@ -699,7 +699,7 @@ class TestLayerAwareFileDiscovery:
         resolver.cleanup_staging()
 
     def test_build_layered_staging_creates_layer_dirs(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_workspace_with_layers(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -722,7 +722,7 @@ class TestLayerAwareFileDiscovery:
 
     def test_resolve_uses_layer_staging_not_flat(self, tmp_path):
         """resolve() from a QUIC file returns QUIC types, from APT returns APT types."""
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_workspace_with_layers(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -763,7 +763,7 @@ class TestLayerAwareFileDiscovery:
         When layers are active but from_file is NOT in any layer,
         colliding basenames must return None (not silently serve wrong file).
         """
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_workspace_with_layers(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -782,12 +782,14 @@ class TestLayerAwareFileDiscovery:
         """With layers, flat staging collision logged at DEBUG (not WARNING/ERROR)."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_workspace_with_layers(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
 
-        with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
+        with caplog.at_level(
+            logging.DEBUG, logger="ivy_lsp.core.indexer.include_resolver"
+        ):
             resolver.create_staging_directory()
 
         # Should have DEBUG "layer-handled" messages, NOT WARNING or ERROR
@@ -812,7 +814,7 @@ class TestLayerAwareFileDiscovery:
         """Without layers, flat staging collision logged at WARNING."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         # No layers — two dirs with same basename
         d1 = tmp_path / "aa"
@@ -824,7 +826,9 @@ class TestLayerAwareFileDiscovery:
 
         resolver = IncludeResolver(str(tmp_path))
 
-        with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
+        with caplog.at_level(
+            logging.DEBUG, logger="ivy_lsp.core.indexer.include_resolver"
+        ):
             resolver.create_staging_directory()
 
         warning_msgs = [
@@ -841,8 +845,8 @@ class TestLayerAwareFileDiscovery:
         """Single layer with two same-name files -> logged at WARNING."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         sub1 = tmp_path / "proto" / "dir1"
         sub1.mkdir(parents=True)
@@ -856,7 +860,9 @@ class TestLayerAwareFileDiscovery:
         ]
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
 
-        with caplog.at_level(logging.DEBUG, logger="ivy_lsp.indexer.include_resolver"):
+        with caplog.at_level(
+            logging.DEBUG, logger="ivy_lsp.core.indexer.include_resolver"
+        ):
             resolver.create_staging_directory()
 
         warning_msgs = [
@@ -875,7 +881,7 @@ class TestDiagnosticLogging:
 
     def _make_two_layer_workspace(self, tmp_path):
         """Create a workspace with two layers sharing a colliding basename."""
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         quic.mkdir(parents=True)
@@ -905,7 +911,7 @@ class TestDiagnosticLogging:
         """Layer staging active, from_file NOT in _file_to_partition → WARNING logged."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_two_layer_workspace(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -916,7 +922,7 @@ class TestDiagnosticLogging:
         outsider = str(tmp_path / "outsider.ivy")
 
         with caplog.at_level(
-            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+            logging.WARNING, logger="ivy_lsp.core.indexer.include_resolver"
         ):
             resolver.resolve("types", outsider)
 
@@ -935,7 +941,7 @@ class TestDiagnosticLogging:
         """Layer staging active, from_file in partition but included file not in layer dir → WARNING."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_two_layer_workspace(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -948,7 +954,7 @@ class TestDiagnosticLogging:
         )
 
         with caplog.at_level(
-            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+            logging.WARNING, logger="ivy_lsp.core.indexer.include_resolver"
         ):
             # Try to resolve a name that does NOT exist in quic layer staging
             resolver.resolve("nonexistent_module", quic_frame)
@@ -968,8 +974,8 @@ class TestDiagnosticLogging:
         """Stdlib files are symlinked into each layer dir; resolving them produces no WARNING."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         # Create workspace with one layer and a stdlib directory
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
@@ -1000,7 +1006,7 @@ class TestDiagnosticLogging:
         quic_frame = str(quic / "frame.ivy")
 
         with caplog.at_level(
-            logging.WARNING, logger="ivy_lsp.indexer.include_resolver"
+            logging.WARNING, logger="ivy_lsp.core.indexer.include_resolver"
         ):
             result = resolver.resolve("order", quic_frame)
 
@@ -1024,13 +1030,15 @@ class TestDiagnosticLogging:
         """After build_layered_staging(), an INFO-level summary message appears."""
         import logging
 
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_two_layer_workspace(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
         resolver.create_staging_directory()
 
-        with caplog.at_level(logging.INFO, logger="ivy_lsp.indexer.include_resolver"):
+        with caplog.at_level(
+            logging.INFO, logger="ivy_lsp.core.indexer.include_resolver"
+        ):
             resolver.build_layered_staging()
 
         summary = [
@@ -1269,7 +1277,7 @@ class TestLayerGuardPreventsPartitionOverwrite:
     """Phase 2.7: build_partitioned_staging() must not overwrite layer partitions."""
 
     def _make_two_layer_workspace(self, tmp_path):
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         quic = tmp_path / "protocol-testing" / "quic" / "quic_stack"
         quic.mkdir(parents=True)
@@ -1297,7 +1305,7 @@ class TestLayerGuardPreventsPartitionOverwrite:
 
     def test_build_partitioned_staging_skipped_when_layers_active(self, tmp_path):
         """build_partitioned_staging() must not overwrite layer partitions."""
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         layers = self._make_two_layer_workspace(tmp_path)
         resolver = IncludeResolver(str(tmp_path), workspace_layers=layers)
@@ -1332,7 +1340,7 @@ class TestLayerGuardPreventsPartitionOverwrite:
 
     def test_build_partitioned_staging_works_without_layers(self, tmp_path):
         """Without layers, build_partitioned_staging() should work normally."""
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         # Create workspace with collisions but NO layers
         quic = tmp_path / "quic"
@@ -1435,7 +1443,7 @@ class TestDiscoverStdlibModules:
     """Phase 2.9: Auto-discover stdlib modules from installed ivy package."""
 
     def test_discover_from_installed_ivy(self):
-        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
 
         mods = discover_stdlib_modules()
         # Must include at least the core modules
@@ -1444,7 +1452,7 @@ class TestDiscoverStdlibModules:
         assert "ip" in mods
 
     def test_discover_fallback_nonexistent(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
 
         # Non-existent path falls back to hardcoded minimum
         mods = discover_stdlib_modules(ivy_include_path=str(tmp_path / "nonexistent"))
@@ -1452,7 +1460,7 @@ class TestDiscoverStdlibModules:
         assert len(mods) == 9  # hardcoded fallback size
 
     def test_discover_custom_path(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
 
         (tmp_path / "custom.ivy").write_text("")
         (tmp_path / "other.ivy").write_text("")
@@ -1460,7 +1468,7 @@ class TestDiscoverStdlibModules:
         assert mods == frozenset({"custom", "other"})
 
     def test_discover_empty_dir_uses_fallback(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
 
         # Empty directory has no .ivy files — should fallback
         mods = discover_stdlib_modules(ivy_include_path=str(tmp_path))
@@ -1468,7 +1476,7 @@ class TestDiscoverStdlibModules:
         assert len(mods) == 9
 
     def test_discover_ignores_non_ivy_files(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
+        from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
 
         (tmp_path / "valid.ivy").write_text("")
         (tmp_path / "readme.txt").write_text("")

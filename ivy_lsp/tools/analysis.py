@@ -8,8 +8,8 @@ import os
 import shutil
 from typing import Any
 
+from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)
@@ -244,7 +244,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     @safe_tool
     async def ivy_capabilities() -> dict:
         """Report which Ivy CLI tools are available on PATH, MCP tools, staging health, and parsing tier."""
-        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
         from ivy_lsp.tools import get_tool_metadata
 
         _tc = ToolTraceContext("ivy_capabilities", {})
@@ -454,8 +454,8 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         )
 
         try:
+            from ivy_lsp.core.workspace.detection import detect_ivy_workspace
             from ivy_lsp.index_builder import IndexBuilder
-            from ivy_lsp.workspace.detection import detect_ivy_workspace
         except ImportError as exc:
             return _tc.finish(
                 error_response(
@@ -498,7 +498,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         ws_ctx = getattr(ctx, "workspace_context", None)
         if ws_ctx is not None:
             try:
-                from ivy_lsp.workspace.context import WorkspaceContext
+                from ivy_lsp.core.workspace.context import WorkspaceContext
 
                 ctx.workspace_context = WorkspaceContext.load(ctx.root)
                 logger.info("Reloaded WorkspaceContext after index build")

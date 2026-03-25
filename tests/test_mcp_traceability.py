@@ -159,8 +159,8 @@ class TestIvyGenerateManifest:
 class TestCoverageComputation:
     def test_requirement_coverage_by_level(self):
         """2 MUST (1 covered), 1 SHOULD -> correct by_level grouping."""
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         reqs = [
@@ -199,8 +199,8 @@ class TestCoverageComputation:
 class TestTraceabilityMatrix:
     def test_matrix_covered_vs_uncovered(self):
         """2 requirements, 1 covered by annotation -> correct covered/uncovered."""
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         req1 = RfcRequirement(
@@ -251,7 +251,7 @@ class TestTraceabilityMatrix:
 class TestCoverageStatsScoping:
     def test_requirement_has_no_file_attribute(self):
         """RfcRequirement has no .file attr — scoping must not filter requirements."""
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         req = RfcRequirement(
             id="rfc9000:4.1",

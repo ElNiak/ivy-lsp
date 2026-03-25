@@ -9,7 +9,7 @@ class TestIvySymbol:
     """Verify IvySymbol dataclass creation and defaults."""
 
     def test_creation_minimal(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="cid",
@@ -21,7 +21,7 @@ class TestIvySymbol:
         assert sym.range == (2, 0, 2, 8)
 
     def test_default_children_empty(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="x",
@@ -31,7 +31,7 @@ class TestIvySymbol:
         assert sym.children == []
 
     def test_default_detail_none(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="x",
@@ -41,7 +41,7 @@ class TestIvySymbol:
         assert sym.detail is None
 
     def test_default_file_path_none(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="x",
@@ -51,7 +51,7 @@ class TestIvySymbol:
         assert sym.file_path is None
 
     def test_explicit_children(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         child = IvySymbol(
             name="zero",
@@ -68,7 +68,7 @@ class TestIvySymbol:
         assert parent.children[0].name == "zero"
 
     def test_explicit_detail(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="send",
@@ -79,7 +79,7 @@ class TestIvySymbol:
         assert sym.detail == "action send(src:cid, dst:cid)"
 
     def test_explicit_file_path(self):
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="cid",
@@ -91,7 +91,7 @@ class TestIvySymbol:
 
     def test_range_is_zero_based(self):
         """Range tuple represents 0-based line/col positions."""
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym = IvySymbol(
             name="t",
@@ -106,7 +106,7 @@ class TestIvySymbol:
 
     def test_children_default_not_shared(self):
         """Each instance should get its own children list."""
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         sym1 = IvySymbol(name="a", kind=SymbolKind.Variable, range=(0, 0, 0, 1))
         sym2 = IvySymbol(name="b", kind=SymbolKind.Variable, range=(1, 0, 1, 1))
@@ -121,31 +121,31 @@ class TestIvyScope:
     """Verify IvyScope dataclass creation and navigation."""
 
     def test_creation_minimal(self):
-        from ivy_lsp.parsing.symbols import IvyScope
+        from ivy_lsp.core.parsing.symbols import IvyScope
 
         scope = IvyScope(name="global")
         assert scope.name == "global"
 
     def test_default_symbols_empty(self):
-        from ivy_lsp.parsing.symbols import IvyScope
+        from ivy_lsp.core.parsing.symbols import IvyScope
 
         scope = IvyScope(name="global")
         assert scope.symbols == {}
 
     def test_default_parent_none(self):
-        from ivy_lsp.parsing.symbols import IvyScope
+        from ivy_lsp.core.parsing.symbols import IvyScope
 
         scope = IvyScope(name="global")
         assert scope.parent is None
 
     def test_default_children_empty(self):
-        from ivy_lsp.parsing.symbols import IvyScope
+        from ivy_lsp.core.parsing.symbols import IvyScope
 
         scope = IvyScope(name="global")
         assert scope.children == []
 
     def test_parent_link(self):
-        from ivy_lsp.parsing.symbols import IvyScope
+        from ivy_lsp.core.parsing.symbols import IvyScope
 
         parent = IvyScope(name="global")
         child = IvyScope(name="bit", parent=parent)
@@ -157,7 +157,7 @@ class TestIvyScope:
         assert parent.children[0].name == "bit"
 
     def test_symbols_dict_holds_ivy_symbols(self):
-        from ivy_lsp.parsing.symbols import IvyScope, IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvyScope, IvySymbol
 
         sym = IvySymbol(
             name="cid",
@@ -169,7 +169,7 @@ class TestIvyScope:
         assert scope.symbols["cid"].name == "cid"
 
     def test_nested_scopes(self):
-        from ivy_lsp.parsing.symbols import IvyScope
+        from ivy_lsp.core.parsing.symbols import IvyScope
 
         root = IvyScope(name="global")
         obj_scope = IvyScope(name="bit", parent=root)
@@ -182,7 +182,7 @@ class TestIvyScope:
 
     def test_symbols_default_not_shared(self):
         """Each instance should get its own symbols dict."""
-        from ivy_lsp.parsing.symbols import IvyScope, IvySymbol
+        from ivy_lsp.core.parsing.symbols import IvyScope, IvySymbol
 
         s1 = IvyScope(name="a")
         s2 = IvyScope(name="b")
@@ -197,19 +197,19 @@ class TestSymbolTable:
     """Verify SymbolTable add/lookup/query operations."""
 
     def test_empty_lookup_returns_empty(self):
-        from ivy_lsp.parsing.symbols import SymbolTable
+        from ivy_lsp.core.parsing.symbols import SymbolTable
 
         table = SymbolTable()
         assert table.lookup("nonexistent") == []
 
     def test_empty_all_symbols(self):
-        from ivy_lsp.parsing.symbols import SymbolTable
+        from ivy_lsp.core.parsing.symbols import SymbolTable
 
         table = SymbolTable()
         assert table.all_symbols() == []
 
     def test_add_and_lookup(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym = IvySymbol(name="cid", kind=SymbolKind.Class, range=(2, 0, 2, 8))
@@ -219,7 +219,7 @@ class TestSymbolTable:
         assert result[0] is sym
 
     def test_multiple_same_name(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym1 = IvySymbol(
@@ -240,7 +240,7 @@ class TestSymbolTable:
         assert len(result) == 2
 
     def test_all_symbols(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym1 = IvySymbol(name="cid", kind=SymbolKind.Class, range=(2, 0, 2, 8))
@@ -253,7 +253,7 @@ class TestSymbolTable:
         assert names == {"cid", "pkt_num"}
 
     def test_symbols_in_file(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym1 = IvySymbol(
@@ -288,7 +288,7 @@ class TestSymbolTable:
         assert frame_syms[0].name == "frame"
 
     def test_symbols_in_file_no_match(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym = IvySymbol(
@@ -302,7 +302,7 @@ class TestSymbolTable:
 
     def test_symbols_in_file_none_file_path(self):
         """Symbols without file_path should not match any file."""
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym = IvySymbol(name="x", kind=SymbolKind.Variable, range=(0, 0, 0, 1))
@@ -311,7 +311,7 @@ class TestSymbolTable:
 
     def test_lookup_qualified_single_level(self):
         """Single-name qualified lookup should behave like regular lookup."""
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         table = SymbolTable()
         sym = IvySymbol(name="cid", kind=SymbolKind.Class, range=(2, 0, 2, 8))
@@ -322,7 +322,7 @@ class TestSymbolTable:
 
     def test_lookup_qualified_walks_children(self):
         """Qualified lookup 'frame.ack.range' walks children hierarchy."""
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         range_sym = IvySymbol(
             name="range",
@@ -351,7 +351,7 @@ class TestSymbolTable:
 
     def test_lookup_qualified_not_found(self):
         """Qualified lookup returns [] when path does not exist."""
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         sym = IvySymbol(
             name="frame",
@@ -365,7 +365,7 @@ class TestSymbolTable:
 
     def test_lookup_qualified_partial_path(self):
         """Qualified lookup returns [] when only partial path matches."""
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         ack_sym = IvySymbol(
             name="ack",
@@ -385,7 +385,7 @@ class TestSymbolTable:
 
     def test_lookup_qualified_empty_string(self):
         """Empty qualified name returns []."""
-        from ivy_lsp.parsing.symbols import SymbolTable
+        from ivy_lsp.core.parsing.symbols import SymbolTable
 
         table = SymbolTable()
         assert table.lookup_qualified("") == []
@@ -395,19 +395,19 @@ class TestIncludeGraph:
     """Verify IncludeGraph edge tracking and traversal."""
 
     def test_empty_graph_get_includes(self):
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         assert graph.get_includes("any.ivy") == set()
 
     def test_empty_graph_get_included_by(self):
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         assert graph.get_included_by("any.ivy") == set()
 
     def test_single_edge(self):
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("quic_frame.ivy", "quic_types.ivy")
@@ -416,7 +416,7 @@ class TestIncludeGraph:
         assert graph.get_included_by("quic_types.ivy") == {"quic_frame.ivy"}
 
     def test_multiple_includes(self):
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("quic_frame.ivy", "quic_types.ivy")
@@ -426,7 +426,7 @@ class TestIncludeGraph:
         assert includes == {"quic_types.ivy", "quic_packet.ivy"}
 
     def test_included_by_reverse(self):
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "common.ivy")
@@ -437,7 +437,7 @@ class TestIncludeGraph:
 
     def test_transitive_chain(self):
         """A includes B, B includes C => transitive_includes(A) = {B, C}."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -448,7 +448,7 @@ class TestIncludeGraph:
 
     def test_transitive_deep_chain(self):
         """A->B->C->D => transitive_includes(A) = {B, C, D}."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -460,7 +460,7 @@ class TestIncludeGraph:
 
     def test_transitive_does_not_include_self(self):
         """Transitive includes should not contain the queried file itself."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -470,7 +470,7 @@ class TestIncludeGraph:
 
     def test_cycle_detection(self):
         """A->B->C->A cycle: transitive_includes terminates and returns all."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -482,7 +482,7 @@ class TestIncludeGraph:
 
     def test_cycle_detection_self_loop(self):
         """Self-loop: A->A should not cause infinite loop."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "a.ivy")
@@ -493,7 +493,7 @@ class TestIncludeGraph:
 
     def test_transitive_diamond(self):
         """Diamond: A->B, A->C, B->D, C->D => transitive(A) = {B,C,D}."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -506,7 +506,7 @@ class TestIncludeGraph:
 
     def test_transitive_no_includes(self):
         """File with no includes has empty transitive set."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -516,7 +516,7 @@ class TestIncludeGraph:
 
     def test_duplicate_edges_idempotent(self):
         """Adding the same edge twice does not create duplicates."""
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         graph = IncludeGraph()
         graph.add_edge("a.ivy", "b.ivy")
@@ -530,7 +530,7 @@ class TestLookupUnqualified:
     """Verify SymbolTable.lookup_unqualified finds nested children."""
 
     def test_finds_nested_child(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         child = IvySymbol(
             name="zero",
@@ -553,7 +553,7 @@ class TestLookupUnqualified:
         assert result[0].name == "zero"
 
     def test_prefers_direct_lookup(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         sym = IvySymbol(
             name="cid",
@@ -569,7 +569,7 @@ class TestLookupUnqualified:
         assert result[0] is sym
 
     def test_finds_deeply_nested(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         deep = IvySymbol(
             name="largest_acked",
@@ -596,7 +596,7 @@ class TestLookupUnqualified:
         assert result[0].name == "largest_acked"
 
     def test_no_match_returns_empty(self):
-        from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
+        from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 
         sym = IvySymbol(
             name="frame",
@@ -613,14 +613,14 @@ class TestCatchAllLogging:
     """Verify the catch-all branch logs unknown decl types."""
 
     def test_unknown_decl_type_logged(self):
-        from ivy_lsp.parsing.ast_to_symbols import _convert_decl
+        from ivy_lsp.core.parsing.ast_to_symbols import _convert_decl
 
         class FakeDecl:
             """A declaration type with no converter."""
 
             pass
 
-        target_logger = logging.getLogger("ivy_lsp.parsing.ast_to_symbols")
+        target_logger = logging.getLogger("ivy_lsp.core.parsing.ast_to_symbols")
         with CaptureHandler(target_logger) as handler:
             result = _convert_decl(FakeDecl(), "test.ivy", "")
             assert result == []

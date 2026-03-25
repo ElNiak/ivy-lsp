@@ -2,7 +2,7 @@
 
 import pytest
 
-from ivy_lsp.analysis.test_scope import TestScope, detect_test_role
+from ivy_lsp.core.analysis.test_scope import TestScope, detect_test_role
 
 
 class TestDetectTestRole:

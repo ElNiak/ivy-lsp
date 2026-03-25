@@ -1,6 +1,6 @@
 """Tests for RFC text parser."""
 
-from ivy_lsp.rfc.parser import get_section_text, parse_rfc_text
+from ivy_lsp.core.rfc.parser import get_section_text, parse_rfc_text
 
 SAMPLE_RFC = """\
 RFC 9000  QUIC: A UDP-Based Multiplexed Transport

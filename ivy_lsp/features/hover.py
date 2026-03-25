@@ -10,13 +10,13 @@ from typing import List, Optional
 from lsprotocol import types as lsp
 from lsprotocol.types import SymbolKind
 
+from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.position_utils import word_at_position
 from ivy_lsp.infra.utils.symbol_resolver import (
     ensure_deep_parsed,
     lookup_with_dotted_fallback,
 )
-from ivy_lsp.parsing.symbols import IvySymbol
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ def _enrich_with_semantic_model(
     if semantic_model is None:
         return content
 
-    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
+    from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
 
     extra_parts: List[str] = []
 
@@ -198,7 +198,7 @@ def _hover_from_semantic_model(
     if semantic_model is None:
         return None
 
-    from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+    from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
     # Search SymbolNode entries matching the word
     symbol_nodes = semantic_model.get_nodes_by_type(SymbolNode)

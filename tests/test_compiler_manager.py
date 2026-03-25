@@ -5,13 +5,13 @@ import time
 
 import pytest
 
-from ivy_lsp.compilation.ir import CompiledModuleIR
+from ivy_lsp.core.compilation.ir import CompiledModuleIR
 
 
 class TestCompilerManager:
     def test_compile_sync_returns_ir(self):
         """compile_sync returns a CompiledModuleIR (success or failure)."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=30.0)
         try:
@@ -23,7 +23,7 @@ class TestCompilerManager:
 
     def test_compile_async_calls_callback(self):
         """compile_async invokes the callback with an IR."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=30.0)
         event = threading.Event()
@@ -43,7 +43,7 @@ class TestCompilerManager:
 
     def test_cache_hit(self):
         """Second compilation of same source returns cached IR."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=30.0)
         try:
@@ -56,7 +56,7 @@ class TestCompilerManager:
 
     def test_cache_miss_on_changed_source(self):
         """Different source content invalidates cache."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=30.0)
         try:
@@ -68,7 +68,7 @@ class TestCompilerManager:
 
     def test_invalidate_clears_cache(self):
         """invalidate() removes cached entry for a file."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=30.0)
         try:
@@ -81,7 +81,7 @@ class TestCompilerManager:
 
     def test_timeout_returns_failed_ir(self):
         """Compilation that exceeds timeout returns failed IR."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=0.001)
         try:
@@ -98,7 +98,7 @@ class TestCompilerManager:
 
     def test_max_concurrent_default_is_one(self):
         """Default max_concurrent is 1."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None)
         assert mgr._max_concurrent == 1
@@ -108,7 +108,7 @@ class TestCompilerManager:
         """Semaphore limits the number of concurrent compilations."""
         from unittest.mock import patch
 
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=60.0, max_concurrent=1)
 
@@ -170,7 +170,7 @@ class TestCompilerManager:
 
         try:
             with patch(
-                "ivy_lsp.compilation.compiler_manager.multiprocessing"
+                "ivy_lsp.core.compilation.compiler_manager.multiprocessing"
             ) as mock_mp:
                 ctx = mock_mp.get_context.return_value
 
@@ -204,7 +204,7 @@ class TestCompilerManager:
         """Old _wait thread must not remove new process from _active."""
         from unittest.mock import patch
 
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(staging_dir=None, timeout=30.0, max_concurrent=2)
 
@@ -260,7 +260,7 @@ class TestCompilerManager:
 
         try:
             with patch(
-                "ivy_lsp.compilation.compiler_manager.multiprocessing"
+                "ivy_lsp.core.compilation.compiler_manager.multiprocessing"
             ) as mock_mp:
                 ctx = mock_mp.get_context.return_value
 
@@ -293,7 +293,7 @@ class TestCompilerManager:
 
     def test_invalidate_dependents_clears_target_and_includers(self):
         """invalidate_dependents removes target + all direct includers."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(timeout=30)
         for f in ["/a.ivy", "/b.ivy", "/c.ivy"]:
@@ -313,7 +313,7 @@ class TestCompilerManager:
 
     def test_invalidate_dependents_without_get_included_by(self):
         """Handles include_graph that lacks get_included_by."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(timeout=30)
         mgr._put_cache("/a.ivy", "hash", CompiledModuleIR.empty("/a.ivy"))
@@ -323,7 +323,7 @@ class TestCompilerManager:
 
     def test_shutdown_clears_active_and_cache(self):
         """shutdown() clears both _active and _cache."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(timeout=30)
         mgr._put_cache("/a.ivy", "hash", CompiledModuleIR.empty("/a.ivy"))
@@ -333,7 +333,7 @@ class TestCompilerManager:
 
     def test_get_stats_returns_correct_counts(self):
         """get_stats reflects cache population."""
-        from ivy_lsp.compilation.compiler_manager import CompilerManager
+        from ivy_lsp.core.compilation.compiler_manager import CompilerManager
 
         mgr = CompilerManager(timeout=30, max_concurrent=4)
         assert mgr.get_stats() == {

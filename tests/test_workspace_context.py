@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from ivy_lsp.workspace.context import (
+from ivy_lsp.core.workspace.context import (
     ProtocolIndex,
     StalenessInfo,
     WorkspaceContext,

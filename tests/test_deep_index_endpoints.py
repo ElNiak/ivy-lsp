@@ -3,11 +3,11 @@
 import threading
 from unittest.mock import MagicMock
 
+from ivy_lsp.core.indexer.workspace_indexer import DeepIndexProgress, FileIndexStatus
 from ivy_lsp.features.monitoring import (
     handle_deep_index_progress,
     handle_test_feature_matrix,
 )
-from ivy_lsp.indexer.workspace_indexer import DeepIndexProgress, FileIndexStatus
 
 
 class TestDeepIndexProgressHandler:
@@ -75,7 +75,7 @@ class TestDeepIndexProgressHandler:
 class TestTestFeatureMatrixHandler:
     def _make_server(self):
         server = MagicMock()
-        from ivy_lsp.analysis.test_scope import ExportImportInfo
+        from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
         file_statuses = {
             "/ws/test1.ivy": FileIndexStatus(

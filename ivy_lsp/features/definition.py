@@ -152,7 +152,7 @@ def _lookup_via_semantic_model(word: str, semantic_model: Any) -> list:
     # TODO: add a by-name index to SemanticModel to avoid O(N) scans here
     # and in hover.py (_enrich_with_semantic_model).
     try:
-        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
         results = []
         for node_type in (SymbolNode, TypeNode):

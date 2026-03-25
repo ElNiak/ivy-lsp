@@ -2,7 +2,7 @@
 
 import pytest
 
-from ivy_lsp.adapters.protocols import (
+from ivy_lsp.core.adapters.protocols import (
     CompileError,
     CompileResult,
     IAstEnrichmentAdapter,
@@ -59,19 +59,19 @@ class TestRuntimeCheckable:
     """Verify isinstance checks work on conforming classes."""
 
     def test_conforming_parser(self):
-        from ivy_lsp.adapters.null_adapter import NullParserAdapter
+        from ivy_lsp.core.adapters.null_adapter import NullParserAdapter
 
         adapter = NullParserAdapter()
         assert isinstance(adapter, IParserAdapter)
 
     def test_conforming_enrichment(self):
-        from ivy_lsp.adapters.null_adapter import NullAstEnrichmentAdapter
+        from ivy_lsp.core.adapters.null_adapter import NullAstEnrichmentAdapter
 
         adapter = NullAstEnrichmentAdapter()
         assert isinstance(adapter, IAstEnrichmentAdapter)
 
     def test_conforming_compiler(self):
-        from ivy_lsp.adapters.null_adapter import NullCompilerAdapter
+        from ivy_lsp.core.adapters.null_adapter import NullCompilerAdapter
 
         adapter = NullCompilerAdapter()
         assert isinstance(adapter, ICompilerAdapter)

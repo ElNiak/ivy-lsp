@@ -378,7 +378,7 @@ class BulkOrchestrationMixin:
         except AttributeError:
             return
 
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 
         if not isinstance(graph, ScopedRequirementModel):
             return

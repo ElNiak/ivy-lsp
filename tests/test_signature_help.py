@@ -62,10 +62,10 @@ class TestParseParams:
 class TestComputeSignatureHelp:
     def test_trigger_on_open_paren(self, tmp_path):
         """Cursor right after '(' triggers signature help."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.signature_help import compute_signature_help
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\naction send(dst:cid)\nafter init { send( }\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -94,10 +94,10 @@ class TestComputeSignatureHelp:
 
     def test_active_parameter_index(self, tmp_path):
         """After comma, active parameter should advance."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.signature_help import compute_signature_help
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         # Write a valid file so the parser indexes foo with full detail
         indexed_source = (
@@ -130,10 +130,10 @@ class TestComputeSignatureHelp:
 
     def test_active_parameter_clamped_when_excess_commas(self, tmp_path):
         """Extra commas beyond parameter count clamp active_parameter."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.signature_help import compute_signature_help
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\ntype cid\naction send(dst:cid)\n"
         (tmp_path / "a.ivy").write_text(source)

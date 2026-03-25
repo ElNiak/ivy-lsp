@@ -2,7 +2,7 @@
 
 import sys
 
-from ivy_lsp.indexer.parallel_indexer import (
+from ivy_lsp.core.indexer.parallel_indexer import (
     WorkerResult,
     _worker_init,
     worker_parse_file,
@@ -36,7 +36,7 @@ class TestWorkerParseFile:
 
 class TestParallelDeepIndexer:
     def test_parse_files_returns_results(self, tmp_path):
-        from ivy_lsp.indexer.parallel_indexer import ParallelDeepIndexer
+        from ivy_lsp.core.indexer.parallel_indexer import ParallelDeepIndexer
 
         files = []
         for i in range(3):
@@ -52,7 +52,7 @@ class TestParallelDeepIndexer:
             assert len(result.symbols) >= 1
 
     def test_serial_fallback_for_single_file(self, tmp_path):
-        from ivy_lsp.indexer.parallel_indexer import ParallelDeepIndexer
+        from ivy_lsp.core.indexer.parallel_indexer import ParallelDeepIndexer
 
         f = tmp_path / "single.ivy"
         f.write_text("#lang ivy1.7\ntype t\n")

@@ -19,10 +19,10 @@ from typing import Any, List
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 from ivy_lsp.infra.utils import uri_to_path
-from ivy_lsp.parsing.fallback_scanner import fallback_scan
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
 
 logger = logging.getLogger(__name__)
 

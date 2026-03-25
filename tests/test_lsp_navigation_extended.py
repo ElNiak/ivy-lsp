@@ -14,6 +14,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
+from ivy_lsp.core.parsing.symbols import IvySymbol  # noqa: E402
 from ivy_lsp.features.definition import (  # noqa: E402
     _DECL_RE,
     _INCLUDE_RE,
@@ -25,7 +26,6 @@ from ivy_lsp.features.document_symbols import (  # noqa: E402
 )
 from ivy_lsp.features.hover import format_hover_content  # noqa: E402
 from ivy_lsp.features.references import find_references  # noqa: E402
-from ivy_lsp.parsing.symbols import IvySymbol  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

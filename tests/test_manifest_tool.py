@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from ivy_lsp.semantic.rfc_annotations import (
+from ivy_lsp.core.semantic.rfc_annotations import (
     find_manifests,
     load_manifest_with_metadata,
     validate_manifest,

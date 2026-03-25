@@ -2,8 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo
+from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
 
 
 class TestReindexFileWithDependents:

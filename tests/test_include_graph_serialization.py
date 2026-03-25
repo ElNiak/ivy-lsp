@@ -1,6 +1,6 @@
 """Tests for IncludeGraph serialization (to_edges / from_edges)."""
 
-from ivy_lsp.parsing.symbols import IncludeGraph
+from ivy_lsp.core.parsing.symbols import IncludeGraph
 
 
 class TestIncludeGraphSerialization:

@@ -16,8 +16,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ivy_lsp.adapters.ast_enrichment_adapter import AstEnrichmentAdapter, _extract_line
-from ivy_lsp.adapters.protocols import IAstEnrichmentAdapter, TypeAnnotation
+from ivy_lsp.core.adapters.ast_enrichment_adapter import (
+    AstEnrichmentAdapter,
+    _extract_line,
+)
+from ivy_lsp.core.adapters.protocols import IAstEnrichmentAdapter, TypeAnnotation
 
 # ---------------------------------------------------------------------------
 # Mock AST factories
@@ -572,14 +575,14 @@ class TestConstantDetailEnhancement:
     """The _extract_constant_detail helper in ast_to_symbols."""
 
     def test_constant_detail_with_sort(self):
-        from ivy_lsp.parsing.ast_to_symbols import _extract_constant_detail
+        from ivy_lsp.core.parsing.ast_to_symbols import _extract_constant_detail
 
         atom = SimpleNamespace(args=[], sort="nat")
         detail = _extract_constant_detail(atom)
         assert detail == ": nat"
 
     def test_relation_detail_with_params_and_sort(self):
-        from ivy_lsp.parsing.ast_to_symbols import _extract_constant_detail
+        from ivy_lsp.core.parsing.ast_to_symbols import _extract_constant_detail
 
         p1 = SimpleNamespace(rep="X", sort="cid")
         p2 = SimpleNamespace(rep="Y", sort="cid")
@@ -590,14 +593,14 @@ class TestConstantDetailEnhancement:
         assert ": bool" in detail
 
     def test_constant_detail_no_sort_no_args(self):
-        from ivy_lsp.parsing.ast_to_symbols import _extract_constant_detail
+        from ivy_lsp.core.parsing.ast_to_symbols import _extract_constant_detail
 
         atom = SimpleNamespace(args=[], sort=None)
         detail = _extract_constant_detail(atom)
         assert detail is None
 
     def test_constant_detail_params_without_sort(self):
-        from ivy_lsp.parsing.ast_to_symbols import _extract_constant_detail
+        from ivy_lsp.core.parsing.ast_to_symbols import _extract_constant_detail
 
         p1 = SimpleNamespace(rep="X", sort=None)
         atom = SimpleNamespace(args=[p1], sort=None)
@@ -606,14 +609,14 @@ class TestConstantDetailEnhancement:
         assert "(X)" in detail
 
     def test_constant_detail_sort_only_no_args(self):
-        from ivy_lsp.parsing.ast_to_symbols import _extract_constant_detail
+        from ivy_lsp.core.parsing.ast_to_symbols import _extract_constant_detail
 
         atom = SimpleNamespace(sort="pkt_num")
         detail = _extract_constant_detail(atom)
         assert detail == ": pkt_num"
 
     def test_constant_detail_handles_exception(self):
-        from ivy_lsp.parsing.ast_to_symbols import _extract_constant_detail
+        from ivy_lsp.core.parsing.ast_to_symbols import _extract_constant_detail
 
         # An object where accessing .args raises
         atom = MagicMock()

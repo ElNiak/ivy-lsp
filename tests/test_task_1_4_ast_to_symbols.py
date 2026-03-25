@@ -3,9 +3,9 @@
 import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-from ivy_lsp.parsing.parser_session import IvyParserWrapper
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 # ---------------------------------------------------------------------------
 # Helpers

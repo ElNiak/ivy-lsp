@@ -17,9 +17,9 @@ if str(IVY_ROOT) not in sys.path:
 
 
 def _build_indexer(tmp_path, files: dict):
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.parsing.parser_session import IvyParserWrapper
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
     for name, content in files.items():
         (tmp_path / name).write_text(content)

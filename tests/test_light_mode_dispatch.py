@@ -1,6 +1,6 @@
 """Test that light_mode_extractor dispatches to lexer when available."""
 
-from ivy_lsp.analysis.light_mode_extractor import extract_requirements_light
+from ivy_lsp.core.analysis.light_mode_extractor import extract_requirements_light
 
 FILEPATH = "test.ivy"
 
@@ -16,7 +16,7 @@ class TestDispatch:
 
     def test_regex_fallback_works(self):
         """Force regex path and verify it still works."""
-        import ivy_lsp.analysis.light_mode_extractor as mod
+        import ivy_lsp.core.analysis.light_mode_extractor as mod
 
         saved = mod._LEXER_AVAILABLE
         try:
@@ -30,13 +30,15 @@ class TestDispatch:
 
     def test_lexer_path_used_when_available(self):
         """Verify lexer path is active (PLY lexer is available in test env)."""
-        import ivy_lsp.analysis.light_mode_extractor as mod
+        import ivy_lsp.core.analysis.light_mode_extractor as mod
 
         assert mod._LEXER_AVAILABLE is True
 
     def test_exports_dispatch(self):
         """Export extraction works through dispatch."""
-        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
+        from ivy_lsp.core.analysis.light_mode_extractor import (
+            extract_exports_imports_light,
+        )
 
         source = "export foo\nimport bar\n"
         info = extract_exports_imports_light(source, FILEPATH)
@@ -45,8 +47,10 @@ class TestDispatch:
 
     def test_exports_regex_fallback(self):
         """Export extraction regex fallback works."""
-        import ivy_lsp.analysis.light_mode_extractor as mod
-        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
+        import ivy_lsp.core.analysis.light_mode_extractor as mod
+        from ivy_lsp.core.analysis.light_mode_extractor import (
+            extract_exports_imports_light,
+        )
 
         saved = mod._LEXER_AVAILABLE
         try:

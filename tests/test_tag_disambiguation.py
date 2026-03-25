@@ -1,6 +1,6 @@
 """Tests for tag disambiguation: bare numeric filtering and is_tag_covered."""
 
-from ivy_lsp.semantic.rfc_annotations import (
+from ivy_lsp.core.semantic.rfc_annotations import (
     TagResolution,
     is_tag_covered,
     normalize_tag_with_diagnostics,

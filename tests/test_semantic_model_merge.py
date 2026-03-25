@@ -2,8 +2,8 @@
 
 import pytest
 
-from ivy_lsp.semantic.edges import SemanticEdgeType
-from ivy_lsp.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.model import SemanticModel
 
 
 class _FakeNode:

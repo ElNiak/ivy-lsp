@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ivy_lsp.parsing.symbols import SymbolReference
+from ivy_lsp.core.parsing.symbols import SymbolReference
 
 
 class TestSymbolReference:
@@ -49,32 +49,32 @@ class TestSymbolReference:
 class TestEdgeTypes:
     @pytest.mark.unit
     def test_calls_edge_type_exists(self):
-        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
         assert SemanticEdgeType.CALLS.value == "calls"
 
     @pytest.mark.unit
     def test_uses_edge_type_exists(self):
-        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
         assert SemanticEdgeType.USES.value == "uses"
 
     @pytest.mark.unit
     def test_monitors_edge_type_exists(self):
-        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
         assert SemanticEdgeType.MONITORS.value == "monitors"
 
     @pytest.mark.unit
     def test_contains_edge_type_exists(self):
-        from ivy_lsp.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
         assert SemanticEdgeType.CONTAINS.value == "contains"
 
 
 def _make_regex_only_extractor():
     """Create a TieredExtractor forced to use Tier 3 (regex only)."""
-    from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+    from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
     ext = TieredExtractor()
     ext._parser_available = False
@@ -84,7 +84,7 @@ def _make_regex_only_extractor():
 
 def _make_lexer_only_extractor():
     """Create a TieredExtractor forced to use Tier 2 (lexer only)."""
-    from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+    from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
     ext = TieredExtractor()
     ext._parser_available = False
@@ -142,7 +142,7 @@ class TestTier3RegexExtraction:
 
     @pytest.mark.unit
     def test_extraction_result_has_references_field(self):
-        from ivy_lsp.parsing.tiered_extractor import ExtractionResult
+        from ivy_lsp.core.parsing.tiered_extractor import ExtractionResult
 
         result = ExtractionResult()
         assert result.references == []
@@ -158,26 +158,26 @@ class TestGetLineNumber:
 
     @pytest.mark.unit
     def test_none_returns_zero(self):
-        from ivy_lsp.parsing.ast_to_symbols import _get_line_number
+        from ivy_lsp.core.parsing.ast_to_symbols import _get_line_number
 
         assert _get_line_number(None) == 0
 
     @pytest.mark.unit
     def test_int_converts_1_based_to_0_based(self):
-        from ivy_lsp.parsing.ast_to_symbols import _get_line_number
+        from ivy_lsp.core.parsing.ast_to_symbols import _get_line_number
 
         assert _get_line_number(5) == 4
         assert _get_line_number(1) == 0
 
     @pytest.mark.unit
     def test_int_zero_clamps_to_zero(self):
-        from ivy_lsp.parsing.ast_to_symbols import _get_line_number
+        from ivy_lsp.core.parsing.ast_to_symbols import _get_line_number
 
         assert _get_line_number(0) == 0
 
     @pytest.mark.unit
     def test_object_with_line_attribute(self):
-        from ivy_lsp.parsing.ast_to_symbols import _get_line_number
+        from ivy_lsp.core.parsing.ast_to_symbols import _get_line_number
 
         class FakeLineno:
             line = 10
@@ -186,7 +186,7 @@ class TestGetLineNumber:
 
     @pytest.mark.unit
     def test_object_without_line_attribute(self):
-        from ivy_lsp.parsing.ast_to_symbols import _get_line_number
+        from ivy_lsp.core.parsing.ast_to_symbols import _get_line_number
 
         class FakeLineno:
             pass
@@ -199,13 +199,13 @@ class TestExtractReferencesFromAstGuards:
 
     @pytest.mark.unit
     def test_none_returns_empty(self):
-        from ivy_lsp.parsing.ast_to_symbols import extract_references_from_ast
+        from ivy_lsp.core.parsing.ast_to_symbols import extract_references_from_ast
 
         assert extract_references_from_ast(None, "test.ivy", "") == []
 
     @pytest.mark.unit
     def test_no_decls_returns_empty(self):
-        from ivy_lsp.parsing.ast_to_symbols import extract_references_from_ast
+        from ivy_lsp.core.parsing.ast_to_symbols import extract_references_from_ast
 
         class FakeAst:
             pass
@@ -214,7 +214,7 @@ class TestExtractReferencesFromAstGuards:
 
     @pytest.mark.unit
     def test_empty_decls_returns_empty(self):
-        from ivy_lsp.parsing.ast_to_symbols import extract_references_from_ast
+        from ivy_lsp.core.parsing.ast_to_symbols import extract_references_from_ast
 
         class FakeAst:
             decls = []
@@ -238,7 +238,7 @@ class TestTier1AstExtraction:
     """Integration tests for AST-based reference extraction (Tier 1)."""
 
     def _extract(self, source: str, filepath: str = "test.ivy"):
-        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
         ext = TieredExtractor()
         return ext.extract(source, filepath)

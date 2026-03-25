@@ -15,15 +15,15 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
 
-from ivy_lsp.analysis.requirement_graph import (
+from ivy_lsp.core.analysis.requirement_graph import (
     EdgeType,
     GraphSnapshot,
     RequirementGraph,
     RequirementNode,
     StateVarNode,
 )
+from ivy_lsp.core.protocols import IvyServerProtocol
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
-from ivy_lsp.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -86,7 +86,7 @@ def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGra
 
 def _resolve_scope(graph: Any, params: dict) -> dict:
     """Determine active scope from params or active test or filePath."""
-    from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+    from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 
     test_file = params.get("testFile")
     file_path = params.get("filePath", "")
@@ -148,7 +148,7 @@ def _classify_direction(action_id: str, scope_info: dict) -> Optional[str]:
     if not scope:
         return None
     try:
-        from ivy_lsp.analysis.test_scope import classify_action_direction
+        from ivy_lsp.core.analysis.test_scope import classify_action_direction
 
         return classify_action_direction(action_id, scope).value
     except Exception:
@@ -162,7 +162,7 @@ def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
 
     nct = None
     try:
-        from ivy_lsp.analysis.test_scope import classify_requirement
+        from ivy_lsp.core.analysis.test_scope import classify_requirement
 
         nct = classify_requirement(req).value
     except Exception:

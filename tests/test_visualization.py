@@ -10,14 +10,15 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
+from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
     ActionNode,
     EdgeType,
     PropertyNode,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel  # noqa: E402
+from ivy_lsp.core.semantic.nodes import RfcRequirement  # noqa: E402
 from ivy_lsp.features.visualization import (  # noqa: E402
     _get_requirement_graph,
     _resolve_scope,
@@ -31,7 +32,6 @@ from ivy_lsp.features.visualization import (  # noqa: E402
     handle_state_machine_view,
     register,
 )
-from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

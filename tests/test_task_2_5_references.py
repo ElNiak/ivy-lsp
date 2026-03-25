@@ -20,10 +20,10 @@ class TestReferencesImport:
 
 class TestFindReferences:
     def test_finds_references_in_same_file(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.references import find_references
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\n\ntype cid\nrelation uses(X:cid, Y:cid)\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -37,10 +37,10 @@ class TestFindReferences:
         assert len(results) >= 1
 
     def test_finds_references_across_files(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.references import find_references
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         (tmp_path / "user.ivy").write_text(
@@ -58,10 +58,10 @@ class TestFindReferences:
         assert any("user.ivy" in u for u in uris)
 
     def test_unknown_symbol_returns_empty(self, tmp_path):
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.references import find_references
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()
@@ -79,11 +79,11 @@ class TestLayerScopedReferences:
 
     def _make_layered_workspace(self, tmp_path):
         """Create a workspace with quic and apt layers (apt depends_on quic)."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
         from ivy_lsp.features.references import find_references
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.workspace.detection import WorkspaceLayer
 
         quic_dir = tmp_path / "quic"
         quic_dir.mkdir()
@@ -140,10 +140,10 @@ class TestLayerScopedReferences:
 
     def test_no_layers_returns_all_files(self, tmp_path):
         """Without workspace layers, all files are searched (backward compat)."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.features.references import find_references
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
 
         d1 = tmp_path / "d1"
         d1.mkdir()

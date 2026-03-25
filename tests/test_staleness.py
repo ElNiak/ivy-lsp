@@ -5,9 +5,9 @@ import tempfile
 
 import pytest
 
-from ivy_lsp.rfc.staleness import check_staleness
-from ivy_lsp.semantic.nodes import ManifestMetadata
-from ivy_lsp.semantic.rfc_annotations import (
+from ivy_lsp.core.rfc.staleness import check_staleness
+from ivy_lsp.core.semantic.nodes import ManifestMetadata
+from ivy_lsp.core.semantic.rfc_annotations import (
     ManifestLoadResult,
     load_manifest_with_metadata,
 )
@@ -125,7 +125,7 @@ class TestStalenessReport:
             path = f.name
 
         try:
-            from ivy_lsp.rfc.fetcher import _compute_hash
+            from ivy_lsp.core.rfc.fetcher import _compute_hash
 
             expected_hash = _compute_hash("Some RFC content MUST be validated.")
             report = await check_staleness(

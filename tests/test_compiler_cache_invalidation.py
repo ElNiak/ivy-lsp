@@ -7,7 +7,7 @@ so that stale compilation artifacts are purged when a source file changes.
 import os
 from unittest.mock import MagicMock, patch
 
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
 
 
 def _make_indexer(workspace_root="/fake/workspace"):

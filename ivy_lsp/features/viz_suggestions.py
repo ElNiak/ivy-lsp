@@ -6,14 +6,14 @@ import logging
 import os
 from typing import Any, Dict, List, Set
 
-from ivy_lsp.analysis.requirement_graph import EdgeType
+from ivy_lsp.core.analysis.requirement_graph import EdgeType
+from ivy_lsp.core.protocols import IvyServerProtocol
 from ivy_lsp.features.visualization import (
     _filter_by_protocol,
     _filter_by_scope,
     _get_requirement_graph,
     _resolve_scope,
 )
-from ivy_lsp.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)
 

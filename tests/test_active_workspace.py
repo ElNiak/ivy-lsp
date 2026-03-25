@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -42,7 +42,7 @@ def workspace_groups():
 @pytest.fixture
 def workspace_layers_list():
     """List of WorkspaceLayer-like objects (dicts for simplicity)."""
-    from ivy_lsp.workspace.detection import WorkspaceLayer
+    from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
     return [
         WorkspaceLayer(id="quic", include_paths=["quic"], depends_on=[]),

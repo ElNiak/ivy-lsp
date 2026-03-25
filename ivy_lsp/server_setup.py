@@ -23,7 +23,7 @@ from ivy_lsp.infra.observability import (
 from ivy_lsp.infra.utils import uri_to_path
 
 if TYPE_CHECKING:
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -71,7 +71,7 @@ class ServerSetupMixin:
 
         # Load offline index context (graceful fallback to empty context)
         try:
-            from ivy_lsp.workspace.context import WorkspaceContext
+            from ivy_lsp.core.workspace.context import WorkspaceContext
 
             self._workspace_context = WorkspaceContext.load(ws_root)
             if self._workspace_context.has_index():
@@ -99,8 +99,8 @@ class ServerSetupMixin:
                 "WorkspaceContext loading failed; proceeding without offline index",
                 exc_info=True,
             )
-            from ivy_lsp.workspace.context import WorkspaceContext
-            from ivy_lsp.workspace.detection import WorkspaceConfig
+            from ivy_lsp.core.workspace.context import WorkspaceContext
+            from ivy_lsp.core.workspace.detection import WorkspaceConfig
 
             self._workspace_context = WorkspaceContext(
                 workspace_root=ws_root,
@@ -162,7 +162,7 @@ class ServerSetupMixin:
 
         # Tier diagnostic: probe parsing tier availability at startup
         try:
-            from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+            from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
             tier_info = TieredExtractor().probe_tiers()
             best = tier_info.get("best_available", 0)
@@ -219,8 +219,8 @@ class ServerSetupMixin:
         Returns:
             (resolver, refined_ws_root) on success, (None, ws_root) on failure.
         """
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.workspace.detection import detect_ivy_workspace
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.workspace.detection import detect_ivy_workspace
 
         ws_config = detect_ivy_workspace(start_dir=ws_root)
         ws_root = ws_config.workspace_root
@@ -342,7 +342,7 @@ class ServerSetupMixin:
             # succeeds even without z3.
             import ivy.ivy_utils  # noqa: F401 --- triggers z3_shim
 
-            from ivy_lsp.parsing.parser_session import IvyParserWrapper
+            from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
             self._parser = IvyParserWrapper(resolve_callback=resolver.resolve)
             self._full_mode = True
@@ -351,7 +351,7 @@ class ServerSetupMixin:
                 extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
             )
         except Exception as e:
-            from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
+            from ivy_lsp.core.parsing.fallback_parser import FallbackOnlyParser
 
             self._parser = FallbackOnlyParser()
             self._full_mode = False
@@ -377,7 +377,7 @@ class ServerSetupMixin:
 
         Returns True on success, False if the indexer could not be created.
         """
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
 
         progress_cb = self._make_progress_callback(
             "Ivy Deep Index",
@@ -490,8 +490,8 @@ class ServerSetupMixin:
         """
         import threading
 
-        from ivy_lsp.indexer.workspace_indexer import FileIndexStatus
-        from ivy_lsp.parsing.symbols import IvySymbol
+        from ivy_lsp.core.indexer.workspace_indexer import FileIndexStatus
+        from ivy_lsp.core.parsing.symbols import IvySymbol
 
         prepop_start = time.time()
         total_files = 0
@@ -586,7 +586,7 @@ class ServerSetupMixin:
         self._indexer._last_index_time = time.time()
 
         # Phase 2: background full-parse from test entry points
-        from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
+        from ivy_lsp.core.parsing.fallback_parser import FallbackOnlyParser
 
         has_full_parser = not isinstance(self._indexer._parser, FallbackOnlyParser)
         if has_full_parser:
@@ -602,28 +602,30 @@ class ServerSetupMixin:
     def _setup_analysis_pipeline(self) -> None:
         """Set up semantic model, adapters, compiler manager, and analysis pipeline."""
         try:
-            from ivy_lsp.adapters.null_adapter import (
+            from ivy_lsp.core.adapters.null_adapter import (
                 NullAstEnrichmentAdapter,
                 NullCompilerAdapter,
             )
-            from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
-            from ivy_lsp.semantic.model import SemanticModel
+            from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
+            from ivy_lsp.core.semantic.model import SemanticModel
 
             self._semantic_model = SemanticModel()
 
             if self._full_mode:
                 try:
-                    from ivy_lsp.adapters.ast_enrichment_adapter import (
+                    from ivy_lsp.core.adapters.ast_enrichment_adapter import (
                         AstEnrichmentAdapter,
                     )
-                    from ivy_lsp.adapters.compiler_adapter import CompilerAdapter
+                    from ivy_lsp.core.adapters.compiler_adapter import CompilerAdapter
 
                     enrichment = AstEnrichmentAdapter()
 
                     # Create CompilerManager for subprocess-based compilation
                     compiler_staging_dir = None
                     try:
-                        from ivy_lsp.compilation.compiler_manager import CompilerManager
+                        from ivy_lsp.core.compilation.compiler_manager import (
+                            CompilerManager,
+                        )
 
                         # Re-read staging dir from the resolver (not the
                         # local var from create_staging_directory) because

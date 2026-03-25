@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 
-from ivy_lsp.compilation.ir import (
+from ivy_lsp.core.compilation.ir import (
     ActionIR,
     CompiledModuleIR,
     IsolateIR,

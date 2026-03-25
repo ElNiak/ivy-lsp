@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from ivy_lsp.rfc.fetcher import (
+from ivy_lsp.core.rfc.fetcher import (
     FetchError,
     FetchResult,
     _compute_hash,

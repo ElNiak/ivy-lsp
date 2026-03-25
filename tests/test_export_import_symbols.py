@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 # ---------------------------------------------------------------------------
 # Fake AST types for mocking ivy.ivy_ast
@@ -159,7 +159,7 @@ class TestExportSymbolExtraction:
         source = "\n".join([""] * 4 + ["export quic.send"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -176,7 +176,7 @@ class TestExportSymbolExtraction:
         source = "\n".join([""] * 4 + ["export quic.send"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -191,7 +191,7 @@ class TestExportSymbolExtraction:
         source = "\n\n\nexport quic.send"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -205,7 +205,7 @@ class TestExportSymbolExtraction:
         source = "\n\nexport quic.send, quic.recv"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -223,7 +223,7 @@ class TestExportSymbolExtraction:
         source = "\nexport quic.alt_send"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -239,7 +239,7 @@ class TestExportSymbolExtraction:
         ast = _make_ast(decl)
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", "export quic.send")
 
@@ -254,7 +254,7 @@ class TestExportSymbolExtraction:
         ast = _make_ast(decl)
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", "")
 
@@ -269,7 +269,7 @@ class TestExportSymbolExtraction:
         ast = _make_ast(decl)
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", "")
 
@@ -290,7 +290,7 @@ class TestImportSymbolExtraction:
         source = "\n".join([""] * 6 + ["import tls.handshake"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -305,7 +305,7 @@ class TestImportSymbolExtraction:
         source = "\n".join([""] * 6 + ["import tls.handshake"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -320,7 +320,7 @@ class TestImportSymbolExtraction:
         source = "\n\nimport tls.handshake"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -334,7 +334,7 @@ class TestImportSymbolExtraction:
         source = "\n\nimport tls.handshake, tls.close"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -357,7 +357,7 @@ class TestMixedExportImport:
         source = "\n\nexport quic.send\n\nimport tls.handshake"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
@@ -372,7 +372,7 @@ class TestMixedExportImport:
         source = "\n\nexport quic.send"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 

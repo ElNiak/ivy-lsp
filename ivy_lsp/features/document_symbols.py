@@ -12,10 +12,10 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.position_utils import make_range
 from ivy_lsp.infra.utils.symbol_resolver import ensure_deep_parsed
-from ivy_lsp.parsing.symbols import IvySymbol
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,8 @@ def compute_document_symbols(
     symbols: List[IvySymbol] = []
 
     if parser is not None and source:
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+        from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
         try:
             result = parser.parse(source, filepath, timeout=0.5)

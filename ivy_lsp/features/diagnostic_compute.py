@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
@@ -265,8 +265,8 @@ def compute_semantic_diagnostics(
     if model is None:
         return []
 
-    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-    from ivy_lsp.semantic.rfc_annotations import is_tag_covered
+    from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+    from ivy_lsp.core.semantic.rfc_annotations import is_tag_covered
 
     diags: List[lsp.Diagnostic] = []
     abs_path = os.path.abspath(filepath)
@@ -358,7 +358,7 @@ def compute_diagnostics(
         # Skip if the parse result already carries lexer diagnostics
         # (avoids redundant re-scan of the same source).
         if not getattr(result, "lexer_errors", None):
-            from ivy_lsp.parsing.fallback_scanner import fallback_scan
+            from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
             _symbols, error_info = fallback_scan(source, filepath)
             if error_info is not None:

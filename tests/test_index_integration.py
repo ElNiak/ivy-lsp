@@ -19,9 +19,9 @@ import time
 
 import pytest
 
+from ivy_lsp.core.workspace.context import WorkspaceContext
+from ivy_lsp.core.workspace.detection import WorkspaceConfig
 from ivy_lsp.index_builder import IndexBuilder
-from ivy_lsp.workspace.context import WorkspaceContext
-from ivy_lsp.workspace.detection import WorkspaceConfig
 
 # ---------------------------------------------------------------------------
 # Fixture: force Tier 3 (regex) when ivy module unavailable
@@ -31,7 +31,7 @@ from ivy_lsp.workspace.detection import WorkspaceConfig
 def _check_ivy_lexer_available():
     """Check if the PLY lexer actually works (requires ivy module at runtime)."""
     try:
-        from ivy_lsp.parsing.token_stream import tokenize_ivy
+        from ivy_lsp.core.parsing.token_stream import tokenize_ivy
 
         tokenize_ivy("type t\n", "<test>")
         return True
@@ -64,7 +64,7 @@ def _force_regex_tier_if_no_lexer(monkeypatch):
 
     _te_mod.TieredExtractor.__init__ = patched_init
 
-    import ivy_lsp.analysis.light_mode_extractor as _lme_mod
+    import ivy_lsp.core.analysis.light_mode_extractor as _lme_mod
 
     original_lexer_flag = _lme_mod._LEXER_AVAILABLE
     _lme_mod._LEXER_AVAILABLE = False

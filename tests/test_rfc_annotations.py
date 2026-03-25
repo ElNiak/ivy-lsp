@@ -3,8 +3,8 @@
 import os
 import tempfile
 
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-from ivy_lsp.semantic.rfc_annotations import (
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+from ivy_lsp.core.semantic.rfc_annotations import (
     CoverageStats,
     compute_coverage,
     find_manifests,

@@ -10,13 +10,13 @@ import shutil
 import time
 from typing import Any
 
+from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check
+from ivy_lsp.core.verification import run_ivy_compile as shared_ivy_compile
+from ivy_lsp.core.verification import run_ivy_show as shared_ivy_show
 from ivy_lsp.infra.observability import ToolTraceContext, trace_tool
 from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.tools import error_response, safe_tool
-from ivy_lsp.verification import run_ivy_check as shared_ivy_check
-from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
-from ivy_lsp.verification import run_ivy_show as shared_ivy_show
 
 logger = logging.getLogger(__name__)
 
@@ -708,7 +708,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         # 2. Lexer errors via fallback scanner (no Z3 needed)
         if layers is None or "lexer" in layers:
             try:
-                from ivy_lsp.parsing.fallback_scanner import fallback_scan
+                from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
                 _symbols, error_info = await asyncio.to_thread(
                     fallback_scan,
@@ -752,8 +752,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         }
                     )
                 if model is not None:
-                    from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-                    from ivy_lsp.semantic.rfc_annotations import is_tag_covered
+                    from ivy_lsp.core.semantic.nodes import (
+                        RfcAnnotation,
+                        RfcRequirement,
+                    )
+                    from ivy_lsp.core.semantic.rfc_annotations import is_tag_covered
 
                     rfc_reqs = model.get_nodes_by_type(RfcRequirement)
                     annotations = [

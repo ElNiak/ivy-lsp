@@ -9,6 +9,7 @@ substring matching, respects result limits, and converts to LSP
 import pytest
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.features.workspace_symbols import (
     MAX_RESULTS,
     FlatSymbol,
@@ -17,7 +18,6 @@ from ivy_lsp.features.workspace_symbols import (
     search_symbols,
     to_workspace_symbol,
 )
-from ivy_lsp.parsing.symbols import IvySymbol
 
 
 class TestFlatSymbolDataclass:

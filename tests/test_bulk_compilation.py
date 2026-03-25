@@ -18,10 +18,10 @@ import threading
 import types
 from unittest.mock import MagicMock, patch
 
-from ivy_lsp.compilation.ir import ActionIR, CompiledModuleIR
+from ivy_lsp.core.compilation.ir import ActionIR, CompiledModuleIR
+from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
+from ivy_lsp.core.semantic.model import SemanticModel
 from ivy_lsp.infra.config import reset_config
-from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
-from ivy_lsp.semantic.model import SemanticModel
 
 
 class FakeCompilerManager:
@@ -67,7 +67,7 @@ class _NullAdapter:
         return None
 
     def compile(self, source, filepath):
-        from ivy_lsp.adapters.protocols import CompileResult
+        from ivy_lsp.core.adapters.protocols import CompileResult
 
         return CompileResult(success=True, errors=[])
 
@@ -77,7 +77,7 @@ class TestBulkCompilationViaPipeline:
 
     def _make_server(self, test_files=None, compile_results=None):
         """Build a minimal server-like object for testing."""
-        from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
+        from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
 
         graph = ScopedRequirementModel()
         if test_files:

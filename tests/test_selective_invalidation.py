@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo
+from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 
 def _dummy_sym(name: str, filepath: str = "/fake/dummy.ivy") -> IvySymbol:

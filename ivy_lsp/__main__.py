@@ -139,7 +139,7 @@ def _main_impl(startup_t0: float) -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "detect":
         import json
 
-        from ivy_lsp.workspace.context import WorkspaceContext
+        from ivy_lsp.core.workspace.context import WorkspaceContext
 
         start = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
         print(json.dumps(WorkspaceContext.detect(start), indent=2))
@@ -273,8 +273,8 @@ def _main_impl(startup_t0: float) -> None:
     if "--mcp" in sys.argv:
         # Standalone MCP server mode (backward compat): stdio transport
         try:
+            from ivy_lsp.core.workspace.detection import detect_ivy_workspace
             from ivy_lsp.mcp_server import start_mcp
-            from ivy_lsp.workspace.detection import detect_ivy_workspace
 
             workspace = None
             docker_image = os.environ.get("IVY_DOCKER_IMAGE")
