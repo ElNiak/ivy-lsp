@@ -21,14 +21,11 @@ CLI entry point: :func:`cli_index` (for ``ivy-lsp index``).
 from __future__ import annotations
 
 import argparse
-import fcntl
 import glob
-import gzip
 import hashlib
 import json
 import logging
 import os
-import pickle
 import sys
 import time
 from datetime import datetime, timezone
@@ -573,24 +570,9 @@ class IndexBuilder:
     @staticmethod
     def _write_pickle(index_dir: str, filename: str, obj: Any) -> None:
         """Write a gzipped pickle with file locking."""
-        lock_path = os.path.join(index_dir, ".build.lock")
-        lock_fd = open(lock_path, "w")
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            out_path = os.path.join(index_dir, filename)
-            with gzip.open(out_path, "wb") as f:
-                pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
-        except BlockingIOError:
-            logger.warning(
-                "Could not acquire lock for %s, skipping pickle write",
-                filename,
-            )
-        finally:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            except Exception:
-                pass
-            lock_fd.close()
+        from ivy_lsp.infra.utils.serialization import write_locked_pickle
+
+        write_locked_pickle(index_dir, filename, obj, logger)
 
     @staticmethod
     def _manifest_entry_missing(filepath: str) -> dict:
