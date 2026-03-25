@@ -152,7 +152,7 @@ def handle_clear_cache(server: IvyServerProtocol) -> Dict[str, Any]:
 
 def handle_feature_status(server: IvyServerProtocol) -> Dict[str, Any]:
     """Compute per-feature availability status."""
-    from ivy_lsp.features.status import IndexingState
+    from ivy_lsp.lsp.ui.status import IndexingState
 
     features = []
     is_full = server.full_mode

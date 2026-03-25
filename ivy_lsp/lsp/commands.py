@@ -65,7 +65,7 @@ def _detect_isolate_at_position(
     doc = server.workspace.get_text_document(uri)
     source = doc.source or ""
 
-    from ivy_lsp.features.document_symbols import compute_document_symbols
+    from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
     symbols = compute_document_symbols(server.parser, server.indexer, source, filepath)
 
@@ -113,7 +113,7 @@ def _collect_all_isolates(
     Checks the current file's document symbols first, then walks the include
     graph to find isolates defined in transitively included modules.
     """
-    from ivy_lsp.features.document_symbols import compute_document_symbols
+    from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
     def _extract_isolate_names(
         syms: Sequence[lsp.DocumentSymbol],
@@ -435,7 +435,7 @@ def _refresh_open_diagnostics_sync(srv: Any) -> None:
     :func:`_refresh_open_diagnostics_async` which processes
     documents in parallel.
     """
-    from ivy_lsp.features.diagnostics import compute_diagnostics
+    from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
 
     try:
         items = list(srv.workspace.text_documents.items())
@@ -465,7 +465,7 @@ async def _refresh_open_diagnostics_async(srv: Any) -> None:
     Uses ``asyncio.gather`` to compute diagnostics for each open
     document concurrently via the thread-pool executor.
     """
-    from ivy_lsp.features.diagnostics import compute_diagnostics
+    from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
 
     try:
         items = list(srv.workspace.text_documents.items())
@@ -534,14 +534,14 @@ def register(server: Any) -> None:
             result["isolate"] = isolate
 
             # Parse output into diagnostics
-            from ivy_lsp.features.diagnostics import parse_ivy_check_output
+            from ivy_lsp.lsp.diagnostics.publisher import parse_ivy_check_output
 
             combined = "\n".join(result["output"])
             deep_diags = parse_ivy_check_output(combined)
             result["diagnosticCount"] = len(deep_diags)
 
             # Publish merged diagnostics
-            from ivy_lsp.features.diagnostics import compute_diagnostics
+            from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
 
             doc = server.workspace.get_text_document(uri)
             base_diags = compute_diagnostics(
@@ -791,6 +791,6 @@ def register(server: Any) -> None:
 
     # Extended commands (compiledModel, activeDocumentChanged, code-lens
     # handlers, recompileAll) are registered via commands_extended.py.
-    from ivy_lsp.features.commands_extended import register_extended_commands
+    from ivy_lsp.lsp.commands_extended import register_extended_commands
 
     register_extended_commands(server)

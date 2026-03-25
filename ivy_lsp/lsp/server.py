@@ -13,7 +13,6 @@ from pygls.lsp.server import LanguageServer
 # Apply pygls patches at import time (side-effect import).
 import ivy_lsp.lsp.pygls_patches  # noqa: F401
 from ivy_lsp import __version__
-from ivy_lsp.features.status import ServerStateTracker
 from ivy_lsp.infra.observability import (
     LogCategory,
     LogEvent,
@@ -24,6 +23,7 @@ from ivy_lsp.infra.observability import (
 )
 from ivy_lsp.lsp.bulk_orchestrator import BulkOrchestrationMixin
 from ivy_lsp.lsp.server_setup import ServerSetupMixin
+from ivy_lsp.lsp.ui.status import ServerStateTracker
 
 if TYPE_CHECKING:
     from ivy_lsp.core.compilation.compiler_manager import CompilerManager
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
     from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
     from ivy_lsp.core.semantic.model import SemanticModel
-    from ivy_lsp.features.diagnostics import DiagnosticCache
+    from ivy_lsp.lsp.diagnostics.publisher import DiagnosticCache
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -61,7 +61,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
         self._rfc_coverage_enabled: bool = True
         self._client_supports_work_done_progress: bool = False
         self._initializing: bool = True
-        from ivy_lsp.features.diagnostics import DiagnosticCache
+        from ivy_lsp.lsp.diagnostics.publisher import DiagnosticCache
 
         self._diagnostic_cache: DiagnosticCache = DiagnosticCache()
         self._mcp_sidecar_thread: Optional[Any] = None

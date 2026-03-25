@@ -19,7 +19,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.infra.utils import uri_to_path
 
-# Re-export compute functions so that ``from ivy_lsp.features.diagnostics
+# Re-export compute functions so that ``from ivy_lsp.lsp.diagnostics.publisher
 # import compute_diagnostics`` (and friends) keeps working everywhere.
 from ivy_lsp.lsp.diagnostics.compute import (  # noqa: F401
     _EXPORT_RE,
@@ -348,7 +348,7 @@ def register(server) -> None:
             try:
                 import os
 
-                from ivy_lsp.features.commands import (
+                from ivy_lsp.lsp.commands import (
                     _find_enclosing_test,
                     _resolve_via_staging,
                 )

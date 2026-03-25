@@ -336,7 +336,7 @@ def compute_diagnostics(
     call), it is reused instead of invoking the parser again, avoiding
     redundant lock acquisition on ``_ivy_state_lock``.
     """
-    from ivy_lsp.features.diagnostics import _convert_error_to_diagnostic
+    from ivy_lsp.lsp.diagnostics.publisher import _convert_error_to_diagnostic
 
     diags = check_structural_issues(source, filepath, indexer)
 
@@ -390,7 +390,7 @@ def compute_diagnostics(
     if indexer is not None:
         graph = getattr(indexer, "requirement_graph", None)
         if graph is not None:
-            from ivy_lsp.features.coverage_hints import compute_coverage_hints
+            from ivy_lsp.core.coverage_hints import compute_coverage_hints
 
             lines = source.split("\n")
             for hint in compute_coverage_hints(graph, filepath):

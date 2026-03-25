@@ -167,7 +167,7 @@ async def _handle_show_action_requirements(
     server: Any, params: Any = None
 ) -> Dict[str, Any]:
     """Handle clicks on monitor/state-var code lenses."""
-    from ivy_lsp.features.visualization import handle_action_requirements
+    from ivy_lsp.lsp.visualization import handle_action_requirements
 
     action_name = _extract_param(params, "actionName")
 

@@ -61,7 +61,7 @@ def goto_implementation(
         if monitors:
             return monitors if len(monitors) != 1 else monitors[0]
         # Fallback: delegate to goto_definition.
-        from ivy_lsp.features.definition import goto_definition as _goto_def
+        from ivy_lsp.lsp.navigation.definition import goto_definition as _goto_def
 
         return _goto_def(indexer, filepath, position, source_lines)
 
