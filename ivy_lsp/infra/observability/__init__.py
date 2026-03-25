@@ -1,7 +1,7 @@
 """Centralized observability package for the Ivy LSP server.
 
 Re-exports the public API from submodules for convenient single-source imports:
-``from ivy_lsp.observability import get_logger, timed_phase, ...``
+``from ivy_lsp.infra.observability import get_logger, timed_phase, ...``
 """
 
 from ivy_lsp.infra.observability.core import (

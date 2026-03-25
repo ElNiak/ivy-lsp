@@ -141,7 +141,7 @@ def _log_session_event(
     call_id: str | None = None,
 ) -> None:
     try:
-        from ivy_lsp.observability.session import get_session_logger
+        from ivy_lsp.infra.observability.session import get_session_logger
 
         get_session_logger().log_event(
             channel=channel,
@@ -508,7 +508,7 @@ def get_logger(name: str, *, subsystem: str | None = None) -> logging.Logger:
     logger = logging.getLogger(name)
     resolved_subsystem = subsystem or _detect_subsystem(name)
     if resolved_subsystem:
-        from ivy_lsp.config import get_config
+        from ivy_lsp.infra.config import get_config
 
         try:
             level_str = get_config().subsystem_levels.get(resolved_subsystem)
@@ -523,8 +523,11 @@ def get_logger(name: str, *, subsystem: str | None = None) -> logging.Logger:
 
 def describe_logging_config() -> dict[str, Any]:
     """Return a summary of all active logging configuration for diagnostics."""
-    from ivy_lsp.config import get_config
-    from ivy_lsp.observability.session import get_session_id, resolve_session_log_dir
+    from ivy_lsp.infra.config import get_config
+    from ivy_lsp.infra.observability.session import (
+        get_session_id,
+        resolve_session_log_dir,
+    )
 
     cfg = get_config()
     session_id = get_session_id()

@@ -367,7 +367,7 @@ class DebugTracer:
         self._logger.debug("\n".join(lines))
 
         try:
-            from ivy_lsp.observability.session import get_session_logger
+            from ivy_lsp.infra.observability.session import get_session_logger
 
             get_session_logger().log_event(
                 channel="lsp",
@@ -412,7 +412,7 @@ def init_tracer(
 
     if log_path is None:
         try:
-            from ivy_lsp.observability.session import (
+            from ivy_lsp.infra.observability.session import (
                 get_session_id,
                 resolve_session_log_dir,
             )

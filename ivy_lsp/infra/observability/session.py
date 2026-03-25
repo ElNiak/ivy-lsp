@@ -323,7 +323,7 @@ def install_session_jsonl_handler() -> None:
 
 def get_session_logger(*, session_dir: str = "/tmp") -> SessionEventLogger:
     """Return a session logger keyed by current config/session state."""
-    from ivy_lsp.config import get_config
+    from ivy_lsp.infra.config import get_config
 
     cfg = get_config()
     session_id = get_session_id(session_dir=session_dir)

@@ -13,8 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
-from ivy_lsp.config import get_config
-from ivy_lsp.observability import (
+from ivy_lsp.infra.config import get_config
+from ivy_lsp.infra.observability import (
     LogCategory,
     ensure_call_id,
     get_call_id,
