@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any
 
-from ivy_lsp.observability import (
+from ivy_lsp.infra.observability import (
     LogCategory,
     call_context,
     enable_package_instrumentation,
@@ -82,7 +82,7 @@ def _setup_log_rotation() -> str:
     log_path = os.environ.get("IVY_LSP_LOG_FILE", "")
     if not log_path:
         try:
-            from ivy_lsp.observability.session import (
+            from ivy_lsp.infra.observability.session import (
                 get_session_id,
                 resolve_session_log_dir,
             )
@@ -173,16 +173,16 @@ def _main_impl(startup_t0: float) -> None:
     )
 
     # Add dedup filter to suppress cascading duplicate messages
-    from ivy_lsp.observability import DedupFilter
+    from ivy_lsp.infra.observability import DedupFilter
 
     logging.getLogger().addFilter(DedupFilter())
 
     # Initialize debug tracer if enabled
-    from ivy_lsp.config import get_config
+    from ivy_lsp.infra.config import get_config
 
     cfg = get_config()
     if cfg.debug_log:
-        from ivy_lsp.observability import init_tracer
+        from ivy_lsp.infra.observability import init_tracer
 
         ws_root = cfg.workspace or cfg.workspace_root or os.getcwd()
         tracer = init_tracer(
@@ -192,7 +192,7 @@ def _main_impl(startup_t0: float) -> None:
         log.info("Debug tracing enabled: %s", tracer.log_path)
 
     try:
-        from ivy_lsp.observability import (
+        from ivy_lsp.infra.observability import (
             get_session_logger,
             install_session_jsonl_handler,
         )

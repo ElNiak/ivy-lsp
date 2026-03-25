@@ -49,7 +49,7 @@ def test_no_scoping_returns_all(workspace):
 
 def test_include_paths_filters(workspace):
     """IVY_LSP_INCLUDE_PATHS restricts to listed subdirectories."""
-    from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS, find_ivy_files
+    from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS, find_ivy_files
 
     include_paths = ["protocol-testing"]
     all_files = find_ivy_files(str(workspace))
@@ -66,7 +66,7 @@ def test_include_paths_filters(workspace):
 
 def test_exclude_paths_filters(workspace):
     """IVY_LSP_EXCLUDE_PATHS excludes directory basenames."""
-    from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS, find_ivy_files
+    from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS, find_ivy_files
 
     extra_excludes = frozenset(["doc", "examples"])
     all_excludes = DEFAULT_EXCLUDE_DIRS | extra_excludes
@@ -80,7 +80,7 @@ def test_exclude_paths_filters(workspace):
 
 def test_combined_include_and_exclude(workspace):
     """Both include and exclude paths work together."""
-    from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS, find_ivy_files
+    from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS, find_ivy_files
 
     extra_excludes = frozenset(["doc", "examples"])
     all_excludes = DEFAULT_EXCLUDE_DIRS | extra_excludes

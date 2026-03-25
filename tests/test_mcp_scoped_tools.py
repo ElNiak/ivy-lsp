@@ -402,8 +402,8 @@ def _make_ctx(root: str, workspace_context=None):
     implementations so that tools like ivy_include_graph work correctly.
     Also provides proper async stubs for get_model / get_req_graph.
     """
+    from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_raw
     from ivy_lsp.mcp_server import ToolContext
-    from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_raw
 
     ctx = ToolContext(
         root=root,

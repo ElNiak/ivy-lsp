@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils import uri_to_path
+from ivy_lsp.infra.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 

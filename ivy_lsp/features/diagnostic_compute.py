@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-from ivy_lsp.observability import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -40,7 +40,7 @@ def check_structural_issues(
     indexer: Any = None,
 ) -> List[lsp.Diagnostic]:
     """Check for structural problems without full parsing."""
-    from ivy_lsp.utils.structural_lint import (
+    from ivy_lsp.infra.utils.structural_lint import (
         check_structural_issues_raw,
         check_unresolved_includes_raw,
     )
@@ -484,7 +484,7 @@ def compute_diagnostics(
 
 def parse_ivy_check_output(output: str) -> List[lsp.Diagnostic]:
     """Parse ivy_check stderr/stdout into LSP diagnostics."""
-    from ivy_lsp.utils.ivy_output import parse_ivy_check_lines
+    from ivy_lsp.infra.utils.ivy_output import parse_ivy_check_lines
 
     diags: List[lsp.Diagnostic] = []
     for entry in parse_ivy_check_lines(output):

@@ -20,9 +20,9 @@ from typing import Any, List
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.parsing.fallback_scanner import fallback_scan
 from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 

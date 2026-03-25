@@ -8,7 +8,7 @@ import os
 import shutil
 from typing import Any
 
-from ivy_lsp.observability import ToolTraceContext
+from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.tools import error_response, safe_tool
 

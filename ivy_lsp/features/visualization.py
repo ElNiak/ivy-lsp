@@ -22,7 +22,7 @@ from ivy_lsp.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.observability import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.protocols import IvyServerProtocol
 
 logger = logging.getLogger(__name__)

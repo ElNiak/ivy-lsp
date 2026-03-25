@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from ivy_lsp.observability import ToolTraceContext
+from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.tools import error_response, safe_tool
 
 logger = logging.getLogger(__name__)

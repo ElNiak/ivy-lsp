@@ -307,7 +307,7 @@ class TieredExtractor:
     @staticmethod
     def _trace_result(filepath: str, result: ExtractionResult) -> None:
         """Send extraction result to the debug tracer (no-op when disabled)."""
-        from ivy_lsp.observability import get_tracer
+        from ivy_lsp.infra.observability import get_tracer
 
         tracer = get_tracer()
         if tracer is not None:
@@ -333,7 +333,7 @@ class TieredExtractor:
         result = wrapper.parse(source, filename=filepath, timeout=self._parser_timeout)
 
         if not result.success or result.ast is None:
-            from ivy_lsp.utils.ivy_output import format_ivy_errors
+            from ivy_lsp.infra.utils.ivy_output import format_ivy_errors
 
             formatted = format_ivy_errors(list(result.errors))
             raise RuntimeError(

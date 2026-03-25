@@ -24,7 +24,7 @@ from ivy_lsp.features.commands import (
     _refresh_open_diagnostics_async,
     _ServerProxy,
 )
-from ivy_lsp.utils import uri_to_path
+from ivy_lsp.infra.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 

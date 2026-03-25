@@ -28,7 +28,7 @@ from ivy_lsp.features.diagnostic_compute import (  # noqa: F401
     parse_ivy_check_output,
     run_deep_diagnostics,
 )
-from ivy_lsp.utils import uri_to_path
+from ivy_lsp.infra.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ def _convert_error_to_diagnostic(error: Any, source: str) -> lsp.Diagnostic:
       via ``format_ivy_error()`` with line extracted from first location
     - Generic fallback: ``str(error)``
     """
-    from ivy_lsp.utils.ivy_output import format_ivy_error
+    from ivy_lsp.infra.utils.ivy_output import format_ivy_error
 
     line = 0
     message = str(error)

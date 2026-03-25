@@ -1,6 +1,6 @@
 # tests/test_counterexample_formatter.py
 """Tests for counterexample formatting."""
-from ivy_lsp.utils.counterexample_formatter import format_counterexample
+from ivy_lsp.infra.utils.counterexample_formatter import format_counterexample
 
 
 def test_format_empty_counterexample():

@@ -86,7 +86,7 @@ def worker_parse_file(
         # Parse ran but failed — record errors for diagnostics
         error_strs = []
         if hasattr(result, "errors") and result.errors:
-            from ivy_lsp.utils.ivy_output import format_ivy_error
+            from ivy_lsp.infra.utils.ivy_output import format_ivy_error
 
             error_strs = [format_ivy_error(e) for e in result.errors]
         logger.debug(

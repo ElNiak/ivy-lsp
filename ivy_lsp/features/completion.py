@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from lsprotocol import types as lsp
 from lsprotocol.types import SymbolKind
 
+from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ def _dot_access_completions(
 
     # Rank parent symbols by layer when duplicates exist across layers
     if len(symbols) > 1 and hasattr(indexer, "get_scope_files_for_file"):
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         scope_files = indexer.get_scope_files_for_file(filepath)
         resolver = getattr(indexer, "resolver", None)

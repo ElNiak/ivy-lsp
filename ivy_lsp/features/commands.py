@@ -13,11 +13,11 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-from ivy_lsp.config import get_config
-from ivy_lsp.observability import LogCategory, LogEvent, StructuredLogAdapter
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
-from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
+from ivy_lsp.infra.config import get_config
+from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.async_subprocess import run_ivy_subprocess
+from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})

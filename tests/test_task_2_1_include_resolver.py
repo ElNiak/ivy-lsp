@@ -1145,7 +1145,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_cross_layer_fallback(self, tmp_path):
         """When only cross-layer results exist, they are returned as fallback."""
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         apt_file = str(tmp_path / "apt" / "types.ivy")
         current_file = str(tmp_path / "quic_stack" / "quic_frame.ivy")
@@ -1177,7 +1177,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_unmapped_files_always_visible(self, tmp_path):
         """Files with r_layer=None (e.g. stdlib) stay in the visible partition."""
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         stdlib_file = str(tmp_path / "stdlib" / "order.ivy")
         apt_file = str(tmp_path / "apt" / "types.ivy")
@@ -1211,7 +1211,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_depends_on_upstream_visible(self, tmp_path):
         """quic_tests (depends_on: quic) sees quic definitions."""
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
         current_file = str(tmp_path / "quic_tests" / "test_handshake.ivy")
@@ -1243,7 +1243,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_no_layer_staging_preserves_old_behavior(self, tmp_path):
         """When _file_to_layer is empty, layer partition is skipped (pure ranking)."""
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         file_a = str(tmp_path / "a" / "types.ivy")
         file_b = str(tmp_path / "b" / "types.ivy")
@@ -1375,7 +1375,7 @@ class TestSharedRankByScope:
 
     def test_import_from_shared_module(self, tmp_path):
         """rank_by_scope is importable from ivy_lsp.utils.scope_ranking."""
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
         apt_file = str(tmp_path / "apt" / "quic_types.ivy")
@@ -1400,7 +1400,7 @@ class TestSharedRankByScope:
 
     def test_handles_file_path_attribute(self, tmp_path):
         """rank_by_scope works with objects that have file_path instead of filepath."""
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         file_a = str(tmp_path / "a" / "types.ivy")
         file_b = str(tmp_path / "b" / "types.ivy")

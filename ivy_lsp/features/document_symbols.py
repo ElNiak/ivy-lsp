@@ -12,10 +12,10 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range
+from ivy_lsp.infra.utils.symbol_resolver import ensure_deep_parsed
 from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.position_utils import make_range
-from ivy_lsp.utils.symbol_resolver import ensure_deep_parsed
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ def register(server) -> None:
 
             result_summary = f"{len(result)} symbols"
 
-            from ivy_lsp.observability import get_tracer
+            from ivy_lsp.infra.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:
@@ -245,7 +245,7 @@ def register(server) -> None:
         except Exception as exc:
             status = "error"
             result_summary = f"error: {type(exc).__name__}"
-            from ivy_lsp.observability import get_tracer
+            from ivy_lsp.infra.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:

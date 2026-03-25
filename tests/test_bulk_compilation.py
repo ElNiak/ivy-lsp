@@ -19,7 +19,7 @@ import types
 from unittest.mock import MagicMock, patch
 
 from ivy_lsp.compilation.ir import ActionIR, CompiledModuleIR
-from ivy_lsp.config import reset_config
+from ivy_lsp.infra.config import reset_config
 from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
 from ivy_lsp.semantic.model import SemanticModel
 

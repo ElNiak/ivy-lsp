@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ivy_lsp.config import reset_config
+from ivy_lsp.infra.config import reset_config
 
 
 @pytest.fixture(autouse=True)

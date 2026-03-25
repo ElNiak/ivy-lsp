@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ivy_lsp.utils.async_subprocess import SubprocessResult
+from ivy_lsp.infra.utils.async_subprocess import SubprocessResult
 from ivy_lsp.verification import (
     detect_isolates_for_file,
     resolve_staging_path,

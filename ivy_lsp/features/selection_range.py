@@ -11,7 +11,7 @@ from typing import List, Optional, Sequence
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 
 
 def _find_enclosing_brace_block(

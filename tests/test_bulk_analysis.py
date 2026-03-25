@@ -10,7 +10,7 @@ from ivy_lsp.adapters.null_adapter import (
     NullCompilerAdapter,
     NullParserAdapter,
 )
-from ivy_lsp.config import reset_config
+from ivy_lsp.infra.config import reset_config
 from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
 from ivy_lsp.semantic.model import SemanticModel
 

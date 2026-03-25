@@ -10,10 +10,10 @@ import shutil
 import time
 from typing import Any
 
-from ivy_lsp.observability import ToolTraceContext, trace_tool
+from ivy_lsp.infra.observability import ToolTraceContext, trace_tool
+from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
+from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.tools import error_response, safe_tool
-from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
-from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check
 from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
 from ivy_lsp.verification import run_ivy_show as shared_ivy_show
@@ -260,13 +260,15 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 )
 
                 if not result.get("success", True):
-                    from ivy_lsp.utils.counterexample_parser import parse_counterexample
+                    from ivy_lsp.infra.utils.counterexample_parser import (
+                        parse_counterexample,
+                    )
 
                     raw = result.get("raw_output", "")
                     cex = parse_counterexample(raw)
                     if cex is not None:
                         result["counterexample"] = cex
-                        from ivy_lsp.utils.counterexample_formatter import (
+                        from ivy_lsp.infra.utils.counterexample_formatter import (
                             format_counterexample,
                         )
 
@@ -299,7 +301,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 result.pop("counterexample", None)
 
             # Task 4.2: Trim raw output regardless of compact mode
-            from ivy_lsp.config import get_config
+            from ivy_lsp.infra.config import get_config
 
             max_raw = get_config().max_raw_output_length
             if max_raw > 0 and "raw_output" in result:

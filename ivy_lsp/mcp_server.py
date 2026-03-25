@@ -22,8 +22,8 @@ from typing import Any, Callable
 # ``ivy_lsp.mcp_server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.tools.*``.
 from ivy_lsp import sidecar_client
-from ivy_lsp.config import get_config
-from ivy_lsp.observability import LogCategory, log_phase, timed_phase
+from ivy_lsp.infra.config import get_config
+from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -53,9 +53,9 @@ def _validate_path(root: str, relative_path: str) -> str:
     return abs_path
 
 
-from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
-from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_files_raw
-from ivy_lsp.utils.structural_lint import (
+from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
+from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_files_raw
+from ivy_lsp.infra.utils.structural_lint import (
     check_structural_issues_raw,
     check_unresolved_includes_raw,
 )
@@ -142,8 +142,8 @@ class ToolContext:
         need the model/graph already handle None returns.
         """
         from ivy_lsp.indexer.include_resolver import discover_stdlib_modules
-        from ivy_lsp.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
-        from ivy_lsp.utils.ivy_output import find_ivy_files as _find_ivy_raw
+        from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
+        from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_raw
 
         indexer = server._indexer
         resolver = indexer.resolver if indexer is not None else None

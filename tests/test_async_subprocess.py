@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from ivy_lsp.config import reset_config
-from ivy_lsp.utils.async_subprocess import (
+from ivy_lsp.infra.config import reset_config
+from ivy_lsp.infra.utils.async_subprocess import (
     SubprocessResult,
     get_tool_semaphore,
     run_ivy_subprocess,
@@ -46,7 +46,7 @@ class TestGetToolSemaphore:
         monkeypatch.delenv("IVY_LSP_MAX_CONCURRENT_TOOLS", raising=False)
         reset_config()
         # Reset module-level state to force re-creation
-        import ivy_lsp.utils.async_subprocess as mod
+        import ivy_lsp.infra.utils.async_subprocess as mod
 
         mod._semaphores.clear()
         mod._semaphore_limit = None
@@ -58,7 +58,7 @@ class TestGetToolSemaphore:
     async def test_env_override(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         reset_config()
-        import ivy_lsp.utils.async_subprocess as mod
+        import ivy_lsp.infra.utils.async_subprocess as mod
 
         mod._semaphores.clear()
         mod._semaphore_limit = None
@@ -69,7 +69,7 @@ class TestGetToolSemaphore:
     async def test_minimum_one(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "0")
         reset_config()
-        import ivy_lsp.utils.async_subprocess as mod
+        import ivy_lsp.infra.utils.async_subprocess as mod
 
         mod._semaphores.clear()
         mod._semaphore_limit = None
@@ -169,7 +169,7 @@ class TestSemaphoreLimiting:
     async def test_bounds_concurrency(self, monkeypatch):
         monkeypatch.setenv("IVY_LSP_MAX_CONCURRENT_TOOLS", "2")
         reset_config()
-        import ivy_lsp.utils.async_subprocess as mod
+        import ivy_lsp.infra.utils.async_subprocess as mod
 
         mod._semaphores.clear()
         mod._semaphore_limit = None

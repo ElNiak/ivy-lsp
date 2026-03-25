@@ -10,9 +10,9 @@ from typing import List, Optional, Set
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.position_utils import make_range, word_at_position
-from ivy_lsp.utils.scope_ranking import get_layer_scope
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils.scope_ranking import get_layer_scope
 
 
 def _filter_files_by_layer_scope(
@@ -140,7 +140,7 @@ def register(server) -> None:
             include_decl,
         )
 
-        from ivy_lsp.observability import get_tracer
+        from ivy_lsp.infra.observability import get_tracer
 
         tracer = get_tracer()
         if tracer is not None:

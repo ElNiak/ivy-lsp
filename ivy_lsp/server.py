@@ -15,7 +15,7 @@ import ivy_lsp.pygls_patches  # noqa: F401
 from ivy_lsp import __version__
 from ivy_lsp.bulk_orchestrator import BulkOrchestrationMixin
 from ivy_lsp.features.status import ServerStateTracker
-from ivy_lsp.observability import (
+from ivy_lsp.infra.observability import (
     LogCategory,
     LogEvent,
     StructuredLogAdapter,

@@ -11,8 +11,8 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 
 
 def compute_document_highlights(

@@ -10,9 +10,9 @@ from typing import Any, List, Optional, Union
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.position_utils import make_range, word_at_position
-from ivy_lsp.utils.symbol_resolver import (
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils.symbol_resolver import (
     ensure_deep_parsed,
     lookup_with_dotted_fallback,
 )
@@ -128,7 +128,7 @@ def _rank_by_scope(
 
     Delegates to the shared :func:`ivy_lsp.utils.scope_ranking.rank_by_scope`.
     """
-    from ivy_lsp.utils.scope_ranking import rank_by_scope
+    from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
     return rank_by_scope(results, current_filepath, scope_files, resolver=resolver)
 
@@ -199,7 +199,7 @@ def register(server) -> None:
                 ),
             )
 
-            from ivy_lsp.observability import get_tracer
+            from ivy_lsp.infra.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:

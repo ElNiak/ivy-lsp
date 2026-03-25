@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from ivy_lsp.utils.symbol_resolver import (
+from ivy_lsp.infra.utils.symbol_resolver import (
     ensure_deep_parsed,
     lookup_with_dotted_fallback,
 )

@@ -8,7 +8,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.utils.path_normalize import (
+from ivy_lsp.infra.utils.path_normalize import (
     ensure_prefix,
     normalize_file_filter,
     normalize_ivy_path,

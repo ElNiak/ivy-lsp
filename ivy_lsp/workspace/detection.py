@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from ivy_lsp.config import get_config
+from ivy_lsp.infra.config import get_config
 
 logger = logging.getLogger(__name__)
 

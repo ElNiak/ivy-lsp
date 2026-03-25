@@ -12,15 +12,15 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.config import get_config
-from ivy_lsp.observability import (
+from ivy_lsp.infra.config import get_config
+from ivy_lsp.infra.observability import (
     LogCategory,
     LogEvent,
     LspLogHandler,
     StructuredLogAdapter,
     timed_phase,
 )
-from ivy_lsp.utils import uri_to_path
+from ivy_lsp.infra.utils import uri_to_path
 
 if TYPE_CHECKING:
     from ivy_lsp.indexer.include_resolver import IncludeResolver

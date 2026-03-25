@@ -34,9 +34,9 @@ class TestPackageImportable:
         assert ivy_lsp.features is not None
 
     def test_utils_subpackage_importable(self):
-        import ivy_lsp.utils
+        import ivy_lsp.infra.utils
 
-        assert ivy_lsp.utils is not None
+        assert ivy_lsp.infra.utils is not None
 
 
 class TestIvyLanguageServer:

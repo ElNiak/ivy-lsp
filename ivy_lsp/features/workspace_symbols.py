@@ -17,8 +17,8 @@ from typing import List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.infra.utils.position_utils import make_range
 from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.utils.position_utils import make_range
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ def register(server) -> None:
         active_filepath = None
         last_uri = getattr(server, "_last_active_uri", None)
         if last_uri:
-            from ivy_lsp.utils import uri_to_path
+            from ivy_lsp.infra.utils import uri_to_path
 
             active_filepath = uri_to_path(last_uri)
 
@@ -317,7 +317,7 @@ def register(server) -> None:
             ),
         )
 
-        from ivy_lsp.observability import get_tracer
+        from ivy_lsp.infra.observability import get_tracer
 
         tracer = get_tracer()
         if tracer is not None:

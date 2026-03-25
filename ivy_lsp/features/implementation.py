@@ -20,9 +20,9 @@ from typing import List, Optional, Union
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.position_utils import make_range, word_at_position
-from ivy_lsp.utils.symbol_resolver import lookup_with_dotted_fallback
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils.symbol_resolver import lookup_with_dotted_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def _find_action_declaration(
 
     # Rank by scope + layer awareness when multiple results
     if filepath and len(filtered) > 1 and hasattr(indexer, "get_scope_files_for_file"):
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         scope_files = indexer.get_scope_files_for_file(filepath)
         resolver = getattr(indexer, "resolver", None)

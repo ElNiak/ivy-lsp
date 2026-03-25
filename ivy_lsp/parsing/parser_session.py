@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
-from ivy_lsp.config import get_config
+from ivy_lsp.infra.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +222,7 @@ class IvyParserWrapper:
                 ast = ip.parse(source)
                 return ParseResult(ast=ast, errors=[], success=True, filename=filename)
             except iu.ErrorList as e:
-                from ivy_lsp.utils.ivy_output import format_ivy_errors
+                from ivy_lsp.infra.utils.ivy_output import format_ivy_errors
 
                 logger.debug(
                     "Parse errors for %s (%d error(s)): %s",

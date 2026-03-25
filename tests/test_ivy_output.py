@@ -1,6 +1,6 @@
 """Tests for shared ivy_check output parser and unified error extraction."""
 
-from ivy_lsp.utils.ivy_output import (
+from ivy_lsp.infra.utils.ivy_output import (
     extract_error_summary,
     find_ivy_files,
     format_ivy_error,

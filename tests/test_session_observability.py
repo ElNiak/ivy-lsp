@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from ivy_lsp.config import reset_config
-from ivy_lsp.observability import (
+from ivy_lsp.infra.config import reset_config
+from ivy_lsp.infra.observability import (
     _read_session_file,
     _workspace_hash,
     get_session_id,
@@ -188,7 +188,7 @@ def test_read_session_file_expires_after_ttl(tmp_path):
     session_file.write_text("2026-03-25T1431-new\n")
 
     # Backdate cache entry to simulate TTL expiry
-    import ivy_lsp.observability.session as obs_mod
+    import ivy_lsp.infra.observability.session as obs_mod
 
     cached = obs_mod._session_cache.get(ws)
     assert cached is not None

@@ -20,7 +20,7 @@ import threading
 import time as _time
 from typing import Any
 
-from ivy_lsp.observability import LogCategory, log_phase, timed_phase
+from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ async def _serve_mcp_http(
 
     async def _prewarm_model():
         """Pre-warm the semantic model after LSP initialization completes."""
-        from ivy_lsp.config import get_config
+        from ivy_lsp.infra.config import get_config
 
         cfg = get_config()
         if not cfg.prewarm_model:

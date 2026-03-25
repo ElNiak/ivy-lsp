@@ -147,7 +147,7 @@ def _get_effective_timeout(tool_name: str) -> float:
        scaled by ``get_config().tool_timeout_scale``
     """
     # Lazy import to avoid circular dependency (config -> tools -> config).
-    from ivy_lsp.config import get_config
+    from ivy_lsp.infra.config import get_config
 
     cfg = get_config()
 
@@ -172,7 +172,7 @@ def _ensure_semaphore() -> asyncio.Semaphore:
     """
     global _tool_semaphore
     if _tool_semaphore is None:
-        from ivy_lsp.config import get_config
+        from ivy_lsp.infra.config import get_config
 
         _tool_semaphore = asyncio.Semaphore(get_config().max_concurrent_tools)
     return _tool_semaphore
@@ -198,7 +198,7 @@ from ivy_lsp.tools.formatters import format_error, format_tool_result
 
 def _truncate_if_needed(result_str: str) -> str:
     """Truncate result string if it exceeds the configured max_result_chars."""
-    from ivy_lsp.config import get_config
+    from ivy_lsp.infra.config import get_config
 
     max_chars = get_config().max_result_chars
     if max_chars > 0 and len(result_str) > max_chars:
@@ -381,8 +381,8 @@ def safe_tool(fn):
                 # Fall through to local handling
 
         # --- Original local handling below ---
-        from ivy_lsp.config import get_config
-        from ivy_lsp.observability import get_session_logger
+        from ivy_lsp.infra.config import get_config
+        from ivy_lsp.infra.observability import get_session_logger
 
         sem = _ensure_semaphore()
         cfg = get_config()

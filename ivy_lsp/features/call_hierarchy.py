@@ -27,10 +27,10 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils.symbol_resolver import lookup_with_dotted_fallback
 from ivy_lsp.parsing.symbols import is_monitor_symbol
-from ivy_lsp.utils import uri_to_path
-from ivy_lsp.utils.position_utils import make_range, word_at_position
-from ivy_lsp.utils.symbol_resolver import lookup_with_dotted_fallback
 
 if TYPE_CHECKING:
     from ivy_lsp.semantic.model import SemanticModel
@@ -162,7 +162,7 @@ def prepare_call_hierarchy(
 
     # Rank results — prefer same-layer matches
     if len(results) > 1 and hasattr(indexer, "get_scope_files_for_file"):
-        from ivy_lsp.utils.scope_ranking import rank_by_scope
+        from ivy_lsp.infra.utils.scope_ranking import rank_by_scope
 
         scope_files = indexer.get_scope_files_for_file(filepath)
         resolver = getattr(indexer, "resolver", None)

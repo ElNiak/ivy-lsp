@@ -16,7 +16,7 @@ from typing import List, Sequence
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.utils.position_utils import make_range
+from ivy_lsp.infra.utils.position_utils import make_range
 
 logger = logging.getLogger(__name__)
 

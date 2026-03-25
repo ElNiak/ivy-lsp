@@ -17,8 +17,8 @@ from ivy_lsp.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
-from ivy_lsp.config import get_config
-from ivy_lsp.observability import LogCategory, LogEvent
+from ivy_lsp.infra.config import get_config
+from ivy_lsp.infra.observability import LogCategory, LogEvent
 from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ class DeepIndexMixin:
 
     def _deep_index_from_tests_impl(self) -> None:
         """Inner implementation of deep indexing (separated for clean shutdown)."""
-        from ivy_lsp.observability import StructuredLogAdapter
+        from ivy_lsp.infra.observability import StructuredLogAdapter
 
         slog = StructuredLogAdapter(logger, {})
 
@@ -263,7 +263,7 @@ class DeepIndexMixin:
                 status.parse_duration = time.time() - file_start
                 if not status.deep_parse_succeeded and result is not None:
                     if hasattr(result, "errors") and result.errors:
-                        from ivy_lsp.utils.ivy_output import format_ivy_error
+                        from ivy_lsp.infra.utils.ivy_output import format_ivy_error
 
                         err_msg = format_ivy_error(result.errors[0])
                         status.parse_error = err_msg
@@ -433,7 +433,7 @@ class DeepIndexMixin:
         Returns True if the file was upgraded, False if already deep-parsed
         or not eligible.
         """
-        from ivy_lsp.observability import StructuredLogAdapter
+        from ivy_lsp.infra.observability import StructuredLogAdapter
         from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
 
         slog = StructuredLogAdapter(logger, {})

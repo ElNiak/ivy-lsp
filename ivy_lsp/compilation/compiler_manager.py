@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from ivy_lsp.compilation.ir import CompiledModuleIR
-from ivy_lsp.observability import LogCategory, log_phase
+from ivy_lsp.infra.observability import LogCategory, log_phase
 
 logger = logging.getLogger(__name__)
 

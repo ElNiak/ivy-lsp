@@ -21,8 +21,8 @@ from ivy_lsp.adapters.protocols import (
     ICompilerAdapter,
     IParserAdapter,
 )
-from ivy_lsp.config import get_config
-from ivy_lsp.observability import LogCategory, log_phase, timed_phase
+from ivy_lsp.infra.config import get_config
+from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.semantic.edges import SemanticEdgeType
 from ivy_lsp.semantic.model import SemanticModel
 from ivy_lsp.semantic.nodes import SymbolNode, TypeNode

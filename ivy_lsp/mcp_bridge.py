@@ -22,7 +22,7 @@ from typing import Any
 
 import anyio
 
-from ivy_lsp.observability import LogCategory, log_phase
+from ivy_lsp.infra.observability import LogCategory, log_phase
 
 logger = logging.getLogger(__name__)
 

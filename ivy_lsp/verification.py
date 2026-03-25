@@ -12,9 +12,9 @@ import logging
 import os
 from typing import Any
 
-from ivy_lsp.observability import LogCategory, log_phase, timed_phase
-from ivy_lsp.utils.async_subprocess import run_ivy_subprocess
-from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
+from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
+from ivy_lsp.infra.utils.async_subprocess import run_ivy_subprocess
+from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
 
 log = logging.getLogger(__name__)
 
