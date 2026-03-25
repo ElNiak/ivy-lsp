@@ -43,3 +43,80 @@ class MirrorId:
         """Create a MirrorId from a test file path and protocol name."""
         stem = os.path.basename(test_file).removesuffix(".ivy")
         return cls(protocol=protocol, entry_stem=stem)
+
+
+@dataclass(frozen=True)
+class Mirror:
+    """First-class representation of an NCT endpoint mirror.
+
+    Evolves TestScope with protocol binding, stable identity, and
+    role semantics. Use from_test_scope() / to_test_scope() for
+    backward compatibility with existing code.
+
+    Note: ``protocol`` is derived from ``id.protocol`` (property, not field)
+    to prevent divergence between the two.
+    """
+
+    id: MirrorId
+    entry_file: str
+    include_closure: FrozenSet[str]
+    exported_actions: FrozenSet[str]
+    imported_actions: FrozenSet[str]
+    role: MirrorRole
+    protocol_version: Optional[str] = None
+
+    @property
+    def protocol(self) -> str:
+        """Protocol name, derived from id to prevent redundancy."""
+        return self.id.protocol
+
+    def is_file_in_scope(self, filepath: str) -> bool:
+        """Check if a file is in this mirror's include closure."""
+        return filepath in self.include_closure
+
+    def file_count(self) -> int:
+        """Number of files in the include closure."""
+        return len(self.include_closure)
+
+    def to_test_scope(self) -> "TestScope":
+        """Convert to legacy TestScope for backward compatibility."""
+        from ivy_lsp.core.analysis.test_scope import TestScope
+
+        return TestScope(
+            test_file=self.entry_file,
+            include_closure=self.include_closure,
+            exported_actions=self.exported_actions,
+            imported_actions=self.imported_actions,
+            tester_role=self.role.value,
+        )
+
+    @classmethod
+    def from_test_scope(
+        cls,
+        scope: "TestScope",
+        protocol: str,
+        protocol_version: Optional[str] = None,
+    ) -> Mirror:
+        """Upgrade a legacy TestScope to a Mirror.
+
+        Defensively converts tester_role — unknown role strings
+        fall back to MirrorRole.UNKNOWN instead of crashing.
+        """
+        try:
+            role = MirrorRole(scope.tester_role)
+        except ValueError:
+            logger.warning(
+                "Unknown tester_role '%s' for %s, defaulting to UNKNOWN",
+                scope.tester_role,
+                scope.test_file,
+            )
+            role = MirrorRole.UNKNOWN
+        return cls(
+            id=MirrorId.from_test_file(scope.test_file, protocol),
+            entry_file=scope.test_file,
+            include_closure=scope.include_closure,
+            exported_actions=scope.exported_actions,
+            imported_actions=scope.imported_actions,
+            role=role,
+            protocol_version=protocol_version,
+        )
