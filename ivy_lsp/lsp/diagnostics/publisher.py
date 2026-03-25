@@ -17,9 +17,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.infra.utils import uri_to_path
+
 # Re-export compute functions so that ``from ivy_lsp.features.diagnostics
 # import compute_diagnostics`` (and friends) keeps working everywhere.
-from ivy_lsp.features.diagnostic_compute import (  # noqa: F401
+from ivy_lsp.lsp.diagnostics.compute import (  # noqa: F401
     _EXPORT_RE,
     check_structural_issues,
     compute_diagnostics,
@@ -28,7 +30,6 @@ from ivy_lsp.features.diagnostic_compute import (  # noqa: F401
     parse_ivy_check_output,
     run_deep_diagnostics,
 )
-from ivy_lsp.infra.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
 
