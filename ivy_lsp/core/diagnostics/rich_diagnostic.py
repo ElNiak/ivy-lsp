@@ -63,7 +63,7 @@ class IvyDiagnostic:
 
     def to_lsp(self) -> lsp.Diagnostic:
         """Convert to an LSP Diagnostic."""
-        from ivy_lsp.diagnostics.codes import DIAGNOSTIC_REGISTRY
+        from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 
         end_line = self.end_line if self.end_line is not None else self.line
         end_char = self.end_character if self.end_character is not None else 80
@@ -93,7 +93,7 @@ class IvyDiagnostic:
 
     def to_mcp_dict(self) -> Dict[str, Any]:
         """Convert to an MCP-compatible dict with rich fields."""
-        from ivy_lsp.diagnostics.codes import DIAGNOSTIC_REGISTRY
+        from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 
         descriptor = DIAGNOSTIC_REGISTRY.get(self.code)
 

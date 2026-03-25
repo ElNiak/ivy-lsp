@@ -28,11 +28,11 @@ import pickle
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo, TestScope
-from ivy_lsp.parsing.symbols import IncludeGraph
-from ivy_lsp.workspace.active_workspace import ActiveWorkspace
-from ivy_lsp.workspace.detection import WorkspaceConfig, detect_ivy_workspace
-from ivy_lsp.workspace.session_overlay import SessionOverlay, TestScopeView
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo, TestScope
+from ivy_lsp.core.parsing.symbols import IncludeGraph
+from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
+from ivy_lsp.core.workspace.detection import WorkspaceConfig, detect_ivy_workspace
+from ivy_lsp.core.workspace.session_overlay import SessionOverlay, TestScopeView
 
 logger = logging.getLogger(__name__)
 

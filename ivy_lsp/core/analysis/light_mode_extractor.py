@@ -14,8 +14,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ivy_lsp.analysis.requirement_graph import RequirementNode
-from ivy_lsp.semantic.rfc_annotations import parse_rfc_tags
+from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+from ivy_lsp.core.semantic.rfc_annotations import parse_rfc_tags
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def _check_lexer() -> bool:
     if _LEXER_AVAILABLE:
         return True
     try:
-        from ivy_lsp.parsing.token_stream import tokenize_ivy  # noqa: F401
+        from ivy_lsp.core.parsing.token_stream import tokenize_ivy  # noqa: F401
 
         _LEXER_AVAILABLE = True
     except ImportError:
@@ -93,7 +93,7 @@ def extract_requirements_light(
     with C++ string literals containing ``>>>``).
     """
     if _LEXER_AVAILABLE:
-        from ivy_lsp.analysis.lexer_requirement_extractor import (
+        from ivy_lsp.core.analysis.lexer_requirement_extractor import (
             extract_requirements_lexer,
         )
 
@@ -102,7 +102,7 @@ def extract_requirements_light(
             return _extract_requirements_regex(source, filepath, known_state_vars)
 
         # Try lexer; on tokenization error, fall back to regex.
-        from ivy_lsp.parsing.token_stream import tokenize_ivy
+        from ivy_lsp.core.parsing.token_stream import tokenize_ivy
 
         if token_stream is None:
             token_stream = tokenize_ivy(source, filepath)
@@ -131,7 +131,7 @@ def extract_exports_imports_light(
         if token_stream is not None and token_stream.error_info is not None:
             return _extract_exports_imports_regex(source, filepath)
 
-        from ivy_lsp.analysis.lexer_requirement_extractor import (
+        from ivy_lsp.core.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
 
@@ -384,7 +384,7 @@ def _extract_exports_imports_regex(
     filepath: str,
 ) -> "ExportImportInfo":
     """Regex-based export/import extraction (fallback path)."""
-    from ivy_lsp.analysis.test_scope import ExportImportInfo
+    from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
     exports: List[str] = []
     imports: List[str] = []

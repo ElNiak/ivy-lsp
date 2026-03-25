@@ -19,10 +19,10 @@ from typing import (
     runtime_checkable,
 )
 
-from ivy_lsp.parsing.parser_session import ParseResult
+from ivy_lsp.core.parsing.parser_session import ParseResult
 
 if TYPE_CHECKING:
-    from ivy_lsp.semantic.snapshots import ModuleSnapshot, SignatureSnapshot
+    from ivy_lsp.core.semantic.snapshots import ModuleSnapshot, SignatureSnapshot
 
 
 # ---------------------------------------------------------------------------

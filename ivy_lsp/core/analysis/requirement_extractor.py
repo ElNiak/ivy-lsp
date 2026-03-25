@@ -13,8 +13,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from ivy_lsp.analysis.requirement_graph import RequirementNode
-from ivy_lsp.parsing.ast_to_symbols import is_from_included_file
+from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+from ivy_lsp.core.parsing.ast_to_symbols import is_from_included_file
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def extract_exports_imports_full(
     Returns:
         An ``ExportImportInfo`` with names and 0-based line numbers.
     """
-    from ivy_lsp.analysis.test_scope import ExportImportInfo
+    from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
     if ast_obj is None or not hasattr(ast_obj, "decls"):
         return ExportImportInfo(file=filepath)
@@ -81,7 +81,9 @@ def extract_exports_imports_full(
     try:
         import ivy.ivy_ast as ia
     except ImportError:
-        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
+        from ivy_lsp.core.analysis.light_mode_extractor import (
+            extract_exports_imports_light,
+        )
 
         return extract_exports_imports_light(source, filepath)
 
@@ -397,7 +399,7 @@ def _extract_bracket_tags(source_lines: List[str], line: int) -> List[str]:
     """
     if line < 0 or line >= len(source_lines):
         return []
-    from ivy_lsp.semantic.rfc_annotations import parse_rfc_tags
+    from ivy_lsp.core.semantic.rfc_annotations import parse_rfc_tags
 
     return parse_rfc_tags(source_lines[line])
 

@@ -16,17 +16,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ivy_lsp.adapters.protocols import (
+from ivy_lsp.core.adapters.protocols import (
     IAstEnrichmentAdapter,
     ICompilerAdapter,
     IParserAdapter,
 )
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
+from ivy_lsp.core.semantic.rfc_annotations import parse_file_rfc_annotations
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
-from ivy_lsp.semantic.edges import SemanticEdgeType
-from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
-from ivy_lsp.semantic.rfc_annotations import parse_file_rfc_annotations
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +277,7 @@ class AnalysisPipeline:
                 indexer to submit many files without corrupting the
                 monitoring display.
         """
-        from ivy_lsp.adapters.protocols import CompileResult
+        from ivy_lsp.core.adapters.protocols import CompileResult
 
         t3_start = time.time()
         with self._state_lock:
@@ -324,7 +324,7 @@ class AnalysisPipeline:
                     try:
                         ir = self._compiler_manager.get_cached(filepath)
                         if ir is not None:
-                            from ivy_lsp.compilation.graph_enrichment import (
+                            from ivy_lsp.core.compilation.graph_enrichment import (
                                 enrich_requirement_graph,
                                 enrich_semantic_model,
                             )
@@ -730,7 +730,7 @@ class AnalysisPipeline:
 
                 if ir.success:
                     try:
-                        from ivy_lsp.compilation.graph_enrichment import (
+                        from ivy_lsp.core.compilation.graph_enrichment import (
                             enrich_requirement_graph,
                             enrich_semantic_model,
                         )

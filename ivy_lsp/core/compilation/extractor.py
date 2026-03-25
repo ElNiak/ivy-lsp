@@ -17,7 +17,7 @@ from typing import Any, Dict, FrozenSet, List, Literal, Optional, Set, Tuple, ca
 _RequirementKind = Literal["require", "ensure", "assume", "assert"]
 _MixinKind = Literal["before", "after", "around", "implement", "direct"]
 
-from ivy_lsp.compilation.ir import (
+from ivy_lsp.core.compilation.ir import (
     ActionIR,
     CompiledModuleIR,
     IsolateIR,

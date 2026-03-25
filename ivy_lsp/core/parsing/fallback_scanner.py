@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
-from ivy_lsp.parsing.token_stream import tokenize_ivy
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.token_stream import tokenize_ivy
 
 if TYPE_CHECKING:
-    from ivy_lsp.parsing.token_stream import TokenStream
+    from ivy_lsp.core.parsing.token_stream import TokenStream
 
 logger = logging.getLogger(__name__)
 

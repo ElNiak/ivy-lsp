@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from ivy_lsp.analysis.impl_block_parser import analyze_impl_blocks
+from ivy_lsp.core.analysis.impl_block_parser import analyze_impl_blocks
 
 logger = logging.getLogger(__name__)
 

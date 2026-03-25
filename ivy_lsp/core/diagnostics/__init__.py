@@ -5,9 +5,9 @@ severity modes, and a unified IvyDiagnostic IR that converts to both
 LSP Diagnostic and MCP dict formats.
 """
 
-from ivy_lsp.diagnostics.codes import DIAGNOSTIC_REGISTRY, DiagnosticDescriptor
-from ivy_lsp.diagnostics.modes import DiagnosticMode, get_active_mode
-from ivy_lsp.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocation
+from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY, DiagnosticDescriptor
+from ivy_lsp.core.diagnostics.modes import DiagnosticMode, get_active_mode
+from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocation
 
 __all__ = [
     "DIAGNOSTIC_REGISTRY",

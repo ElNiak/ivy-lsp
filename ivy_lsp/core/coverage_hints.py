@@ -35,7 +35,7 @@ def compute_coverage_hints(
     if graph is None:
         return []
 
-    from ivy_lsp.analysis.requirement_graph import EdgeType
+    from ivy_lsp.core.analysis.requirement_graph import EdgeType
 
     hints: List[Dict[str, Any]] = []
 

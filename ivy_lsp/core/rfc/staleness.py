@@ -52,7 +52,7 @@ async def check_staleness(
     # 1. Content hash comparison (re-fetch source and compare)
     if manifest_source and manifest_hash:
         try:
-            from ivy_lsp.rfc.fetcher import fetch_rfc
+            from ivy_lsp.core.rfc.fetcher import fetch_rfc
 
             result = await fetch_rfc(manifest_source, use_cache=False)
             report.content_hash_match = result.content_hash == manifest_hash

@@ -15,7 +15,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
-    from ivy_lsp.semantic.nodes import RfcRequirement
+    from ivy_lsp.core.semantic.nodes import RfcRequirement
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class GraphSnapshot:
 
     def get_uncovered_requirements(self) -> List["RfcRequirement"]:
         """Return RFC requirements not covered by any bracket tag."""
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         rfc_keys = set(self.rfc_requirements.keys())
         covered_ids: Set[str] = set()
@@ -82,7 +82,7 @@ class GraphSnapshot:
 
     def get_coverage_stats(self) -> Dict[str, int]:
         """Compute covered/uncovered/total RFC requirement counts."""
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         rfc_keys = set(self.rfc_requirements.keys())
         covered_ids: Set[str] = set()
@@ -396,7 +396,7 @@ class RequirementGraph:
         with self._lock:
             self.clear_wiring_edges()
 
-            from ivy_lsp.analysis.formula_analyzer import (
+            from ivy_lsp.core.analysis.formula_analyzer import (
                 extract_state_var_references_text,
             )
 
@@ -440,7 +440,7 @@ class RequirementGraph:
 
         Uses tag normalization so bare tags like '4' match 'rfc9000:4.1' etc.
         """
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         with self._lock:
             existing = {(s, t) for s, et, t in self.edges if et == EdgeType.COVERS}
@@ -537,7 +537,7 @@ class RequirementGraph:
 
     def get_coverage_stats(self) -> Dict[str, int]:
         """Compute covered/uncovered/total by level."""
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         with self._lock:
             rfc_keys = set(self.rfc_requirements.keys())
@@ -554,7 +554,7 @@ class RequirementGraph:
 
     def get_uncovered_requirements(self) -> List[RfcRequirement]:
         """Return RfcRequirement nodes with no COVERS edge."""
-        from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+        from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
         with self._lock:
             rfc_keys = set(self.rfc_requirements.keys())

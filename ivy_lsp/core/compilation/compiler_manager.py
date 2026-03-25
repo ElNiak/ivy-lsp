@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
-from ivy_lsp.compilation.ir import CompiledModuleIR
+from ivy_lsp.core.compilation.ir import CompiledModuleIR
 from ivy_lsp.infra.observability import LogCategory, log_phase
 
 logger = logging.getLogger(__name__)
@@ -348,6 +348,6 @@ def _worker_entry(
     staging_dir: Optional[str],
 ) -> None:
     """Trampoline into the real worker (avoids pickling issues)."""
-    from ivy_lsp.compilation.worker import compiler_worker
+    from ivy_lsp.core.compilation.worker import compiler_worker
 
     compiler_worker(source, filename, result_conn, staging_dir)

@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 from lsprotocol.types import SymbolKind
 
 if TYPE_CHECKING:
-    from ivy_lsp.parsing.symbols import IvySymbol
-    from ivy_lsp.semantic.model import SemanticModel
+    from ivy_lsp.core.parsing.symbols import IvySymbol
+    from ivy_lsp.core.semantic.model import SemanticModel
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def populate_model_from_symbols(
     Returns:
         The number of nodes added.
     """
-    from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+    from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
     tier = _tier_label(tier_used)
     count = 0

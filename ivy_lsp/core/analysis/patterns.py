@@ -57,7 +57,7 @@ def handle_pattern_analysis(
         Dict with detected patterns, validation issues, or comparison.
     """
     try:
-        from ivy_lsp.analysis.pattern_library import (
+        from ivy_lsp.core.analysis.pattern_library import (
             PatternCrossReferencer,
             PatternKind,
             analyze_protocol,

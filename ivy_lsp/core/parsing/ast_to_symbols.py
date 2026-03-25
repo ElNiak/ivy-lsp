@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
+from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolReference
 from ivy_lsp.infra.utils.position_utils import ivy_location_to_range
-from ivy_lsp.parsing.symbols import IvySymbol, SymbolReference
 
 logger = logging.getLogger(__name__)
 

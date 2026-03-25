@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from ivy_lsp.semantic.nodes import ManifestMetadata, RfcAnnotation, RfcRequirement
+from ivy_lsp.core.semantic.nodes import ManifestMetadata, RfcAnnotation, RfcRequirement
 
 logger = logging.getLogger(__name__)
 

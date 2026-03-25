@@ -12,18 +12,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ivy_lsp.analysis.light_mode_extractor import (
+from ivy_lsp.core.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
-from ivy_lsp.analysis.test_scope import ExportImportInfo, ScopedRequirementModel
-from ivy_lsp.indexer.deep_indexer import DeepIndexMixin
-from ivy_lsp.indexer.file_cache import FileCache
-from ivy_lsp.indexer.include_resolver import IncludeResolver
-from ivy_lsp.indexer.scope_manager import ScopeManagerMixin
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo, ScopedRequirementModel
+from ivy_lsp.core.indexer.deep_indexer import DeepIndexMixin
+from ivy_lsp.core.indexer.file_cache import FileCache
+from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+from ivy_lsp.core.indexer.scope_manager import ScopeManagerMixin
+from ivy_lsp.core.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
-from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -38,7 +38,7 @@ def _try_tokenize(source: str, filepath: str) -> Optional[Any]:
     when None is passed.
     """
     try:
-        from ivy_lsp.parsing.token_stream import tokenize_ivy
+        from ivy_lsp.core.parsing.token_stream import tokenize_ivy
 
         return tokenize_ivy(source, filepath)
     except ImportError:
@@ -121,7 +121,7 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
         self._progress_callback = progress_callback
         self._done_callback = done_callback
         if persistent_cache:
-            from ivy_lsp.indexer.file_cache import PersistentFileCache
+            from ivy_lsp.core.indexer.file_cache import PersistentFileCache
 
             self._cache = PersistentFileCache(workspace_root, cache_dir=cache_dir)
         else:
@@ -300,7 +300,7 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
         # Phase 2: background full-parse from test entry points
         # Only run deep indexing with the real Ivy parser (IvyParserWrapper),
         # not the FallbackOnlyParser which always returns success=False.
-        from ivy_lsp.parsing.fallback_parser import FallbackOnlyParser
+        from ivy_lsp.core.parsing.fallback_parser import FallbackOnlyParser
 
         has_full_parser = not isinstance(self._parser, FallbackOnlyParser)
         if has_full_parser:
@@ -328,7 +328,7 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
         runs in a thread pool for faster I/O throughput.  All shared-state
         mutations are performed on the calling thread after collection.
         """
-        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+        from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
         files = self._resolver.find_all_ivy_files()
         num_workers = get_config().fast_index_workers
@@ -588,8 +588,8 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
 
     def _index_single_file(self, filepath: str) -> List[IvySymbol]:
         """Parse and index one file, using the cache when possible."""
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+        from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
         cached = self._cache.get(filepath)
         if cached is not None:

@@ -6,12 +6,12 @@ import threading
 from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from ivy_lsp.adapters.protocols import IParserAdapter
-    from ivy_lsp.compilation.compiler_manager import CompilerManager
+    from ivy_lsp.core.adapters.protocols import IParserAdapter
+    from ivy_lsp.core.compilation.compiler_manager import CompilerManager
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
+    from ivy_lsp.core.semantic.model import SemanticModel
     from ivy_lsp.features.status import ServerStateTracker
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
-    from ivy_lsp.semantic.model import SemanticModel
 
 
 @runtime_checkable

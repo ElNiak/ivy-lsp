@@ -8,7 +8,7 @@ callers like :class:`WorkspaceIndexer` to fall through to the lexer-based
 
 from __future__ import annotations
 
-from ivy_lsp.parsing.parser_session import ParseResult
+from ivy_lsp.core.parsing.parser_session import ParseResult
 
 
 class FallbackOnlyParser:

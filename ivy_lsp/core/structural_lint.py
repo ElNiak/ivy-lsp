@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
-from ivy_lsp.parsing.tiered_extractor import INCLUDE_PATTERN
+from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
 
 
 def check_structural_issues_raw(

@@ -16,7 +16,7 @@ import time
 from multiprocessing.connection import Connection
 from typing import Optional
 
-from ivy_lsp.compilation.ir import CompiledModuleIR
+from ivy_lsp.core.compilation.ir import CompiledModuleIR
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +250,7 @@ def compiler_worker(
 
             duration = time.monotonic() - start
 
-            from ivy_lsp.compilation.extractor import extract_compiled_module_ir
+            from ivy_lsp.core.compilation.extractor import extract_compiled_module_ir
 
             ir = extract_compiled_module_ir(im.module, il.sig, filename, duration)
         result_conn.send(ir)

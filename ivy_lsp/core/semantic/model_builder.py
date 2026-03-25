@@ -48,8 +48,8 @@ def build_semantic_model(
     """
     # Import required modules -- narrow ImportError to just these imports
     try:
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.rfc_annotations import (
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.rfc_annotations import (
             find_manifests,
             load_requirement_manifest,
             parse_file_rfc_annotations,
@@ -74,8 +74,8 @@ def build_semantic_model(
 
     # Scan .ivy files for annotations, types, and symbols using
     # tiered extraction: parser -> lexer -> regex cascade.
-    from ivy_lsp.parsing.symbol_to_model import populate_model_from_symbols
-    from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+    from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+    from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
     extractor = TieredExtractor(resolve_callback=include_resolver)
     # Cache includes per file for INCLUDES edge wiring later
@@ -154,14 +154,14 @@ def _wire_semantic_edges(
 
     Extracted as a helper to keep ``build_semantic_model`` readable.
     """
-    from ivy_lsp.semantic.edges import SemanticEdgeType
-    from ivy_lsp.semantic.nodes import (
+    from ivy_lsp.core.semantic.edges import SemanticEdgeType
+    from ivy_lsp.core.semantic.nodes import (
         RfcAnnotation,
         RfcRequirement,
         SymbolNode,
         TypeNode,
     )
-    from ivy_lsp.semantic.rfc_annotations import normalize_tag_to_manifest_ids
+    from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_to_manifest_ids
 
     # 1. COVERS: RfcAnnotation -> RfcRequirement
     # Use normalize_tag_to_manifest_ids for proper tag resolution:

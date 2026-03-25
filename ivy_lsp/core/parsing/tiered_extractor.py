@@ -22,7 +22,7 @@ from typing import Callable, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol, SymbolReference
+from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolReference
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +143,10 @@ class TieredExtractor:
 
         # Tier 1: try importing parser (same imports as _try_parser)
         try:
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols  # noqa: F401
-            from ivy_lsp.parsing.parser_session import IvyParserWrapper  # noqa: F401
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols  # noqa: F401
+            from ivy_lsp.core.parsing.parser_session import (  # noqa: F401
+                IvyParserWrapper,
+            )
 
             result["tier_1"] = True
         except ImportError as exc:
@@ -152,7 +154,9 @@ class TieredExtractor:
 
         # Tier 2: try importing lexer (same imports as _try_lexer)
         try:
-            from ivy_lsp.parsing.fallback_scanner import fallback_scan  # noqa: F401
+            from ivy_lsp.core.parsing.fallback_scanner import (  # noqa: F401
+                fallback_scan,
+            )
 
             result["tier_2"] = True
         except ImportError as exc:
@@ -323,11 +327,11 @@ class TieredExtractor:
         Raises ImportError if ivy package is unavailable.
         Raises RuntimeError if parsing fails.
         """
-        from ivy_lsp.parsing.ast_to_symbols import (
+        from ivy_lsp.core.parsing.ast_to_symbols import (
             ast_to_symbols,
             extract_references_from_ast,
         )
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         wrapper = IvyParserWrapper(resolve_callback=self._resolve_callback)
         result = wrapper.parse(source, filename=filepath, timeout=self._parser_timeout)
@@ -364,7 +368,7 @@ class TieredExtractor:
         Raises ImportError if PLY is unavailable.
         Raises RuntimeError if the lexer fails entirely.
         """
-        from ivy_lsp.parsing.fallback_scanner import fallback_scan
+        from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
         symbols, error_info = fallback_scan(source, filename=filepath)
 

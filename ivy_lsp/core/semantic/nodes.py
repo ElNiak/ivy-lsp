@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
 # Re-export existing node types for backward compatibility
-from ivy_lsp.analysis.requirement_graph import (
+from ivy_lsp.core.analysis.requirement_graph import (
     ActionNode,
     PropertyNode,
     RequirementNode,

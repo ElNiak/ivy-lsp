@@ -14,16 +14,16 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from ivy_lsp.analysis.light_mode_extractor import (
+from ivy_lsp.core.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
-from ivy_lsp.analysis.requirement_extractor import (
+from ivy_lsp.core.analysis.requirement_extractor import (
     extract_exports_imports_full,
     extract_requirements_full,
 )
-from ivy_lsp.analysis.test_scope import TestScope, detect_test_role
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.analysis.test_scope import TestScope, detect_test_role
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 if TYPE_CHECKING:
     pass
@@ -240,7 +240,7 @@ class ScopeManagerMixin:
 
     def _load_requirement_manifests(self) -> None:
         """Load RFC requirement manifests from the workspace and add to the graph."""
-        from ivy_lsp.semantic.rfc_annotations import (
+        from ivy_lsp.core.semantic.rfc_annotations import (
             find_manifests,
             load_requirement_manifest,
         )

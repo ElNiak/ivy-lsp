@@ -12,12 +12,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
-from ivy_lsp.analysis.requirement_graph import RequirementNode
-from ivy_lsp.parsing.token_stream import TokenStream, tokenize_ivy
-from ivy_lsp.semantic.rfc_annotations import parse_rfc_tags
+from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+from ivy_lsp.core.parsing.token_stream import TokenStream, tokenize_ivy
+from ivy_lsp.core.semantic.rfc_annotations import parse_rfc_tags
 
 if TYPE_CHECKING:
-    from ivy_lsp.analysis.test_scope import ExportImportInfo
+    from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +294,7 @@ def extract_exports_imports_lexer(
 
     Same return type as extract_exports_imports_light.
     """
-    from ivy_lsp.analysis.test_scope import ExportImportInfo
+    from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
     if not source or not source.strip():
         return ExportImportInfo(file=filepath)

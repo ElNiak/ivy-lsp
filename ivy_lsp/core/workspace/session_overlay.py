@@ -18,8 +18,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo, TestScope
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo, TestScope
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +181,10 @@ class SessionOverlay:
         Runs *outside* the lock so that extraction does not block
         concurrent readers.
         """
-        from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
-        from ivy_lsp.parsing.tiered_extractor import TieredExtractor
+        from ivy_lsp.core.analysis.light_mode_extractor import (
+            extract_exports_imports_light,
+        )
+        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
         now = time.time()
 

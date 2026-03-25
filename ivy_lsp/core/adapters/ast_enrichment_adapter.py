@@ -11,8 +11,8 @@ import logging
 import os
 from typing import Any, List
 
-from ivy_lsp.adapters.protocols import TypeAnnotation
-from ivy_lsp.parsing.ast_to_symbols import is_from_included_file
+from ivy_lsp.core.adapters.protocols import TypeAnnotation
+from ivy_lsp.core.parsing.ast_to_symbols import is_from_included_file
 
 logger = logging.getLogger(__name__)
 

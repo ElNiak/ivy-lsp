@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Optional
 
-from ivy_lsp.adapters.protocols import CompileResult, TypeAnnotation
-from ivy_lsp.parsing.parser_session import ParseResult
+from ivy_lsp.core.adapters.protocols import CompileResult, TypeAnnotation
+from ivy_lsp.core.parsing.parser_session import ParseResult
 
 
 class NullParserAdapter:

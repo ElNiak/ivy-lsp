@@ -7,7 +7,7 @@ files instead of the entire repository.
 
 Typical usage::
 
-    from ivy_lsp.workspace.active_workspace import ActiveWorkspace
+    from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
 
     # Set the active workspace from a test file
     ws = ActiveWorkspace.from_test_file(

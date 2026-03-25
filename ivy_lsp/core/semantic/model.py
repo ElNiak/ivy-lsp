@@ -11,7 +11,7 @@ import threading
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
-from ivy_lsp.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
 # ---------------------------------------------------------------------------
 # Model
@@ -324,7 +324,7 @@ class SemanticModel:
 
     def get_coverage_stats(self) -> Dict[str, Any]:
         """Get RFC coverage statistics from the semantic graph."""
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         with self._lock:
             reqs = list(self._nodes_by_type.get(RequirementNode, {}).values())

@@ -13,13 +13,13 @@ import os
 import time
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from ivy_lsp.analysis.light_mode_extractor import (
+from ivy_lsp.core.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
+from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolTable
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, LogEvent
-from ivy_lsp.parsing.symbols import IvySymbol, SymbolTable
 
 if TYPE_CHECKING:
     pass
@@ -162,8 +162,8 @@ class DeepIndexMixin:
 
     def _deep_index_serial(self, test_files: List[str]) -> None:
         """Serial deep indexing of test files."""
-        from ivy_lsp.indexer.workspace_indexer import FileIndexStatus
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.core.indexer.workspace_indexer import FileIndexStatus
+        from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
         for test_file in test_files:
             if self._stop_requested.is_set():
@@ -283,13 +283,13 @@ class DeepIndexMixin:
         num_workers: int,
     ) -> None:
         """Parallel deep indexing using ProcessPoolExecutor."""
-        from ivy_lsp.indexer.workspace_indexer import FileIndexStatus
+        from ivy_lsp.core.indexer.workspace_indexer import FileIndexStatus
 
         if self._stop_requested.is_set():
             return
 
-        from ivy_lsp.indexer.parallel_indexer import ParallelDeepIndexer
-        from ivy_lsp.parsing.symbols import IvySymbol as _IvySymbol
+        from ivy_lsp.core.indexer.parallel_indexer import ParallelDeepIndexer
+        from ivy_lsp.core.parsing.symbols import IvySymbol as _IvySymbol
 
         indexer = ParallelDeepIndexer(
             num_workers=num_workers,
@@ -433,8 +433,8 @@ class DeepIndexMixin:
         Returns True if the file was upgraded, False if already deep-parsed
         or not eligible.
         """
+        from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
         from ivy_lsp.infra.observability import StructuredLogAdapter
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
 
         slog = StructuredLogAdapter(logger, {})
 

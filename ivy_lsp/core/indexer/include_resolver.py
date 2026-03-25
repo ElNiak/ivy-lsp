@@ -194,7 +194,7 @@ class IncludeResolver:
     @classmethod
     def from_config(cls, d: dict) -> "IncludeResolver":
         """Restore an IncludeResolver from a config dict."""
-        from ivy_lsp.workspace.detection import WorkspaceLayer
+        from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         layers = [
             WorkspaceLayer(

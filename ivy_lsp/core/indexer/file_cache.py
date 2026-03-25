@@ -216,7 +216,7 @@ class PersistentFileCache:
                     logger.debug("SQLite delete failed for %s", filepath, exc_info=True)
             return None
         try:
-            from ivy_lsp.parsing.symbols import IvySymbol
+            from ivy_lsp.core.parsing.symbols import IvySymbol
 
             symbols = [IvySymbol.from_dict(d) for d in json.loads(row["symbols_json"])]
             includes = json.loads(row["includes_json"])

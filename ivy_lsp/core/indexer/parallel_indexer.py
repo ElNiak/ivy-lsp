@@ -63,12 +63,12 @@ def worker_parse_file(
 
     # Try full parser first
     try:
-        from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         resolve_callback = None
         if resolver_config:
-            from ivy_lsp.indexer.include_resolver import IncludeResolver
+            from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
             resolver = IncludeResolver.from_config(resolver_config)
             resolve_callback = resolver.resolve
@@ -105,7 +105,7 @@ def worker_parse_file(
         logger.warning("Worker: parse failed for %s: %s", filepath, e)
 
     # Fallback: lexer-based scan
-    from ivy_lsp.parsing.fallback_scanner import fallback_scan
+    from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
     symbols, _error_info = fallback_scan(source, filepath)
     return WorkerResult(

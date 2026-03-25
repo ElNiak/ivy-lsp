@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, FrozenSet, List, Literal, Optional, Set, Tuple
 
-from ivy_lsp.analysis.requirement_graph import RequirementGraph, RequirementNode
+from ivy_lsp.core.analysis.requirement_graph import RequirementGraph, RequirementNode
 
 
 @dataclass

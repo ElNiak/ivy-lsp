@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Tuple
 
-from ivy_lsp.compilation.ir import CompiledModuleIR
-from ivy_lsp.semantic.edges import SemanticEdgeType
-from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+from ivy_lsp.core.compilation.ir import CompiledModuleIR
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ def enrich_requirement_graph(
         )
         return
 
-    from ivy_lsp.analysis.requirement_graph import ActionNode
+    from ivy_lsp.core.analysis.requirement_graph import ActionNode
 
     for action_name in ir.actions:
         graph.add_action_if_absent(

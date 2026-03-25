@@ -14,8 +14,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
-from ivy_lsp.adapters.protocols import CompileError, CompileResult
-from ivy_lsp.semantic.snapshots import (
+from ivy_lsp.core.adapters.protocols import CompileError, CompileResult
+from ivy_lsp.core.semantic.snapshots import (
     ModuleSnapshot,
     SignatureSnapshot,
     SortInfo,
@@ -46,7 +46,7 @@ class CompilerSession:
 
     def __enter__(self) -> CompilerSession:
         """Enter the compiler session, saving and resetting compiler globals."""
-        from ivy_lsp.parsing.parser_session import ParserSession
+        from ivy_lsp.core.parsing.parser_session import ParserSession
 
         self._parser_session = ParserSession(timeout=self._timeout)
         self._parser_session.__enter__()
