@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from lsprotocol import types as lsp
 
 from ivy_lsp.analysis.test_scope import ScopedRequirementModel
-from ivy_lsp.structured_logging import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.observability import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.utils import uri_to_path
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,21 @@ class DiagnosticCache:
         """Remove cached entry for *uri*."""
         with self._lock:
             self._entries.pop(uri, None)
+
+    def bump_result_id(self, uri: str) -> Optional[str]:
+        """Bump the result_id for *uri* without changing diagnostics.
+
+        Used to signal pull-mode clients that they should re-request,
+        e.g., after background semantic analysis completes.
+        """
+        import time as _t
+
+        with self._lock:
+            e = self._entries.get(uri)
+            if e is None:
+                return None
+            e.result_id = f"{e.source_hash}-{int(_t.time() * 1000)}"
+            return e.result_id
 
     def all_uris(self) -> List[str]:
         """Return all cached URIs."""
@@ -868,7 +883,13 @@ def register(server) -> None:
                 if enclosing is not None:
                     deep_filepath = _resolve_via_staging(server, enclosing)
                 elif not _EXPORT_RE.search(source):
-                    # Module file without test scope — can't compile standalone
+                    # Module file without test scope — can't compile standalone.
+                    # Still trigger a diagnostic refresh so pull clients re-request
+                    # (previous fast diagnostics may have cached a stale result_id).
+                    try:
+                        server.workspace_diagnostic_refresh(None)
+                    except Exception:
+                        pass
                     return
                 else:
                     deep_filepath = _resolve_via_staging(server, filepath)

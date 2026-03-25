@@ -10,7 +10,16 @@ import logging
 import os
 import signal
 import sys
+import threading
+import time
 from typing import Any
+
+from ivy_lsp.observability import (
+    LogCategory,
+    call_context,
+    enable_package_instrumentation,
+    log_phase,
+)
 
 
 def _fixed_params_hook(obj: dict, cls: type) -> Any:
@@ -57,29 +66,63 @@ def _parse_mcp_port() -> int:
     return 0  # use default (19847)
 
 
-def _setup_log_rotation() -> None:
+def _setup_log_rotation() -> str:
     """Add a rotating file handler for MCP/LSP server logs.
 
-    Writes to ``/tmp/ivy-lsp.log`` with 5 MB rotation and 2 backups,
-    preventing unbounded log growth (previously 18 MB+ per day).
+    Writes to the session log directory when available, falling back to
+    ``/tmp/ivy-lsp.log``.  Returns the resolved log path.
+
+    Env vars:
+      - ``IVY_LSP_LOG_FILE``: log path (overrides session-aware resolution)
+      - ``IVY_LSP_LOG_MAX_BYTES``: max bytes per file (default 10 MB)
+      - ``IVY_LSP_LOG_BACKUP_COUNT``: rotated backup count (default 3)
     """
     from logging.handlers import RotatingFileHandler
 
-    log_path = os.environ.get("IVY_LSP_LOG_FILE", "/tmp/ivy-lsp.log")
+    log_path = os.environ.get("IVY_LSP_LOG_FILE", "")
+    if not log_path:
+        try:
+            from ivy_lsp.observability.session import (
+                get_session_id,
+                resolve_session_log_dir,
+            )
+
+            session_dir = resolve_session_log_dir(get_session_id())
+            session_dir.mkdir(parents=True, exist_ok=True)
+            log_path = str(session_dir / "ivy-lsp.log")
+        except Exception:
+            log_path = "/tmp/ivy-lsp.log"
+    try:
+        max_bytes = int(os.environ.get("IVY_LSP_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+    except (ValueError, TypeError):
+        max_bytes = 10 * 1024 * 1024
+    try:
+        backup_count = int(os.environ.get("IVY_LSP_LOG_BACKUP_COUNT", "3"))
+    except (ValueError, TypeError):
+        backup_count = 3
     handler = RotatingFileHandler(
         log_path,
-        maxBytes=5 * 1024 * 1024,  # 5 MB
-        backupCount=2,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
         encoding="utf-8",
     )
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(name)s %(levelname)s: %(message)s")
     )
     logging.getLogger().addHandler(handler)
+    return log_path
 
 
 def main():
     """Start the Ivy Language Server in LSP, MCP, or unified mode."""
+    startup_t0 = time.perf_counter()
+    startup_call_id = f"startup-{os.getpid()}"
+    with call_context(startup_call_id):
+        _main_impl(startup_t0)
+
+
+def _main_impl(startup_t0: float) -> None:
+    """Internal startup implementation with correlation context attached."""
     log_level = os.environ.get("IVY_LSP_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         stream=sys.stderr,
@@ -106,10 +149,31 @@ def main():
     log = logging.getLogger("ivy_lsp")
 
     # Add rotating file handler to prevent unbounded log growth
-    _setup_log_rotation()
+    resolved_log_path = _setup_log_rotation()
+
+    # Demote stderr to WARNING since the rotating file is the primary log sink.
+    # Without this, every log line appears twice (stderr + file) when the MCP
+    # process's stderr is redirected to the same log destination.
+    for _h in logging.getLogger().handlers:
+        if (
+            isinstance(_h, logging.StreamHandler)
+            and not isinstance(_h, logging.FileHandler)
+            and getattr(_h, "stream", None) is sys.stderr
+        ):
+            _h.setLevel(logging.WARNING)
+            break
+
+    log_phase(
+        log,
+        category=LogCategory.MILESTONE,
+        phase="startup",
+        message="Rotating log configured",
+        data={"log_file": resolved_log_path},
+        level=logging.INFO,
+    )
 
     # Add dedup filter to suppress cascading duplicate messages
-    from ivy_lsp.utils.log_dedup_filter import DedupFilter
+    from ivy_lsp.observability import DedupFilter
 
     logging.getLogger().addFilter(DedupFilter())
 
@@ -118,7 +182,7 @@ def main():
 
     cfg = get_config()
     if cfg.debug_log:
-        from ivy_lsp.debug_trace import init_tracer
+        from ivy_lsp.observability import init_tracer
 
         ws_root = cfg.workspace or cfg.workspace_root or os.getcwd()
         tracer = init_tracer(
@@ -126,6 +190,50 @@ def main():
             log_path=cfg.debug_log_path,
         )
         log.info("Debug tracing enabled: %s", tracer.log_path)
+
+    try:
+        from ivy_lsp.observability import (
+            get_session_logger,
+            install_session_jsonl_handler,
+        )
+
+        install_session_jsonl_handler()
+        session_logger = get_session_logger()
+        log_phase(
+            log,
+            category=LogCategory.MILESTONE,
+            phase="startup",
+            message="Observability paths ready",
+            data={
+                "events_file": str(session_logger.events_file),
+                "debug_log_enabled": cfg.debug_log,
+                "debug_log_path": cfg.debug_log_path,
+                "elapsed_ms": round((time.perf_counter() - startup_t0) * 1000, 2),
+            },
+            level=logging.INFO,
+        )
+    except Exception:
+        log.debug("Session logger initialization skipped", exc_info=True)
+
+    if cfg.trace_all_functions:
+        summary = enable_package_instrumentation(
+            "ivy_lsp",
+            category=LogCategory.ACTIVITY,
+            phase="deep-trace",
+            channel="core",
+        )
+        log_phase(
+            log,
+            category=LogCategory.MILESTONE,
+            phase="startup",
+            message="Deep tracing enabled for ivy_lsp package",
+            data={
+                "trace_all_functions": True,
+                "modules_scanned": summary.get("modules", 0),
+                "wrapped_callables": summary.get("wrapped", 0),
+            },
+            level=logging.INFO,
+        )
 
     def _sigterm_handler(signum, frame):
         log.warning(
@@ -137,6 +245,30 @@ def main():
         sys.exit(128 + signum)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Parent-process watchdog: detect when Claude Code (our parent) dies.
+    # On macOS/Linux, an orphaned process is reparented to PID 1 (launchd/init).
+    # When this happens, the stdio pipes are broken and the server is useless.
+    _parent_pid = os.getppid()
+
+    def _parent_watchdog():
+        import time
+
+        while True:
+            time.sleep(5)
+            current_ppid = os.getppid()
+            if current_ppid != _parent_pid:
+                log.warning(
+                    "[ORPHAN] Parent PID changed %d -> %d (parent died). "
+                    "Shutting down.",
+                    _parent_pid,
+                    current_ppid,
+                )
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    _watchdog = threading.Thread(target=_parent_watchdog, daemon=True)
+    _watchdog.start()
 
     if "--mcp" in sys.argv:
         # Standalone MCP server mode (backward compat): stdio transport

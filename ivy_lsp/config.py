@@ -41,6 +41,20 @@ def _csv_env(name: str) -> List[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _dict_env(name: str) -> dict[str, str]:
+    """Parse ``KEY=VAL,KEY=VAL`` env var into a dict."""
+    raw = os.environ.get(name, "")
+    result: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if k:
+                result[k] = v
+    return result
+
+
 @dataclass(frozen=True)
 class ServerConfig:
     """Immutable configuration read from ``IVY_LSP_*`` environment variables.
@@ -66,7 +80,7 @@ class ServerConfig:
     bulk_compile: bool = True
 
     # Worker / concurrency
-    compile_workers: int = 1
+    compile_workers: int = 2
     compile_timeout: float = 300.0
     compile_cache_ttl: float = 600.0
     max_concurrent_tools: int = 4
@@ -91,13 +105,23 @@ class ServerConfig:
     max_raw_output_length: int = 2000
     max_result_chars: int = 8000
 
+    # MCP bridge per-request timeout (seconds)
+    bridge_timeout: float = 120.0
+
     # Debug tracing
     debug_log: bool = False
     debug_log_path: str | None = None
+    trace_all_functions: bool = False
+
+    # Parsing tier override (0 = auto, 1/2/3 = force specific tier)
+    force_tier: int = 0
 
     # Session observability
     observability_enabled: bool = False
     observability_dir: str | None = None
+
+    # Per-subsystem log level overrides (e.g. {"parsing": "DEBUG", "mcp": "WARNING"})
+    subsystem_levels: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> ServerConfig:
@@ -117,7 +141,7 @@ class ServerConfig:
             bulk_analysis=_bool_env("IVY_LSP_BULK_ANALYSIS"),
             bulk_analysis_t2=_bool_env("IVY_LSP_BULK_ANALYSIS_T2"),
             bulk_compile=_bool_env("IVY_LSP_BULK_COMPILE"),
-            compile_workers=max(1, _int_env("IVY_LSP_COMPILE_WORKERS", 1)),
+            compile_workers=max(1, _int_env("IVY_LSP_COMPILE_WORKERS", 2)),
             compile_timeout=_float_env("IVY_LSP_COMPILE_TIMEOUT", 300.0),
             compile_cache_ttl=_float_env("IVY_LSP_COMPILE_CACHE_TTL", 600.0),
             max_concurrent_tools=max(1, _int_env("IVY_LSP_MAX_CONCURRENT_TOOLS", 4)),
@@ -147,8 +171,12 @@ class ServerConfig:
             max_result_chars=_int_env("IVY_LSP_MAX_RESULT_CHARS", 8000),
             debug_log=debug_log,
             debug_log_path=os.environ.get("IVY_LSP_DEBUG_LOG_PATH"),
+            bridge_timeout=_float_env("IVY_LSP_BRIDGE_TIMEOUT", 120.0, floor=10.0),
+            trace_all_functions=_bool_env("IVY_LSP_TRACE_ALL_FUNCTIONS", "0"),
+            force_tier=_int_env("IVY_LSP_FORCE_TIER", 0),
             observability_enabled=observability_enabled,
             observability_dir=os.environ.get("IVY_OBSERVABILITY_DIR"),
+            subsystem_levels=_dict_env("IVY_LSP_SUBSYSTEM_LEVELS"),
         )
 
 

@@ -20,6 +20,8 @@ import threading
 import time as _time
 from typing import Any
 
+from ivy_lsp.observability import LogCategory, log_phase, timed_phase
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MCP_PORT = 19847
@@ -53,6 +55,8 @@ def _write_port_file(root: str, port: int) -> str:
     try:
         with open(path, "w") as f:
             f.write(str(port))
+            f.flush()
+            os.fsync(f.fileno())
         logger.info("MCP port file written: %s (port=%d)", path, port)
     except OSError as exc:
         logger.warning("Failed to write MCP port file %s: %s", path, exc)
@@ -126,51 +130,90 @@ def start_mcp_http_thread(
     """
     from ivy_lsp.mcp_server import ToolContext, create_mcp_app
 
-    ctx = ToolContext.from_lsp_server(lsp_server)
+    with timed_phase(
+        logger,
+        category=LogCategory.MILESTONE,
+        phase="mcp-sidecar",
+        name="start_mcp_http_thread",
+        channel="mcp",
+        payload={"requested_port": port},
+    ):
+        ctx = ToolContext.from_lsp_server(lsp_server)
 
-    # Fallback: indexer not initialized yet, use env var from start-ivy-server.sh
-    if not ctx.root:
-        ctx.root = os.environ.get("IVY_WORKSPACE_ROOT", os.getcwd())
-        logger.info("Sidecar using workspace root from env: %s", ctx.root)
+        # Fallback: indexer not initialized yet, use env var from start-ivy-server.sh
+        if not ctx.root:
+            ctx.root = os.environ.get("IVY_WORKSPACE_ROOT", os.getcwd())
+            logger.info("Sidecar using workspace root from env: %s", ctx.root)
 
-    if port <= 0:
-        port = _DEFAULT_MCP_PORT
+        if port <= 0:
+            port = _DEFAULT_MCP_PORT
 
-    actual_port = _find_available_port(port)
+        actual_port = _find_available_port(port)
 
-    mcp_app = create_mcp_app(ctx)
-    port_file_path = _write_port_file(ctx.root, actual_port)
+        mcp_app = create_mcp_app(ctx)
 
-    def _run_sidecar():
-        """Entry point for the daemon thread — runs its own event loop."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(
-                _serve_mcp_http(mcp_app, actual_port, ctx.root, ctx=ctx)
+        # Readiness barrier: port file is written only after uvicorn binds,
+        # preventing health-check race conditions.
+        ready_event = threading.Event()
+
+        def _run_sidecar():
+            """Entry point for the daemon thread — runs its own event loop."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    _serve_mcp_http(
+                        mcp_app,
+                        actual_port,
+                        ctx.root,
+                        ctx=ctx,
+                        ready_event=ready_event,
+                    )
+                )
+            except Exception:
+                logger.error("MCP HTTP sidecar crashed", exc_info=True)
+            finally:
+                ready_event.set()  # unblock main thread even on crash
+                loop.close()
+
+        thread = threading.Thread(
+            target=_run_sidecar,
+            name="mcp-http-sidecar",
+            daemon=True,
+        )
+        thread.start()
+
+        # Wait for uvicorn to actually bind the port before writing the port file
+        if not ready_event.wait(timeout=10.0):
+            logger.warning(
+                "MCP sidecar did not become ready within 10s; "
+                "writing port file anyway"
             )
-        except Exception:
-            logger.error("MCP HTTP sidecar crashed", exc_info=True)
-        finally:
-            loop.close()
+        port_file_path = _write_port_file(ctx.root, actual_port)
 
-    thread = threading.Thread(
-        target=_run_sidecar,
-        name="mcp-http-sidecar",
-        daemon=True,
-    )
-    thread.start()
     logger.info(
         "MCP HTTP sidecar started on 127.0.0.1:%d (thread=%s, port_file=%s)",
         actual_port,
         thread.name,
         port_file_path,
     )
+    log_phase(
+        logger,
+        category=LogCategory.MILESTONE,
+        phase="mcp-sidecar",
+        message="MCP sidecar thread started",
+        data={"port": actual_port, "workspace_root": ctx.root},
+        level=logging.INFO,
+    )
     return thread, actual_port
 
 
 async def _serve_mcp_http(
-    mcp_app: Any, port: int, workspace_root: str, ctx: Any = None
+    mcp_app: Any,
+    port: int,
+    workspace_root: str,
+    ctx: Any = None,
+    ready_event: threading.Event | None = None,
 ) -> None:
     """Run the FastMCP app via uvicorn's Streamable HTTP transport."""
     try:
@@ -240,5 +283,23 @@ async def _serve_mcp_http(
         access_log=False,
     )
     server = uvicorn.Server(config)
+
+    async def _signal_ready() -> None:
+        """Poll uvicorn until it starts, then signal the readiness event."""
+        while not server.started:
+            await asyncio.sleep(0.05)
+        if ready_event is not None:
+            ready_event.set()
+
+    asyncio.create_task(_signal_ready())
+
     logger.info("[MCP-HTTP-READY] Serving on http://127.0.0.1:%d/mcp", port)
+    log_phase(
+        logger,
+        category=LogCategory.MILESTONE,
+        phase="mcp-sidecar",
+        message="MCP HTTP ready",
+        data={"port": port, "workspace_root": workspace_root},
+        level=logging.INFO,
+    )
     await server.serve()

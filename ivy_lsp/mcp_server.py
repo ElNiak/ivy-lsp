@@ -23,6 +23,7 @@ from typing import Any, Callable
 # tool handlers were moved to ``ivy_lsp.tools.*``.
 from ivy_lsp import sidecar_client
 from ivy_lsp.config import get_config
+from ivy_lsp.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.verification import run_ivy_compile as shared_ivy_compile
 from ivy_lsp.verification import run_ivy_show as shared_ivy_show
@@ -89,6 +90,7 @@ class ToolContext:
     # Callable helpers — assigned after construction inside start_mcp()
     find_ivy_files: Callable[..., list[str]] = field(default=lambda: [])
     get_model: Callable[..., Any] = field(default=lambda: None)
+    get_model_or_none: Callable[..., Any] = field(default=lambda: None)
     get_model_status: Callable[..., dict] = field(
         default=lambda: {"state": "not_built"}
     )
@@ -395,15 +397,31 @@ def start_mcp(
             instance without starting the server.
         ws_config: Optional workspace configuration object.
     """
-    try:
-        import mcp.server.fastmcp  # noqa: F401 — validate dependency
-    except ImportError:
-        raise ImportError(
-            "MCP mode requires the 'mcp' package. "
-            "Install with: pip install ivy-lsp[mcp]"
-        )
+    with timed_phase(
+        logger,
+        category=LogCategory.MILESTONE,
+        phase="mcp",
+        name="start_mcp",
+        channel="mcp",
+        payload={"workspace_root": workspace_root, "docker_image": docker_image},
+    ):
+        try:
+            import mcp.server.fastmcp  # noqa: F401 — validate dependency
+        except ImportError:
+            raise ImportError(
+                "MCP mode requires the 'mcp' package. "
+                "Install with: pip install ivy-lsp[mcp]"
+            )
 
-    root = workspace_root or os.getcwd()
+        root = workspace_root or os.getcwd()
+        log_phase(
+            logger,
+            category=LogCategory.MILESTONE,
+            phase="mcp",
+            message="MCP startup initialized",
+            data={"root": root, "return_app": _return_app},
+            level=logging.INFO,
+        )
 
     # --- Workspace scoping: respect include/exclude paths from detection ---
     if ws_config is not None:
@@ -631,6 +649,26 @@ def start_mcp(
                 "retry_in_seconds": round(remaining),
             }
         return {"state": "not_built"}
+
+    async def _get_model_or_none(timeout: float = 5.0):
+        """Return the model if ready, or wait briefly if building. Never blocks long.
+
+        Unlike _get_model(), this will NOT trigger a full build. If the model
+        hasn't started building yet, it kicks off a background build and returns
+        None immediately. If it's currently building, waits up to *timeout*
+        seconds for it to finish.
+        """
+        if semantic_model is not None:
+            return semantic_model
+        if not _model_building:
+            # Kick off background build, but don't wait for it
+            asyncio.ensure_future(_get_model())
+            return None
+        # Model is currently building — wait briefly
+        deadline = time.monotonic() + timeout
+        while _model_building and time.monotonic() < deadline:
+            await asyncio.sleep(0.5)
+        return semantic_model  # may still be None
 
     def _write_model_to_index(model):
         """Write a SemanticModel to .ivy-index/ per-protocol directories.
@@ -1112,6 +1150,7 @@ def start_mcp(
     # Wire up callables that close over start_mcp's local state
     ctx.find_ivy_files = _find_ivy_files_cached
     ctx.get_model = _get_model
+    ctx.get_model_or_none = _get_model_or_none
     ctx.get_model_status = _get_model_status
     ctx.get_req_graph = _get_req_graph
     ctx.make_viz_server_proxy = _make_viz_server_proxy

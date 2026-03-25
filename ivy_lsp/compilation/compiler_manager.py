@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from ivy_lsp.compilation.ir import CompiledModuleIR
+from ivy_lsp.observability import LogCategory, log_phase
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,14 @@ class CompilerManager:
 
         cached = self._get_cached_by_hash(filepath, content_hash)
         if cached is not None:
+            log_phase(
+                logger,
+                category=LogCategory.PERFORMANCE,
+                phase="compile",
+                message="Compiler cache hit",
+                data={"filepath": filepath},
+                level=logging.DEBUG,
+            )
             callback(cached)
             return
 
@@ -74,9 +83,46 @@ class CompilerManager:
                 args=(source, filepath, child_conn, self._staging_dir),
                 daemon=True,
             )
+            log_phase(
+                logger,
+                category=LogCategory.ACTIVITY,
+                phase="compile",
+                message="Compilation process prepared",
+                data={"filepath": filepath, "staging_dir": self._staging_dir},
+                level=logging.DEBUG,
+            )
 
             def _wait():
-                self._semaphore.acquire()
+                wait_start = time.monotonic()
+                acquired = self._semaphore.acquire(timeout=60.0)
+                queue_wait_ms = (time.monotonic() - wait_start) * 1000
+                if not acquired:
+                    log_phase(
+                        logger,
+                        category=LogCategory.DIAGNOSTIC,
+                        phase="compile",
+                        message="Compiler semaphore timeout",
+                        data={"filepath": filepath, "wait_ms": round(queue_wait_ms, 2)},
+                        level=logging.WARNING,
+                    )
+                    with self._lock:
+                        self._active.pop(filepath, None)
+                    callback(
+                        CompiledModuleIR.empty(
+                            filepath,
+                            errors=["Compilation queue timeout after 60s"],
+                            duration=60.0,
+                        )
+                    )
+                    return
+                log_phase(
+                    logger,
+                    category=LogCategory.PERFORMANCE,
+                    phase="compile",
+                    message="Compiler semaphore acquired",
+                    data={"filepath": filepath, "wait_ms": round(queue_wait_ms, 2)},
+                    level=logging.DEBUG,
+                )
                 try:
                     try:
                         proc.start()
@@ -125,6 +171,14 @@ class CompilerManager:
                                 duration=self._timeout,
                             )
                         self._put_cache(filepath, content_hash, ir)
+                        log_phase(
+                            logger,
+                            category=LogCategory.PERFORMANCE,
+                            phase="compile",
+                            message="Compilation completed",
+                            data={"filepath": filepath, "success": ir.success},
+                            level=logging.INFO,
+                        )
                         callback(ir)
                     else:
                         proc.kill()
@@ -143,6 +197,14 @@ class CompilerManager:
                             filepath,
                             errors=[f"Compilation timed out after {self._timeout}s"],
                             duration=self._timeout,
+                        )
+                        log_phase(
+                            logger,
+                            category=LogCategory.DIAGNOSTIC,
+                            phase="compile",
+                            message="Compilation timed out",
+                            data={"filepath": filepath, "timeout_s": self._timeout},
+                            level=logging.WARNING,
                         )
                         callback(ir)
                 except Exception as exc:

@@ -10,7 +10,7 @@ import shutil
 import time
 from typing import Any
 
-from ivy_lsp.debug_trace import ToolTraceContext, trace_tool
+from ivy_lsp.observability import ToolTraceContext, trace_tool
 from ivy_lsp.tools import error_response, safe_tool
 from ivy_lsp.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.utils.validation import validate_ivy_param as _validate_ivy_param
@@ -729,12 +729,26 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         # 3. Semantic diagnostics (orphaned RFC tags, untagged assertions)
         if layers is None or "semantic" in layers:
             try:
-                # Check model status first to avoid blocking
+                # Check model status — avoid blocking on first-time build
                 _model_status = ctx.get_model_status()
-                if _model_status.get("state") not in ("ready", "not_built"):
-                    model = None
+                if _model_status.get("state") == "ready":
+                    model = await ctx.get_model()  # instant — already built
+                elif hasattr(ctx, "get_model_or_none") and callable(
+                    ctx.get_model_or_none
+                ):
+                    model = await ctx.get_model_or_none(timeout=5.0)
                 else:
-                    model = await ctx.get_model()
+                    model = None
+                if model is None and _model_status.get("state") != "ready":
+                    layer_errors.append(
+                        {
+                            "layer": "semantic",
+                            "error": (
+                                f"Model {_model_status.get('state', 'unavailable')} "
+                                "(building in background; retry in 30s for full results)"
+                            ),
+                        }
+                    )
                 if model is not None:
                     from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
                     from ivy_lsp.semantic.rfc_annotations import is_tag_covered

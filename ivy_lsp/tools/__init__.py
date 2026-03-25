@@ -337,7 +337,7 @@ def safe_tool(fn):
 
         # --- Original local handling below (unchanged) ---
         from ivy_lsp.config import get_config
-        from ivy_lsp.session_observability import get_session_logger
+        from ivy_lsp.observability import get_session_logger
 
         tool_name = fn.__name__
         timeout = _get_effective_timeout(tool_name)
@@ -426,6 +426,24 @@ def safe_tool(fn):
                     "tool": tool_name,
                 }
             )
+        except RuntimeError as exc:
+            # Defensive catch for anyio cancel-scope mismatches (mcp SDK bug).
+            # Return a graceful error instead of crashing the MCP server.
+            if "cancel scope" in str(exc).lower():
+                metrics.error_count += 1
+                logger.warning(
+                    "MCP cancel scope error in %s (anyio bug): %s",
+                    tool_name,
+                    exc,
+                )
+                return format_error(
+                    {
+                        "success": False,
+                        "message": f"Internal concurrency error in {tool_name}. Please retry.",
+                        "tool": tool_name,
+                    }
+                )
+            raise  # re-raise non-cancel-scope RuntimeErrors
         except Exception as exc:
             metrics.error_count += 1
             logger.error(
