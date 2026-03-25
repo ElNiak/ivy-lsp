@@ -6,19 +6,79 @@ compatible with panther-ivy-plugin hooks.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# --- Session file cache (keyed by workspace root) ---
+_session_cache: dict[str, tuple[float, str]] = (
+    {}
+)  # ws_root -> (monotonic_time, session_id)
+_SESSION_CACHE_TTL = 5.0  # seconds
 
-def get_session_id() -> str:
-    """Return the active session identifier, or ``unknown`` when missing."""
-    session_id = os.environ.get("IVY_SESSION_ID", "").strip()
-    return session_id or "unknown"
+
+def _workspace_hash(workspace_root: str) -> str:
+    """12-char SHA-256 hex hash matching the shell convention."""
+    return hashlib.sha256(workspace_root.encode()).hexdigest()[:12]
+
+
+def _read_session_file(
+    workspace_root: str,
+    *,
+    session_dir: str = "/tmp",
+) -> str | None:
+    """Read session ID from the file written by the SessionStart hook.
+
+    Returns None if the file is missing, empty, or unreadable.
+    Results are cached per workspace root for _SESSION_CACHE_TTL seconds.
+    """
+    now = time.monotonic()
+    cached = _session_cache.get(workspace_root)
+    if cached and (now - cached[0]) < _SESSION_CACHE_TTL:
+        return cached[1]
+
+    ws_hash = _workspace_hash(workspace_root)
+    path = Path(session_dir) / f"ivy-session-{ws_hash}.id"
+    try:
+        value = path.read_text().strip()
+    except OSError:
+        return None
+    if value:
+        _session_cache[workspace_root] = (now, value)
+        return value
+    return None
+
+
+def reset_session_cache() -> None:
+    """Clear the session file cache (for tests)."""
+    _session_cache.clear()
+
+
+def get_session_id(*, session_dir: str = "/tmp") -> str:
+    """Return the active session identifier, or ``unknown`` when missing.
+
+    Resolution order:
+      1. ``IVY_SESSION_ID`` environment variable (explicit override)
+      2. ``/tmp/ivy-session-<ws_hash>.id`` file (written by SessionStart hook)
+      3. ``"unknown"`` fallback
+    """
+    from_env = os.environ.get("IVY_SESSION_ID", "").strip()
+    if from_env:
+        return from_env
+
+    ws_root = os.environ.get("IVY_WORKSPACE_ROOT", "").strip() or os.getcwd()
+    from_file = _read_session_file(ws_root, session_dir=session_dir)
+    if from_file:
+        return from_file
+
+    return "unknown"
 
 
 def resolve_session_log_dir(
@@ -130,14 +190,59 @@ class SessionEventLogger:
 _logger: SessionEventLogger | None = None
 _logger_key: _LoggerKey | None = None
 _logger_lock = threading.Lock()
+_jsonl_handler: logging.Handler | None = None
 
 
-def get_session_logger() -> SessionEventLogger:
+class SessionJsonLogHandler(logging.Handler):
+    """Logging handler that mirrors Python log records into session JSONL."""
+
+    def emit(self, record: logging.LogRecord) -> None:  # noqa: D102
+        try:
+            logger = get_session_logger()
+            payload = {
+                "logger": record.name,
+                "level": record.levelname,
+            }
+            if hasattr(record, "module"):
+                payload["module"] = record.module
+            if hasattr(record, "funcName"):
+                payload["function"] = record.funcName
+            if hasattr(record, "lineno"):
+                payload["line"] = record.lineno
+
+            logger.log_event(
+                channel="python-log",
+                event_type="log",
+                name=record.name,
+                status=record.levelname.lower(),
+                payload={
+                    **payload,
+                    "message": record.getMessage(),
+                },
+            )
+        except Exception:
+            # Never propagate logging failures.
+            return
+
+
+def install_session_jsonl_handler() -> None:
+    """Install a singleton root logging handler for session JSONL mirroring."""
+    global _jsonl_handler
+    root = logging.getLogger()
+    with _logger_lock:
+        if _jsonl_handler is not None:
+            return
+        handler = SessionJsonLogHandler(level=logging.DEBUG)
+        root.addHandler(handler)
+        _jsonl_handler = handler
+
+
+def get_session_logger(*, session_dir: str = "/tmp") -> SessionEventLogger:
     """Return a session logger keyed by current config/session state."""
     from ivy_lsp.config import get_config
 
     cfg = get_config()
-    session_id = get_session_id()
+    session_id = get_session_id(session_dir=session_dir)
     key = _LoggerKey(
         session_id=session_id,
         enabled=cfg.observability_enabled,
@@ -168,3 +273,4 @@ def reset_session_logger() -> None:
     with _logger_lock:
         _logger = None
         _logger_key = None
+        reset_session_cache()
