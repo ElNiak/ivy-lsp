@@ -23,7 +23,6 @@ from ivy_lsp.infra.observability.core import (
 from ivy_lsp.infra.observability.handlers import (
     DebugTracer,
     DedupFilter,
-    LspLogHandler,
     ToolTraceContext,
     get_tracer,
     init_tracer,
@@ -62,7 +61,6 @@ __all__ = [
     # handlers
     "DebugTracer",
     "DedupFilter",
-    "LspLogHandler",
     "ToolTraceContext",
     "get_tracer",
     "init_tracer",

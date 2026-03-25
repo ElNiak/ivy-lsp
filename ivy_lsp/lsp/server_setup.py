@@ -16,11 +16,11 @@ from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import (
     LogCategory,
     LogEvent,
-    LspLogHandler,
     StructuredLogAdapter,
     timed_phase,
 )
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.lsp.lsp_log_handler import LspLogHandler
 
 if TYPE_CHECKING:
     from ivy_lsp.core.indexer.include_resolver import IncludeResolver
