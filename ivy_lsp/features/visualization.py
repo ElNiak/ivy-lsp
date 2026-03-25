@@ -642,7 +642,6 @@ def handle_coverage_gaps(server: IvyServerProtocol, params: dict) -> dict:
         try:
             from ivy_lsp.analysis.pattern_library import (
                 PatternCrossReferencer,
-                PatternKind,
                 analyze_protocol,
             )
 

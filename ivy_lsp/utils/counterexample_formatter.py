@@ -7,7 +7,7 @@ a readable state trace with step-by-step variable changes.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Union
 
 
 def format_counterexample(cex: Union[Mapping[str, Any], None]) -> str:
