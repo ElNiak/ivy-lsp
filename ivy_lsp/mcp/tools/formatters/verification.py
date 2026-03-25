@@ -6,7 +6,7 @@ ivy_verification_dashboard.
 
 from __future__ import annotations
 
-from ivy_lsp.mcp.tools.formatters._primitives import (
+from ivy_lsp.mcp.tools.formatters.primitives import (
     _bullet_list,
     _code_block,
     _diag_line,

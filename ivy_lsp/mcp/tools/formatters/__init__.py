@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from ivy_lsp.mcp.tools.formatters._primitives import _code_block
+from ivy_lsp.mcp.tools.formatters.primitives import _code_block
 from ivy_lsp.mcp.tools.formatters.traceability import (
     _format_ivy_coverage,
     _format_ivy_extract_requirements,

@@ -6,7 +6,7 @@ ivy_manifest (info/validate/staleness/refresh).
 
 from __future__ import annotations
 
-from ivy_lsp.mcp.tools.formatters._primitives import (
+from ivy_lsp.mcp.tools.formatters.primitives import (
     _badge,
     _bullet_list,
     _code_block,
@@ -271,7 +271,7 @@ def _format_extract_manifest(data: dict) -> str:
 
 def _format_ivy_manifest(data: dict) -> str:
     """Dispatcher by mode (detected from response shape)."""
-    from ivy_lsp.mcp.tools.formatters._primitives import _code_block
+    from ivy_lsp.mcp.tools.formatters.primitives import _code_block
 
     if "reports" in data:
         # staleness or refresh -- differentiate by report fields
