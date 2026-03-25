@@ -4,7 +4,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.semantic.model import SemanticModel
 from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
-from ivy_lsp.features.diagnostics import compute_semantic_diagnostics
+from ivy_lsp.lsp.diagnostics.publisher import compute_semantic_diagnostics
 
 
 class TestComputeSemanticDiagnostics:
@@ -100,7 +100,7 @@ class TestComputeDiagnosticsIntegration:
     """Verify compute_diagnostics accepts semantic_model param."""
 
     def test_accepts_semantic_model_kwarg(self):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
 
         # Should not raise even when semantic_model=None
         diags = compute_diagnostics(

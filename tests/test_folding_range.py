@@ -12,7 +12,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestFoldingRangeImport:
     def test_import(self):
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         assert compute_folding_ranges is not None
 
@@ -20,7 +20,7 @@ class TestFoldingRangeImport:
 class TestBraceBlockFolding:
     def test_single_brace_block(self):
         """Brace block spanning multiple lines produces a fold."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = "#lang ivy1.7\n" "\n" "object foo = {\n" "    type this\n" "}\n"
         ranges = compute_folding_ranges(source)
@@ -32,7 +32,7 @@ class TestBraceBlockFolding:
 
     def test_nested_brace_blocks(self):
         """Nested braces produce nested folds."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = (
             "#lang ivy1.7\n"
@@ -54,7 +54,7 @@ class TestBraceBlockFolding:
 
     def test_no_fold_for_single_line_brace(self):
         """Single-line brace block does not produce a fold."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = "#lang ivy1.7\ntype foo = { a, b, c }\n"
         ranges = compute_folding_ranges(source)
@@ -65,7 +65,7 @@ class TestBraceBlockFolding:
 class TestCommentFolding:
     def test_consecutive_comments(self):
         """Three or more consecutive comment lines produce a comment fold."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = (
             "#lang ivy1.7\n"
@@ -85,7 +85,7 @@ class TestCommentFolding:
 class TestIncludeFolding:
     def test_consecutive_includes(self):
         """Consecutive include directives produce an imports fold."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = (
             "#lang ivy1.7\n"
@@ -106,7 +106,7 @@ class TestIncludeFolding:
 class TestUnmatchedBraces:
     def test_unmatched_opening_brace(self):
         """Unclosed brace produces no fold."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = "#lang ivy1.7\nobject foo = {\n    type this\n"
         ranges = compute_folding_ranges(source)
@@ -115,7 +115,7 @@ class TestUnmatchedBraces:
 
     def test_unmatched_closing_brace(self):
         """Extra closing brace produces no fold."""
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         source = "#lang ivy1.7\n}\ntype cid\n"
         ranges = compute_folding_ranges(source)
@@ -125,6 +125,6 @@ class TestUnmatchedBraces:
 
 class TestEmptySource:
     def test_empty_string(self):
-        from ivy_lsp.features.folding_range import compute_folding_ranges
+        from ivy_lsp.lsp.ui.folding_range import compute_folding_ranges
 
         assert compute_folding_ranges("") == []

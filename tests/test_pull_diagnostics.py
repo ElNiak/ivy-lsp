@@ -18,7 +18,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.features.diagnostics import DiagnosticCache, register
+from ivy_lsp.lsp.diagnostics.publisher import DiagnosticCache, register
 
 # ---------------------------------------------------------------------------
 # Shared helpers

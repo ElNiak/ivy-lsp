@@ -14,7 +14,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
-from ivy_lsp.features.workspace_symbols import (
+from ivy_lsp.lsp.workspace_symbols import (
     FlatSymbol,
     compute_workspace_symbols,
     flatten_symbols,

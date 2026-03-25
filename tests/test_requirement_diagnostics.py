@@ -1,4 +1,4 @@
-"""Tests for requirement diagnostics (ivy_lsp.features.diagnostics)."""
+"""Tests for requirement diagnostics (ivy_lsp.lsp.diagnostics.publisher)."""
 
 import os
 import sys
@@ -19,7 +19,7 @@ from ivy_lsp.core.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.features.diagnostics import (
+from ivy_lsp.lsp.diagnostics.publisher import (
     compute_diagnostics,
     compute_requirement_diagnostics,
 )

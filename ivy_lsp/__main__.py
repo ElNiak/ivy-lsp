@@ -132,7 +132,7 @@ def _main_impl(startup_t0: float) -> None:
     # Subcommand dispatch: index, detect — lightweight CLI commands that
     # don't need log rotation, debug tracing, or SIGTERM handling.
     if len(sys.argv) > 1 and sys.argv[1] == "index":
-        from ivy_lsp.index_builder import cli_index
+        from ivy_lsp.lsp.index_builder import cli_index
 
         sys.exit(cli_index(sys.argv[2:]))
 
@@ -322,7 +322,7 @@ def _main_impl(startup_t0: float) -> None:
     else:
         # LSP server mode (default): stdio + optional MCP HTTP sidecar
         try:
-            from ivy_lsp.server import IvyLanguageServer
+            from ivy_lsp.lsp.server import IvyLanguageServer
 
             server = IvyLanguageServer()
             _patch_pygls_converter(server)

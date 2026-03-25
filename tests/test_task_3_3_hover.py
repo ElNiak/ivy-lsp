@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestHoverImport:
     def test_import(self):
-        from ivy_lsp.features.hover import format_hover_content, get_hover_info
+        from ivy_lsp.lsp.navigation.hover import format_hover_content, get_hover_info
 
         assert format_hover_content is not None
         assert get_hover_info is not None
@@ -33,7 +33,7 @@ class TestFormatHoverContent:
         )
 
     def test_type_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("cid", SymbolKind.Class)
         result = format_hover_content(sym)
@@ -41,7 +41,7 @@ class TestFormatHoverContent:
         assert "type cid" in result
 
     def test_enum_type_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("stream_kind", SymbolKind.Class, detail="enum: unidir, bidir")
         result = format_hover_content(sym)
@@ -50,7 +50,7 @@ class TestFormatHoverContent:
         assert "bidir" in result
 
     def test_action_symbol_with_signature(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym(
             "send", SymbolKind.Method, detail="(src:cid, dst:cid, pkt:pkt_num)"
@@ -60,14 +60,14 @@ class TestFormatHoverContent:
         assert "src:cid" in result
 
     def test_relation_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("connected", SymbolKind.Function, detail="relation")
         result = format_hover_content(sym)
         assert "relation connected" in result
 
     def test_object_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         child = self._sym("zero", SymbolKind.Variable)
         sym = self._sym("bit", SymbolKind.Module, children=[child])
@@ -75,35 +75,35 @@ class TestFormatHoverContent:
         assert "object bit" in result or "module bit" in result
 
     def test_property_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("reflexivity", SymbolKind.Property)
         result = format_hover_content(sym)
         assert "property reflexivity" in result or "axiom reflexivity" in result
 
     def test_namespace_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("iso_protocol", SymbolKind.Namespace)
         result = format_hover_content(sym)
         assert "isolate iso_protocol" in result
 
     def test_variable_symbol(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("aid", SymbolKind.Variable, detail="alias")
         result = format_hover_content(sym)
         assert "alias aid" in result
 
     def test_file_path_in_hover(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         sym = self._sym("cid", SymbolKind.Class, file_path="/ws/quic_types.ivy")
         result = format_hover_content(sym)
         assert "quic_types.ivy" in result
 
     def test_none_symbol_returns_none(self):
-        from ivy_lsp.features.hover import format_hover_content
+        from ivy_lsp.lsp.navigation.hover import format_hover_content
 
         result = format_hover_content(None)
         assert result is None
@@ -114,7 +114,7 @@ class TestGetHoverInfo:
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
         from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         parser = IvyParserWrapper()
@@ -132,7 +132,7 @@ class TestGetHoverInfo:
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
         from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()
@@ -149,7 +149,7 @@ class TestGetHoverInfo:
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
         from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()

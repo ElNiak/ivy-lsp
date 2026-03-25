@@ -1061,7 +1061,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_same_layer_ranks_higher_than_different_layer(self, tmp_path):
         """When two symbols share a name, the one in the same layer ranks first."""
-        from ivy_lsp.features.definition import _rank_by_scope
+        from ivy_lsp.lsp.navigation.definition import _rank_by_scope
 
         # Simulate two symbol results in different layers
         quic_file = str(tmp_path / "quic_stack" / "quic_types.ivy")
@@ -1099,7 +1099,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_scope_still_beats_layer_within_visible(self, tmp_path):
         """Within visible layers, in-scope results rank higher than same-layer out-of-scope."""
-        from ivy_lsp.features.definition import _rank_by_scope
+        from ivy_lsp.lsp.navigation.definition import _rank_by_scope
 
         # Both files are in visible layers (standard depends on nothing,
         # but we make apt depend on standard so both are visible from standard)
@@ -1136,7 +1136,7 @@ class TestDefinitionLayerAwareRanking:
 
     def test_no_resolver_falls_back(self, tmp_path):
         """Without a resolver, ranking falls through to default (4, 0) for all out-of-scope."""
-        from ivy_lsp.features.definition import _rank_by_scope
+        from ivy_lsp.lsp.navigation.definition import _rank_by_scope
 
         file_a = str(tmp_path / "a" / "types.ivy")
         file_b = str(tmp_path / "b" / "types.ivy")
@@ -1425,7 +1425,7 @@ class TestSharedRankByScope:
 
     def test_definition_delegation_still_works(self, tmp_path):
         """definition._rank_by_scope delegates to shared module."""
-        from ivy_lsp.features.definition import _rank_by_scope
+        from ivy_lsp.lsp.navigation.definition import _rank_by_scope
 
         file_a = str(tmp_path / "a" / "types.ivy")
         current_file = str(tmp_path / "a" / "frame.ivy")

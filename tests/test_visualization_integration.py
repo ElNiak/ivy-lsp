@@ -21,7 +21,7 @@ from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
     StateVarNode,
 )
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel  # noqa: E402
-from ivy_lsp.features.visualization import (  # noqa: E402
+from ivy_lsp.lsp.visualization import (  # noqa: E402
     handle_action_dependency_graph,
     handle_action_requirements,
     handle_coverage_gaps,

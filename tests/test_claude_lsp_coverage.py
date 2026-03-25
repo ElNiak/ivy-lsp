@@ -13,14 +13,14 @@ from pathlib import Path
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.features.call_hierarchy import (
+from ivy_lsp.lsp.navigation.call_hierarchy import (
     get_incoming_calls,
     get_outgoing_calls,
     prepare_call_hierarchy,
 )
-from ivy_lsp.features.definition import goto_definition
-from ivy_lsp.features.implementation import goto_implementation
-from ivy_lsp.features.references import find_references
+from ivy_lsp.lsp.navigation.definition import goto_definition
+from ivy_lsp.lsp.navigation.implementation import goto_implementation
+from ivy_lsp.lsp.navigation.references import find_references
 
 
 def _make_workspace(tmp_path: Path, files: dict[str, str]) -> str:
@@ -162,7 +162,7 @@ class TestHover:
     @pytest.mark.unit
     @pytest.mark.lsp
     def test_action_hover(self, tmp_path):
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         ws = _make_workspace(tmp_path, WORKSPACE_FILES)
         indexer = _index(ws)
@@ -176,7 +176,7 @@ class TestHover:
     @pytest.mark.unit
     @pytest.mark.lsp
     def test_type_hover(self, tmp_path):
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         ws = _make_workspace(tmp_path, WORKSPACE_FILES)
         indexer = _index(ws)
@@ -196,7 +196,7 @@ class TestDocumentSymbol:
     @pytest.mark.unit
     @pytest.mark.lsp
     def test_returns_symbols(self, tmp_path):
-        from ivy_lsp.features.document_symbols import get_document_symbols
+        from ivy_lsp.lsp.document_symbols import get_document_symbols
 
         ws = _make_workspace(tmp_path, WORKSPACE_FILES)
         indexer = _index(ws)
@@ -212,7 +212,7 @@ class TestDocumentSymbol:
     @pytest.mark.unit
     @pytest.mark.lsp
     def test_empty_file(self, tmp_path):
-        from ivy_lsp.features.document_symbols import get_document_symbols
+        from ivy_lsp.lsp.document_symbols import get_document_symbols
 
         ws = _make_workspace(tmp_path, {"empty.ivy": "#lang ivy1.7\n"})
         indexer = _index(ws)

@@ -112,7 +112,7 @@ class TestBulkCompilationViaPipeline:
         server.work_done_progress = MagicMock()
 
         # Bind the actual server methods
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server._start_bulk_compilation_via_pipeline = types.MethodType(
             IvyLanguageServer._start_bulk_compilation_via_pipeline, server

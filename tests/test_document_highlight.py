@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestDocumentHighlightImport:
     def test_import(self):
-        from ivy_lsp.features.document_highlight import compute_document_highlights
+        from ivy_lsp.lsp.document_highlight import compute_document_highlights
 
         assert compute_document_highlights is not None
 
@@ -21,7 +21,7 @@ class TestDocumentHighlightImport:
 class TestBasicHighlight:
     def test_highlights_all_occurrences(self):
         """All occurrences of the word under cursor are highlighted."""
-        from ivy_lsp.features.document_highlight import compute_document_highlights
+        from ivy_lsp.lsp.document_highlight import compute_document_highlights
 
         source = (
             "#lang ivy1.7\n" "type cid\n" "relation r(X:cid)\n" "action send(dst:cid)\n"
@@ -34,7 +34,7 @@ class TestBasicHighlight:
 
     def test_no_match_returns_empty(self):
         """Cursor on whitespace returns empty list."""
-        from ivy_lsp.features.document_highlight import compute_document_highlights
+        from ivy_lsp.lsp.document_highlight import compute_document_highlights
 
         lines = ["#lang ivy1.7", "", "type cid"]
         highlights = compute_document_highlights(lines, Position(line=1, character=0))
@@ -45,7 +45,7 @@ class TestBasicHighlight:
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
         from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.features.document_highlight import compute_document_highlights
+        from ivy_lsp.lsp.document_highlight import compute_document_highlights
 
         source = "#lang ivy1.7\ntype cid\nrelation r(X:cid)\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -68,12 +68,12 @@ class TestBasicHighlight:
 
 class TestEdgeCases:
     def test_cursor_out_of_bounds(self):
-        from ivy_lsp.features.document_highlight import compute_document_highlights
+        from ivy_lsp.lsp.document_highlight import compute_document_highlights
 
         lines = ["#lang ivy1.7", "type cid"]
         assert compute_document_highlights(lines, Position(line=99, character=0)) == []
 
     def test_empty_source(self):
-        from ivy_lsp.features.document_highlight import compute_document_highlights
+        from ivy_lsp.lsp.document_highlight import compute_document_highlights
 
         assert compute_document_highlights([], Position(line=0, character=0)) == []

@@ -10,7 +10,7 @@ import pytest
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.parsing.symbols import IvySymbol
-from ivy_lsp.features.workspace_symbols import (
+from ivy_lsp.lsp.workspace_symbols import (
     MAX_RESULTS,
     FlatSymbol,
     compute_workspace_symbols,
@@ -134,7 +134,7 @@ class TestSearchSymbols:
 
     def test_result_limit(self):
         """Results are capped at _SEARCH_INTERNAL_LIMIT, not MAX_RESULTS."""
-        from ivy_lsp.features.workspace_symbols import _SEARCH_INTERNAL_LIMIT
+        from ivy_lsp.lsp.workspace_symbols import _SEARCH_INTERNAL_LIMIT
 
         flat = [self._make_flat(f"sym_{i}") for i in range(1500)]
         result = search_symbols(flat, "sym")
@@ -395,6 +395,6 @@ class TestRegister:
 
     def test_register_importable(self):
         """The register function can be imported from the module."""
-        from ivy_lsp.features.workspace_symbols import register
+        from ivy_lsp.lsp.workspace_symbols import register
 
         assert callable(register)

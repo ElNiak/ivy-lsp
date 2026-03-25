@@ -19,7 +19,7 @@ from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
 )
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel  # noqa: E402
 from ivy_lsp.core.semantic.nodes import RfcRequirement  # noqa: E402
-from ivy_lsp.features.visualization import (  # noqa: E402
+from ivy_lsp.lsp.visualization import (  # noqa: E402
     _get_requirement_graph,
     _resolve_scope,
     _serialize_requirement,

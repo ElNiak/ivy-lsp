@@ -1,4 +1,4 @@
-"""Tests for code lens feature (ivy_lsp.features.code_lens)."""
+"""Tests for code lens feature (ivy_lsp.lsp.ui.code_lens)."""
 
 import os
 import sys
@@ -19,7 +19,7 @@ from ivy_lsp.core.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.features.code_lens import compute_code_lenses
+from ivy_lsp.lsp.ui.code_lens import compute_code_lenses
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -839,7 +839,7 @@ class TestRegisterHandler:
     """Tests for the async handler registered by code_lens.register()."""
 
     def _make_server_and_handler(self):
-        from ivy_lsp.features.code_lens import register
+        from ivy_lsp.lsp.ui.code_lens import register
 
         server = MagicMock()
         registered = {}

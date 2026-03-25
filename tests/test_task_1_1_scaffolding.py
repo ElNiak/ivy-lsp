@@ -43,26 +43,26 @@ class TestIvyLanguageServer:
     """Verify IvyLanguageServer class."""
 
     def test_server_importable(self):
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         assert IvyLanguageServer is not None
 
     def test_server_is_language_server_subclass(self):
         from pygls.lsp.server import LanguageServer
 
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         assert issubclass(IvyLanguageServer, LanguageServer)
 
     def test_server_instantiation(self):
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
         assert server.name == "ivy-language-server"
 
     def test_server_version_matches_package(self):
         import ivy_lsp
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
         assert server.version == ivy_lsp.__version__

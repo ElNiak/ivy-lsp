@@ -13,14 +13,14 @@ if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
-from ivy_lsp.features.commands import (
+from ivy_lsp.lsp.commands import (
     _detect_isolate_at_position,
     _find_enclosing_test,
     _find_tool,
     _run_tool,
     _validate_ivy_param,
 )
-from ivy_lsp.features.diagnostics import parse_ivy_check_output
+from ivy_lsp.lsp.diagnostics.publisher import parse_ivy_check_output
 
 # ---------------------------------------------------------------------------
 # parse_ivy_check_output
@@ -100,7 +100,7 @@ class TestDetectIsolateAtPosition:
         result = _detect_isolate_at_position(server, "file:///a.ivy", None)
         assert result is None
 
-    @patch("ivy_lsp.features.document_symbols.compute_document_symbols")
+    @patch("ivy_lsp.lsp.document_symbols.compute_document_symbols")
     def test_inside_isolate(self, mock_compute):
         ns_symbol = lsp.DocumentSymbol(
             name="test_iso",
@@ -116,7 +116,7 @@ class TestDetectIsolateAtPosition:
         )
         assert result == "test_iso"
 
-    @patch("ivy_lsp.features.document_symbols.compute_document_symbols")
+    @patch("ivy_lsp.lsp.document_symbols.compute_document_symbols")
     def test_outside_isolate(self, mock_compute):
         ns_symbol = lsp.DocumentSymbol(
             name="test_iso",
@@ -229,7 +229,7 @@ class TestRunTool:
 
 class TestCapabilities:
     def test_capabilities_response(self):
-        from ivy_lsp.features.commands import register
+        from ivy_lsp.lsp.commands import register
 
         server = MagicMock()
         registered = {}
@@ -254,7 +254,7 @@ class TestCapabilities:
 
 class TestVerifyHandler:
     def test_verify_registered(self):
-        from ivy_lsp.features.commands import register
+        from ivy_lsp.lsp.commands import register
 
         server = MagicMock()
         registered = {}
@@ -282,7 +282,7 @@ class TestVerifyHandler:
 
 def _make_registered_handlers():
     """Register handlers on a mock server and return (server, handlers dict)."""
-    from ivy_lsp.features.commands import register
+    from ivy_lsp.lsp.commands import register
 
     server = MagicMock()
     registered = {}
@@ -399,7 +399,7 @@ class TestVerifyHandlerParams:
 
 class TestResolveViaStaging:
     def test_staging_available(self):
-        from ivy_lsp.features.commands import _resolve_via_staging
+        from ivy_lsp.lsp.commands import _resolve_via_staging
 
         server = MagicMock()
         server.indexer.resolver.get_staged_path.return_value = "/tmp/staging/foo.ivy"
@@ -409,7 +409,7 @@ class TestResolveViaStaging:
         )
 
     def test_staging_returns_none(self):
-        from ivy_lsp.features.commands import _resolve_via_staging
+        from ivy_lsp.lsp.commands import _resolve_via_staging
 
         server = MagicMock()
         server.indexer.resolver.get_staged_path.return_value = None
@@ -419,13 +419,13 @@ class TestResolveViaStaging:
         )
 
     def test_no_indexer(self):
-        from ivy_lsp.features.commands import _resolve_via_staging
+        from ivy_lsp.lsp.commands import _resolve_via_staging
 
         server = MagicMock(spec=[])
         assert _resolve_via_staging(server, "/project/foo.ivy") == "/project/foo.ivy"
 
     def test_indexer_is_none(self):
-        from ivy_lsp.features.commands import _resolve_via_staging
+        from ivy_lsp.lsp.commands import _resolve_via_staging
 
         server = MagicMock()
         server.indexer = None
@@ -835,7 +835,7 @@ class TestShowModelRedirection:
         with (
             patch("asyncio.create_subprocess_exec") as mock_exec,
             patch(
-                "ivy_lsp.features.document_symbols.compute_document_symbols",
+                "ivy_lsp.lsp.document_symbols.compute_document_symbols",
                 return_value=[ns_symbol],
             ),
         ):

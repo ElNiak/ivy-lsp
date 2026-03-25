@@ -232,7 +232,7 @@ class TestBulkPipelineState:
 class TestBulkAnalysisEnvVars:
     def test_env_disable_bulk_analysis(self):
         """IVY_LSP_BULK_ANALYSIS=0 should prevent _start_bulk_analysis from running."""
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer.__new__(IvyLanguageServer)
         server._analysis_pipeline = object()  # non-None sentinel

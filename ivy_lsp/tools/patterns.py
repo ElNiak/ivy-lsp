@@ -30,7 +30,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         reference_protocol: str | None = None,
     ) -> dict:
         """Analyze formal model patterns in a protocol specification."""
-        from ivy_lsp.features.patterns import handle_pattern_analysis
+        from ivy_lsp.core.analysis.patterns import handle_pattern_analysis
 
         params: dict[str, Any] = {"protocol": protocol, "mode": mode}
         if pattern:
@@ -272,7 +272,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         _tc = ToolTraceContext(
             "ivy_pattern_scaffold", {"protocol": protocol, "pattern": pattern}
         )
-        from ivy_lsp.features.patterns import handle_pattern_scaffold
+        from ivy_lsp.core.analysis.patterns import handle_pattern_scaffold
 
         params: dict[str, Any] = {
             "protocol": protocol,

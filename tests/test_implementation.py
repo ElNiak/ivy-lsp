@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.features.implementation import goto_implementation
+from ivy_lsp.lsp.navigation.implementation import goto_implementation
 
 
 def _make_workspace(tmp_path: Path, files: dict[str, str]) -> str:

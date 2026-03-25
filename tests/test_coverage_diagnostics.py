@@ -16,7 +16,7 @@ from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.features.coverage_hints import compute_coverage_hints  # noqa: E402
+from ivy_lsp.core.coverage_hints import compute_coverage_hints  # noqa: E402
 
 
 def _build_hint_graph():
@@ -141,7 +141,7 @@ class TestCoverageHintDiagnosticTags:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
 
         graph = _build_hint_graph()
         indexer = MagicMock()

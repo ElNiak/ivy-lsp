@@ -4,7 +4,7 @@ import threading
 from unittest.mock import MagicMock
 
 from ivy_lsp.core.indexer.workspace_indexer import DeepIndexProgress, FileIndexStatus
-from ivy_lsp.features.monitoring import (
+from ivy_lsp.lsp.ui.monitoring import (
     handle_deep_index_progress,
     handle_test_feature_matrix,
 )

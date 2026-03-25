@@ -806,7 +806,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             try:
                 graph = await ctx.get_req_graph()
                 if graph is not None:
-                    from ivy_lsp.features.coverage_hints import compute_coverage_hints
+                    from ivy_lsp.core.coverage_hints import compute_coverage_hints
 
                     for hint in compute_coverage_hints(graph, abs_path):
                         all_diags.append(

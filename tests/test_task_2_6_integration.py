@@ -64,7 +64,7 @@ class TestPhase2FullPipeline:
         assert len(scope) >= 10
 
     def test_goto_definition_from_frame(self, quic_indexer):
-        from ivy_lsp.features.definition import goto_definition
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         frame_file = QUIC_STACK_DIR / "quic_frame.ivy"
         if not frame_file.exists():
@@ -80,7 +80,7 @@ class TestPhase2FullPipeline:
                     break
 
     def test_server_can_instantiate_with_features(self):
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
         assert server.indexer is None  # not initialized yet

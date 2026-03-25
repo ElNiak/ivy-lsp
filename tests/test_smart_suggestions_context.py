@@ -26,7 +26,7 @@ class TestResolveScopeFilePath:
         )
         graph.register_test_scope(scope)
 
-        from ivy_lsp.features.visualization import _resolve_scope
+        from ivy_lsp.lsp.visualization import _resolve_scope
 
         result = _resolve_scope(graph, {"filePath": "/fake/quic_types.ivy"})
 
@@ -49,7 +49,7 @@ class TestResolveScopeFilePath:
         graph.register_test_scope(scope)
         graph.set_active_test("/fake/test_quic.ivy")
 
-        from ivy_lsp.features.visualization import _resolve_scope
+        from ivy_lsp.lsp.visualization import _resolve_scope
 
         result = _resolve_scope(graph, {"filePath": "/fake/unrelated.ivy"})
 
@@ -71,7 +71,7 @@ class TestResolveScopeFilePath:
         )
         graph.register_test_scope(scope)
 
-        from ivy_lsp.features.visualization import _resolve_scope
+        from ivy_lsp.lsp.visualization import _resolve_scope
 
         result = _resolve_scope(graph, {"filePath": "/fake/unrelated.ivy"})
 
@@ -100,7 +100,7 @@ class TestResolveScopeFilePath:
         graph.register_test_scope(scope_a)
         graph.register_test_scope(scope_b)
 
-        from ivy_lsp.features.visualization import _resolve_scope
+        from ivy_lsp.lsp.visualization import _resolve_scope
 
         result = _resolve_scope(
             graph,
@@ -126,7 +126,7 @@ class TestResolveScopeFilePath:
         graph.register_test_scope(scope)
         graph.set_active_test("/fake/test_quic.ivy")
 
-        from ivy_lsp.features.visualization import _resolve_scope
+        from ivy_lsp.lsp.visualization import _resolve_scope
 
         result = _resolve_scope(graph, {"filePath": ""})
 
@@ -140,7 +140,7 @@ class TestSmartSuggestionsContextFiltering:
 
     def test_file_path_resolves_to_scope_in_handler(self):
         """When filePath is provided without actionName, suggestions are scoped."""
-        from ivy_lsp.features.visualization import handle_smart_suggestions
+        from ivy_lsp.lsp.visualization import handle_smart_suggestions
 
         server = MagicMock()
         graph = MagicMock()
@@ -153,7 +153,7 @@ class TestSmartSuggestionsContextFiltering:
         )
 
         with patch(
-            "ivy_lsp.features.visualization._get_requirement_graph",
+            "ivy_lsp.lsp.visualization._get_requirement_graph",
             return_value=graph,
         ):
             result = handle_smart_suggestions(
@@ -166,7 +166,7 @@ class TestSmartSuggestionsContextFiltering:
     def test_non_scoped_graph_returns_all_suggestions(self):
         """When graph is not a ScopedRequirementModel, no scoping is applied."""
         from ivy_lsp.core.analysis.requirement_graph import RequirementGraph
-        from ivy_lsp.features.visualization import _resolve_scope
+        from ivy_lsp.lsp.visualization import _resolve_scope
 
         graph = RequirementGraph()
 

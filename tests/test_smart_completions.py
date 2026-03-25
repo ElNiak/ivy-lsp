@@ -16,7 +16,7 @@ from ivy_lsp.core.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.features.completion import compute_semantic_completions
+from ivy_lsp.lsp.completion import compute_semantic_completions
 
 
 def _build_completion_graph():

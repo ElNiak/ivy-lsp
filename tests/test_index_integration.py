@@ -21,7 +21,7 @@ import pytest
 
 from ivy_lsp.core.workspace.context import WorkspaceContext
 from ivy_lsp.core.workspace.detection import WorkspaceConfig
-from ivy_lsp.index_builder import IndexBuilder
+from ivy_lsp.lsp.index_builder import IndexBuilder
 
 # ---------------------------------------------------------------------------
 # Fixture: force Tier 3 (regex) when ivy module unavailable

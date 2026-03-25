@@ -2,7 +2,7 @@
 
 import pytest
 
-from ivy_lsp.features.status import (
+from ivy_lsp.lsp.ui.status import (
     IndexingState,
     OperationRecord,
     OperationTracker,

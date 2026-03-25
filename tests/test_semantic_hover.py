@@ -7,7 +7,7 @@ from lsprotocol import types as lsp
 from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.core.semantic.model import SemanticModel
 from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
-from ivy_lsp.features.hover import (
+from ivy_lsp.lsp.navigation.hover import (
     _enrich_with_semantic_model,
     format_hover_content,
     get_hover_info,

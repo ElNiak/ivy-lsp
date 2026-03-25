@@ -22,7 +22,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestCodeActionImport:
     def test_import(self):
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         assert compute_code_actions is not None
 
@@ -30,7 +30,7 @@ class TestCodeActionImport:
 class TestMissingLangHeader:
     def test_quickfix_inserts_lang_header(self):
         """A diagnostic with code 'missing-lang-header' produces an insert action."""
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
             range=Range(start=Position(0, 0), end=Position(0, 0)),
@@ -57,7 +57,7 @@ class TestMissingLangHeader:
 class TestUnresolvedInclude:
     def test_quickfix_removes_include_line(self):
         """A diagnostic with code 'unresolved-include' produces a remove action."""
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
             range=Range(start=Position(2, 0), end=Position(2, 20)),
@@ -74,7 +74,7 @@ class TestUnresolvedInclude:
 
     def test_quickfix_last_line_include_no_trailing_newline(self):
         """Include on last line without trailing newline produces valid range."""
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
             range=Range(start=Position(1, 0), end=Position(1, 20)),
@@ -95,7 +95,7 @@ class TestUnresolvedInclude:
 class TestNoMatchingDiagnostic:
     def test_no_actionable_diagnostics(self):
         """Diagnostics without known codes produce no actions."""
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
             range=Range(start=Position(0, 0), end=Position(0, 5)),
@@ -108,13 +108,13 @@ class TestNoMatchingDiagnostic:
 
     def test_empty_diagnostics(self):
         """No diagnostics produce no actions."""
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         assert compute_code_actions("file:///test.ivy", "", []) == []
 
     def test_out_of_bounds_diagnostic_line(self):
         """Diagnostic with line beyond source produces no action."""
-        from ivy_lsp.features.code_action import compute_code_actions
+        from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
             range=Range(start=Position(99, 0), end=Position(99, 20)),
@@ -131,7 +131,7 @@ class TestNoMatchingDiagnostic:
 class TestDiagnosticCodeField:
     def test_missing_lang_header_has_code(self):
         """check_structural_issues sets code='missing-lang-header'."""
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.publisher import check_structural_issues
 
         source = "type cid\n"
         diags = check_structural_issues(source, "/tmp/test.ivy")
@@ -140,7 +140,7 @@ class TestDiagnosticCodeField:
 
     def test_unresolved_include_has_code(self):
         """check_structural_issues sets code='unresolved-include'."""
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.publisher import check_structural_issues
 
         # check_structural_issues requires an indexer whose
         # _resolver.resolve() returns None for unresolved includes.

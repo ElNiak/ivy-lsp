@@ -6,7 +6,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.semantic.model import SemanticModel
 from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
-from ivy_lsp.features.code_lens import compute_code_lenses
+from ivy_lsp.lsp.ui.code_lens import compute_code_lenses
 
 
 def _make_indexer(graph=None):

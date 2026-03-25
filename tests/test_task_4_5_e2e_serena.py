@@ -48,7 +48,7 @@ class TestSerenaGetSymbolsOverview:
     """Serena's get_symbols_overview maps to textDocument/documentSymbol."""
 
     def test_returns_list_of_document_symbols(self, tmp_path):
-        from ivy_lsp.features.document_symbols import compute_document_symbols
+        from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
         indexer, parser = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         source = (tmp_path / "types.ivy").read_text()
@@ -59,7 +59,7 @@ class TestSerenaGetSymbolsOverview:
         assert len(result) > 0
 
     def test_symbols_have_required_fields(self, tmp_path):
-        from ivy_lsp.features.document_symbols import compute_document_symbols
+        from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
         indexer, parser = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         source = (tmp_path / "frame.ivy").read_text()
@@ -75,7 +75,7 @@ class TestSerenaGetSymbolsOverview:
             ), "DocumentSymbol must have selection_range"
 
     def test_nested_symbols_have_children(self, tmp_path):
-        from ivy_lsp.features.document_symbols import compute_document_symbols
+        from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
         indexer, parser = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         source = (tmp_path / "frame.ivy").read_text()
@@ -92,7 +92,7 @@ class TestSerenaFindSymbol:
     """Serena's find_symbol maps to workspace/symbol."""
 
     def test_returns_workspace_symbols(self, tmp_path):
-        from ivy_lsp.features.workspace_symbols import compute_workspace_symbols
+        from ivy_lsp.lsp.workspace_symbols import compute_workspace_symbols
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         result = compute_workspace_symbols(indexer, "cid")
@@ -100,7 +100,7 @@ class TestSerenaFindSymbol:
         assert len(result) > 0
 
     def test_symbols_have_location_with_uri(self, tmp_path):
-        from ivy_lsp.features.workspace_symbols import compute_workspace_symbols
+        from ivy_lsp.lsp.workspace_symbols import compute_workspace_symbols
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         result = compute_workspace_symbols(indexer, "cid")
@@ -108,7 +108,7 @@ class TestSerenaFindSymbol:
             assert sym.location.uri.startswith("file://")
 
     def test_cross_file_search(self, tmp_path):
-        from ivy_lsp.features.workspace_symbols import compute_workspace_symbols
+        from ivy_lsp.lsp.workspace_symbols import compute_workspace_symbols
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         # 'frame' is in frame.ivy, 'cid' is in types.ivy
@@ -122,7 +122,7 @@ class TestSerenaDefinition:
     """Serena relies on go-to-definition for cross-file navigation."""
 
     def test_definition_returns_location(self, tmp_path):
-        from ivy_lsp.features.definition import goto_definition
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         # Look up 'cid' on line "    individual src:cid" in frame.ivy
@@ -133,7 +133,7 @@ class TestSerenaDefinition:
         assert result is not None
 
     def test_cross_file_definition(self, tmp_path):
-        from ivy_lsp.features.definition import goto_definition
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         lines = (tmp_path / "frame.ivy").read_text().split("\n")
@@ -150,7 +150,7 @@ class TestSerenaReferences:
     """Serena's find_referencing_symbols maps to textDocument/references."""
 
     def test_references_returns_locations(self, tmp_path):
-        from ivy_lsp.features.references import find_references
+        from ivy_lsp.lsp.navigation.references import find_references
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         lines = (tmp_path / "types.ivy").read_text().split("\n")
@@ -160,7 +160,7 @@ class TestSerenaReferences:
         assert isinstance(result, list)
 
     def test_cross_file_references(self, tmp_path):
-        from ivy_lsp.features.references import find_references
+        from ivy_lsp.lsp.navigation.references import find_references
 
         indexer, _ = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         lines = (tmp_path / "types.ivy").read_text().split("\n")
@@ -179,7 +179,7 @@ class TestSerenaSymbolRanges:
     """Serena editing tools depend on accurate symbol ranges."""
 
     def test_symbol_range_not_negative(self, tmp_path):
-        from ivy_lsp.features.document_symbols import compute_document_symbols
+        from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
         indexer, parser = _build_indexer(tmp_path, MULTI_FILE_WORKSPACE)
         source = (tmp_path / "frame.ivy").read_text()
@@ -193,7 +193,7 @@ class TestSerenaSymbolRanges:
             assert sym.range.end.character >= 0
 
     def test_symbol_range_covers_declaration(self, tmp_path):
-        from ivy_lsp.features.document_symbols import compute_document_symbols
+        from ivy_lsp.lsp.document_symbols import compute_document_symbols
 
         indexer, parser = _build_indexer(
             tmp_path, {"a.ivy": "#lang ivy1.7\ntype cid\n"}

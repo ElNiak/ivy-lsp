@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.features.call_hierarchy import (
+from ivy_lsp.lsp.navigation.call_hierarchy import (
     get_incoming_calls,
     get_outgoing_calls,
     prepare_call_hierarchy,

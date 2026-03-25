@@ -73,7 +73,7 @@ class TestCompiledModelCommand:
     def _setup_server(self):
         """Register commands and return server + handler."""
         server = FakeServer()
-        from ivy_lsp.features.commands import register
+        from ivy_lsp.lsp.commands import register
 
         register(server)
         handler = server._handlers.get("ivy/compiledModel")
@@ -235,7 +235,7 @@ class TestCompiledModelCommand:
 class TestCapabilitiesCompiledModel:
     def test_compiled_model_available_false_without_manager(self):
         server = FakeServer()
-        from ivy_lsp.features.commands import register
+        from ivy_lsp.lsp.commands import register
 
         register(server)
         handler = server._handlers["ivy/capabilities"]
@@ -245,7 +245,7 @@ class TestCapabilitiesCompiledModel:
     def test_compiled_model_available_true_with_manager(self):
         server = FakeServer()
         server.compiler_manager = FakeCompilerManager()
-        from ivy_lsp.features.commands import register
+        from ivy_lsp.lsp.commands import register
 
         register(server)
         handler = server._handlers["ivy/capabilities"]
