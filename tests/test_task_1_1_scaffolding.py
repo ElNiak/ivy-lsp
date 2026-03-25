@@ -19,14 +19,14 @@ class TestPackageImportable:
         assert ivy_lsp.__version__ == "0.11.1"
 
     def test_parsing_subpackage_importable(self):
-        import ivy_lsp.parsing
+        import ivy_lsp.core.parsing
 
-        assert ivy_lsp.parsing is not None
+        assert ivy_lsp.core.parsing is not None
 
     def test_indexer_subpackage_importable(self):
-        import ivy_lsp.indexer
+        import ivy_lsp.core.indexer
 
-        assert ivy_lsp.indexer is not None
+        assert ivy_lsp.core.indexer is not None
 
     def test_features_subpackage_importable(self):
         import ivy_lsp.features

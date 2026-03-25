@@ -53,7 +53,7 @@ def _force_regex_tier_if_no_lexer(monkeypatch):
         yield
         return
 
-    from ivy_lsp.parsing import tiered_extractor as _te_mod
+    from ivy_lsp.core.parsing import tiered_extractor as _te_mod
 
     original_init = _te_mod.TieredExtractor.__init__
 

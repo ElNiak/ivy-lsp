@@ -466,16 +466,16 @@ def enable_package_instrumentation(
 
 # Subsystem detection map
 SUBSYSTEM_MAP = {
-    "parsing": "ivy_lsp.parsing",
-    "indexer": "ivy_lsp.indexer",
-    "compilation": "ivy_lsp.compilation",
-    "semantic": "ivy_lsp.semantic",
+    "parsing": "ivy_lsp.core.parsing",
+    "indexer": "ivy_lsp.core.indexer",
+    "compilation": "ivy_lsp.core.compilation",
+    "semantic": "ivy_lsp.core.semantic",
     "features": "ivy_lsp.features",
     "tools": "ivy_lsp.tools",
     "mcp": "ivy_lsp.mcp",
-    "analysis": "ivy_lsp.analysis",
-    "rfc": "ivy_lsp.rfc",
-    "adapters": "ivy_lsp.adapters",
+    "analysis": "ivy_lsp.core.analysis",
+    "rfc": "ivy_lsp.core.rfc",
+    "adapters": "ivy_lsp.core.adapters",
 }
 
 # Reverse map for auto-detection
@@ -485,7 +485,7 @@ for _sub, _prefix in SUBSYSTEM_MAP.items():
 
 
 def _detect_subsystem(name: str) -> str | None:
-    """Auto-detect subsystem from a logger name like 'ivy_lsp.parsing.tiered_extractor'."""
+    """Auto-detect subsystem from a logger name like 'ivy_lsp.core.parsing.tiered_extractor'."""
     for prefix, subsystem in _PREFIX_TO_SUBSYSTEM.items():
         if name == prefix or name.startswith(prefix + "."):
             return subsystem

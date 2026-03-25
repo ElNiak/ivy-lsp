@@ -88,7 +88,7 @@ class TestPhase2FullPipeline:
 
 class TestIndexerPackageImports:
     def test_import_from_package(self):
-        from ivy_lsp.indexer import (
+        from ivy_lsp.core.indexer import (
             CachedFile,
             FileCache,
             IncludeResolver,
