@@ -1,6 +1,3 @@
-"""Requirements analysis layer for Ivy LSP.
+"""Backward-compat shim."""
 
-Provides requirement extraction from Ivy AST bodies, formula state-variable
-analysis, a typed requirement graph with cross-file propagation, and a
-regex-based light-mode fallback for environments without Z3.
-"""
+from ivy_lsp.core.analysis import *  # noqa: F401,F403
