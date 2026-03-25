@@ -12,6 +12,10 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
+from ivy_lsp.utils.symbol_resolver import (
+    ensure_deep_parsed,
+    lookup_with_dotted_fallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +56,7 @@ def goto_definition(
         or ``None`` when no definition can be located.
     """
     # Demand-driven deep parse for shared modules
-    if indexer is not None and hasattr(indexer, "deep_parse_on_demand"):
-        indexer.deep_parse_on_demand(filepath)
+    ensure_deep_parsed(indexer, filepath)
 
     # H5: Check if cursor is on an include line
     if position.line < len(source_lines):
@@ -78,14 +81,7 @@ def goto_definition(
     if not word:
         return None
 
-    results = indexer.lookup_symbol(word)
-    if not results and "." in word:
-        parts = word.split(".")
-        for i in range(1, len(parts)):
-            suffix = ".".join(parts[i:])
-            results = indexer.lookup_symbol(suffix)
-            if results:
-                break
+    results = lookup_with_dotted_fallback(indexer, word)
 
     if not results and semantic_model is not None:
         results = _lookup_via_semantic_model(word, semantic_model)

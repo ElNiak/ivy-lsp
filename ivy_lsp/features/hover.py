@@ -13,6 +13,10 @@ from lsprotocol.types import SymbolKind
 from ivy_lsp.parsing.symbols import IvySymbol
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import word_at_position
+from ivy_lsp.utils.symbol_resolver import (
+    ensure_deep_parsed,
+    lookup_with_dotted_fallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,21 +303,13 @@ def get_hover_info(
 ) -> Optional[lsp.Hover]:
     """Look up symbol at cursor and return formatted Hover."""
     # Demand-driven deep parse for shared modules
-    if indexer is not None and hasattr(indexer, "deep_parse_on_demand"):
-        indexer.deep_parse_on_demand(filepath)
+    ensure_deep_parsed(indexer, filepath)
 
     word = word_at_position(source_lines, position)
     if not word:
         return None
 
-    results = indexer.lookup_symbol(word)
-    if not results and "." in word:
-        parts = word.split(".")
-        for i in range(1, len(parts)):
-            suffix = ".".join(parts[i:])
-            results = indexer.lookup_symbol(suffix)
-            if results:
-                break
+    results = lookup_with_dotted_fallback(indexer, word)
 
     if not results:
         # Fallback: query the SemanticModel directly when the indexer

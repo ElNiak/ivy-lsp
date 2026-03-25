@@ -15,6 +15,7 @@ from lsprotocol import types as lsp
 from ivy_lsp.parsing.symbols import IvySymbol
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range
+from ivy_lsp.utils.symbol_resolver import ensure_deep_parsed
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,7 @@ def compute_document_symbols(
     5. If neither: return empty list
     """
     # Demand-driven deep parse for shared modules
-    if indexer is not None and hasattr(indexer, "deep_parse_on_demand"):
-        indexer.deep_parse_on_demand(filepath)
+    ensure_deep_parsed(indexer, filepath)
 
     symbols: List[IvySymbol] = []
 

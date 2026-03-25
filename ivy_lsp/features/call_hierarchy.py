@@ -29,6 +29,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
+from ivy_lsp.utils.symbol_resolver import lookup_with_dotted_fallback
 
 if TYPE_CHECKING:
     from ivy_lsp.semantic.model import SemanticModel
@@ -163,10 +164,7 @@ def prepare_call_hierarchy(
     if not word:
         return None
 
-    results = indexer.lookup_symbol(word)
-    if not results and "." in word:
-        last = word.rsplit(".", 1)[1]
-        results = indexer.lookup_symbol(last)
+    results = lookup_with_dotted_fallback(indexer, word)
 
     if not results:
         return None

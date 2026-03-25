@@ -22,6 +22,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.utils import uri_to_path
 from ivy_lsp.utils.position_utils import make_range, word_at_position
+from ivy_lsp.utils.symbol_resolver import lookup_with_dotted_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +105,7 @@ def _find_action_declaration(
     filepath: str = None,
 ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
     """Find the declaration of an action by name (excluding monitors)."""
-    results = indexer.lookup_symbol(action_name)
-    if not results and "." in action_name:
-        last = action_name.rsplit(".", 1)[1]
-        results = indexer.lookup_symbol(last)
+    results = lookup_with_dotted_fallback(indexer, action_name)
 
     # Filter out before/after symbols — we want the declaration only.
     filtered = []
