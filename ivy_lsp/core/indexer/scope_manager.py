@@ -19,7 +19,7 @@ from ivy_lsp.core.analysis.light_mode_extractor import (
     extract_exports_imports_light,
     extract_requirements_light,
 )
-from ivy_lsp.core.analysis.mirror import Mirror
+from ivy_lsp.core.analysis.mirror import Mirror, MirrorId, MirrorRole
 from ivy_lsp.core.analysis.requirement_extractor import (
     extract_exports_imports_full,
     extract_requirements_full,
@@ -333,7 +333,19 @@ class ScopeManagerMixin:
                 tester_role=detect_test_role(frozen_closure),
             )
             self._requirement_graph.register_test_scope(scope)
-            mirror = Mirror.from_test_scope(scope, protocol="unknown")
+            tester_role = scope.tester_role
+            try:
+                role = MirrorRole(tester_role)
+            except ValueError:
+                role = MirrorRole.UNKNOWN
+            mirror = Mirror(
+                id=MirrorId.from_test_file(filepath, protocol="unknown"),
+                entry_file=filepath,
+                include_closure=frozen_closure,
+                exported_actions=frozenset(all_exports),
+                imported_actions=frozenset(all_imports),
+                role=role,
+            )
             self._mirror_registry.register(mirror)
 
         # Selective or full cache invalidation
