@@ -112,7 +112,7 @@ def flatten_symbols(symbols: List[IvySymbol], prefix: str = "") -> List[FlatSymb
                 kind=sym.kind,
                 file_path=sym.file_path,
                 range=sym.range,
-                synthetic=getattr(sym, "synthetic", False),
+                synthetic=sym.synthetic,
             )
         )
         if sym.children:

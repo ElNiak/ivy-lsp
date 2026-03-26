@@ -348,6 +348,7 @@ class TestWorkspaceSymbolsFilterWithQuery:
             range = (0, 0, 0, 0)
             file_path = None
             children = []
+            synthetic = False
 
         syms = [_NullFileSymbol()]
 
@@ -527,15 +528,17 @@ class TestIvySymbolSyntheticField:
         sym = IvySymbol.from_dict(d)
         assert sym.synthetic is True
 
-    def test_from_dict_defaults_synthetic_false(self):
-        """Old serialized dicts without synthetic field default to False."""
+    def test_from_dict_requires_synthetic_key(self):
+        """Dicts without synthetic field raise KeyError (no backward compat)."""
         d = {
             "name": "cid",
             "kind": int(lsp.SymbolKind.Class),
             "range": [0, 0, 0, 3],
         }
-        sym = IvySymbol.from_dict(d)
-        assert sym.synthetic is False
+        import pytest
+
+        with pytest.raises(KeyError):
+            IvySymbol.from_dict(d)
 
 
 class TestEmptyQuerySyntheticSorting:

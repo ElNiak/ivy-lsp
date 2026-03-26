@@ -58,7 +58,7 @@ class IvySymbol:
             children=[cls.from_dict(c) for c in d.get("children", [])],
             detail=d.get("detail"),
             file_path=d.get("file_path"),
-            synthetic=d.get("synthetic", False),
+            synthetic=d["synthetic"],
         )
 
 
