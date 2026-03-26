@@ -270,7 +270,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         }
         # Parsing tier availability (capped at 3s to avoid blocking ivy_capabilities)
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result["parsing_tiers"] = await asyncio.wait_for(
                 loop.run_in_executor(None, TieredExtractor().probe_tiers),
                 timeout=3.0,

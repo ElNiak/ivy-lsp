@@ -144,8 +144,14 @@ def _handle_get(ctx: Any) -> dict:
         # Fall back to persisted state before returning cleared.
         state_path = os.path.join(ctx.root, ".ivy-workspace-state.json")
         if os.path.exists(state_path):
-            ws = ActiveWorkspace.load(state_path)
-            if ws.is_set():
+            try:
+                ws = ActiveWorkspace.load(state_path)
+            except Exception:
+                logger.warning(
+                    "Failed to load persisted workspace state", exc_info=True
+                )
+                ws = None
+            if ws is not None and ws.is_set():
                 ctx.active_workspace = ws  # Restore in-memory state
                 logger.info(
                     "Restored workspace from persisted state: %s", ws.active_group

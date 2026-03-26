@@ -218,15 +218,16 @@ def register(server) -> None:
                     and hasattr(indexer, "_symbol_table")
                     and len(indexer._symbol_table._all) > 0
                 )
-                if not indexer_has_data and not parser_available:
+                if not parser_available and not indexer_available:
+                    # Both components genuinely missing
                     status = "degraded"
                     result = [
                         _status_document_symbol(
-                            "indexing in progress",
-                            "Document symbols may be incomplete until initialization finishes.",
+                            "symbol extraction unavailable",
+                            "Parser and indexer are unavailable; check ivy-lsp server health.",
                         )
                     ]
-                elif not parser_available and not indexer_available:
+                elif not indexer_has_data and not parser_available:
                     status = "degraded"
                     result = [
                         _status_document_symbol(
