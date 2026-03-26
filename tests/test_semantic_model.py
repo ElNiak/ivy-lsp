@@ -510,6 +510,96 @@ class TestSemanticModelDomainQueries:
         assert stats["uncovered"] == 0
 
 
+class TestNodesByNameIndex:
+    """Tests for the _nodes_by_name O(1) lookup index."""
+
+    def _make_node(self, node_id, name, file=None, tier=None):
+        """Create a minimal node with required attributes."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=node_id, name=name, file=file, tier=tier)
+
+    def test_get_nodes_by_name_returns_matching(self):
+        model = SemanticModel()
+        n1 = self._make_node("n1", "send", file="a.ivy")
+        n2 = self._make_node("n2", "recv", file="a.ivy")
+        n3 = self._make_node("n3", "send", file="b.ivy")
+        model.add_node(n1)
+        model.add_node(n2)
+        model.add_node(n3)
+        result = model.get_nodes_by_name("send")
+        assert len(result) == 2
+        assert {r.id for r in result} == {"n1", "n3"}
+
+    def test_get_nodes_by_name_empty_for_missing(self):
+        model = SemanticModel()
+        assert model.get_nodes_by_name("nonexistent") == []
+
+    def test_remove_file_cleans_name_index(self):
+        model = SemanticModel()
+        n1 = self._make_node("n1", "send", file="a.ivy")
+        n2 = self._make_node("n2", "send", file="b.ivy")
+        model.add_node(n1)
+        model.add_node(n2)
+        model.remove_file("a.ivy")
+        result = model.get_nodes_by_name("send")
+        assert len(result) == 1
+        assert result[0].id == "n2"
+
+    def test_add_node_replace_updates_name_index(self):
+        """Replacing a node with a different name must clean old name entry."""
+        model = SemanticModel()
+        n1 = self._make_node("n1", "old_name", file="a.ivy")
+        model.add_node(n1)
+        assert len(model.get_nodes_by_name("old_name")) == 1
+
+        n1_updated = self._make_node("n1", "new_name", file="a.ivy")
+        model.add_node(n1_updated)
+        assert model.get_nodes_by_name("old_name") == []
+        assert len(model.get_nodes_by_name("new_name")) == 1
+
+    def test_pickle_backward_compat_rebuilds_name_index(self):
+        """Old pickled models without _nodes_by_name should rebuild on load."""
+        import pickle
+
+        model = SemanticModel()
+        n1 = self._make_node("n1", "action_send", file="a.ivy")
+        model.add_node(n1)
+
+        # Simulate old pickle: remove _nodes_by_name before serializing
+        state = model.__getstate__()
+        state.pop("_nodes_by_name", None)
+        old_model = SemanticModel.__new__(SemanticModel)
+        old_model.__setstate__(state)
+
+        # Should still work after rebuild
+        result = old_model.get_nodes_by_name("action_send")
+        assert len(result) == 1
+
+    def test_update_file_maintains_name_index(self):
+        """update_file should keep name index consistent."""
+        model = SemanticModel()
+        n1 = self._make_node("n1", "send", file="a.ivy", tier="tier1")
+        model.update_file("a.ivy", [n1], [], "tier1")
+        assert len(model.get_nodes_by_name("send")) == 1
+
+        # Replace at tier2
+        n1_v2 = self._make_node("n1", "send_v2", file="a.ivy", tier="tier2")
+        model.update_file("a.ivy", [n1_v2], [], "tier2")
+        assert model.get_nodes_by_name("send") == []
+        assert len(model.get_nodes_by_name("send_v2")) == 1
+
+    def test_merge_from_populates_name_index(self):
+        """merge_from should index names from the other model."""
+        m1 = SemanticModel()
+        m2 = SemanticModel()
+        n1 = self._make_node("n1", "action_a", file="a.ivy")
+        m2.add_node(n1)
+
+        m1.merge_from(m2)
+        assert len(m1.get_nodes_by_name("action_a")) == 1
+
+
 class TestSemanticModelReferenceEdges:
     """Test CALLS, USES, MONITORS, and CONTAINS edge wiring."""
 

@@ -37,6 +37,7 @@ class SemanticModel:
         self._nodes_by_type: Dict[type, Dict[str, Any]] = defaultdict(dict)
         self._nodes_by_file: Dict[str, Set[str]] = defaultdict(set)
         self._node_tiers: Dict[str, str] = {}  # node_id -> tier
+        self._nodes_by_name: Dict[str, List[Any]] = defaultdict(list)
 
         # Edges – use a set to prevent duplicate accumulation
         self._edges: Set[Tuple[str, SemanticEdgeType, str]] = set()
@@ -59,15 +60,40 @@ class SemanticModel:
         """Rebuild the RLock after deserialization."""
         self.__dict__.update(state)
         self._lock = threading.RLock()
+        if not hasattr(self, "_nodes_by_name"):
+            self._nodes_by_name = defaultdict(list)
+            for node in self._nodes.values():
+                name = getattr(node, "name", None)
+                if name:
+                    self._nodes_by_name[name].append(node)
 
     # -- Mutation -----------------------------------------------------------
 
     def add_node(self, node: Any) -> None:
         """Add or replace a node in the model."""
         node_id = node.id
+        name = getattr(node, "name", None)
         with self._lock:
+            # Name index — handle replace semantics (before overwrite)
+            old_node = self._nodes.get(node_id)
+            if old_node is not None:
+                old_name = getattr(old_node, "name", None)
+                if old_name and old_name != name:
+                    name_list = self._nodes_by_name.get(old_name)
+                    if name_list:
+                        self._nodes_by_name[old_name] = [
+                            n for n in name_list if n.id != node_id
+                        ]
+                        if not self._nodes_by_name[old_name]:
+                            del self._nodes_by_name[old_name]
             self._nodes[node_id] = node
             self._nodes_by_type[type(node)][node_id] = node
+            # Index the new name
+            if name:
+                existing = self._nodes_by_name.get(name, [])
+                self._nodes_by_name[name] = [n for n in existing if n.id != node_id] + [
+                    node
+                ]
             file_attr = getattr(node, "file", None)
             if file_attr:
                 self._nodes_by_file[file_attr].add(node_id)
@@ -99,6 +125,15 @@ class SemanticModel:
                     type_dict = self._nodes_by_type.get(type(node))
                     if type_dict:
                         type_dict.pop(nid, None)
+                    name = getattr(node, "name", None)
+                    if name:
+                        name_list = self._nodes_by_name.get(name)
+                        if name_list:
+                            self._nodes_by_name[name] = [
+                                n for n in name_list if n.id != nid
+                            ]
+                            if not self._nodes_by_name[name]:
+                                del self._nodes_by_name[name]
                 self._node_tiers.pop(nid, None)
             edges_to_remove = {
                 (src, etype, dst)
@@ -152,6 +187,15 @@ class SemanticModel:
                     type_dict = self._nodes_by_type.get(type(node))
                     if type_dict:
                         type_dict.pop(nid, None)
+                    name = getattr(node, "name", None)
+                    if name:
+                        name_list = self._nodes_by_name.get(name)
+                        if name_list:
+                            self._nodes_by_name[name] = [
+                                n for n in name_list if n.id != nid
+                            ]
+                            if not self._nodes_by_name[name]:
+                                del self._nodes_by_name[name]
                 self._node_tiers.pop(nid, None)
                 file_set = self._nodes_by_file.get(filepath)
                 if file_set:
@@ -196,6 +240,12 @@ class SemanticModel:
                 self._nodes_by_type[type(node)][nid] = node
                 self._nodes_by_file[filepath].add(nid)
                 self._node_tiers[nid] = tier
+                name = getattr(node, "name", None)
+                if name:
+                    existing = self._nodes_by_name.get(name, [])
+                    self._nodes_by_name[name] = [n for n in existing if n.id != nid] + [
+                        node
+                    ]
 
             # Add new edges (incremental, skip duplicates)
             for src, etype, dst in edges:
@@ -244,6 +294,12 @@ class SemanticModel:
                 tier = getattr(node, "tier", None)
                 if tier:
                     self._node_tiers[node_id] = tier
+                name = getattr(node, "name", None)
+                if name:
+                    existing = self._nodes_by_name.get(name, [])
+                    self._nodes_by_name[name] = [
+                        n for n in existing if n.id != node_id
+                    ] + [node]
             # Copy edges
             for src, etype, dst in other._edges:
                 edge = (src, etype, dst)
@@ -263,6 +319,11 @@ class SemanticModel:
         """Return all nodes of a given type."""
         with self._lock:
             return list(self._nodes_by_type.get(node_type, {}).values())
+
+    def get_nodes_by_name(self, name: str) -> List[Any]:
+        """Return all nodes with the given name (O(1) lookup)."""
+        with self._lock:
+            return list(self._nodes_by_name.get(name, []))
 
     def get_nodes_in_file(self, filepath: str) -> List[Any]:
         """Return all nodes defined in *filepath*."""
