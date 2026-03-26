@@ -14,6 +14,7 @@ from ivy_lsp.core.structural_lint import (
     check_structural_issues_raw,
     check_unresolved_includes_raw,
 )
+from ivy_lsp.infra.utils.basename_cache import BasenameCache
 from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
 from ivy_lsp.infra.utils.ivy_output import (  # noqa: F401
     find_ivy_files as _find_ivy_files_raw,
@@ -142,24 +143,8 @@ class ToolContext:
             return _find_ivy_raw(search_root, _exclude)
 
         # Basename cache
-        _basename_cache: dict[str, list[str]] | None = None
-        _cache_lock = __import__("threading").Lock()
-
-        def _get_basename_cache() -> dict[str, list[str]]:
-            nonlocal _basename_cache
-            if _basename_cache is not None:
-                return _basename_cache
-            with _cache_lock:
-                if _basename_cache is not None:
-                    return _basename_cache
-                cache: dict[str, list[str]] = {}
-                import os as _os
-
-                for rel_path in _find_files(ws_root):
-                    basename = _os.path.basename(rel_path)[:-4]
-                    cache.setdefault(basename, []).append(rel_path)
-                _basename_cache = cache
-                return cache
+        _basename_cache_obj = BasenameCache(_find_files, ws_root)
+        _get_basename_cache = _basename_cache_obj.get
 
         discovered_stdlib = discover_stdlib_modules()
 

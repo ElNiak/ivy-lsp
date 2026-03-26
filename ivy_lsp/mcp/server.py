@@ -21,6 +21,7 @@ from typing import Any
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
+from ivy_lsp.infra.utils.basename_cache import BasenameCache
 
 # Re-export verification functions so that external code and tests that patch
 # ``ivy_lsp.mcp.server.shared_ivy_check`` (etc.) continue to work after the
@@ -188,8 +189,7 @@ class McpServerState:
         # File caches
         self._cached_ivy_files: list[str] | None = None
         self._cached_ivy_files_lock = threading.Lock()
-        self._basename_cache: dict[str, list[str]] | None = None
-        self._basename_cache_lock = threading.Lock()
+        self._basename_cache_obj = BasenameCache(self.find_ivy_files_cached, root)
 
         # Include resolution
         self._resolver = resolver
@@ -237,18 +237,7 @@ class McpServerState:
 
     def get_basename_cache(self) -> dict[str, list[str]]:
         """Build (or return cached) basename->[relative_paths] map for all .ivy files."""
-        if self._basename_cache is not None:
-            return self._basename_cache
-
-        with self._basename_cache_lock:
-            if self._basename_cache is not None:
-                return self._basename_cache
-            cache: dict[str, list[str]] = {}
-            for rel_path in self.find_ivy_files_cached(self.root):
-                basename = os.path.basename(rel_path)[:-4]  # strip .ivy
-                cache.setdefault(basename, []).append(rel_path)
-            self._basename_cache = cache
-            return cache
+        return self._basename_cache_obj.get()
 
     def make_resolve_callback(self):
         """Create a resolve callback for structural lint include checking."""
@@ -365,67 +354,29 @@ class McpServerState:
     def _write_model_to_index(self, model):
         """Write a SemanticModel to .ivy-index/ per-protocol directories.
 
-        Uses fcntl file locking (same pattern as IndexBuilder._write_pickle()).
+        Uses :func:`write_locked_pickle` for atomic, lock-guarded writes.
         Creates output files alongside existing index artifacts so subsequent
         MCP startups can load them via Strategy 1.
         """
-        try:
-            import fcntl
-            import gzip
-            import pickle
+        from ivy_lsp.infra.utils.serialization import write_locked_pickle
 
+        try:
             if self.workspace_context is None:
                 return
 
             # Write to each protocol's .ivy-index/ directory
-            for proto, idx in self.workspace_context.protocol_indexes.items():
+            for _proto, idx in self.workspace_context.protocol_indexes.items():
                 index_dir = idx.index_dir
                 if not index_dir or not os.path.isdir(index_dir):
                     continue
-                lock_path = os.path.join(index_dir, ".build.lock")
-                try:
-                    lock_fd = open(lock_path, "w")
-                    try:
-                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        out_path = os.path.join(index_dir, "semantic_model.pickle.gz")
-                        with gzip.open(out_path, "wb") as f:
-                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
-                        logger.info("Wrote model to %s", out_path)
-                    except BlockingIOError:
-                        logger.debug("Index lock held for %s, skipping write", proto)
-                    finally:
-                        try:
-                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                        except Exception:
-                            pass
-                        lock_fd.close()
-                except OSError:
-                    logger.debug("Cannot write to %s index dir", proto, exc_info=True)
+                write_locked_pickle(
+                    index_dir, "semantic_model.pickle.gz", model, logger
+                )
 
             # Also try workspace-level .ivy-index/ if it exists
             ws_index = os.path.join(self.root, ".ivy-index")
             if os.path.isdir(ws_index):
-                lock_path = os.path.join(ws_index, ".build.lock")
-                try:
-                    lock_fd = open(lock_path, "w")
-                    try:
-                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        out_path = os.path.join(ws_index, "semantic_model.pickle.gz")
-                        with gzip.open(out_path, "wb") as f:
-                            pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
-                        logger.info("Wrote model to %s", out_path)
-                    except BlockingIOError:
-                        pass
-                    finally:
-                        try:
-                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                        except Exception:
-                            pass
-                        lock_fd.close()
-                except OSError:
-                    logger.debug(
-                        "Cannot write to workspace .ivy-index/ dir", exc_info=True
-                    )
+                write_locked_pickle(ws_index, "semantic_model.pickle.gz", model, logger)
         except Exception:
             logger.debug("Failed to write model to .ivy-index/", exc_info=True)
 
