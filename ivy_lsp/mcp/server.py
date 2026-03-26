@@ -22,6 +22,7 @@ from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa:
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.infra.utils.basename_cache import BasenameCache
+from ivy_lsp.infra.utils.lazy_builder import LazyAsyncBuilder
 
 # Re-export verification functions so that external code and tests that patch
 # ``ivy_lsp.mcp.server.shared_ivy_check`` (etc.) continue to work after the
@@ -167,24 +168,31 @@ class McpServerState:
         self.staging_dir = staging_dir
         self.base_path = base_path
 
-        # Lazy SemanticModel
-        self.semantic_model = semantic_model
-        self._model_lock = asyncio.Lock()
-        self._model_build_attempted: float = 0.0
-        self._model_build_error: str | None = None
-        self._model_building: bool = False
-
-        # Lazy RequirementGraph
-        self._req_graph: Any = requirement_graph
-        self._req_graph_lock = asyncio.Lock()
-        self._req_graph_import_failed = False
-        self._req_graph_last_failure: float = 0.0
-
         # Config-driven timeouts/cooldowns
         _cfg = get_config()
         self._MODEL_RETRY_COOLDOWN = _cfg.model_retry_cooldown
         self._MODEL_BUILD_TIMEOUT = _cfg.model_build_timeout
         self._REQ_GRAPH_COOLDOWN = _cfg.req_graph_cooldown
+
+        # Lazy SemanticModel (via LazyAsyncBuilder)
+        self._model_builder: LazyAsyncBuilder[Any] = LazyAsyncBuilder(
+            lambda: asyncio.to_thread(self._build_model),
+            timeout=self._MODEL_BUILD_TIMEOUT,
+            retry_cooldown=self._MODEL_RETRY_COOLDOWN,
+            name="semantic_model",
+        )
+        if semantic_model is not None:
+            self._model_builder.value = semantic_model
+
+        # Lazy RequirementGraph (via LazyAsyncBuilder)
+        self._graph_builder: LazyAsyncBuilder[Any] = LazyAsyncBuilder(
+            lambda: asyncio.to_thread(self._build_requirement_graph),
+            retry_cooldown=self._REQ_GRAPH_COOLDOWN,
+            permanent_failure_check=lambda exc: isinstance(exc, ImportError),
+            name="requirement_graph",
+        )
+        if requirement_graph is not None:
+            self._graph_builder.value = requirement_graph
 
         # File caches
         self._cached_ivy_files: list[str] | None = None
@@ -255,101 +263,29 @@ class McpServerState:
 
         return _resolve
 
-    # --- Lazy SemanticModel construction ---
+    # --- Lazy SemanticModel (delegated to LazyAsyncBuilder) ---
 
-    async def get_model(self):
+    @property
+    def semantic_model(self) -> Any:
+        """Return the cached SemanticModel, or ``None`` if not yet built."""
+        return self._model_builder.value
+
+    @semantic_model.setter
+    def semantic_model(self, value: Any) -> None:
+        """Set the cached SemanticModel directly (e.g. from constructor args)."""
+        self._model_builder.value = value
+
+    async def get_model(self) -> Any:
         """Return the semantic model, building one if needed."""
-        # Fast path: model already built
-        if self.semantic_model is not None:
-            return self.semantic_model
-        # Fast path: previous build failed and cooldown has not elapsed
-        if (
-            self._model_build_attempted
-            and (time.monotonic() - self._model_build_attempted)
-            < self._MODEL_RETRY_COOLDOWN
-        ):
-            return None
-        # Early return if another coroutine is already building the model
-        if self._model_building:
-            return None
-
-        async with self._model_lock:
-            # Double-check after acquiring lock
-            if self.semantic_model is not None:
-                return self.semantic_model
-            if (
-                self._model_build_attempted
-                and (time.monotonic() - self._model_build_attempted)
-                < self._MODEL_RETRY_COOLDOWN
-            ):
-                return None
-
-            self._model_building = True
-            try:
-                model = await asyncio.wait_for(
-                    asyncio.to_thread(self._build_model),
-                    timeout=self._MODEL_BUILD_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                logger.error(
-                    "Model build timed out after %.0fs", self._MODEL_BUILD_TIMEOUT
-                )
-                self._model_build_attempted = time.monotonic()
-                self._model_build_error = (
-                    f"Build timed out after {self._MODEL_BUILD_TIMEOUT:.0f}s"
-                )
-                return None
-            except Exception as exc:
-                logger.error("Model build failed: %s", exc, exc_info=True)
-                self._model_build_attempted = time.monotonic()
-                self._model_build_error = str(exc)
-                return None
-            finally:
-                self._model_building = False
-            if model is not None:
-                self.semantic_model = model
-            else:
-                self._model_build_attempted = time.monotonic()
-                self._model_build_error = (
-                    "Build returned empty model (missing dependencies?)"
-                )
-            return model
+        return await self._model_builder.get()
 
     def get_model_status(self) -> dict:
         """Return the current model build status for error surfacing."""
-        if self.semantic_model is not None:
-            return {"state": "ready"}
-        if self._model_building:
-            return {"state": "building"}
-        if self._model_build_error:
-            elapsed = time.monotonic() - self._model_build_attempted
-            remaining = max(0, self._MODEL_RETRY_COOLDOWN - elapsed)
-            return {
-                "state": "failed",
-                "error": self._model_build_error,
-                "retry_in_seconds": round(remaining),
-            }
-        return {"state": "not_built"}
+        return self._model_builder.get_status()
 
-    async def get_model_or_none(self, timeout: float = 5.0):
-        """Return the model if ready, or wait briefly if building. Never blocks long.
-
-        Unlike get_model(), this will NOT trigger a full build. If the model
-        hasn't started building yet, it kicks off a background build and returns
-        None immediately. If it's currently building, waits up to *timeout*
-        seconds for it to finish.
-        """
-        if self.semantic_model is not None:
-            return self.semantic_model
-        if not self._model_building:
-            # Kick off background build, but don't wait for it
-            asyncio.ensure_future(self.get_model())
-            return None
-        # Model is currently building — wait briefly
-        deadline = time.monotonic() + timeout
-        while self._model_building and time.monotonic() < deadline:
-            await asyncio.sleep(0.5)
-        return self.semantic_model  # may still be None
+    async def get_model_or_none(self, timeout: float = 5.0) -> Any:
+        """Return the model if ready, or wait briefly if building. Never blocks long."""
+        return await self._model_builder.get_or_wait(timeout)
 
     def _write_model_to_index(self, model):
         """Write a SemanticModel to .ivy-index/ per-protocol directories.
@@ -452,58 +388,11 @@ class McpServerState:
 
         return model
 
-    # --- Lazy RequirementGraph construction ---
+    # --- Lazy RequirementGraph (delegated to LazyAsyncBuilder) ---
 
-    async def get_req_graph(self):
+    async def get_req_graph(self) -> Any:
         """Return the requirement graph, lazily building one if needed."""
-        if self._req_graph is not None:
-            return self._req_graph
-        # Permanent failure: missing dependency
-        if self._req_graph_import_failed:
-            return None
-        # Transient failure: respect cooldown
-        if self._req_graph_last_failure and (
-            time.monotonic() - self._req_graph_last_failure < self._REQ_GRAPH_COOLDOWN
-        ):
-            return None
-
-        async with self._req_graph_lock:
-            if self._req_graph is not None:
-                return self._req_graph
-            if self._req_graph_import_failed:
-                return None
-            if self._req_graph_last_failure and (
-                time.monotonic() - self._req_graph_last_failure
-                < self._REQ_GRAPH_COOLDOWN
-            ):
-                return None
-
-            try:
-                logger.info(
-                    "Building requirement graph (first call, may take 1-2 min)..."
-                )
-                graph = await asyncio.to_thread(self._build_requirement_graph)
-            except ImportError as exc:
-                logger.warning(
-                    "Requirement graph unavailable (missing dependency): %s",
-                    exc,
-                )
-                self._req_graph_import_failed = True
-                return None
-            except Exception as exc:
-                logger.warning(
-                    "Requirement graph build failed (will retry in %ds): %s",
-                    self._REQ_GRAPH_COOLDOWN,
-                    exc,
-                )
-                self._req_graph_last_failure = time.monotonic()
-                return None
-
-            if graph is not None:
-                self._req_graph = graph
-            else:
-                self._req_graph_last_failure = time.monotonic()
-            return graph
+        return await self._graph_builder.get()
 
     def _populate_semantic_model_from_graph(self, graph: Any) -> None:
         """Mirror RequirementGraph nodes and edges into the SemanticModel.
