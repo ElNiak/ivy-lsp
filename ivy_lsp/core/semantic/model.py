@@ -38,6 +38,7 @@ class SemanticModel:
         self._nodes_by_file: Dict[str, Set[str]] = defaultdict(set)
         self._node_tiers: Dict[str, str] = {}  # node_id -> tier
         self._nodes_by_name: Dict[str, List[Any]] = defaultdict(list)
+        self._version: int = 0
 
         # Edges – use a set to prevent duplicate accumulation
         self._edges: Set[Tuple[str, SemanticEdgeType, str]] = set()
@@ -100,6 +101,7 @@ class SemanticModel:
             tier = getattr(node, "tier", None)
             if tier:
                 self._node_tiers[node_id] = tier
+            self._version += 1
 
     def add_edge(
         self, source_id: str, edge_type: SemanticEdgeType, target_id: str
@@ -154,6 +156,7 @@ class SemanticModel:
                         adj_list.remove((etype, src))
                     except ValueError:
                         pass
+            self._version += 1
 
     def update_file(
         self,
@@ -254,6 +257,7 @@ class SemanticModel:
                     self._edges.add(edge)
                     self._outgoing[src].append((etype, dst))
                     self._incoming[dst].append((etype, src))
+            self._version += 1
 
     def _rebuild_adjacency(self) -> None:
         """Rebuild adjacency indices from the edge list.
@@ -307,6 +311,7 @@ class SemanticModel:
                     self._edges.add(edge)
                     self._outgoing[src].append((etype, dst))
                     self._incoming[dst].append((etype, src))
+            self._version += 1
 
     # -- Queries ------------------------------------------------------------
 
@@ -314,6 +319,12 @@ class SemanticModel:
         """Return a node by id, or None."""
         with self._lock:
             return self._nodes.get(node_id)
+
+    @property
+    def version(self) -> int:
+        """Monotonic version counter; incremented on every mutation."""
+        with self._lock:
+            return self._version
 
     def get_nodes_by_type(self, node_type: Type) -> List[Any]:
         """Return all nodes of a given type."""

@@ -600,6 +600,39 @@ class TestNodesByNameIndex:
         assert len(m1.get_nodes_by_name("action_a")) == 1
 
 
+class TestVersionCounter:
+    def _make_node(self, node_id, name, file=None, tier=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=node_id, name=name, file=file, tier=tier)
+
+    def test_version_starts_at_zero(self):
+        assert SemanticModel().version == 0
+
+    def test_add_node_increments_version(self):
+        m = SemanticModel()
+        m.add_node(self._make_node("n1", "a"))
+        assert m.version == 1
+        m.add_node(self._make_node("n2", "b"))
+        assert m.version == 2
+
+    def test_remove_file_increments_version(self):
+        m = SemanticModel()
+        m.add_node(self._make_node("n1", "a", file="f.ivy"))
+        v = m.version
+        m.remove_file("f.ivy")
+        assert m.version == v + 1
+
+    def test_version_survives_pickle(self):
+        import pickle
+
+        m = SemanticModel()
+        m.add_node(self._make_node("n1", "a"))
+        data = pickle.dumps(m)
+        m2 = pickle.loads(data)
+        assert m2.version == 1
+
+
 class TestSemanticModelReferenceEdges:
     """Test CALLS, USES, MONITORS, and CONTAINS edge wiring."""
 
