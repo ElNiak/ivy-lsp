@@ -14,7 +14,6 @@ from either to avoid circular imports.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -48,15 +47,6 @@ def set_sidecar_port(port: int | None) -> None:
     """Store the discovered sidecar port (monitor thread writes, safe_tool reads)."""
     global _sidecar_port
     _sidecar_port = port
-
-
-def workspace_hash(root: str) -> str:
-    """Stable 12-char hash of the workspace root path.
-
-    Must match ``_workspace_hash`` in ``mcp_sidecar.py`` — SHA-256, first 12
-    hex chars.
-    """
-    return hashlib.sha256(root.encode()).hexdigest()[:12]
 
 
 def read_port_file(port_dir: str = "/tmp", ws_hash: str | None = None) -> int | None:

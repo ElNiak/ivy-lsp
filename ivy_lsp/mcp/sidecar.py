@@ -11,7 +11,6 @@ Usage (from IvyLanguageServer):
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json as _json
 import logging
 import os
@@ -20,7 +19,12 @@ import threading
 import time as _time
 from typing import Any
 
-from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
+from ivy_lsp.infra.observability import (
+    LogCategory,
+    log_phase,
+    timed_phase,
+    workspace_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +47,9 @@ def _find_available_port(start: int) -> int:
     )
 
 
-def _workspace_hash(root: str) -> str:
-    """Stable short hash of the workspace root for port file naming."""
-    return hashlib.sha256(root.encode()).hexdigest()[:12]
-
-
 def _write_port_file(root: str, port: int) -> str:
     """Write port to /tmp/ivy-mcp-{workspace_hash}.port, return the path."""
-    ws_hash = _workspace_hash(root)
+    ws_hash = workspace_hash(root)
     path = os.path.join("/tmp", f"ivy-mcp-{ws_hash}.port")
     try:
         with open(path, "w") as f:
@@ -65,7 +64,7 @@ def _write_port_file(root: str, port: int) -> str:
 
 def _remove_port_file(root: str) -> None:
     """Remove the port file on shutdown."""
-    ws_hash = _workspace_hash(root)
+    ws_hash = workspace_hash(root)
     path = os.path.join("/tmp", f"ivy-mcp-{ws_hash}.port")
     try:
         os.unlink(path)

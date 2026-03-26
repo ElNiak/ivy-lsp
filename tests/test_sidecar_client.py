@@ -31,7 +31,7 @@ def test_read_port_file_returns_none_when_corrupt(tmp_path):
 
 
 def test_workspace_hash_is_stable():
-    from ivy_lsp.mcp.client import workspace_hash
+    from ivy_lsp.infra.observability.session import workspace_hash
 
     h1 = workspace_hash("/some/path")
     h2 = workspace_hash("/some/path")
@@ -40,7 +40,7 @@ def test_workspace_hash_is_stable():
 
 
 def test_workspace_hash_differs_for_different_paths():
-    from ivy_lsp.mcp.client import workspace_hash
+    from ivy_lsp.infra.observability.session import workspace_hash
 
     assert workspace_hash("/path/a") != workspace_hash("/path/b")
 
@@ -92,7 +92,7 @@ def test_workspace_hash_matches_sidecar_algorithm():
     """Ensure workspace_hash matches _workspace_hash in mcp_sidecar.py."""
     import hashlib
 
-    from ivy_lsp.mcp.client import workspace_hash
+    from ivy_lsp.infra.observability.session import workspace_hash
 
     path = "/some/workspace/root"
     expected = hashlib.sha256(path.encode()).hexdigest()[:12]
