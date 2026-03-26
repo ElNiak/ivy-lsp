@@ -76,6 +76,7 @@ class ToolContext:
     get_basename_cache: Callable[..., dict[str, list[str]]] = field(default=lambda: {})
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
     include_resolver: Any = None
+    _basename_cache_invalidate: Callable[[], None] = field(default=lambda: None)
 
     # Active workspace management
     active_workspace: Any = None  # Optional[ActiveWorkspace]
@@ -108,6 +109,43 @@ class ToolContext:
             "chrono_time",
         }
     )
+
+    def build_context_metadata(self) -> dict:
+        """Build workspace/scope context metadata for tool result injection.
+
+        Returns empty dict when workspace is not set.
+        """
+        import os
+
+        ctx: dict = {}
+        ws = self.active_workspace
+        if ws is None or not getattr(ws, "active_group", None):
+            return ctx
+        ctx["workspace"] = ws.active_group
+        ctx["layers"] = sorted(ws.active_layers)
+        ctx["set_by"] = getattr(ws, "set_by", "unknown")
+        resolver = self.include_resolver
+        if resolver is not None and hasattr(resolver, "_file_to_layer"):
+            ftl = resolver._file_to_layer
+            active = getattr(resolver, "_active_layers", set())
+            if active:
+                ctx["files_in_scope"] = sum(
+                    1 for layer in ftl.values() if layer in active
+                )
+            else:
+                ctx["files_in_scope"] = len(ftl)
+            ctx["files_total"] = len(ftl)
+            # Filtered collision count
+            cmap = getattr(resolver, "_collision_map", {})
+            if cmap and active:
+                in_scope_collisions = sum(
+                    1
+                    for variants in cmap.values()
+                    if sum(1 for v in variants if ftl.get(v) in active) > 1
+                )
+                ctx["collisions_in_scope"] = in_scope_collisions
+                ctx["collisions_total"] = len(cmap)
+        return ctx
 
     @classmethod
     def from_lsp_server(cls, server: Any) -> "ToolContext":
@@ -180,6 +218,8 @@ class ToolContext:
         ctx.get_model_status = _get_model_status
         ctx.get_req_graph = _get_req_graph
         ctx.get_basename_cache = _get_basename_cache
+        # Wire cache invalidation callback for workspace switching
+        ctx._basename_cache_invalidate = _basename_cache_obj.invalidate
 
         def _make_resolve_callback():
             cache = _get_basename_cache()
