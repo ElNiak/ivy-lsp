@@ -61,12 +61,6 @@ class SemanticModel:
         """Rebuild the RLock after deserialization."""
         self.__dict__.update(state)
         self._lock = threading.RLock()
-        if not hasattr(self, "_nodes_by_name"):
-            self._nodes_by_name = defaultdict(list)
-            for node in self._nodes.values():
-                name = getattr(node, "name", None)
-                if name:
-                    self._nodes_by_name[name].append(node)
 
     # -- Mutation -----------------------------------------------------------
 
@@ -234,16 +228,26 @@ class SemanticModel:
                     continue  # preserve higher-tier node
                 # Clean up old type index entry if the node already exists
                 # (may be a different type at the old tier)
+                name = getattr(node, "name", None)
                 old_node = self._nodes.get(nid)
                 if old_node is not None:
                     old_type_dict = self._nodes_by_type.get(type(old_node))
                     if old_type_dict:
                         old_type_dict.pop(nid, None)
+                    # Clean old name index if name changed
+                    old_name = getattr(old_node, "name", None)
+                    if old_name and old_name != name:
+                        name_list = self._nodes_by_name.get(old_name)
+                        if name_list:
+                            self._nodes_by_name[old_name] = [
+                                n for n in name_list if n.id != nid
+                            ]
+                            if not self._nodes_by_name[old_name]:
+                                del self._nodes_by_name[old_name]
                 self._nodes[nid] = node
                 self._nodes_by_type[type(node)][nid] = node
                 self._nodes_by_file[filepath].add(nid)
                 self._node_tiers[nid] = tier
-                name = getattr(node, "name", None)
                 if name:
                     existing = self._nodes_by_name.get(name, [])
                     self._nodes_by_name[name] = [n for n in existing if n.id != nid] + [

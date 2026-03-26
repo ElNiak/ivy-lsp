@@ -558,24 +558,6 @@ class TestNodesByNameIndex:
         assert model.get_nodes_by_name("old_name") == []
         assert len(model.get_nodes_by_name("new_name")) == 1
 
-    def test_pickle_backward_compat_rebuilds_name_index(self):
-        """Old pickled models without _nodes_by_name should rebuild on load."""
-        import pickle
-
-        model = SemanticModel()
-        n1 = self._make_node("n1", "action_send", file="a.ivy")
-        model.add_node(n1)
-
-        # Simulate old pickle: remove _nodes_by_name before serializing
-        state = model.__getstate__()
-        state.pop("_nodes_by_name", None)
-        old_model = SemanticModel.__new__(SemanticModel)
-        old_model.__setstate__(state)
-
-        # Should still work after rebuild
-        result = old_model.get_nodes_by_name("action_send")
-        assert len(result) == 1
-
     def test_update_file_maintains_name_index(self):
         """update_file should keep name index consistent."""
         model = SemanticModel()
