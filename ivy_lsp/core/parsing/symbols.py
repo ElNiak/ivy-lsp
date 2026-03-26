@@ -95,9 +95,10 @@ class SymbolTable:
     """
 
     def __init__(self) -> None:
-        """Initialize empty name, file, and flat symbol indices."""
+        """Initialize empty name, file, kind, and flat symbol indices."""
         self._by_name: Dict[str, List[IvySymbol]] = defaultdict(list)
         self._by_file: Dict[str, List[IvySymbol]] = defaultdict(list)
+        self._by_kind: Dict[SymbolKind, List[IvySymbol]] = defaultdict(list)
         self._all: List[IvySymbol] = []
 
     def add_symbol(self, sym: IvySymbol) -> None:
@@ -105,6 +106,7 @@ class SymbolTable:
         self._by_name[sym.name].append(sym)
         if sym.file_path is not None:
             self._by_file[sym.file_path].append(sym)
+        self._by_kind[sym.kind].append(sym)
         self._all.append(sym)
 
     def lookup(self, name: str) -> List[IvySymbol]:
@@ -168,6 +170,10 @@ class SymbolTable:
         """Return symbols whose ``file_path`` equals *path*."""
         return list(self._by_file.get(path, []))
 
+    def symbols_by_kind(self, kind: SymbolKind) -> List[IvySymbol]:
+        """Return all symbols of a given kind."""
+        return list(self._by_kind.get(kind, []))
+
     def remove_file(self, filepath: str) -> int:
         """Remove all symbols originating from *filepath* in place.
 
@@ -183,6 +189,11 @@ class SymbolTable:
                 self._by_name[sym.name] = [s for s in name_list if id(s) not in old_set]
                 if not self._by_name[sym.name]:
                     del self._by_name[sym.name]
+            kind_list = self._by_kind.get(sym.kind)
+            if kind_list is not None:
+                self._by_kind[sym.kind] = [s for s in kind_list if id(s) not in old_set]
+                if not self._by_kind[sym.kind]:
+                    del self._by_kind[sym.kind]
         self._all = [s for s in self._all if id(s) not in old_set]
         return len(old)
 
