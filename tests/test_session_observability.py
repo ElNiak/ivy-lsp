@@ -10,13 +10,13 @@ import pytest
 from ivy_lsp.infra.config import reset_config
 from ivy_lsp.infra.observability import (
     _read_session_file,
-    _workspace_hash,
     get_session_id,
     get_session_logger,
     init_tracer,
     reset_session_cache,
     reset_session_logger,
     resolve_session_log_dir,
+    workspace_hash,
 )
 
 
@@ -141,12 +141,12 @@ def test_lsp_trace_persists_status_and_call_id(monkeypatch, tmp_path):
 # --- Session file resolution tests ---
 
 
-def test_workspace_hash_matches_shell_convention():
+def testworkspace_hash_matches_shell_convention():
     """Python hash must match: printf '%s' "$path" | shasum -a 256 | cut -c1-12."""
     path = "/Users/test/workspace"
     expected = hashlib.sha256(path.encode()).hexdigest()[:12]
-    assert _workspace_hash(path) == expected
-    assert len(_workspace_hash(path)) == 12
+    assert workspace_hash(path) == expected
+    assert len(workspace_hash(path)) == 12
 
 
 def test_read_session_file_returns_id(tmp_path):

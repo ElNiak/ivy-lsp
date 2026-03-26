@@ -32,14 +32,15 @@ from ivy_lsp.infra.observability.session import (
     SessionEventLogger,
     SessionJsonLogHandler,
     _read_session_file,
-    _workspace_hash,
     get_error_count,
     get_session_id,
     get_session_logger,
     install_session_jsonl_handler,
     reset_session_cache,
     reset_session_logger,
+    resolve_session_id,
     resolve_session_log_dir,
+    workspace_hash,
 )
 
 __all__ = [
@@ -69,12 +70,13 @@ __all__ = [
     "SessionEventLogger",
     "SessionJsonLogHandler",
     "_read_session_file",
-    "_workspace_hash",
+    "workspace_hash",
     "get_error_count",
     "get_session_id",
     "get_session_logger",
     "install_session_jsonl_handler",
     "reset_session_cache",
     "reset_session_logger",
+    "resolve_session_id",
     "resolve_session_log_dir",
 ]

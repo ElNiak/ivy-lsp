@@ -25,7 +25,7 @@ _session_cache: dict[str, tuple[float, str]] = (
 _SESSION_CACHE_TTL = 5.0  # seconds
 
 
-def _workspace_hash(workspace_root: str) -> str:
+def workspace_hash(workspace_root: str) -> str:
     """12-char SHA-256 hex hash matching the shell convention."""
     return hashlib.sha256(workspace_root.encode()).hexdigest()[:12]
 
@@ -45,7 +45,7 @@ def _read_session_file(
     if cached and (now - cached[0]) < _SESSION_CACHE_TTL:
         return cached[1]
 
-    ws_hash = _workspace_hash(workspace_root)
+    ws_hash = workspace_hash(workspace_root)
     path = Path(session_dir) / f"ivy-session-{ws_hash}.id"
     try:
         value = path.read_text().strip()
@@ -79,6 +79,47 @@ def get_session_id(*, session_dir: str = "/tmp") -> str:
     if from_file:
         return from_file
 
+    return "unknown"
+
+
+def resolve_session_id(
+    hook_payload: dict | None = None,
+    *,
+    session_dir: str = "/tmp",
+) -> str:
+    """Canonical session ID resolution matching detect-ivy-workspace.sh boot order.
+
+    Priority:
+      1. ``hook_payload["session_id"]`` (boot-time primary)
+      2. ``CLAUDE_SESSION_ID``
+      3. ``CLAUDE_CODE_SESSION_ID``
+      4. ``IVY_SESSION_ID`` (already date-prefixed by boot hook)
+      5. ``/tmp/ivy-session-<ws_hash>.id`` file
+      6. ``"unknown"`` fallback
+    """
+    # 1. Hook payload (boot-time primary)
+    if hook_payload:
+        sid = str(hook_payload.get("session_id", "")).strip()
+        if sid:
+            return sid
+    # 2. CLAUDE_SESSION_ID
+    sid = os.environ.get("CLAUDE_SESSION_ID", "").strip()
+    if sid:
+        return sid
+    # 3. CLAUDE_CODE_SESSION_ID
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if sid:
+        return sid
+    # 4. IVY_SESSION_ID
+    sid = os.environ.get("IVY_SESSION_ID", "").strip()
+    if sid:
+        return sid
+    # 5. /tmp session file
+    ws_root = os.environ.get("IVY_WORKSPACE_ROOT", "").strip() or os.getcwd()
+    from_file = _read_session_file(ws_root, session_dir=session_dir)
+    if from_file:
+        return from_file
+    # 6. Fallback
     return "unknown"
 
 
