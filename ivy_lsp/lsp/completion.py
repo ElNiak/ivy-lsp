@@ -548,11 +548,9 @@ def _enrich_items_from_semantic_model(
     try:
         from ivy_lsp.core.semantic.nodes import SymbolNode
 
-        symbol_nodes = {
-            sn.name: sn for sn in semantic_model.get_nodes_by_type(SymbolNode)
-        }
         for item in items:
-            sn = symbol_nodes.get(item.label)
+            candidates = semantic_model.get_nodes_by_name(item.label)
+            sn = next((n for n in candidates if isinstance(n, SymbolNode)), None)
             if sn is None:
                 continue
             parts = []

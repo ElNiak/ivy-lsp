@@ -144,22 +144,19 @@ class _SemanticSymbolLoc:
 
 
 def _lookup_via_semantic_model(word: str, semantic_model: Any) -> list:
-    """Query the SemanticModel for symbol locations when the indexer misses.
-
-    Returns a list of ``_SemanticSymbolLoc`` objects (matching the shape
-    expected by the calling code in ``goto_definition``).
-    """
-    # TODO: add a by-name index to SemanticModel to avoid O(N) scans here
-    # and in hover.py (_enrich_with_semantic_model).
+    """Query the SemanticModel for symbol locations using O(1) name index."""
     try:
-        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
-
         results = []
-        for node_type in (SymbolNode, TypeNode):
-            for node in semantic_model.get_nodes_by_type(node_type):
-                if node.name == word or getattr(node, "qualified_name", None) == word:
-                    if node.file and node.line:
-                        results.append(_SemanticSymbolLoc(node.file, node.line))
+        for node in semantic_model.get_nodes_by_name(word):
+            if getattr(node, "file", None) and getattr(node, "line", None):
+                results.append(_SemanticSymbolLoc(node.file, node.line))
+        if not results and "." in word:
+            # Fallback: qualified name — try last segment
+            last = word.rsplit(".", 1)[-1]
+            for node in semantic_model.get_nodes_by_name(last):
+                qn = getattr(node, "qualified_name", None)
+                if qn == word and node.file and node.line:
+                    results.append(_SemanticSymbolLoc(node.file, node.line))
         return results
     except Exception:
         logger.debug("semantic model lookup failed", exc_info=True)

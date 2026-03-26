@@ -220,22 +220,19 @@ def _wire_semantic_edges(
 
     # 4. CALLS / USES / MONITORS edges from extracted references
     if file_references:
-        # Build name->node_id indices for resolution
-        symbol_by_name: dict[str, str] = {}
-        symbol_by_qname: dict[str, str] = {}
-        for sn in model.get_nodes_by_type(SymbolNode):
-            symbol_by_name.setdefault(sn.name, sn.id)
-            symbol_by_qname[sn.qualified_name] = sn.id
-        # Also index TypeNodes (for USES edges targeting modules/types)
-        for tn in model.get_nodes_by_type(TypeNode):
-            symbol_by_name.setdefault(tn.name, tn.id)
-            symbol_by_qname[tn.qualified_name] = tn.id
 
         def _resolve_name(name: str) -> str | None:
-            """Resolve a symbol name to a node ID."""
-            return symbol_by_qname.get(name) or symbol_by_name.get(
-                name.rsplit(".", 1)[-1] if "." in name else name
-            )
+            """Resolve a symbol name to a node ID using O(1) name index."""
+            last = name.rsplit(".", 1)[-1] if "." in name else name
+            candidates = model.get_nodes_by_name(last)
+            # Prefer qualified name match
+            for c in candidates:
+                if getattr(c, "qualified_name", None) == name:
+                    return c.id
+            # Fallback: first match by short name
+            if candidates:
+                return candidates[0].id
+            return None
 
         for refs in file_references.values():
             for ref in refs:

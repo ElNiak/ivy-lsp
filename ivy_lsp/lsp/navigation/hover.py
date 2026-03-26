@@ -153,29 +153,39 @@ def _enrich_with_semantic_model(
                         f"\n**{req.rfc} {req.section}** ({req.level}): {req.text}"
                     )
 
-    # Enrich with sort/arity from SymbolNode
-    symbol_nodes = semantic_model.get_nodes_by_type(SymbolNode)
-    for sn in symbol_nodes:
-        if sn.name == symbol_name or sn.qualified_name == symbol_name:
-            if sn.params:
-                param_str = ", ".join(sn.params)
-                extra_parts.append(f"\n*Params:* `({param_str})`")
-            if sn.return_sort:
-                extra_parts.append(f"*Returns:* `{sn.return_sort}`")
-            if sn.sort_name and sn.sort_name != "action":
-                extra_parts.append(f"*Sort:* `{sn.sort_name}`")
-            break
+    # Enrich with sort/arity from SymbolNode (O(1) name lookup)
+    matches = semantic_model.get_nodes_by_name(symbol_name)
+    sn = next(
+        (n for n in matches if isinstance(n, SymbolNode)),
+        None,
+    )
+    if sn is None and "." in symbol_name:
+        last = symbol_name.rsplit(".", 1)[-1]
+        matches = semantic_model.get_nodes_by_name(last)
+        sn = next(
+            (
+                n
+                for n in matches
+                if isinstance(n, SymbolNode) and n.qualified_name == symbol_name
+            ),
+            None,
+        )
+    if sn is not None:
+        if sn.params:
+            param_str = ", ".join(sn.params)
+            extra_parts.append(f"\n*Params:* `({param_str})`")
+        if sn.return_sort:
+            extra_parts.append(f"*Returns:* `{sn.return_sort}`")
+        if sn.sort_name and sn.sort_name != "action":
+            extra_parts.append(f"*Sort:* `{sn.sort_name}`")
 
-    # Cross-reference summary
-    for sn in symbol_nodes:
-        if sn.name == symbol_name:
-            incoming = semantic_model.get_incoming(sn.id)
-            outgoing = semantic_model.get_outgoing(sn.id)
-            if incoming or outgoing:
-                extra_parts.append(
-                    f"\n*References:* {len(incoming)} incoming, {len(outgoing)} outgoing"
-                )
-            break
+        # Cross-reference summary
+        incoming = semantic_model.get_incoming(sn.id)
+        outgoing = semantic_model.get_outgoing(sn.id)
+        if incoming or outgoing:
+            extra_parts.append(
+                f"\n*References:* {len(incoming)} incoming, {len(outgoing)} outgoing"
+            )
 
     if extra_parts:
         content += "\n\n---\n" + "\n".join(extra_parts)
@@ -200,23 +210,23 @@ def _hover_from_semantic_model(
 
     from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
-    # Search SymbolNode entries matching the word
-    symbol_nodes = semantic_model.get_nodes_by_type(SymbolNode)
-    matches = [
-        sn for sn in symbol_nodes if sn.name == word or sn.qualified_name == word
-    ]
-    if not matches and "." in word:
+    # Search entries matching the word via O(1) name index
+    all_matches = semantic_model.get_nodes_by_name(word)
+    matches = [n for n in all_matches if isinstance(n, SymbolNode)]
+    type_matches = [n for n in all_matches if isinstance(n, TypeNode)]
+
+    if not matches and not type_matches and "." in word:
         last = word.rsplit(".", 1)[-1]
-        by_last = [sn for sn in symbol_nodes if sn.name == last]
+        all_by_last = semantic_model.get_nodes_by_name(last)
+        by_last = [n for n in all_by_last if isinstance(n, SymbolNode)]
         suffix = [sn for sn in by_last if sn.qualified_name.endswith(word)]
         matches = suffix if suffix else by_last
-
-    # Also check TypeNode
-    type_matches = [
-        tn
-        for tn in semantic_model.get_nodes_by_type(TypeNode)
-        if tn.name == word or tn.qualified_name == word
-    ]
+        if not type_matches:
+            type_matches = [
+                n
+                for n in all_by_last
+                if isinstance(n, TypeNode) and n.qualified_name.endswith(word)
+            ]
 
     if not matches and not type_matches:
         return None

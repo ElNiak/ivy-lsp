@@ -96,14 +96,15 @@ def _find_symbol_node_id(
     from ivy_lsp.core.semantic.nodes import SymbolNode
 
     last = name.rsplit(".", 1)[-1] if "." in name else name
+    candidates = [n for n in model.get_nodes_by_name(last) if isinstance(n, SymbolNode)]
     # Prefer match scoped to the file.
-    for sn in model.get_nodes_by_type(SymbolNode):
+    for sn in candidates:
         if (sn.name == last or sn.qualified_name == name) and (
             not filepath or sn.file == filepath
         ):
             return sn.id
     # Fallback: match by name only.
-    for sn in model.get_nodes_by_type(SymbolNode):
+    for sn in candidates:
         if sn.name == last or sn.qualified_name == name:
             return sn.id
     return None
