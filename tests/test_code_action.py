@@ -131,7 +131,7 @@ class TestNoMatchingDiagnostic:
 class TestDiagnosticCodeField:
     def test_missing_lang_header_has_code(self):
         """check_structural_issues sets code='missing-lang-header'."""
-        from ivy_lsp.lsp.diagnostics.publisher import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         source = "type cid\n"
         diags = check_structural_issues(source, "/tmp/test.ivy")
@@ -140,7 +140,7 @@ class TestDiagnosticCodeField:
 
     def test_unresolved_include_has_code(self):
         """check_structural_issues sets code='unresolved-include'."""
-        from ivy_lsp.lsp.diagnostics.publisher import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         # check_structural_issues requires an indexer whose
         # _resolver.resolve() returns None for unresolved includes.

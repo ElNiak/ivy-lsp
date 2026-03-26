@@ -20,7 +20,7 @@ from ivy_lsp.core.analysis.requirement_graph import (
     RequirementNode,
 )
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
-from ivy_lsp.lsp.diagnostics.publisher import compute_requirement_diagnostics
+from ivy_lsp.lsp.diagnostics.compute import compute_requirement_diagnostics
 
 # ---------------------------------------------------------------------------
 # Helpers

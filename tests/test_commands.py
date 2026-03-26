@@ -20,7 +20,7 @@ from ivy_lsp.lsp.commands import (
     _run_tool,
     _validate_ivy_param,
 )
-from ivy_lsp.lsp.diagnostics.publisher import parse_ivy_check_output
+from ivy_lsp.lsp.diagnostics.compute import parse_ivy_check_output
 
 # ---------------------------------------------------------------------------
 # parse_ivy_check_output

@@ -19,7 +19,7 @@ from ivy_lsp.core.analysis.requirement_graph import (
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.lsp.diagnostics.publisher import (
+from ivy_lsp.lsp.diagnostics.compute import (
     compute_diagnostics,
     compute_requirement_diagnostics,
 )

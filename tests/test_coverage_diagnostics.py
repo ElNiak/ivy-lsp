@@ -141,7 +141,7 @@ class TestCoverageHintDiagnosticTags:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         graph = _build_hint_graph()
         indexer = MagicMock()

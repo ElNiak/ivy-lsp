@@ -108,7 +108,7 @@ class TestPhase3Pipeline:
 
     def test_diagnostics_valid_file(self, tmp_path):
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         diags = compute_diagnostics(
@@ -119,7 +119,7 @@ class TestPhase3Pipeline:
 
     def test_diagnostics_broken_file(self):
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
-        from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         diags = compute_diagnostics(
@@ -142,7 +142,7 @@ class TestFeatureInteraction:
         """File with errors still provides completions."""
         from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
         from ivy_lsp.lsp.completion import get_completions
-        from ivy_lsp.lsp.diagnostics.publisher import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         source = "#lang ivy1.7\ntype cid\nobject broken = { @@@ }\n"
         (tmp_path / "a.ivy").write_text(source)

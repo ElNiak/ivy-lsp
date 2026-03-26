@@ -18,16 +18,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from lsprotocol import types as lsp
 
 from ivy_lsp.infra.utils import uri_to_path
-
-# Re-export compute functions so that ``from ivy_lsp.lsp.diagnostics.publisher
-# import compute_diagnostics`` (and friends) keeps working everywhere.
-from ivy_lsp.lsp.diagnostics.compute import (  # noqa: F401
+from ivy_lsp.lsp.diagnostics.compute import (
     _EXPORT_RE,
     check_structural_issues,
     compute_diagnostics,
-    compute_requirement_diagnostics,
-    compute_semantic_diagnostics,
-    parse_ivy_check_output,
     run_deep_diagnostics,
 )
 

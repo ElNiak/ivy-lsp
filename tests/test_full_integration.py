@@ -24,7 +24,7 @@ from ivy_lsp.core.semantic.rfc_annotations import (
     parse_file_rfc_annotations,
     parse_rfc_tags,
 )
-from ivy_lsp.lsp.diagnostics.publisher import compute_semantic_diagnostics
+from ivy_lsp.lsp.diagnostics.compute import compute_semantic_diagnostics
 from ivy_lsp.lsp.navigation.hover import _enrich_with_semantic_model
 from ivy_lsp.lsp.ui.code_lens import compute_code_lenses
 
