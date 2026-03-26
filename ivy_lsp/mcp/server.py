@@ -28,15 +28,7 @@ from ivy_lsp.infra.utils.lazy_builder import LazyAsyncBuilder
 # ``ivy_lsp.mcp.server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.mcp.tools.*``.
 from ivy_lsp.mcp import client as sidecar_client
-
-# Extracted in Phase 5a — re-export for backward compatibility so that
-# ``from ivy_lsp.mcp.server import ToolContext`` (and the two helpers)
-# continues to work.
-from ivy_lsp.mcp.context import (  # noqa: F401
-    ToolContext,
-    _check_structural_issues,
-    _validate_path,
-)
+from ivy_lsp.mcp.context import ToolContext
 
 logger = logging.getLogger(__name__)
 

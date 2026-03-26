@@ -590,7 +590,7 @@ from ivy_lsp.mcp.tools.visualization import register_visualization_tools
 from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
 if TYPE_CHECKING:
-    from ivy_lsp.mcp.server import ToolContext
+    from ivy_lsp.mcp.context import ToolContext
 
 
 def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
