@@ -115,8 +115,6 @@ class ToolContext:
 
         Returns empty dict when workspace is not set.
         """
-        import os
-
         ctx: dict = {}
         ws = self.active_workspace
         if ws is None or not getattr(ws, "active_group", None):
@@ -137,12 +135,15 @@ class ToolContext:
             ctx["files_total"] = len(ftl)
             # Filtered collision count
             cmap = getattr(resolver, "_collision_map", {})
-            if cmap and active:
-                in_scope_collisions = sum(
-                    1
-                    for variants in cmap.values()
-                    if sum(1 for v in variants if ftl.get(v) in active) > 1
-                )
+            if cmap:
+                if active:
+                    in_scope_collisions = sum(
+                        1
+                        for variants in cmap.values()
+                        if sum(1 for v in variants if ftl.get(v) in active) > 1
+                    )
+                else:
+                    in_scope_collisions = len(cmap)
                 ctx["collisions_in_scope"] = in_scope_collisions
                 ctx["collisions_total"] = len(cmap)
         return ctx
