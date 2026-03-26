@@ -545,6 +545,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 (default) = no scope-based override.
         """
         # Task 3.2: Resolve scope -> test_file when scope is provided
+        _resolved_scope = None
         if (
             scope
             and not test_file
@@ -603,16 +604,31 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     result_dict["matrix_total"] = len(matrix)
             if scope:
                 result_dict["scope"] = scope
+                if _resolved_scope is not None:
+                    result_dict["scope_role"] = _resolved_scope.tester_role
+                    result_dict["include_closure_size"] = len(
+                        _resolved_scope.include_closure
+                    )
             return _tc.finish(result_dict)
         elif mode == "gaps":
             result_dict = await _ivy_coverage_gaps(test_file, protocol)
             if scope:
                 result_dict["scope"] = scope
+                if _resolved_scope is not None:
+                    result_dict["scope_role"] = _resolved_scope.tester_role
+                    result_dict["include_closure_size"] = len(
+                        _resolved_scope.include_closure
+                    )
             return _tc.finish(result_dict)
         elif mode == "diff":
             result_dict = await _ivy_coverage_diff(relative_path)
             if scope:
                 result_dict["scope"] = scope
+                if _resolved_scope is not None:
+                    result_dict["scope_role"] = _resolved_scope.tester_role
+                    result_dict["include_closure_size"] = len(
+                        _resolved_scope.include_closure
+                    )
             return _tc.finish(result_dict)
         else:  # default: stats
             result_dict = await _ivy_requirement_coverage(relative_path, test_file)
@@ -626,6 +642,11 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                         result_dict["uncovered_ids_truncated"] = True
             if scope:
                 result_dict["scope"] = scope
+                if _resolved_scope is not None:
+                    result_dict["scope_role"] = _resolved_scope.tester_role
+                    result_dict["include_closure_size"] = len(
+                        _resolved_scope.include_closure
+                    )
             return _tc.finish(result_dict)
 
     # ------------------------------------------------------------------

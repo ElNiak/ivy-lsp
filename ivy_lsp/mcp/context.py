@@ -140,7 +140,12 @@ class ToolContext:
                     in_scope_collisions = sum(
                         1
                         for variants in cmap.values()
-                        if sum(1 for v in variants if ftl.get(v) in active) > 1
+                        if sum(
+                            1
+                            for v in variants
+                            if ftl.get(os.path.realpath(v)) in active
+                        )
+                        > 1
                     )
                 else:
                     in_scope_collisions = len(cmap)

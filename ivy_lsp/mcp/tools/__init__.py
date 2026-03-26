@@ -463,6 +463,10 @@ def safe_tool(_fn=None, *, ctx=None):
                     scope_name = result.get("scope")
                     if scope_name:
                         _ctx_meta["mirror"] = scope_name
+                    # Propagate closure size from handler result
+                    closure_size = result.get("include_closure_size")
+                    if closure_size is not None:
+                        _ctx_meta["closure_size"] = closure_size
                     if _ctx_meta:
                         result["_context"] = _ctx_meta
 

@@ -179,6 +179,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             }
             if _scope_files is not None:
                 _file_result["scope"] = scope
+                if _resolved_scope is not None:
+                    _file_result["scope_role"] = _resolved_scope.tester_role
+                    _file_result["include_closure_size"] = len(
+                        _resolved_scope.include_closure
+                    )
             return _tc.finish(_file_result)
         else:
             # Compute entry points (files not included by any other file)
@@ -206,6 +211,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     }
                     if _scope_files is not None:
                         _trunc_result["scope"] = scope
+                        if _resolved_scope is not None:
+                            _trunc_result["scope_role"] = _resolved_scope.tester_role
+                            _trunc_result["include_closure_size"] = len(
+                                _resolved_scope.include_closure
+                            )
                     return _tc.finish(_trunc_result)
                 _full_result: dict[str, Any] = {
                     "files": files_data,
@@ -213,6 +223,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 }
                 if _scope_files is not None:
                     _full_result["scope"] = scope
+                    if _resolved_scope is not None:
+                        _full_result["scope_role"] = _resolved_scope.tester_role
+                        _full_result["include_closure_size"] = len(
+                            _resolved_scope.include_closure
+                        )
                 return _tc.finish(_full_result)
             else:
                 # Summary mode (default) — compact overview
@@ -238,6 +253,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 }
                 if _scope_files is not None:
                     _summary_result["scope"] = scope
+                    if _resolved_scope is not None:
+                        _summary_result["scope_role"] = _resolved_scope.tester_role
+                        _summary_result["include_closure_size"] = len(
+                            _resolved_scope.include_closure
+                        )
                 return _tc.finish(_summary_result)
 
     @mcp.tool()

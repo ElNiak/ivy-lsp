@@ -316,6 +316,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             if _resolved_scope is not None:
                 result["scope"] = scope
                 result["scope_role"] = _resolved_scope.tester_role
+                result["include_closure_size"] = len(_resolved_scope.include_closure)
 
             _tt[0] = result
             return _tt[0]
@@ -482,6 +483,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             if _resolved_scope is not None:
                 result["scope"] = scope
                 result["scope_role"] = _resolved_scope.tester_role
+                result["include_closure_size"] = len(_resolved_scope.include_closure)
 
             _tt[0] = result
             return _tt[0]
@@ -694,6 +696,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             }
             if _scope_files is not None:
                 _struct_result["scope"] = scope
+                if _resolved_scope is not None:
+                    _struct_result["scope_role"] = _resolved_scope.tester_role
+                    _struct_result["include_closure_size"] = len(
+                        _resolved_scope.include_closure
+                    )
             return _tc.finish(_struct_result)
 
         # Full mode: all 5 diagnostic layers
@@ -935,6 +942,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         # Task 3.2: Annotate result with scope info when available
         if _scope_files is not None:
             _diag_result["scope"] = scope
+            if _resolved_scope is not None:
+                _diag_result["scope_role"] = _resolved_scope.tester_role
+                _diag_result["include_closure_size"] = len(
+                    _resolved_scope.include_closure
+                )
 
         return _tc.finish(_diag_result)
 
