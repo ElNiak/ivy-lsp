@@ -308,8 +308,11 @@ def _summarize_for_log(value: Any, max_len: int = 240) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def safe_tool(fn):
-    """Decorator that adds timeout, concurrency, metrics, and crash safety.
+def safe_tool(fn=None, *, ctx=None):
+    """Decorator that adds timeout, concurrency, metrics, crash safety, and context injection.
+
+    Can be used as ``@safe_tool`` (backward compatible, no ctx) or
+    ``@safe_tool(ctx=ctx)`` to enable workspace context injection into results.
 
     Applied to every MCP tool handler.  Responsibilities:
 
@@ -318,267 +321,301 @@ def safe_tool(fn):
     3. Records call metrics (count, duration, errors, timeouts).
     4. Catches unhandled exceptions and returns a JSON error instead of
        crashing the sidecar process.
+    5. (When *ctx* is provided) Injects workspace context metadata into
+       dict results before formatting.
 
     The wrapper is rebuilt with the original function's ``__globals__`` so
     that FastMCP can resolve ``ForwardRef`` type annotations (``Literal``,
     etc.) that result from ``from __future__ import annotations``.
     """
 
-    @functools.wraps(fn)
-    async def _wrapper(*args, **kwargs):
-        tool_name = fn.__name__
-        timeout = _get_effective_timeout(tool_name)
+    def _decorator(fn):
+        @functools.wraps(fn)
+        async def _wrapper(*args, **kwargs):
+            tool_name = fn.__name__
+            timeout = _get_effective_timeout(tool_name)
 
-        # --- Sidecar delegation (lazy bridge) ---
-        # Check BEFORE semaphore/timeout — sidecar handles its own concurrency.
-        #
-        # Connection is established here (in the MCP server's event loop),
-        # NOT in the monitor thread.  The monitor only discovers the port;
-        # we connect lazily on first tool call so the ClientSession is bound
-        # to the correct asyncio event loop.
-        _client = get_sidecar_client()
-        if _client is None:
-            from ivy_lsp.mcp.client import connect_to_sidecar, get_sidecar_port
+            # --- Sidecar delegation (lazy bridge) ---
+            # Check BEFORE semaphore/timeout — sidecar handles its own concurrency.
+            #
+            # Connection is established here (in the MCP server's event loop),
+            # NOT in the monitor thread.  The monitor only discovers the port;
+            # we connect lazily on first tool call so the ClientSession is bound
+            # to the correct asyncio event loop.
+            _client = get_sidecar_client()
+            if _client is None:
+                from ivy_lsp.mcp.client import connect_to_sidecar, get_sidecar_port
 
-            _port = get_sidecar_port()
-            if _port is not None:
-                _client = await connect_to_sidecar(_port)
-                if _client is not None:
-                    set_sidecar_client(_client)
-                    logger.info(
-                        "[UPGRADED] Connected to sidecar on port %d from MCP event loop",
-                        _port,
+                _port = get_sidecar_port()
+                if _port is not None:
+                    _client = await connect_to_sidecar(_port)
+                    if _client is not None:
+                        set_sidecar_client(_client)
+                        logger.info(
+                            "[UPGRADED] Connected to sidecar on port %d from MCP event loop",
+                            _port,
+                        )
+
+            if _client is not None:
+                try:
+                    result = await _cancel_safe_wait_for(
+                        _client.call_tool(tool_name, kwargs),
+                        timeout=timeout,
+                    )
+                    return result  # verbatim from sidecar
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "[SIDECAR-TIMEOUT] %s timed out after %.0fs",
+                        tool_name,
+                        timeout,
+                    )
+                    set_sidecar_client(None)
+                    return _error_result(
+                        {
+                            "success": False,
+                            "message": f"Sidecar tool timed out after {timeout:.0f}s",
+                            "timeout": True,
+                            "tool": tool_name,
+                        }
+                    )
+                except Exception:
+                    logger.warning(
+                        "[DOWNGRADED] Sidecar call to %s failed, using local",
+                        tool_name,
+                    )
+                    set_sidecar_client(None)
+                    # Fall through to local handling
+
+            # --- Original local handling below ---
+            from ivy_lsp.infra.config import get_config
+            from ivy_lsp.infra.observability import get_session_logger
+
+            sem = _ensure_semaphore()
+            cfg = get_config()
+            call_id = (
+                f"{tool_name}-{int(time.time() * 1000)}-{id(asyncio.current_task())}"
+            )
+            logger_session = get_session_logger()
+
+            arg_summary = [_summarize_for_log(arg) for arg in list(args)[:4]]
+            kw_summary = {k: _summarize_for_log(v) for k, v in list(kwargs.items())[:8]}
+
+            # Ensure per-tool metrics bucket exists.
+            if tool_name not in _tool_metrics:
+                _tool_metrics[tool_name] = ToolMetrics()
+            metrics = _tool_metrics[tool_name]
+
+            start = time.monotonic()
+            try:
+                if cfg.debug_log:
+                    logger.debug(
+                        "[TOOL-START] %s call_id=%s timeout=%.1fs",
+                        tool_name,
+                        call_id,
+                        timeout,
+                    )
+                    logger_session.log_event(
+                        channel="mcp",
+                        event_type="call_start",
+                        name=tool_name,
+                        status="started",
+                        payload={"args": arg_summary, "kwargs": kw_summary},
+                        call_id=call_id,
                     )
 
-        if _client is not None:
-            try:
-                result = await _cancel_safe_wait_for(
-                    _client.call_tool(tool_name, kwargs),
-                    timeout=timeout,
-                )
-                return result  # verbatim from sidecar
+                sem_timeout = timeout * 0.5
+                try:
+                    await asyncio.wait_for(sem.acquire(), timeout=sem_timeout)
+                except asyncio.TimeoutError:
+                    metrics.timeout_count += 1
+                    metrics.error_count += 1
+                    logger.error(
+                        "MCP tool %s timed out waiting for concurrency slot (%.1fs)",
+                        tool_name,
+                        sem_timeout,
+                    )
+                    return _error_result(
+                        {
+                            "success": False,
+                            "message": f"Tool queued too long (>{sem_timeout:.0f}s). Other tools may be stuck.",
+                            "timeout": True,
+                            "tool": tool_name,
+                        }
+                    )
+                try:
+                    result = await _cancel_safe_wait_for(
+                        fn(*args, **kwargs), timeout=timeout
+                    )
+                finally:
+                    sem.release()
+
+                # Inject workspace context metadata into dict results
+                if ctx is not None and isinstance(result, dict):
+                    _ctx_meta = ctx.build_context_metadata()
+                    # Enrich with mirror info if handler provided scope
+                    scope_role = result.get("scope_role")
+                    if scope_role:
+                        _ctx_meta["ivy_role"] = scope_role
+                        _ctx_meta["tests_role"] = {
+                            "client": "server",
+                            "server": "client",
+                            "mim": "network",
+                        }.get(scope_role, "unknown")
+                    scope_name = result.get("scope")
+                    if scope_name:
+                        _ctx_meta["mirror"] = scope_name
+                    if _ctx_meta:
+                        result["_context"] = _ctx_meta
+
+                result = _format_result(tool_name, result)
+
+                if cfg.debug_log:
+                    elapsed_ms = (time.monotonic() - start) * 1000
+                    logger.debug(
+                        "[TOOL-END] %s call_id=%s duration_ms=%.0f",
+                        tool_name,
+                        call_id,
+                        elapsed_ms,
+                    )
+                    logger_session.log_event(
+                        channel="mcp",
+                        event_type="call_end",
+                        name=tool_name,
+                        status="ok",
+                        duration_ms=elapsed_ms,
+                        payload={
+                            "result_type": type(result).__name__,
+                            "result": _summarize_for_log(result),
+                        },
+                        call_id=call_id,
+                    )
+
+                return result
             except asyncio.TimeoutError:
-                logger.error(
-                    "[SIDECAR-TIMEOUT] %s timed out after %.0fs",
-                    tool_name,
-                    timeout,
-                )
-                set_sidecar_client(None)
-                return _error_result(
-                    {
-                        "success": False,
-                        "message": f"Sidecar tool timed out after {timeout:.0f}s",
-                        "timeout": True,
-                        "tool": tool_name,
-                    }
-                )
-            except Exception:
-                logger.warning(
-                    "[DOWNGRADED] Sidecar call to %s failed, using local",
-                    tool_name,
-                )
-                set_sidecar_client(None)
-                # Fall through to local handling
-
-        # --- Original local handling below ---
-        from ivy_lsp.infra.config import get_config
-        from ivy_lsp.infra.observability import get_session_logger
-
-        sem = _ensure_semaphore()
-        cfg = get_config()
-        call_id = f"{tool_name}-{int(time.time() * 1000)}-{id(asyncio.current_task())}"
-        logger_session = get_session_logger()
-
-        arg_summary = [_summarize_for_log(arg) for arg in list(args)[:4]]
-        kw_summary = {k: _summarize_for_log(v) for k, v in list(kwargs.items())[:8]}
-
-        # Ensure per-tool metrics bucket exists.
-        if tool_name not in _tool_metrics:
-            _tool_metrics[tool_name] = ToolMetrics()
-        metrics = _tool_metrics[tool_name]
-
-        start = time.monotonic()
-        try:
-            if cfg.debug_log:
-                logger.debug(
-                    "[TOOL-START] %s call_id=%s timeout=%.1fs",
-                    tool_name,
-                    call_id,
-                    timeout,
-                )
-                logger_session.log_event(
-                    channel="mcp",
-                    event_type="call_start",
-                    name=tool_name,
-                    status="started",
-                    payload={"args": arg_summary, "kwargs": kw_summary},
-                    call_id=call_id,
-                )
-
-            sem_timeout = timeout * 0.5
-            try:
-                await asyncio.wait_for(sem.acquire(), timeout=sem_timeout)
-            except asyncio.TimeoutError:
+                elapsed = time.monotonic() - start
                 metrics.timeout_count += 1
                 metrics.error_count += 1
                 logger.error(
-                    "MCP tool %s timed out waiting for concurrency slot (%.1fs)",
+                    "MCP tool %s timed out after %.1fs (limit %.0fs)",
                     tool_name,
-                    sem_timeout,
+                    elapsed,
+                    timeout,
                 )
+                if cfg.debug_log:
+                    logger_session.log_event(
+                        channel="mcp",
+                        event_type="call_end",
+                        name=tool_name,
+                        status="timeout",
+                        duration_ms=elapsed * 1000,
+                        payload={"timeout_s": timeout},
+                        call_id=call_id,
+                    )
                 return _error_result(
                     {
                         "success": False,
-                        "message": f"Tool queued too long (>{sem_timeout:.0f}s). Other tools may be stuck.",
+                        "message": f"Tool timed out after {timeout:.0f}s",
                         "timeout": True,
                         "tool": tool_name,
                     }
                 )
-            try:
-                result = await _cancel_safe_wait_for(
-                    fn(*args, **kwargs), timeout=timeout
-                )
-            finally:
-                sem.release()
-            result = _format_result(tool_name, result)
-
-            if cfg.debug_log:
-                elapsed_ms = (time.monotonic() - start) * 1000
-                logger.debug(
-                    "[TOOL-END] %s call_id=%s duration_ms=%.0f",
-                    tool_name,
-                    call_id,
-                    elapsed_ms,
-                )
-                logger_session.log_event(
-                    channel="mcp",
-                    event_type="call_end",
-                    name=tool_name,
-                    status="ok",
-                    duration_ms=elapsed_ms,
-                    payload={
-                        "result_type": type(result).__name__,
-                        "result": _summarize_for_log(result),
-                    },
-                    call_id=call_id,
-                )
-
-            return result
-        except asyncio.TimeoutError:
-            elapsed = time.monotonic() - start
-            metrics.timeout_count += 1
-            metrics.error_count += 1
-            logger.error(
-                "MCP tool %s timed out after %.1fs (limit %.0fs)",
-                tool_name,
-                elapsed,
-                timeout,
-            )
-            if cfg.debug_log:
-                logger_session.log_event(
-                    channel="mcp",
-                    event_type="call_end",
-                    name=tool_name,
-                    status="timeout",
-                    duration_ms=elapsed * 1000,
-                    payload={"timeout_s": timeout},
-                    call_id=call_id,
-                )
-            return _error_result(
-                {
-                    "success": False,
-                    "message": f"Tool timed out after {timeout:.0f}s",
-                    "timeout": True,
-                    "tool": tool_name,
-                }
-            )
-        except RuntimeError as exc:
-            # Defensive catch for anyio cancel-scope mismatches (mcp SDK bug).
-            # Return a graceful error instead of crashing the MCP server.
-            if "cancel scope" in str(exc).lower():
+            except RuntimeError as exc:
+                # Defensive catch for anyio cancel-scope mismatches (mcp SDK bug).
+                # Return a graceful error instead of crashing the MCP server.
+                if "cancel scope" in str(exc).lower():
+                    metrics.error_count += 1
+                    logger.warning(
+                        "MCP cancel scope error in %s (anyio bug): %s",
+                        tool_name,
+                        exc,
+                    )
+                    return _error_result(
+                        {
+                            "success": False,
+                            "message": f"Internal concurrency error in {tool_name}. Please retry.",
+                            "tool": tool_name,
+                        }
+                    )
+                raise  # re-raise non-cancel-scope RuntimeErrors
+            except Exception as exc:
                 metrics.error_count += 1
-                logger.warning(
-                    "MCP cancel scope error in %s (anyio bug): %s",
+                logger.error(
+                    "Unhandled exception in MCP tool %s: %s",
                     tool_name,
                     exc,
+                    exc_info=True,
                 )
+                if cfg.debug_log:
+                    logger_session.log_event(
+                        channel="mcp",
+                        event_type="call_end",
+                        name=tool_name,
+                        status="error",
+                        duration_ms=(time.monotonic() - start) * 1000,
+                        payload={
+                            "error_type": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                        call_id=call_id,
+                    )
                 return _error_result(
                     {
                         "success": False,
-                        "message": f"Internal concurrency error in {tool_name}. Please retry.",
-                        "tool": tool_name,
+                        "message": f"Internal error in {tool_name}: {exc}",
                     }
                 )
-            raise  # re-raise non-cancel-scope RuntimeErrors
-        except Exception as exc:
-            metrics.error_count += 1
-            logger.error(
-                "Unhandled exception in MCP tool %s: %s",
-                tool_name,
-                exc,
-                exc_info=True,
-            )
-            if cfg.debug_log:
-                logger_session.log_event(
-                    channel="mcp",
-                    event_type="call_end",
-                    name=tool_name,
-                    status="error",
-                    duration_ms=(time.monotonic() - start) * 1000,
-                    payload={
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                    },
-                    call_id=call_id,
-                )
-            return _error_result(
-                {"success": False, "message": f"Internal error in {tool_name}: {exc}"}
-            )
-        finally:
-            elapsed = time.monotonic() - start
-            metrics.call_count += 1
-            metrics.total_duration += elapsed
+            finally:
+                elapsed = time.monotonic() - start
+                metrics.call_count += 1
+                metrics.total_duration += elapsed
 
-    # FastMCP resolves ForwardRef type annotations using func.__globals__.
-    # The wrapper lives in tools/__init__.py whose globals lack Literal and
-    # other imports from tool modules.  Rebuild the wrapper with fn's
-    # __globals__ — all names the wrapper body references (logger,
-    # error_response, _get_effective_timeout, _ensure_semaphore,
-    # _tool_metrics, ToolMetrics, asyncio, time) are also available there
-    # via each tool module's own imports *or* via closure.  We inject the
-    # missing names into fn's globals so the rebuilt function can find them.
-    _injected_names = {
-        "logger": logger,
-        "error_response": error_response,
-        "_get_effective_timeout": _get_effective_timeout,
-        "_ensure_semaphore": _ensure_semaphore,
-        "_tool_metrics": _tool_metrics,
-        "ToolMetrics": ToolMetrics,
-        "asyncio": asyncio,
-        "time": time,
-        "format_error": format_error,
-        "format_tool_result": format_tool_result,
-        "_format_result": _format_result,
-        "_truncate_if_needed": _truncate_if_needed,
-        "_summarize_for_log": _summarize_for_log,
-        "get_sidecar_client": get_sidecar_client,
-        "set_sidecar_client": set_sidecar_client,
-        "_error_result": _error_result,
-        "_cancel_safe_wait_for": _cancel_safe_wait_for,
-        "CallToolResult": CallToolResult,
-        "TextContent": TextContent,
-    }
-    patched_globals = {**fn.__globals__, **_injected_names}
+        # FastMCP resolves ForwardRef type annotations using func.__globals__.
+        # The wrapper lives in tools/__init__.py whose globals lack Literal and
+        # other imports from tool modules.  Rebuild the wrapper with fn's
+        # __globals__ — all names the wrapper body references (logger,
+        # error_response, _get_effective_timeout, _ensure_semaphore,
+        # _tool_metrics, ToolMetrics, asyncio, time) are also available there
+        # via each tool module's own imports *or* via closure.  We inject the
+        # missing names into fn's globals so the rebuilt function can find them.
+        _injected_names = {
+            "logger": logger,
+            "error_response": error_response,
+            "_get_effective_timeout": _get_effective_timeout,
+            "_ensure_semaphore": _ensure_semaphore,
+            "_tool_metrics": _tool_metrics,
+            "ToolMetrics": ToolMetrics,
+            "asyncio": asyncio,
+            "time": time,
+            "format_error": format_error,
+            "format_tool_result": format_tool_result,
+            "_format_result": _format_result,
+            "_truncate_if_needed": _truncate_if_needed,
+            "_summarize_for_log": _summarize_for_log,
+            "get_sidecar_client": get_sidecar_client,
+            "set_sidecar_client": set_sidecar_client,
+            "_error_result": _error_result,
+            "_cancel_safe_wait_for": _cancel_safe_wait_for,
+            "CallToolResult": CallToolResult,
+            "TextContent": TextContent,
+        }
+        patched_globals = {**fn.__globals__, **_injected_names}
 
-    wrapper = types.FunctionType(
-        _wrapper.__code__,
-        patched_globals,
-        _wrapper.__name__,
-        _wrapper.__defaults__,
-        _wrapper.__closure__,
-    )
-    functools.update_wrapper(wrapper, fn)
-    return wrapper
+        wrapper = types.FunctionType(
+            _wrapper.__code__,
+            patched_globals,
+            _wrapper.__name__,
+            _wrapper.__defaults__,
+            _wrapper.__closure__,
+        )
+        functools.update_wrapper(wrapper, fn)
+        return wrapper
+
+    # Factory dispatch: @safe_tool vs @safe_tool(ctx=ctx)
+    if fn is not None:
+        # Called as @safe_tool (no arguments) — backward compatible
+        return _decorator(fn)
+    # Called as @safe_tool(ctx=ctx)
+    return _decorator
 
 
 from ivy_lsp.mcp.tools.analysis import register_analysis_tools
