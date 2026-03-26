@@ -158,6 +158,10 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
         # _compute_test_scopes; fully cleared on initial/full rebuilds.
         self._mirror_scope_cache: Dict[str, List[IvySymbol]] = {}
         self._mirror_registry = MirrorRegistry()
+        # Hash of each file's export/import signature, used by
+        # reindex_file() to skip expensive re-wiring when exports
+        # haven't changed.
+        self._file_export_hashes: Dict[str, str] = {}
 
     # -- Public accessors (Phase 3.2) ----------------------------------------
 
@@ -290,6 +294,7 @@ class WorkspaceIndexer(DeepIndexMixin, ScopeManagerMixin):
         self._requirement_graph = ScopedRequirementModel()
         self._file_export_imports = {}
         self._mirror_scope_cache = {}
+        self._file_export_hashes = {}
         with self._progress_lock:
             self._deep_index_running = False
 

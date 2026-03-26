@@ -9,6 +9,7 @@ runtime.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -55,8 +56,26 @@ class ScopeManagerMixin:
             return mgr
         return None
 
+    @staticmethod
+    def _compute_export_hash(info: Any) -> str:
+        """Compute a deterministic hash of a file's export/import signature.
+
+        The hash covers the sorted export and import action names.
+        Returns a hex digest string.
+        """
+        exports = "\0".join(sorted(info.exports))
+        imports = "\0".join(sorted(info.imports))
+        payload = f"E:{exports}\nI:{imports}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     def reindex_file(self, filepath: str) -> None:
-        """Re-index a single file after it has been modified on disk."""
+        """Re-index a single file after it has been modified on disk.
+
+        Uses an export-hash cut-off: if the file's export/import
+        signature hasn't changed since the last indexing, the expensive
+        ``_wire_requirement_graph()`` and ``_compute_test_scopes()``
+        calls are skipped.
+        """
         abs_path = os.path.abspath(filepath)
         self._remove_file_symbols(abs_path)
         self._requirement_graph.remove_file(abs_path)
@@ -70,6 +89,29 @@ class ScopeManagerMixin:
         if compiler_mgr is not None:
             compiler_mgr.invalidate_dependents(abs_path, self._include_graph)
         self._index_single_file(abs_path)
+
+        # Cut-off: skip expensive re-wiring when exports haven't changed.
+        old_hash = self._file_export_hashes.get(abs_path)
+        with self._exports_lock:
+            new_info = self._file_export_imports.get(abs_path)
+
+        if new_info is not None:
+            new_hash = self._compute_export_hash(new_info)
+        else:
+            # Extraction failed — be conservative and force re-wire.
+            new_hash = None
+
+        if new_hash is not None and old_hash == new_hash:
+            # Exports unchanged — skip re-wiring.
+            logger.debug("Export hash unchanged for %s; skipping re-wiring", abs_path)
+            return
+
+        # Update stored hash (or clear it on extraction failure).
+        if new_hash is not None:
+            self._file_export_hashes[abs_path] = new_hash
+        else:
+            self._file_export_hashes.pop(abs_path, None)
+
         self._wire_requirement_graph()
         self._compute_test_scopes(dirty_files={abs_path})
 
