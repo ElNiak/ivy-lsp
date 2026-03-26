@@ -22,6 +22,7 @@ from typing import Callable, List, Optional, Tuple
 
 from lsprotocol.types import SymbolKind
 
+from ivy_lsp.core.parsing.reference_extraction import extract_references_regex
 from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolReference
 
 logger = logging.getLogger(__name__)
@@ -88,15 +89,6 @@ _INDIVIDUAL_DECL_RE = re.compile(r"^\s*individual\s+([\w.]+)\s*:\s*(\w+)", re.MU
 _OBJECT_DECL_RE = re.compile(
     r"^\s*(object|module|isolate)\s+([\w.]+)\s*(?:=\s*\{)?", re.MULTILINE
 )
-
-# ---------------------------------------------------------------------------
-# Tier 2/3: Reference extraction patterns
-# ---------------------------------------------------------------------------
-
-_CALL_STMT_RE = re.compile(r"(?:call\s+)([\w.]+)\s*(?:\(|;|$)", re.MULTILINE)
-_INSTANCE_RE = re.compile(r"^\s*instance\s+([\w.]+)\s*:\s*([\w.]+)", re.MULTILINE)
-_MONITOR_RE = re.compile(r"^\s*(before|after|around)\s+([\w.]+)", re.MULTILINE)
-
 
 # ---------------------------------------------------------------------------
 # TieredExtractor
@@ -393,57 +385,8 @@ class TieredExtractor:
             if not (sym.kind == SymbolKind.File and sym.detail == "include")
         ]
 
-        # Extract references using same regex patterns as Tier 3
-        references: List[SymbolReference] = []
-
-        for m in _CALL_STMT_RE.finditer(source):
-            target = m.group(1)
-            call_line = source[: m.start()].count("\n")
-            # Find enclosing action from extracted symbols
-            best_name: Optional[str] = None
-            best_line = -1
-            for sym in declaration_symbols:
-                if (
-                    sym.kind in (SymbolKind.Function, SymbolKind.Method)
-                    and sym.range[0] <= call_line
-                    and sym.range[0] > best_line
-                ):
-                    best_name = sym.name
-                    best_line = sym.range[0]
-            if best_name:
-                references.append(
-                    SymbolReference(
-                        source_name=best_name,
-                        target_name=target,
-                        kind="call",
-                        line=call_line,
-                        file_path=filepath,
-                    )
-                )
-
-        for m in _INSTANCE_RE.finditer(source):
-            references.append(
-                SymbolReference(
-                    source_name=m.group(1),
-                    target_name=m.group(2),
-                    kind="instance",
-                    line=source[: m.start()].count("\n"),
-                    file_path=filepath,
-                )
-            )
-
-        for m in _MONITOR_RE.finditer(source):
-            mk = m.group(1)
-            an = m.group(2)
-            references.append(
-                SymbolReference(
-                    source_name=f"{mk} {an}",
-                    target_name=an,
-                    kind="monitor",
-                    line=source[: m.start()].count("\n"),
-                    file_path=filepath,
-                )
-            )
+        # Extract references using shared regex helper
+        references = extract_references_regex(source, filepath, declaration_symbols)
 
         return declaration_symbols, includes, references
 
@@ -575,69 +518,8 @@ class TieredExtractor:
         # Includes
         includes = INCLUDE_PATTERN.findall(source)
 
-        # --- Reference extraction ---
-        references: List[SymbolReference] = []
-
-        # Helper: find enclosing action for a given line
-        def _find_enclosing_action(line_idx: int) -> Optional[str]:
-            """Find which action's range contains this line."""
-            best_name: Optional[str] = None
-            best_line = -1
-            for sym in symbols:
-                if (
-                    sym.kind in (SymbolKind.Function, SymbolKind.Method)
-                    and sym.range[0] <= line_idx
-                    and sym.range[0] > best_line
-                ):
-                    best_name = sym.name
-                    best_line = sym.range[0]
-            return best_name
-
-        # CALLS: call X(...)
-        for m in _CALL_STMT_RE.finditer(source):
-            target = m.group(1)
-            call_line = source[: m.start()].count("\n")
-            enclosing = _find_enclosing_action(call_line)
-            if enclosing:
-                references.append(
-                    SymbolReference(
-                        source_name=enclosing,
-                        target_name=target,
-                        kind="call",
-                        line=call_line,
-                        file_path=filepath,
-                    )
-                )
-
-        # USES: instance X : Y(...)
-        for m in _INSTANCE_RE.finditer(source):
-            inst_name = m.group(1)
-            module_name = m.group(2)
-            inst_line = source[: m.start()].count("\n")
-            references.append(
-                SymbolReference(
-                    source_name=inst_name,
-                    target_name=module_name,
-                    kind="instance",
-                    line=inst_line,
-                    file_path=filepath,
-                )
-            )
-
-        # MONITORS: before/after/around X
-        for m in _MONITOR_RE.finditer(source):
-            mixin_kind = m.group(1)  # "before", "after", "around"
-            action_name = m.group(2)
-            mon_line = source[: m.start()].count("\n")
-            references.append(
-                SymbolReference(
-                    source_name=f"{mixin_kind} {action_name}",
-                    target_name=action_name,
-                    kind="monitor",
-                    line=mon_line,
-                    file_path=filepath,
-                )
-            )
+        # Extract references using shared regex helper
+        references = extract_references_regex(source, filepath, symbols)
 
         return symbols, includes, references
 

@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from lsprotocol.types import SymbolKind
 
-from ivy_lsp.core.parsing.symbols import SymbolReference
+from ivy_lsp.core.parsing.reference_extraction import (
+    _find_enclosing_action,
+    extract_references_regex,
+)
+from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolReference
 
 
 class TestSymbolReference:
@@ -367,3 +372,167 @@ class TestTier2LexerExtraction:
         mon_refs = [r for r in result.references if r.kind == "monitor"]
         assert len(mon_refs) >= 1
         assert any(r.target_name == "connect" for r in mon_refs)
+
+
+# ---------------------------------------------------------------------------
+# Test: extract_references_regex() standalone function
+# ---------------------------------------------------------------------------
+
+
+def _make_action_symbol(name: str, start_line: int) -> IvySymbol:
+    """Helper to build a minimal action symbol for tests."""
+    return IvySymbol(
+        name=name,
+        kind=SymbolKind.Function,
+        range=(start_line, 0, start_line, 0),
+    )
+
+
+class TestFindEnclosingAction:
+    """Tests for _find_enclosing_action helper."""
+
+    @pytest.mark.unit
+    def test_no_symbols_returns_none(self):
+        assert _find_enclosing_action([], 5) is None
+
+    @pytest.mark.unit
+    def test_single_enclosing_action(self):
+        syms = [_make_action_symbol("process", 3)]
+        assert _find_enclosing_action(syms, 5) == "process"
+
+    @pytest.mark.unit
+    def test_picks_closest_enclosing_action(self):
+        syms = [
+            _make_action_symbol("init", 0),
+            _make_action_symbol("process", 5),
+            _make_action_symbol("cleanup", 20),
+        ]
+        # Line 8 is inside 'process' (starts at 5), not 'cleanup' (starts at 20)
+        assert _find_enclosing_action(syms, 8) == "process"
+
+    @pytest.mark.unit
+    def test_line_before_any_action_returns_none(self):
+        syms = [_make_action_symbol("process", 10)]
+        assert _find_enclosing_action(syms, 2) is None
+
+    @pytest.mark.unit
+    def test_exact_line_match(self):
+        syms = [_make_action_symbol("process", 5)]
+        assert _find_enclosing_action(syms, 5) == "process"
+
+    @pytest.mark.unit
+    def test_ignores_non_function_symbols(self):
+        syms = [
+            IvySymbol(name="mytype", kind=SymbolKind.Class, range=(0, 0, 0, 0)),
+            _make_action_symbol("process", 5),
+        ]
+        assert _find_enclosing_action(syms, 3) is None
+        assert _find_enclosing_action(syms, 6) == "process"
+
+
+class TestExtractReferencesRegex:
+    """Tests for extract_references_regex standalone function."""
+
+    @pytest.mark.unit
+    def test_finds_calls_instances_monitors(self):
+        source = (
+            "type cid\n"  # line 0
+            "action connect(src:cid, dst:cid)\n"  # line 1
+            "action process(c:cid) = {\n"  # line 2
+            "    call connect(c, c);\n"  # line 3
+            "}\n"  # line 4
+            "module endpoint = {\n"  # line 5
+            "}\n"  # line 6
+            "instance net : endpoint\n"  # line 7
+            "before connect {\n"  # line 8
+            "    require src ~= dst;\n"  # line 9
+            "}\n"  # line 10
+        )
+        syms = [
+            _make_action_symbol("connect", 1),
+            _make_action_symbol("process", 2),
+        ]
+        refs = extract_references_regex(source, "test.ivy", syms)
+
+        call_refs = [r for r in refs if r.kind == "call"]
+        inst_refs = [r for r in refs if r.kind == "instance"]
+        mon_refs = [r for r in refs if r.kind == "monitor"]
+
+        assert len(call_refs) >= 1
+        assert any(
+            r.target_name == "connect" and r.source_name == "process" for r in call_refs
+        )
+
+        assert len(inst_refs) == 1
+        assert inst_refs[0].source_name == "net"
+        assert inst_refs[0].target_name == "endpoint"
+
+        assert len(mon_refs) >= 1
+        assert any(
+            r.target_name == "connect" and r.source_name == "before connect"
+            for r in mon_refs
+        )
+
+    @pytest.mark.unit
+    def test_empty_source_returns_empty(self):
+        refs = extract_references_regex("", "test.ivy", [])
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_no_references_in_plain_declarations(self):
+        source = "type cid\naction connect(src:cid, dst:cid)\n"
+        syms = [_make_action_symbol("connect", 1)]
+        refs = extract_references_regex(source, "test.ivy", syms)
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_file_path_propagated(self):
+        source = "action process(c:cid) = {\n    call connect(c, c);\n}\n"
+        syms = [_make_action_symbol("process", 0)]
+        refs = extract_references_regex(source, "/my/file.ivy", syms)
+        assert all(r.file_path == "/my/file.ivy" for r in refs)
+
+    @pytest.mark.unit
+    def test_call_without_enclosing_action_skipped(self):
+        source = "call connect(c, c);\n"
+        # No action symbols to enclose the call
+        refs = extract_references_regex(source, "test.ivy", [])
+        call_refs = [r for r in refs if r.kind == "call"]
+        assert call_refs == []
+
+    @pytest.mark.unit
+    def test_multiple_instances(self):
+        source = "instance a : mod_a\ninstance b : mod_b\n"
+        refs = extract_references_regex(source, "test.ivy", [])
+        inst_refs = [r for r in refs if r.kind == "instance"]
+        assert len(inst_refs) == 2
+        assert {r.source_name for r in inst_refs} == {"a", "b"}
+        assert {r.target_name for r in inst_refs} == {"mod_a", "mod_b"}
+
+    @pytest.mark.unit
+    def test_around_monitor(self):
+        source = "action send(x:nat)\naround send {\n    require x > 0;\n}\n"
+        syms = [_make_action_symbol("send", 0)]
+        refs = extract_references_regex(source, "test.ivy", syms)
+        mon_refs = [r for r in refs if r.kind == "monitor"]
+        assert len(mon_refs) == 1
+        assert mon_refs[0].source_name == "around send"
+        assert mon_refs[0].target_name == "send"
+
+    @pytest.mark.unit
+    def test_after_monitor(self):
+        source = "action send(x:nat)\nafter send {\n}\n"
+        syms = [_make_action_symbol("send", 0)]
+        refs = extract_references_regex(source, "test.ivy", syms)
+        mon_refs = [r for r in refs if r.kind == "monitor"]
+        assert len(mon_refs) == 1
+        assert mon_refs[0].source_name == "after send"
+
+    @pytest.mark.unit
+    def test_dotted_call_target(self):
+        source = "action process(c:cid) = {\n    call conn.send(c);\n}\n"
+        syms = [_make_action_symbol("process", 0)]
+        refs = extract_references_regex(source, "test.ivy", syms)
+        call_refs = [r for r in refs if r.kind == "call"]
+        assert len(call_refs) == 1
+        assert call_refs[0].target_name == "conn.send"
