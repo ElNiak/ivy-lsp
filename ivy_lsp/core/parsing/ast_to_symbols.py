@@ -633,7 +633,7 @@ def _convert_definition(decl: Any, filename: str, source: str) -> List[IvySymbol
             kind=SymbolKind.Function,
             range=rng,
             file_path=filename,
-            synthetic=re.fullmatch(r"def\d+", name) is not None,
+            synthetic=re.fullmatch(r"def\d+", name.rsplit(".", 1)[-1]) is not None,
         )
     ]
 
