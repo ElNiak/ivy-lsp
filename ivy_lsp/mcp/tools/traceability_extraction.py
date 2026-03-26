@@ -135,7 +135,7 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
     """Register ivy_extract_requirements and ivy_manifest on *mcp*."""
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_extract_requirements(
         rfc_text: str = "",
         output: str = "structured",
@@ -251,7 +251,7 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
     # --- ivy_manifest tool ---
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_manifest(
         mode: Literal["info", "validate", "staleness", "refresh"] = "info",
         protocol: str = "",

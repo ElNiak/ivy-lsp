@@ -182,7 +182,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         return result
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_visualize(
         view: Literal["dependencies", "state_machine", "layers"] = "dependencies",
         test_file: str | None = None,
@@ -252,7 +252,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             return _tc.finish(result)
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_model_summary(
         detail: Literal["summary", "requirements"] = "summary",
         test_file: str | None = None,

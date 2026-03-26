@@ -19,7 +19,7 @@ def register_workspace_tools(mcp: Any, ctx: Any) -> None:
     """Register workspace management MCP tools."""
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_workspace(
         action: Literal["set", "get", "list", "clear"],
         target: str | None = None,
@@ -112,6 +112,10 @@ async def _handle_set(ctx: Any, target: str | None, roles: str | None) -> dict:
         ctx.include_resolver, "set_active_workspace"
     ):
         ctx.include_resolver.set_active_workspace(ws.active_layers)
+
+    # Invalidate basename cache so it rebuilds with new layer scope
+    if hasattr(ctx, "_basename_cache_invalidate"):
+        ctx._basename_cache_invalidate()
 
     # Store on context
     ctx.active_workspace = ws

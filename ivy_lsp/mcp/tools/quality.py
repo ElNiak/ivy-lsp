@@ -298,7 +298,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
     # ------------------------------------------------------------------
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_quality(
         mode: Literal["suggestions", "gate"] = "suggestions",
         file_path: str | None = None,

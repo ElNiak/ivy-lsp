@@ -132,7 +132,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 _evict_oldest_if_needed()
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_verify(
         relative_path: str,
         isolate: str | None = None,
@@ -321,7 +321,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             return _tt[0]
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_compile(
         relative_path: str,
         target: str = "test",
@@ -487,7 +487,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             return _tt[0]
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_model_info(
         relative_path: str,
         isolate: str | None = None,
@@ -566,7 +566,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             return _tt[0]
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_diagnostics(
         relative_path: str,
         mode: str = "full",
@@ -965,7 +965,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
     ctx.get_verify_cache_summary = _get_cache_summary
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_verification_dashboard() -> dict:
         """Workspace-level verification status: files verified, failed, pending.
 

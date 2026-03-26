@@ -173,7 +173,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
     # ------------------------------------------------------------------
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_patterns(
         protocol: str,
         mode: str = "analyze",
@@ -235,7 +235,7 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             )
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_pattern_scaffold(
         protocol: str,
         pattern: str,

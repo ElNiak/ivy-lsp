@@ -21,7 +21,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     """Register analysis-related MCP tools."""
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_include_graph(
         relative_path: str | None = None,
         detail: str = "summary",
@@ -241,7 +241,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 return _tc.finish(_summary_result)
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_capabilities() -> dict:
         """Report which Ivy CLI tools are available on PATH, MCP tools, staging health, and parsing tier."""
         from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
@@ -285,7 +285,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         return _tc.finish(result)
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_scope(relative_path: str) -> dict:
         """Return endpoint mirror scope info for an Ivy file.
 
@@ -373,7 +373,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         return _tc.finish(result)
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_health_check() -> dict:
         """Server health check: uptime, cache status, tool metrics, model status.
 
@@ -435,7 +435,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         return _tc.finish(health)
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_index(
         protocol: str = "all",
         fast: bool = False,

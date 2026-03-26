@@ -498,7 +498,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # ------------------------------------------------------------------
 
     @mcp.tool()
-    @safe_tool
+    @safe_tool(ctx=ctx)
     async def ivy_coverage(
         mode: Literal["matrix", "stats", "gaps", "diff"] = "stats",
         relative_path: str | None = None,
