@@ -266,8 +266,6 @@ def _build_panther_workspace(
     include_paths = [f"protocol-testing/{p}" for p in discovered]
 
     # Build one layer per protocol for a lightweight heuristic config.
-    # (The root .ivyworkspace, if present, will already provide richer layer data
-    # via the marker pipeline; this only runs when no marker was found.)
     layers = [
         WorkspaceLayer(
             id=p,

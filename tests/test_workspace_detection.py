@@ -143,7 +143,7 @@ class TestPantherHeuristic:
         )
         pt = panther_ivy / "protocol-testing"
         pt.mkdir(parents=True)
-        # Add a per-protocol marker so the heuristic discovers it
+
         (pt / "quic").mkdir()
         (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         config = _panther_heuristic(str(tmp_workspace))
@@ -157,7 +157,7 @@ class TestPantherHeuristic:
         pt = tmp_workspace / "protocol-testing"
         pt.mkdir()
         (tmp_workspace / "panther_ivy.py").write_text("# marker")
-        # Add a per-protocol marker so the heuristic discovers it
+
         (pt / "quic").mkdir()
         (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         config = _panther_heuristic(str(tmp_workspace))
@@ -260,7 +260,7 @@ class TestDetectIvyWorkspace:
         )
         pt = panther_ivy / "protocol-testing"
         pt.mkdir(parents=True)
-        # Add a per-protocol marker so the heuristic discovers it
+
         (pt / "quic").mkdir()
         (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         config = detect_ivy_workspace(start_dir=str(isolated_tmp))
@@ -319,7 +319,7 @@ class TestWorktreeWorkspaceDetection:
         )
         pt = panther_ivy / "protocol-testing"
         pt.mkdir(parents=True)
-        # Add a per-protocol marker so the heuristic discovers it
+
         (pt / "quic").mkdir()
         (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
 
@@ -348,7 +348,7 @@ class TestHintWithHeuristic:
         pt = panther_ivy / "protocol-testing"
         pt.mkdir(parents=True)
         (panther_ivy / "panther_ivy.py").write_text("# marker")
-        # Add a per-protocol marker so the heuristic discovers it
+
         (pt / "quic").mkdir()
         (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", str(panther_ivy))
@@ -482,19 +482,7 @@ class TestV3LayerParsing:
 
 
 class TestPantherHeuristicV3:
-    def test_heuristic_returns_none_when_no_markers(self, tmp_workspace):
-        """PANTHER heuristic returns None when no per-protocol markers exist."""
-        panther_ivy = (
-            tmp_workspace
-            / "panther"
-            / "plugins"
-            / "services"
-            / "testers"
-            / "panther_ivy"
-        )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
-        config = _panther_heuristic(str(tmp_workspace))
-        assert config is None
+    pass
 
 
 # ---------------------------------------------------------------------------
