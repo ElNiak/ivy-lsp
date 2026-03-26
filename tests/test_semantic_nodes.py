@@ -2,15 +2,18 @@
 
 import pytest
 
-from ivy_lsp.core.semantic.edges import EdgeType, SemanticEdgeType
-from ivy_lsp.core.semantic.nodes import (  # Re-exported backward compat
+from ivy_lsp.core.analysis.requirement_graph import (
     ActionNode,
-    MonitorNode,
+    EdgeType,
     PropertyNode,
     RequirementNode,
+    StateVarNode,
+)
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.nodes import (
+    MonitorNode,
     RfcAnnotation,
     RfcRequirement,
-    StateVarNode,
     SymbolNode,
     TypeNode,
 )

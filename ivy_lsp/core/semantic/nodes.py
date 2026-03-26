@@ -10,21 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
-# Re-export existing node types for backward compatibility
-from ivy_lsp.core.analysis.requirement_graph import (
-    ActionNode,
-    PropertyNode,
-    RequirementNode,
-    StateVarNode,
-)
-
 __all__ = [
-    # Existing (re-exported)
-    "RequirementNode",
-    "StateVarNode",
-    "ActionNode",
-    "PropertyNode",
-    # New
     "SymbolNode",
     "TypeNode",
     "MonitorNode",

@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-# Re-export existing EdgeType for backward compatibility
-from ivy_lsp.core.analysis.requirement_graph import EdgeType
-
-__all__ = ["EdgeType", "SemanticEdgeType"]
+__all__ = ["SemanticEdgeType"]
 
 
 class SemanticEdgeType(Enum):
