@@ -22,12 +22,13 @@ from typing import Any
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
-from ivy_lsp.infra.utils.basename_cache import BasenameCache
-from ivy_lsp.infra.utils.lazy_builder import LazyAsyncBuilder
 
 # Re-export verification functions so that external code and tests that patch
 # ``ivy_lsp.mcp.server.shared_ivy_check`` (etc.) continue to work after the
 # tool handlers were moved to ``ivy_lsp.mcp.tools.*``.
+from ivy_lsp.infra.observability.session import workspace_hash
+from ivy_lsp.infra.utils.basename_cache import BasenameCache
+from ivy_lsp.infra.utils.lazy_builder import LazyAsyncBuilder
 from ivy_lsp.mcp import client as sidecar_client
 from ivy_lsp.mcp.context import ToolContext
 
@@ -73,7 +74,7 @@ async def _sidecar_monitor(
         logger.info("[SIDECAR-MONITOR] Upgrade disabled by IVY_MCP_DISABLE_UPGRADE")
         return
 
-    ws_hash = sidecar_client.workspace_hash(workspace_root)
+    ws_hash = workspace_hash(workspace_root)
     elapsed = 0.0
     poll = _poll_interval
     iteration = 0
