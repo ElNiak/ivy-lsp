@@ -255,10 +255,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 "ivyc": shutil.which("ivyc") is not None,
                 "ivy_show": shutil.which("ivy_show") is not None,
             },
-            # Also report legacy flat keys for backward compat
-            "ivy_check": shutil.which("ivy_check") is not None,
-            "ivyc": shutil.which("ivyc") is not None,
-            "ivy_show": shutil.which("ivy_show") is not None,
             "mcp_tools": {
                 name: {
                     "category": meta.get("category", ""),

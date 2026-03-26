@@ -84,12 +84,6 @@ def _format_ivy_capabilities(data: dict) -> str:
         for tool, available in cli_tools.items():
             icon = "+" if available else "-"
             parts.append(f"- [{icon}] `{tool}`")
-    else:
-        # Fallback to legacy flat keys
-        for tool in ("ivy_check", "ivyc", "ivy_show"):
-            available = data.get(tool, False)
-            icon = "+" if available else "-"
-            parts.append(f"- [{icon}] `{tool}`")
 
     # MCP tools
     mcp_tools = data.get("mcp_tools", {})
