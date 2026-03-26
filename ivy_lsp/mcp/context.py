@@ -177,7 +177,8 @@ class ToolContext:
 
         def _find_files(search_root: str) -> list[str]:
             if resolver is not None:
-                return resolver.find_all_ivy_files()
+                has_active_ws = bool(getattr(resolver, "_active_layers", None))
+                return resolver.find_all_ivy_files(filter_active=has_active_ws)
             return _find_ivy_raw(search_root, _exclude)
 
         # Basename cache

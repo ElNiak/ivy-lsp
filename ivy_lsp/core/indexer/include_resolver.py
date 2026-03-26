@@ -571,7 +571,9 @@ class IncludeResolver:
             )
         return sorted(result)
 
-    def find_all_ivy_files(self, root: Optional[str] = None) -> List[str]:
+    def find_all_ivy_files(
+        self, root: Optional[str] = None, filter_active: bool = False
+    ) -> List[str]:
         """Return all .ivy file paths in the workspace, sorted.
 
         When a staging directory is active and *root* is ``None``, returns
@@ -580,14 +582,21 @@ class IncludeResolver:
 
         Args:
             root: Directory to search. Defaults to workspace_root.
+            filter_active: When True, return only files belonging to
+                currently active layers. Snapshot ``_active_layers``
+                at call time to avoid TOCTOU races.
 
         Returns:
             Sorted list of absolute paths to .ivy files.
         """
-        # When layer staging is active, return ALL layer-mapped files.
-        # Flat _staged_files only has collision winners; layer staging
-        # correctly maps every file to its layer.
         if self._file_to_layer and root is None:
+            if filter_active and self._active_layers:
+                active = set(self._active_layers)  # snapshot
+                return sorted(
+                    path
+                    for path, layer in self._file_to_layer.items()
+                    if layer in active
+                )
             return sorted(self._file_to_layer.keys())
         if self._staging_dir and root is None:
             return sorted(self._staged_files.values())

@@ -36,3 +36,12 @@ class BasenameCache:
                 cache.setdefault(basename, []).append(rel_path)
             self._cache = cache
             return cache
+
+    def invalidate(self) -> None:
+        """Clear the cache so it rebuilds on the next ``get()`` call.
+
+        Called when the active workspace changes, so the basename cache
+        reflects only files in active layers.
+        """
+        with self._lock:
+            self._cache = None
