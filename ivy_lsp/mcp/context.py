@@ -84,9 +84,6 @@ class ToolContext:
     # Workspace context (loaded from .ivy-index/, shared with LSP)
     workspace_context: Any = None
 
-    # Semantic model version for cache invalidation
-    get_index_version: Callable[[], int] = field(default=lambda: 0)
-
     # Known Ivy standard library modules (fallback; overwritten at runtime
     # by discover_stdlib_modules() which scans ivy/include/1.7/)
     stdlib_modules: frozenset[str] = frozenset(
@@ -183,9 +180,6 @@ class ToolContext:
         ctx.get_model_status = _get_model_status
         ctx.get_req_graph = _get_req_graph
         ctx.get_basename_cache = _get_basename_cache
-        ctx.get_index_version = lambda: (
-            server._semantic_model.version if server._semantic_model else 0
-        )
 
         def _make_resolve_callback():
             cache = _get_basename_cache()

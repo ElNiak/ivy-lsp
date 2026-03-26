@@ -62,6 +62,19 @@ class SemanticModel:
         self.__dict__.update(state)
         self._lock = threading.RLock()
 
+    # -- Name index helpers (caller must hold _lock) -------------------------
+
+    def _unindex_name(self, name: str, node_id: str) -> None:
+        name_list = self._nodes_by_name.get(name)
+        if name_list:
+            self._nodes_by_name[name] = [n for n in name_list if n.id != node_id]
+            if not self._nodes_by_name[name]:
+                del self._nodes_by_name[name]
+
+    def _index_name(self, name: str, node_id: str, node: Any) -> None:
+        existing = self._nodes_by_name.get(name, [])
+        self._nodes_by_name[name] = [n for n in existing if n.id != node_id] + [node]
+
     # -- Mutation -----------------------------------------------------------
 
     def add_node(self, node: Any) -> None:
@@ -69,26 +82,15 @@ class SemanticModel:
         node_id = node.id
         name = getattr(node, "name", None)
         with self._lock:
-            # Name index — handle replace semantics (before overwrite)
             old_node = self._nodes.get(node_id)
             if old_node is not None:
                 old_name = getattr(old_node, "name", None)
                 if old_name and old_name != name:
-                    name_list = self._nodes_by_name.get(old_name)
-                    if name_list:
-                        self._nodes_by_name[old_name] = [
-                            n for n in name_list if n.id != node_id
-                        ]
-                        if not self._nodes_by_name[old_name]:
-                            del self._nodes_by_name[old_name]
+                    self._unindex_name(old_name, node_id)
             self._nodes[node_id] = node
             self._nodes_by_type[type(node)][node_id] = node
-            # Index the new name
             if name:
-                existing = self._nodes_by_name.get(name, [])
-                self._nodes_by_name[name] = [n for n in existing if n.id != node_id] + [
-                    node
-                ]
+                self._index_name(name, node_id, node)
             file_attr = getattr(node, "file", None)
             if file_attr:
                 self._nodes_by_file[file_attr].add(node_id)
@@ -123,13 +125,7 @@ class SemanticModel:
                         type_dict.pop(nid, None)
                     name = getattr(node, "name", None)
                     if name:
-                        name_list = self._nodes_by_name.get(name)
-                        if name_list:
-                            self._nodes_by_name[name] = [
-                                n for n in name_list if n.id != nid
-                            ]
-                            if not self._nodes_by_name[name]:
-                                del self._nodes_by_name[name]
+                        self._unindex_name(name, nid)
                 self._node_tiers.pop(nid, None)
             edges_to_remove = {
                 (src, etype, dst)
@@ -186,13 +182,7 @@ class SemanticModel:
                         type_dict.pop(nid, None)
                     name = getattr(node, "name", None)
                     if name:
-                        name_list = self._nodes_by_name.get(name)
-                        if name_list:
-                            self._nodes_by_name[name] = [
-                                n for n in name_list if n.id != nid
-                            ]
-                            if not self._nodes_by_name[name]:
-                                del self._nodes_by_name[name]
+                        self._unindex_name(name, nid)
                 self._node_tiers.pop(nid, None)
                 file_set = self._nodes_by_file.get(filepath)
                 if file_set:
@@ -234,25 +224,15 @@ class SemanticModel:
                     old_type_dict = self._nodes_by_type.get(type(old_node))
                     if old_type_dict:
                         old_type_dict.pop(nid, None)
-                    # Clean old name index if name changed
                     old_name = getattr(old_node, "name", None)
                     if old_name and old_name != name:
-                        name_list = self._nodes_by_name.get(old_name)
-                        if name_list:
-                            self._nodes_by_name[old_name] = [
-                                n for n in name_list if n.id != nid
-                            ]
-                            if not self._nodes_by_name[old_name]:
-                                del self._nodes_by_name[old_name]
+                        self._unindex_name(old_name, nid)
                 self._nodes[nid] = node
                 self._nodes_by_type[type(node)][nid] = node
                 self._nodes_by_file[filepath].add(nid)
                 self._node_tiers[nid] = tier
                 if name:
-                    existing = self._nodes_by_name.get(name, [])
-                    self._nodes_by_name[name] = [n for n in existing if n.id != nid] + [
-                        node
-                    ]
+                    self._index_name(name, nid, node)
 
             # Add new edges (incremental, skip duplicates)
             for src, etype, dst in edges:
@@ -304,10 +284,7 @@ class SemanticModel:
                     self._node_tiers[node_id] = tier
                 name = getattr(node, "name", None)
                 if name:
-                    existing = self._nodes_by_name.get(name, [])
-                    self._nodes_by_name[name] = [
-                        n for n in existing if n.id != node_id
-                    ] + [node]
+                    self._index_name(name, node_id, node)
             # Copy edges
             for src, etype, dst in other._edges:
                 edge = (src, etype, dst)

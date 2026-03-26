@@ -97,30 +97,15 @@ def resolve_session_id(
       5. ``/tmp/ivy-session-<ws_hash>.id`` file
       6. ``"unknown"`` fallback
     """
-    # 1. Hook payload (boot-time primary)
     if hook_payload:
         sid = str(hook_payload.get("session_id", "")).strip()
         if sid:
             return sid
-    # 2. CLAUDE_SESSION_ID
-    sid = os.environ.get("CLAUDE_SESSION_ID", "").strip()
-    if sid:
-        return sid
-    # 3. CLAUDE_CODE_SESSION_ID
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
-    if sid:
-        return sid
-    # 4. IVY_SESSION_ID
-    sid = os.environ.get("IVY_SESSION_ID", "").strip()
-    if sid:
-        return sid
-    # 5. /tmp session file
-    ws_root = os.environ.get("IVY_WORKSPACE_ROOT", "").strip() or os.getcwd()
-    from_file = _read_session_file(ws_root, session_dir=session_dir)
-    if from_file:
-        return from_file
-    # 6. Fallback
-    return "unknown"
+    for env_var in ("CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
+        sid = os.environ.get(env_var, "").strip()
+        if sid:
+            return sid
+    return get_session_id(session_dir=session_dir)
 
 
 def resolve_session_log_dir(
