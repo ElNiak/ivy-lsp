@@ -25,6 +25,7 @@ class IvySymbol:
         children: Nested symbols (e.g., fields inside an object).
         detail: Optional human-readable signature or type string.
         file_path: Optional originating file path.
+        synthetic: Whether this symbol has a compiler-generated name.
     """
 
     name: str
@@ -33,6 +34,7 @@ class IvySymbol:
     children: List[IvySymbol] = field(default_factory=list)
     detail: Optional[str] = None
     file_path: Optional[str] = None
+    synthetic: bool = False
 
     def to_dict(self) -> dict:
         """Serialize to a plain dictionary for cross-process transfer."""
@@ -43,6 +45,7 @@ class IvySymbol:
             "children": [c.to_dict() for c in self.children],
             "detail": self.detail,
             "file_path": self.file_path,
+            "synthetic": self.synthetic,
         }
 
     @classmethod
@@ -55,6 +58,7 @@ class IvySymbol:
             children=[cls.from_dict(c) for c in d.get("children", [])],
             detail=d.get("detail"),
             file_path=d.get("file_path"),
+            synthetic=d.get("synthetic", False),
         )
 
 

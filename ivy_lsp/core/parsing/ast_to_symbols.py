@@ -633,6 +633,7 @@ def _convert_definition(decl: Any, filename: str, source: str) -> List[IvySymbol
             kind=SymbolKind.Function,
             range=rng,
             file_path=filename,
+            synthetic=re.fullmatch(r"def\d+", name) is not None,
         )
     ]
 
@@ -684,6 +685,7 @@ def _convert_interpret(decl: Any, filename: str, source: str) -> List[IvySymbol]
             kind=SymbolKind.TypeParameter,
             range=rng,
             file_path=filename,
+            synthetic=True,
         )
     ]
 
@@ -807,6 +809,7 @@ def _convert_mixin(decl: Any, filename: str, source: str) -> List[IvySymbol]:
                 range=rng,
                 detail=detail,
                 file_path=filename,
+                synthetic="[" in mixee_name,
             )
         ]
     except (IndexError, AttributeError):
@@ -893,6 +896,7 @@ def _convert_native(decl: Any, filename: str, source: str) -> List[IvySymbol]:
                 range=rng,
                 detail="native",
                 file_path=filename,
+                synthetic=True,
             )
         ]
     except (IndexError, AttributeError):

@@ -78,12 +78,14 @@ class FlatSymbol:
         kind: LSP symbol kind.
         file_path: Originating file path, or ``None``.
         range: 0-based ``(start_line, start_col, end_line, end_col)`` span.
+        synthetic: Whether this symbol has a compiler-generated name.
     """
 
     qualified_name: str
     kind: lsp.SymbolKind
     file_path: Optional[str]
     range: tuple  # (sl, sc, el, ec)
+    synthetic: bool = False
 
 
 def flatten_symbols(symbols: List[IvySymbol], prefix: str = "") -> List[FlatSymbol]:
@@ -110,6 +112,7 @@ def flatten_symbols(symbols: List[IvySymbol], prefix: str = "") -> List[FlatSymb
                 kind=sym.kind,
                 file_path=sym.file_path,
                 range=sym.range,
+                synthetic=getattr(sym, "synthetic", False),
             )
         )
         if sym.children:
@@ -125,7 +128,9 @@ def search_symbols(flat: List[FlatSymbol], query: str) -> List[FlatSymbol]:
     ``MAX_RESULTS`` cap.
     """
     if not query:
-        return flat[:MAX_RESULTS]
+        return sorted(flat, key=lambda fs: (fs.synthetic, fs.qualified_name))[
+            :MAX_RESULTS
+        ]
     q = query.lower()
     matches = [s for s in flat if q in s.qualified_name.lower()]
 

@@ -18,6 +18,7 @@ from ivy_lsp.lsp.workspace_symbols import (
     FlatSymbol,
     compute_workspace_symbols,
     flatten_symbols,
+    search_symbols,
 )
 
 # ---------------------------------------------------------------------------
@@ -488,3 +489,136 @@ class TestWorkspaceSymbolsProtocolScopingFromFilepath:
         names = [r.name for r in results]
         assert "quic_sym" in names
         assert "apt_sym" not in names
+
+
+class TestIvySymbolSyntheticField:
+    """IvySymbol.synthetic field exists and round-trips through serialization."""
+
+    def test_synthetic_defaults_to_false(self):
+        sym = IvySymbol(name="cid", kind=lsp.SymbolKind.Class, range=(0, 0, 0, 3))
+        assert sym.synthetic is False
+
+    def test_synthetic_set_to_true(self):
+        sym = IvySymbol(
+            name="interp14",
+            kind=lsp.SymbolKind.TypeParameter,
+            range=(0, 0, 0, 8),
+            synthetic=True,
+        )
+        assert sym.synthetic is True
+
+    def test_to_dict_includes_synthetic(self):
+        sym = IvySymbol(
+            name="interp14",
+            kind=lsp.SymbolKind.TypeParameter,
+            range=(0, 0, 0, 8),
+            synthetic=True,
+        )
+        d = sym.to_dict()
+        assert d["synthetic"] is True
+
+    def test_from_dict_restores_synthetic(self):
+        d = {
+            "name": "interp14",
+            "kind": int(lsp.SymbolKind.TypeParameter),
+            "range": [0, 0, 0, 8],
+            "synthetic": True,
+        }
+        sym = IvySymbol.from_dict(d)
+        assert sym.synthetic is True
+
+    def test_from_dict_defaults_synthetic_false(self):
+        """Old serialized dicts without synthetic field default to False."""
+        d = {
+            "name": "cid",
+            "kind": int(lsp.SymbolKind.Class),
+            "range": [0, 0, 0, 3],
+        }
+        sym = IvySymbol.from_dict(d)
+        assert sym.synthetic is False
+
+
+class TestEmptyQuerySyntheticSorting:
+    """Empty query sorts synthetic symbols after real definitions."""
+
+    def test_synthetic_symbols_sort_last(self):
+        """With empty query, synthetic=True symbols appear after synthetic=False."""
+        flat = [
+            FlatSymbol(
+                qualified_name="interp14",
+                kind=lsp.SymbolKind.TypeParameter,
+                file_path="/ws/q.ivy",
+                range=(0, 0, 0, 8),
+                synthetic=True,
+            ),
+            FlatSymbol(
+                qualified_name="cid",
+                kind=lsp.SymbolKind.Class,
+                file_path="/ws/q.ivy",
+                range=(0, 0, 0, 3),
+                synthetic=False,
+            ),
+            FlatSymbol(
+                qualified_name="native3",
+                kind=lsp.SymbolKind.String,
+                file_path="/ws/q.ivy",
+                range=(0, 0, 0, 7),
+                synthetic=True,
+            ),
+            FlatSymbol(
+                qualified_name="quic_packet_type",
+                kind=lsp.SymbolKind.Module,
+                file_path="/ws/q.ivy",
+                range=(0, 0, 0, 16),
+                synthetic=False,
+            ),
+        ]
+        results = search_symbols(flat, query="")
+        names = [r.qualified_name for r in results]
+        assert names.index("cid") < names.index("interp14")
+        assert names.index("quic_packet_type") < names.index("native3")
+
+    def test_query_search_ignores_synthetic_flag(self):
+        """With a non-empty query, synthetic flag does NOT affect results."""
+        flat = [
+            FlatSymbol(
+                qualified_name="interp14",
+                kind=lsp.SymbolKind.TypeParameter,
+                file_path="/ws/q.ivy",
+                range=(0, 0, 0, 8),
+                synthetic=True,
+            ),
+            FlatSymbol(
+                qualified_name="interp_helper",
+                kind=lsp.SymbolKind.Function,
+                file_path="/ws/q.ivy",
+                range=(0, 0, 0, 13),
+                synthetic=False,
+            ),
+        ]
+        results = search_symbols(flat, query="interp")
+        names = [r.qualified_name for r in results]
+        assert "interp14" in names
+        assert "interp_helper" in names
+
+    def test_flatten_preserves_synthetic(self):
+        """flatten_symbols propagates synthetic from IvySymbol to FlatSymbol."""
+        syms = [
+            IvySymbol(
+                name="cid",
+                kind=lsp.SymbolKind.Class,
+                range=(0, 0, 0, 3),
+                file_path="/ws/q.ivy",
+                synthetic=False,
+            ),
+            IvySymbol(
+                name="interp14",
+                kind=lsp.SymbolKind.TypeParameter,
+                range=(0, 0, 0, 8),
+                file_path="/ws/q.ivy",
+                synthetic=True,
+            ),
+        ]
+        flat = flatten_symbols(syms)
+        assert flat[0].synthetic is False
+        assert flat[1].synthetic is True
