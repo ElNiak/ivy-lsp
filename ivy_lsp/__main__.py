@@ -14,6 +14,11 @@ import threading
 import time
 from typing import Any
 
+try:
+    BaseExceptionGroup  # Python 3.11+
+except NameError:
+    from exceptiongroup import BaseExceptionGroup
+
 from ivy_lsp.infra.observability import (
     LogCategory,
     call_context,
@@ -302,13 +307,39 @@ def _main_impl(startup_t0: float) -> None:
                 ws_config.detected_by,
                 ws_config.project_type,
             )
-            start_mcp(
-                workspace_root=ws_config.workspace_root,
-                ws_config=ws_config,
-                docker_image=docker_image,
-                base_path=base_path,
-                staging_dir=staging_dir,
-            )
+            _MAX_MCP_RESTARTS = 3
+            for _attempt in range(1, _MAX_MCP_RESTARTS + 1):
+                try:
+                    start_mcp(
+                        workspace_root=ws_config.workspace_root,
+                        ws_config=ws_config,
+                        docker_image=docker_image,
+                        base_path=base_path,
+                        staging_dir=staging_dir,
+                    )
+                    break  # Clean exit
+                except BaseExceptionGroup as eg:
+                    cancel_scope_errors = [
+                        e
+                        for e in eg.exceptions
+                        if isinstance(e, (RuntimeError, BaseExceptionGroup))
+                        and "cancel scope" in str(e)
+                    ]
+                    if cancel_scope_errors and _attempt < _MAX_MCP_RESTARTS:
+                        log.warning(
+                            "[MCP-RESTART] Cancel scope crash (attempt %d/%d), "
+                            "restarting... (upstream: github.com/"
+                            "modelcontextprotocol/python-sdk/issues/577)",
+                            _attempt,
+                            _MAX_MCP_RESTARTS,
+                        )
+                        continue
+                    log.critical(
+                        "[MCP-FATAL] Ivy MCP server crashed: %s",
+                        eg,
+                        exc_info=True,
+                    )
+                    sys.exit(1)
         except ImportError as e:
             log.critical(
                 "[MCP-FATAL] Missing dependency: %s\n"
