@@ -32,7 +32,7 @@ class TestServerConfigFromEnv:
         assert cfg.bulk_analysis is True
         assert cfg.bulk_analysis_t2 is True
         assert cfg.bulk_compile is True
-        assert cfg.compile_workers == 1
+        assert cfg.compile_workers == 2
         assert cfg.compile_timeout == 300.0
         assert cfg.compile_cache_ttl == 600.0
         assert cfg.max_concurrent_tools == 4
@@ -141,7 +141,7 @@ class TestServerConfigFromEnv:
     def test_invalid_int_falls_back_to_default(self):
         with patch.dict(os.environ, {"IVY_LSP_COMPILE_WORKERS": "abc"}):
             cfg = ServerConfig.from_env()
-        assert cfg.compile_workers == 1
+        assert cfg.compile_workers == 2
 
     def test_invalid_float_falls_back_to_default(self):
         with patch.dict(os.environ, {"IVY_LSP_COMPILE_TIMEOUT": "abc"}):

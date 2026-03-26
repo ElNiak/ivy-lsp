@@ -413,6 +413,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 )
 
         result["counting_method"] = "requirement_graph_with_stats_overlay"
+
+        # FX5: When the semantic model has no wired edges, impact analysis
+        # cannot trace cross-references.  Surface this as a note so callers
+        # know why symbol-level impact data is absent.
+        if model is None or not getattr(model, "has_edges", lambda: False)():
+            result.setdefault("notes", []).append(
+                "No cross-reference edges found for this symbol."
+            )
+
         return result
 
     async def _ivy_coverage_diff(relative_path: str | None = None) -> dict:

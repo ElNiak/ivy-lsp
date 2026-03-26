@@ -34,11 +34,16 @@ def isolated_tmp():
     When TMPDIR points inside the ivy-lsp directory (e.g. Claude Code sandbox),
     pytest tmp_path creates dirs inside the workspace tree. The walk-up marker
     search then finds the real .ivyworkspace marker, breaking isolation.
-    This fixture explicitly uses /tmp to escape that.
+    Tries /tmp first; falls back to default tempdir if /tmp is not writable.
     """
-    d = Path(tempfile.mkdtemp(prefix="ivy-ws-test-", dir="/tmp"))
-    yield d
-    shutil.rmtree(d, ignore_errors=True)
+    try:
+        d = Path(tempfile.mkdtemp(prefix="ivy-ws-test-", dir="/tmp"))
+    except OSError:
+        d = Path(tempfile.mkdtemp(prefix="ivy-ws-test-"))
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture
@@ -200,6 +205,9 @@ class TestDetectIvyWorkspace:
     def test_fallback_to_start_dir(self, isolated_tmp, monkeypatch):
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        # Skip if TMPDIR fallback landed inside a real workspace tree
+        if _walk_up_for_marker(str(isolated_tmp)):
+            pytest.skip("TMPDIR is inside a workspace tree")
         config = detect_ivy_workspace(start_dir=str(isolated_tmp))
         assert config.detected_by == "fallback"
         assert config.workspace_root == str(isolated_tmp)
@@ -217,6 +225,9 @@ class TestDetectIvyWorkspace:
     def test_panther_heuristic_detected(self, isolated_tmp, monkeypatch):
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        # Skip if TMPDIR fallback landed inside a real workspace tree
+        if _walk_up_for_marker(str(isolated_tmp)):
+            pytest.skip("TMPDIR is inside a workspace tree")
         panther_ivy = (
             isolated_tmp
             / "panther"
@@ -269,6 +280,9 @@ class TestWorktreeWorkspaceDetection:
         """detect_ivy_workspace should follow worktree link to find PANTHER structure."""
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        # Skip if TMPDIR fallback landed inside a real workspace tree
+        if _walk_up_for_marker(str(isolated_tmp)):
+            pytest.skip("TMPDIR is inside a workspace tree")
 
         # Main repo with panther_ivy
         main_repo = isolated_tmp / "main"

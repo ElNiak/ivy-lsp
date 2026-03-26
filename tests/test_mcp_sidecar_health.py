@@ -1,10 +1,12 @@
 """Tests for the MCP sidecar /health endpoint."""
 
-import asyncio
 import json
 
+import pytest
 
-def test_health_response_includes_workspace_root():
+
+@pytest.mark.asyncio
+async def test_health_response_includes_workspace_root():
     """The /health endpoint must return workspace_root for validation."""
     from ivy_lsp.mcp.sidecar import _health_middleware_factory
 
@@ -27,7 +29,7 @@ def test_health_response_includes_workspace_root():
         if message["type"] == "http.response.body":
             response_body = message.get("body", b"")
 
-    asyncio.get_event_loop().run_until_complete(middleware(scope, receive, send))
+    await middleware(scope, receive, send)
 
     body = json.loads(response_body)
     assert body["status"] == "ok"

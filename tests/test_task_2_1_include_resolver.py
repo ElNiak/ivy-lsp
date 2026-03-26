@@ -1457,7 +1457,7 @@ class TestDiscoverStdlibModules:
         # Non-existent path falls back to hardcoded minimum
         mods = discover_stdlib_modules(ivy_include_path=str(tmp_path / "nonexistent"))
         assert "order" in mods
-        assert len(mods) == 9  # hardcoded fallback size
+        assert len(mods) == 18  # _STDLIB_FALLBACK size
 
     def test_discover_custom_path(self, tmp_path):
         from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
@@ -1473,7 +1473,7 @@ class TestDiscoverStdlibModules:
         # Empty directory has no .ivy files — should fallback
         mods = discover_stdlib_modules(ivy_include_path=str(tmp_path))
         assert "order" in mods
-        assert len(mods) == 9
+        assert len(mods) == 18  # _STDLIB_FALLBACK size
 
     def test_discover_ignores_non_ivy_files(self, tmp_path):
         from ivy_lsp.core.indexer.include_resolver import discover_stdlib_modules
