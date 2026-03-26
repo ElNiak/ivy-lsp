@@ -308,11 +308,10 @@ def _summarize_for_log(value: Any, max_len: int = 240) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def safe_tool(fn=None, *, ctx=None):
+def safe_tool(_fn=None, *, ctx=None):
     """Decorator that adds timeout, concurrency, metrics, crash safety, and context injection.
 
-    Can be used as ``@safe_tool`` (backward compatible, no ctx) or
-    ``@safe_tool(ctx=ctx)`` to enable workspace context injection into results.
+    Supports both ``@safe_tool`` (bare) and ``@safe_tool(ctx=ctx)`` (factory).
 
     Applied to every MCP tool handler.  Responsibilities:
 
@@ -321,8 +320,8 @@ def safe_tool(fn=None, *, ctx=None):
     3. Records call metrics (count, duration, errors, timeouts).
     4. Catches unhandled exceptions and returns a JSON error instead of
        crashing the sidecar process.
-    5. (When *ctx* is provided) Injects workspace context metadata into
-       dict results before formatting.
+    5. Injects workspace context metadata into dict results before formatting
+       (when *ctx* is provided).
 
     The wrapper is rebuilt with the original function's ``__globals__`` so
     that FastMCP can resolve ``ForwardRef`` type annotations (``Literal``,
@@ -610,11 +609,8 @@ def safe_tool(fn=None, *, ctx=None):
         functools.update_wrapper(wrapper, fn)
         return wrapper
 
-    # Factory dispatch: @safe_tool vs @safe_tool(ctx=ctx)
-    if fn is not None:
-        # Called as @safe_tool (no arguments) — backward compatible
-        return _decorator(fn)
-    # Called as @safe_tool(ctx=ctx)
+    if _fn is not None:
+        return _decorator(_fn)
     return _decorator
 
 
