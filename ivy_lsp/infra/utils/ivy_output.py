@@ -57,7 +57,6 @@ DEFAULT_EXCLUDE_DIRS = frozenset(
         ".pytest_cache",
     }
 )
-_DEFAULT_EXCLUDE_DIRS = DEFAULT_EXCLUDE_DIRS  # back-compat alias
 
 
 def parse_ivy_check_lines(output: str) -> List[Dict[str, Any]]:
@@ -327,7 +326,7 @@ def find_ivy_files(
             covering VCS, build, venv, and cache directories.
     """
     if exclude_dirs is None:
-        exclude_dirs = _DEFAULT_EXCLUDE_DIRS
+        exclude_dirs = DEFAULT_EXCLUDE_DIRS
     results = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
