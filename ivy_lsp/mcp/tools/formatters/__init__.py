@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from ivy_lsp.mcp.tools.formatters.primitives import _code_block
+from ivy_lsp.mcp.tools.formatters.primitives import _code_block, _format_context_banner
 from ivy_lsp.mcp.tools.formatters.traceability import (
     _format_ivy_coverage,
     _format_ivy_extract_requirements,
@@ -106,14 +106,15 @@ def format_tool_result(tool_name: str, data: dict) -> str:
     if not isinstance(data, dict):
         return _code_block(str(data))
     formatter = _FORMATTERS.get(tool_name, _format_generic)
+    banner = _format_context_banner(data)
     try:
-        return formatter(data)
+        body = formatter(data)
     except Exception:
-        # If a formatter crashes, fall back to generic rather than losing data
         try:
-            return _format_generic(data)
+            body = _format_generic(data)
         except Exception:
-            return _code_block(str(data))
+            body = _code_block(str(data))
+    return (banner + "\n" + body) if banner else body
 
 
 __all__ = ["format_error", "format_tool_result", "_format_generic"]

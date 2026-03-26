@@ -4,7 +4,8 @@ Reads JSON-RPC messages from stdin (what Claude Code sends),
 forwards them to the sidecar's HTTP endpoint, and pipes
 responses back to stdout.
 
-Includes automatic reconnection with exponential backoff.
+Includes automatic reconnection with exponential backoff and
+a standalone fallback if the sidecar becomes permanently unavailable.
 
 Usage: python -m ivy_lsp.mcp.bridge 19847 [port_file]
 """
@@ -187,6 +188,73 @@ async def _relay_stdout(
         raise anyio.get_cancelled_exc_class()()
 
 
+async def _fallback_standalone(stdin_queue: asyncio.Queue) -> None:  # type: ignore[type-arg]
+    """Last resort: spawn a standalone MCP process and relay stdio."""
+    workspace = os.environ.get("IVY_WORKSPACE_ROOT", os.getcwd())
+    logger.warning("Falling back to standalone MCP (workspace=%s)", workspace)
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "ivy_lsp",
+        "--mcp",
+        "--workspace",
+        workspace,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def _drain_queue_to_proc() -> None:
+        """Feed queued stdin lines into the subprocess."""
+        assert proc.stdin is not None
+        try:
+            while True:
+                item = await stdin_queue.get()
+                if item is _EOF_SENTINEL:
+                    proc.stdin.close()
+                    return
+                proc.stdin.write((item + "\n").encode())
+                await proc.stdin.drain()
+        except Exception:
+            logger.error("_drain_queue_to_proc crashed", exc_info=True)
+
+    async def _relay_proc_stdout() -> None:
+        """Forward subprocess stdout to our stdout."""
+        assert proc.stdout is not None
+        try:
+            async for line in proc.stdout:
+                sys.stdout.buffer.write(line)
+                sys.stdout.buffer.flush()
+        except Exception:
+            logger.error("_relay_proc_stdout crashed", exc_info=True)
+
+    async def _relay_proc_stderr() -> None:
+        """Forward subprocess stderr to our stderr."""
+        assert proc.stderr is not None
+        try:
+            log_phase(
+                logger,
+                category=LogCategory.ACTIVITY,
+                phase="mcp-bridge",
+                message="Standalone MCP stderr relay started",
+                data={"workspace": workspace},
+                level=logging.DEBUG,
+            )
+            async for line in proc.stderr:
+                sys.stderr.buffer.write(line)
+                sys.stderr.buffer.flush()
+        except Exception:
+            pass
+
+    await asyncio.gather(
+        _drain_queue_to_proc(),
+        _relay_proc_stdout(),
+        _relay_proc_stderr(),
+    )
+    await proc.wait()
+
+
 async def _timeout_watchdog(
     pending: dict[str | int, Any],
     timeout: float,
@@ -231,7 +299,8 @@ async def run(port: int, port_file: str | None = None) -> None:
     """Bridge stdin/stdout to the MCP HTTP sidecar on *port*.
 
     Implements automatic reconnection with exponential backoff.  If all
-    reconnection attempts are exhausted, raises ``RuntimeError``.
+    reconnection attempts are exhausted, falls back to spawning a
+    standalone ``ivy_lsp --mcp`` process.
     """
     from mcp.client.streamable_http import streamablehttp_client
 
@@ -291,10 +360,8 @@ async def run(port: int, port_file: str | None = None) -> None:
                 logger.error("All reconnection attempts exhausted")
                 stdin_task.cancel()
                 watchdog_task.cancel()
-                raise RuntimeError(
-                    "MCP sidecar unavailable after "
-                    f"{_MAX_RECONNECT_ATTEMPTS} reconnection attempts"
-                )
+                await _fallback_standalone(stdin_queue)
+                return
             continue
 
         # Clean exit from relay tasks (stdin EOF forwarded)

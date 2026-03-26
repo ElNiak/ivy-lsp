@@ -1,7 +1,8 @@
 """Entry point for running the Ivy Language Server.
 
-Supports two modes:
+Supports three modes:
   - Default:     LSP over stdio + MCP HTTP sidecar (unified process)
+  - --mcp:       Standalone MCP server over stdio (backward compat)
   - --lsp-only:  LSP over stdio without MCP sidecar
 """
 
@@ -12,6 +13,11 @@ import sys
 import threading
 import time
 from typing import Any
+
+try:
+    BaseExceptionGroup  # Python 3.11+
+except NameError:
+    from exceptiongroup import BaseExceptionGroup
 
 from ivy_lsp.infra.observability import (
     LogCategory,
@@ -113,7 +119,7 @@ def _setup_log_rotation() -> str:
 
 
 def main():
-    """Start the Ivy Language Server in unified or LSP-only mode."""
+    """Start the Ivy Language Server in LSP, MCP, or unified mode."""
     startup_t0 = time.perf_counter()
     startup_call_id = f"startup-{os.getpid()}"
     with call_context(startup_call_id):
@@ -269,32 +275,108 @@ def _main_impl(startup_t0: float) -> None:
     _watchdog = threading.Thread(target=_parent_watchdog, daemon=True)
     _watchdog.start()
 
-    # LSP server mode (default): stdio + optional MCP HTTP sidecar
-    try:
-        from ivy_lsp.lsp.server import IvyLanguageServer
+    if "--mcp" in sys.argv:
+        # Standalone MCP server mode (backward compat): stdio transport
+        try:
+            from ivy_lsp.core.workspace.detection import detect_ivy_workspace
+            from ivy_lsp.mcp.server import start_mcp
 
-        server = IvyLanguageServer()
-        _patch_pygls_converter(server)
+            workspace = None
+            docker_image = os.environ.get("IVY_DOCKER_IMAGE")
+            base_path = os.environ.get("IVY_BASE_PATH")
+            staging_dir = None
 
-        # Start MCP HTTP sidecar unless --lsp-only is passed
-        if "--lsp-only" not in sys.argv:
-            mcp_port = _parse_mcp_port()
-            server.start_mcp_sidecar(port=mcp_port)
+            for i, arg in enumerate(sys.argv):
+                if arg == "--workspace" and i + 1 < len(sys.argv):
+                    workspace = sys.argv[i + 1]
+                elif arg == "--docker-image" and i + 1 < len(sys.argv):
+                    docker_image = sys.argv[i + 1]
+                elif arg == "--base-path" and i + 1 < len(sys.argv):
+                    base_path = sys.argv[i + 1]
+                elif arg == "--staging-dir" and i + 1 < len(sys.argv):
+                    staging_dir = sys.argv[i + 1]
 
-        server.start_io()
-    except ImportError as e:
-        log.critical(
-            "Failed to start Ivy Language Server: missing dependency: %s",
-            e,
-        )
-        sys.exit(1)
-    except Exception as e:
-        log.critical(
-            "Ivy Language Server crashed: %s",
-            e,
-            exc_info=True,
-        )
-        sys.exit(1)
+            # Auto-detect workspace scope
+            ws_config = detect_ivy_workspace(
+                start_dir=workspace or os.getcwd(),
+                explicit_workspace=workspace,
+            )
+            log.info(
+                "Workspace detection: root=%s, detected_by=%s, type=%s",
+                ws_config.workspace_root,
+                ws_config.detected_by,
+                ws_config.project_type,
+            )
+            _MAX_MCP_RESTARTS = 3
+            for _attempt in range(1, _MAX_MCP_RESTARTS + 1):
+                try:
+                    start_mcp(
+                        workspace_root=ws_config.workspace_root,
+                        ws_config=ws_config,
+                        docker_image=docker_image,
+                        base_path=base_path,
+                        staging_dir=staging_dir,
+                    )
+                    break  # Clean exit
+                except BaseExceptionGroup as eg:
+                    cancel_scope_errors = [
+                        e
+                        for e in eg.exceptions
+                        if isinstance(e, (RuntimeError, BaseExceptionGroup))
+                        and "cancel scope" in str(e)
+                    ]
+                    if cancel_scope_errors and _attempt < _MAX_MCP_RESTARTS:
+                        log.warning(
+                            "[MCP-RESTART] Cancel scope crash (attempt %d/%d), "
+                            "restarting... (upstream: github.com/"
+                            "modelcontextprotocol/python-sdk/issues/577)",
+                            _attempt,
+                            _MAX_MCP_RESTARTS,
+                        )
+                        continue
+                    log.critical(
+                        "[MCP-FATAL] Ivy MCP server crashed: %s",
+                        eg,
+                        exc_info=True,
+                    )
+                    sys.exit(1)
+        except ImportError as e:
+            log.critical(
+                "[MCP-FATAL] Missing dependency: %s\n"
+                "Install with: pip install ivy-lsp[mcp]",
+                e,
+            )
+            sys.exit(1)
+        except Exception as e:
+            log.critical("[MCP-FATAL] Ivy MCP server crashed: %s", e, exc_info=True)
+            sys.exit(1)
+    else:
+        # LSP server mode (default): stdio + optional MCP HTTP sidecar
+        try:
+            from ivy_lsp.lsp.server import IvyLanguageServer
+
+            server = IvyLanguageServer()
+            _patch_pygls_converter(server)
+
+            # Start MCP HTTP sidecar unless --lsp-only is passed
+            if "--lsp-only" not in sys.argv:
+                mcp_port = _parse_mcp_port()
+                server.start_mcp_sidecar(port=mcp_port)
+
+            server.start_io()
+        except ImportError as e:
+            log.critical(
+                "Failed to start Ivy Language Server: missing dependency: %s",
+                e,
+            )
+            sys.exit(1)
+        except Exception as e:
+            log.critical(
+                "Ivy Language Server crashed: %s",
+                e,
+                exc_info=True,
+            )
+            sys.exit(1)
 
 
 if __name__ == "__main__":
