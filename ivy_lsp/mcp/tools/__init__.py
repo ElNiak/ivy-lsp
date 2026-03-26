@@ -193,6 +193,18 @@ def error_response(message: str) -> dict:
 # ---------------------------------------------------------------------------
 
 from ivy_lsp.mcp.client import get_sidecar_client, set_sidecar_client
+
+
+async def _cleanup_sidecar(client: Any) -> None:
+    """Background cleanup of a stale sidecar client session."""
+    try:
+        from ivy_lsp.mcp.client import disconnect_sidecar
+
+        await asyncio.wait_for(disconnect_sidecar(client), timeout=3.0)
+    except Exception:
+        logger.debug("[SIDECAR-CLEANUP] Cleanup failed", exc_info=True)
+
+
 from ivy_lsp.mcp.tools.formatters import format_error, format_tool_result
 
 
@@ -341,10 +353,14 @@ def safe_tool(_fn=None, *, ctx=None):
             # NOT in the monitor thread.  The monitor only discovers the port;
             # we connect lazily on first tool call so the ClientSession is bound
             # to the correct asyncio event loop.
+            #
+            # Uses a SHORT sidecar-specific timeout to avoid hanging on
+            # transport-level deadlocks (MCP SDK streamable HTTP issue).
+            # On timeout, falls back to local execution.
+            from ivy_lsp.mcp.client import connect_to_sidecar, get_sidecar_port
+
             _client = get_sidecar_client()
             if _client is None:
-                from ivy_lsp.mcp.client import connect_to_sidecar, get_sidecar_port
-
                 _port = get_sidecar_port()
                 if _port is not None:
                     _client = await connect_to_sidecar(_port)
@@ -356,34 +372,48 @@ def safe_tool(_fn=None, *, ctx=None):
                         )
 
             if _client is not None:
+                from ivy_lsp.infra.config import get_config as _get_cfg
+
+                _sidecar_timeout = _get_cfg().sidecar_delegation_timeout
+                _sidecar_port = get_sidecar_port()
+                logger.debug(
+                    "[TOOL-ROUTE] %s -> sidecar (port %s, timeout=%.1fs)",
+                    tool_name,
+                    _sidecar_port,
+                    _sidecar_timeout,
+                )
                 try:
                     result = await _cancel_safe_wait_for(
                         _client.call_tool(tool_name, kwargs),
-                        timeout=timeout,
+                        timeout=_sidecar_timeout,
                     )
                     return result  # verbatim from sidecar
                 except asyncio.TimeoutError:
-                    logger.error(
-                        "[SIDECAR-TIMEOUT] %s timed out after %.0fs",
+                    logger.warning(
+                        "[SIDECAR-TIMEOUT] %s delegation timed out after %.1fs, "
+                        "falling back to local execution",
                         tool_name,
-                        timeout,
+                        _sidecar_timeout,
                     )
+                    _stale = _client
                     set_sidecar_client(None)
-                    return _error_result(
-                        {
-                            "success": False,
-                            "message": f"Sidecar tool timed out after {timeout:.0f}s",
-                            "timeout": True,
-                            "tool": tool_name,
-                        }
+                    asyncio.ensure_future(_cleanup_sidecar(_stale))
+                    logger.debug(
+                        "[TOOL-ROUTE] %s -> local (sidecar timeout fallback)",
+                        tool_name,
                     )
+                    # Fall through to local handling
                 except Exception:
                     logger.warning(
                         "[DOWNGRADED] Sidecar call to %s failed, using local",
                         tool_name,
                     )
+                    _stale = _client
                     set_sidecar_client(None)
+                    asyncio.ensure_future(_cleanup_sidecar(_stale))
                     # Fall through to local handling
+            else:
+                logger.debug("[TOOL-ROUTE] %s -> local (no sidecar)", tool_name)
 
             # --- Original local handling below ---
             from ivy_lsp.infra.config import get_config
@@ -618,6 +648,22 @@ def safe_tool(_fn=None, *, ctx=None):
     return _decorator
 
 
+def inject_scope_metadata(
+    result: dict, scope: str, resolved_scope: object | None
+) -> None:
+    """Inject scope, role, and closure size into a tool result dict.
+
+    Call from tool handlers after resolving a test scope.  No-op when
+    *resolved_scope* is ``None``.
+    """
+    if resolved_scope is None:
+        return
+    result["scope"] = scope
+    result["scope_role"] = getattr(resolved_scope, "tester_role", "unknown")
+    closure = getattr(resolved_scope, "include_closure", ())
+    result["include_closure_size"] = len(closure)
+
+
 from ivy_lsp.mcp.tools.analysis import register_analysis_tools
 from ivy_lsp.mcp.tools.patterns import register_pattern_tools
 from ivy_lsp.mcp.tools.quality import register_quality_tools
@@ -646,6 +692,7 @@ __all__ = [
     "error_response",
     "get_tool_metadata",
     "get_tool_metrics",
+    "inject_scope_metadata",
     "register_all_tools",
     "register_workspace_tools",
     "safe_tool",

@@ -12,7 +12,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-QUIC_STACK_DIR = IVY_ROOT / "protocol-testing" / "quic" / "quic_stack"
+from tests.conftest import QUIC_STACK_DIR
 
 
 class TestWorkspaceIndexerImport:

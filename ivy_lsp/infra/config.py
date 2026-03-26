@@ -108,6 +108,11 @@ class ServerConfig:
     # MCP bridge per-request timeout (seconds)
     bridge_timeout: float = 120.0
 
+    # Sidecar delegation timeout (seconds).  When the standalone MCP server
+    # delegates a tool call to the LSP sidecar, this is the maximum time to
+    # wait for the sidecar response before falling back to local execution.
+    sidecar_delegation_timeout: float = 8.0
+
     # Debug tracing
     debug_log: bool = False
     debug_log_path: str | None = None
@@ -172,6 +177,9 @@ class ServerConfig:
             debug_log=debug_log,
             debug_log_path=os.environ.get("IVY_LSP_DEBUG_LOG_PATH"),
             bridge_timeout=_float_env("IVY_LSP_BRIDGE_TIMEOUT", 120.0, floor=10.0),
+            sidecar_delegation_timeout=_float_env(
+                "IVY_LSP_SIDECAR_TIMEOUT", 8.0, floor=2.0
+            ),
             trace_all_functions=_bool_env("IVY_LSP_TRACE_ALL_FUNCTIONS", "0"),
             force_tier=_int_env("IVY_LSP_FORCE_TIER", 0),
             observability_enabled=observability_enabled,

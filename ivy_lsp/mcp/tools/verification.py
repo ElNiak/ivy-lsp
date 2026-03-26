@@ -16,7 +16,7 @@ from ivy_lsp.core.verification import run_ivy_show as shared_ivy_show
 from ivy_lsp.infra.observability import ToolTraceContext, trace_tool
 from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
-from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -295,12 +295,12 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     _verify_in_flight.discard(cache_key)
                 raise
 
-            # Task 4.1: Strip verbose fields in compact mode
+            # Strip verbose fields in compact mode
             if compact:
                 result.pop("raw_output", None)
                 result.pop("counterexample", None)
 
-            # Task 4.2: Trim raw output regardless of compact mode
+            # Trim raw output regardless of compact mode
             from ivy_lsp.infra.config import get_config
 
             max_raw = get_config().max_raw_output_length
@@ -312,11 +312,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         " full output in /tmp/ivy-lsp-latest.log]"
                     )
 
-            # Task 3.2: Annotate result with scope info when available
-            if _resolved_scope is not None:
-                result["scope"] = scope
-                result["scope_role"] = _resolved_scope.tester_role
-                result["include_closure_size"] = len(_resolved_scope.include_closure)
+            inject_scope_metadata(result, scope, _resolved_scope)
 
             _tt[0] = result
             return _tt[0]
@@ -448,10 +444,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         "target": exec_result.target,
                         "duration_seconds": round(duration, 2),
                     }
-                    # Task 3.2: Annotate result with scope info
-                    if _resolved_scope is not None:
-                        compile_result_dict["scope"] = scope
-                        compile_result_dict["scope_role"] = _resolved_scope.tester_role
+                    inject_scope_metadata(compile_result_dict, scope, _resolved_scope)
                     _tt[0] = compile_result_dict
                     return _tt[0]
                 except ImportError:
@@ -479,11 +472,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 result["fallback"] = "subprocess"
                 result["fallback_reason"] = _docker_fallback_reason
 
-            # Task 3.2: Annotate result with scope info
-            if _resolved_scope is not None:
-                result["scope"] = scope
-                result["scope_role"] = _resolved_scope.tester_role
-                result["include_closure_size"] = len(_resolved_scope.include_closure)
+            inject_scope_metadata(result, scope, _resolved_scope)
 
             _tt[0] = result
             return _tt[0]
@@ -618,6 +607,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
 
         # Resolve scope for file filtering
         _scope_files: frozenset[str] | None = None
+        _resolved_scope = None
         if scope and getattr(ctx, "workspace_context", None) is not None:
             _resolved_scope = ctx.workspace_context.get_test_scope(scope)
             if _resolved_scope is not None:
@@ -659,7 +649,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         if not os.path.isfile(abs_path):
             return _tc.finish(error_response(f"File not found: {relative_path}"))
 
-        # Task 3.2: Skip file if it falls outside the requested scope
+        # Skip file if it falls outside the requested scope
         if _scope_files is not None and abs_path not in _scope_files:
             return _tc.finish(
                 {
@@ -694,13 +684,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     1 for d in diagnostics if d["severity"] == "warning"
                 ),
             }
-            if _scope_files is not None:
-                _struct_result["scope"] = scope
-                if _resolved_scope is not None:
-                    _struct_result["scope_role"] = _resolved_scope.tester_role
-                    _struct_result["include_closure_size"] = len(
-                        _resolved_scope.include_closure
-                    )
+            inject_scope_metadata(_struct_result, scope, _resolved_scope)
             return _tc.finish(_struct_result)
 
         # Full mode: all 5 diagnostic layers
@@ -745,7 +729,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 elif hasattr(ctx, "get_model_or_none") and callable(
                     ctx.get_model_or_none
                 ):
-                    model = await ctx.get_model_or_none(timeout=5.0)
+                    _result = ctx.get_model_or_none(timeout=5.0)
+                    if asyncio.iscoroutine(_result):
+                        model = await _result
+                    else:
+                        model = _result
                 else:
                     model = None
                 if model is None and _model_status.get("state") != "ready":
@@ -939,14 +927,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             "layer_errors": layer_errors,
             "partial": bool(layer_errors),
         }
-        # Task 3.2: Annotate result with scope info when available
-        if _scope_files is not None:
-            _diag_result["scope"] = scope
-            if _resolved_scope is not None:
-                _diag_result["scope_role"] = _resolved_scope.tester_role
-                _diag_result["include_closure_size"] = len(
-                    _resolved_scope.include_closure
-                )
+        inject_scope_metadata(_diag_result, scope, _resolved_scope)
 
         return _tc.finish(_diag_result)
 

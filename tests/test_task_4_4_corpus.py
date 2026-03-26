@@ -22,10 +22,10 @@ from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 from ivy_lsp.lsp.document_symbols import compute_document_symbols
+from tests.conftest import PROTOCOL_TESTING_DIR
 
 logger = logging.getLogger(__name__)
 
-PROTOCOL_TESTING_DIR = IVY_ROOT / "protocol-testing"
 DOC_EXAMPLES_DIR = IVY_ROOT / "doc" / "examples"
 
 
@@ -33,7 +33,7 @@ def _collect_corpus_files():
     """Collect all .ivy files from corpus directories."""
     files = []
     for d in [PROTOCOL_TESTING_DIR, DOC_EXAMPLES_DIR]:
-        if d.exists():
+        if d is not None and d.exists():
             files.extend(sorted(d.rglob("*.ivy")))
     return files
 
@@ -135,6 +135,8 @@ class TestCorpusIncludeResolution:
 
     def test_quic_stack_includes_resolve(self):
         """Include directives within quic_stack/ should resolve to existing files."""
+        if PROTOCOL_TESTING_DIR is None:
+            pytest.skip("protocol-testing/ not found")
         quic_dir = PROTOCOL_TESTING_DIR / "quic" / "quic_stack"
         if not quic_dir.exists():
             pytest.skip("quic_stack/ not found")
@@ -161,6 +163,8 @@ class TestCorpusWorkspaceIndexing:
 
     def test_quic_workspace_indexes_under_60s(self):
         """Full indexing of quic/ protocol-testing should complete in <60s."""
+        if PROTOCOL_TESTING_DIR is None:
+            pytest.skip("protocol-testing/ not found")
         quic_dir = PROTOCOL_TESTING_DIR / "quic"
         if not quic_dir.exists():
             pytest.skip("quic/ not found")
@@ -175,6 +179,8 @@ class TestCorpusWorkspaceIndexing:
 
     def test_indexed_symbols_are_searchable(self):
         """After indexing, symbol lookup should find known QUIC types."""
+        if PROTOCOL_TESTING_DIR is None:
+            pytest.skip("protocol-testing/ not found")
         quic_stack = PROTOCOL_TESTING_DIR / "quic" / "quic_stack"
         if not quic_stack.exists():
             pytest.skip("quic_stack/ not found")
@@ -191,6 +197,8 @@ class TestDocumentSymbolsCorpus:
     """Verify compute_document_symbols works on corpus files."""
 
     def test_quic_types_produces_symbols(self):
+        if PROTOCOL_TESTING_DIR is None:
+            pytest.skip("protocol-testing/ not found")
         quic_types = PROTOCOL_TESTING_DIR / "quic" / "quic_stack" / "quic_types.ivy"
         if not quic_types.exists():
             pytest.skip("quic_types.ivy not found")

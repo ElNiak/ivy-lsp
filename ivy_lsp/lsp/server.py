@@ -61,6 +61,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
         self._rfc_coverage_enabled: bool = True
         self._client_supports_work_done_progress: bool = False
         self._initializing: bool = True
+        self._ready_event: threading.Event = threading.Event()
         from ivy_lsp.lsp.diagnostics.publisher import DiagnosticCache
 
         self._diagnostic_cache: DiagnosticCache = DiagnosticCache()
@@ -449,6 +450,7 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
                 )
             finally:
                 self._initializing = False
+                self._ready_event.set()
                 self._send_server_ready_notification(init_start)
 
         @self.feature(lsp.SHUTDOWN)

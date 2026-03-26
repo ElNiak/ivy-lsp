@@ -191,6 +191,16 @@ def register(server) -> None:
         result_summary = "0 symbols"
         try:
             server._last_active_uri = uri
+
+            # Wait for server initialization to complete before reading
+            # parser/indexer.  Without this gate, requests arriving during
+            # the ~3 s _setup_indexer window see parser=None, indexer=None
+            # and return a false "unavailable" status.
+            ready_event = getattr(server, "_ready_event", None)
+            if ready_event is not None and not ready_event.is_set():
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, ready_event.wait, 10.0)
+
             doc = server.workspace.get_text_document(uri)
             source = doc.source or ""
             parser = getattr(server, "parser", None)

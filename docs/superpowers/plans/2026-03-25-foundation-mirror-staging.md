@@ -12,6 +12,28 @@
 
 ---
 
+## Review-Driven Design Decisions
+
+These decisions were made after 4-perspective review (type design, silent failures, test coverage, architecture):
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| C1 | `MirrorRegistry.register()` cleans stale reverse-index entries on re-registration | Prevents phantom mirror references after incremental re-index |
+| C2 | `FlatStagingStrategy.prepare()` logs ERROR when all symlinks fail | Prevents silent degradation of include resolution |
+| C4 | `StagingResult` has `metadata: Dict[str, Any]` field | Extensibility for LayeredStagingStrategy (Plan 4) without bloating base type |
+| C5 | `IncludeResolver.resolve()` delegates step 2 to `strategy.resolve()` | Enables VirtualStagingStrategy in Plan 4 |
+| H1 | All MirrorRegistry read methods acquire `_lock` | Thread safety for concurrent index + query |
+| H2 | `Mirror.protocol` is a property derived from `id.protocol` | Eliminates redundancy and divergence risk |
+| H3 | `MirrorRegistry.to_snapshot_dict()` added | Plan 2 needs immutable mirror dict for `IndexSnapshot` |
+| H4 | `FlatStagingStrategy.cleanup()` uses `onerror` callback | Restores existing logging behavior lost in extraction |
+| H5 | `StagingResult` is `frozen=True` | Prevent mutation after creation |
+| H6 | `TestScope.from_mirror()` NOT added in Plan 1 | Avoids circular import. Bridge is one-directional: `Mirror` knows `TestScope`, not vice versa |
+| H7 | `protocol="unknown"` accepted as intermediate state | MirrorIds will change when Plan 3 wires `NctWorkspace`. No persistent storage of MirrorIds before then |
+| M1 | `Mirror.from_test_scope()` uses defensive role conversion | Unknown role strings fall back to `UNKNOWN` instead of crashing |
+| M5 | `MirrorId.from_test_file()` uses `.removesuffix(".ivy")` | Prevents stripping `.ivy` from middle of filename |
+
+---
+
 ## File Structure
 
 ### New Files
@@ -28,8 +50,7 @@
 | File | Change |
 |------|--------|
 | `ivy_lsp/core/indexer/scope_manager.py:258-316` | Create `Mirror` objects alongside `TestScope` in `_compute_test_scopes()` |
-| `ivy_lsp/core/analysis/test_scope.py:56-95` | Add `from_mirror()` classmethod on `TestScope` |
-| `ivy_lsp/core/indexer/include_resolver.py:467-583` | Delegate `create_staging_directory()` to injected `FlatStagingStrategy` |
+| `ivy_lsp/core/indexer/include_resolver.py:467-583` | Delegate `create_staging_directory()` to injected `FlatStagingStrategy`; wire `strategy.resolve()` into `resolve()` |
 | `ivy_lsp/core/indexer/workspace_indexer.py` | Add `_mirror_registry` attribute, expose via property |
 
 ---
@@ -121,10 +142,13 @@ and tester role for a single test file.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import FrozenSet, Literal, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class MirrorRole(str, Enum):
@@ -152,7 +176,7 @@ class MirrorId:
     @classmethod
     def from_test_file(cls, test_file: str, protocol: str) -> MirrorId:
         """Create a MirrorId from a test file path and protocol name."""
-        stem = os.path.basename(test_file).replace(".ivy", "")
+        stem = os.path.basename(test_file).removesuffix(".ivy")
         return cls(protocol=protocol, entry_stem=stem)
 ```
 
@@ -198,7 +222,6 @@ class TestMirror:
             exported_actions=frozenset({"send_frame", "recv_frame"}),
             imported_actions=frozenset({"accept_connection"}),
             role=MirrorRole.CLIENT,
-            protocol="quic",
             protocol_version="rfc9000",
         )
 
@@ -238,6 +261,20 @@ class TestMirror:
         assert mirror.role == MirrorRole.SERVER
         assert mirror.protocol_version == "rfc9000"
 
+    def test_from_test_scope_invalid_role_falls_back(self):
+        """M1 fix: unknown tester_role falls back to UNKNOWN, not crash."""
+        from ivy_lsp.core.analysis.test_scope import TestScope
+
+        scope = TestScope(
+            test_file="/ws/test.ivy",
+            include_closure=frozenset({"/ws/test.ivy"}),
+            exported_actions=frozenset(),
+            imported_actions=frozenset(),
+            tester_role="proxy",  # invalid role
+        )
+        mirror = Mirror.from_test_scope(scope, protocol="quic")
+        assert mirror.role == MirrorRole.UNKNOWN
+
     def test_roundtrip_to_test_scope(self, sample_mirror):
         scope = sample_mirror.to_test_scope()
         roundtripped = Mirror.from_test_scope(
@@ -267,6 +304,9 @@ class Mirror:
     Evolves TestScope with protocol binding, stable identity, and
     role semantics. Use from_test_scope() / to_test_scope() for
     backward compatibility with existing code.
+
+    Note: ``protocol`` is derived from ``id.protocol`` (property, not field)
+    to prevent divergence between the two.
     """
 
     id: MirrorId
@@ -275,8 +315,12 @@ class Mirror:
     exported_actions: FrozenSet[str]
     imported_actions: FrozenSet[str]
     role: MirrorRole
-    protocol: str
     protocol_version: Optional[str] = None
+
+    @property
+    def protocol(self) -> str:
+        """Protocol name, derived from id to prevent redundancy."""
+        return self.id.protocol
 
     def is_file_in_scope(self, filepath: str) -> bool:
         """Check if a file is in this mirror's include closure."""
@@ -305,15 +349,26 @@ class Mirror:
         protocol: str,
         protocol_version: Optional[str] = None,
     ) -> Mirror:
-        """Upgrade a legacy TestScope to a Mirror."""
+        """Upgrade a legacy TestScope to a Mirror.
+
+        Defensively converts tester_role — unknown role strings
+        fall back to MirrorRole.UNKNOWN instead of crashing.
+        """
+        try:
+            role = MirrorRole(scope.tester_role)
+        except ValueError:
+            logger.warning(
+                "Unknown tester_role '%s' for %s, defaulting to UNKNOWN",
+                scope.tester_role, scope.test_file,
+            )
+            role = MirrorRole.UNKNOWN
         return cls(
             id=MirrorId.from_test_file(scope.test_file, protocol),
             entry_file=scope.test_file,
             include_closure=scope.include_closure,
             exported_actions=scope.exported_actions,
             imported_actions=scope.imported_actions,
-            role=MirrorRole(scope.tester_role),
-            protocol=protocol,
+            role=role,
             protocol_version=protocol_version,
         )
 ```
@@ -364,7 +419,6 @@ class TestMirrorRegistry:
             exported_actions=frozenset({"send"}),
             imported_actions=frozenset({"recv"}),
             role=MirrorRole.CLIENT,
-            protocol="quic",
         )
 
     @pytest.fixture
@@ -380,7 +434,6 @@ class TestMirrorRegistry:
             exported_actions=frozenset({"recv"}),
             imported_actions=frozenset({"send"}),
             role=MirrorRole.SERVER,
-            protocol="quic",
         )
 
     def test_register_and_get(self, registry, mirror_a):
@@ -449,6 +502,33 @@ class TestMirrorRegistry:
         registry.clear()
         assert registry.all_mirrors() == []
         assert registry.get(mirror_a.id) is None
+
+    def test_reregister_cleans_stale_reverse_index(self, registry, mirror_a):
+        """C1 fix: re-registering with changed closure removes stale entries."""
+        registry.register(mirror_a)  # closure includes /ws/frame.ivy
+        updated = Mirror(
+            id=mirror_a.id, entry_file=mirror_a.entry_file,
+            include_closure=frozenset({"/ws/server_test.ivy", "/ws/types.ivy"}),
+            exported_actions=mirror_a.exported_actions,
+            imported_actions=mirror_a.imported_actions,
+            role=mirror_a.role, protocol="quic",
+        )
+        registry.register(updated)
+        # frame.ivy was removed from closure — should not be found
+        assert registry.get_mirrors_for_file("/ws/frame.ivy") == []
+        # types.ivy still in closure — should still be found
+        assert len(registry.get_mirrors_for_file("/ws/types.ivy")) == 1
+
+    def test_to_snapshot_dict(self, registry, mirror_a, mirror_b):
+        """H3 fix: snapshot extraction for Plan 2 IndexSnapshot."""
+        registry.register(mirror_a)
+        registry.register(mirror_b)
+        snap = registry.to_snapshot_dict()
+        assert len(snap) == 2
+        assert mirror_a.id in snap
+        # Snapshot is a copy — mutations don't affect registry
+        snap.clear()
+        assert len(registry.all_mirrors()) == 2
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -481,8 +561,23 @@ class MirrorRegistry:
         self._lock = threading.RLock()
 
     def register(self, mirror: Mirror) -> None:
-        """Register a mirror, updating all indexes."""
+        """Register a mirror, updating all indexes.
+
+        If a mirror with the same ID was previously registered, its stale
+        reverse-index entries are cleaned before adding the new ones.
+        """
         with self._lock:
+            old = self._mirrors.get(mirror.id)
+            if old is not None:
+                # Remove stale reverse-index entries from old closure
+                for f in old.include_closure:
+                    s = self._file_to_mirrors.get(f)
+                    if s is not None:
+                        s.discard(mirror.id)
+                        if not s:
+                            del self._file_to_mirrors[f]
+                if old.entry_file in self._by_entry_file:
+                    del self._by_entry_file[old.entry_file]
             self._mirrors[mirror.id] = mirror
             self._by_entry_file[mirror.entry_file] = mirror
             for f in mirror.include_closure:
@@ -498,20 +593,29 @@ class MirrorRegistry:
 
     def get_mirrors_for_file(self, filepath: str) -> List[Mirror]:
         """All mirrors whose include closure contains filepath."""
-        ids = self._file_to_mirrors.get(filepath, set())
-        return [self._mirrors[mid] for mid in ids if mid in self._mirrors]
+        with self._lock:
+            ids = self._file_to_mirrors.get(filepath, set())
+            return [self._mirrors[mid] for mid in ids if mid in self._mirrors]
 
     def get_mirrors_for_protocol(self, protocol: str) -> List[Mirror]:
         """All mirrors for a given protocol."""
-        return [m for m in self._mirrors.values() if m.protocol == protocol]
+        with self._lock:
+            return [m for m in self._mirrors.values() if m.protocol == protocol]
 
     def all_mirrors(self) -> List[Mirror]:
         """All registered mirrors."""
-        return list(self._mirrors.values())
+        with self._lock:
+            return list(self._mirrors.values())
 
     def invalidate_file(self, filepath: str) -> Set[MirrorId]:
         """Return mirror IDs affected by a change to filepath."""
-        return set(self._file_to_mirrors.get(filepath, set()))
+        with self._lock:
+            return set(self._file_to_mirrors.get(filepath, set()))
+
+    def to_snapshot_dict(self) -> Dict[MirrorId, Mirror]:
+        """Return an immutable copy for IndexSnapshot (Plan 2)."""
+        with self._lock:
+            return dict(self._mirrors)
 
     def clear(self) -> None:
         """Remove all mirrors and indexes."""
@@ -733,13 +837,20 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-@dataclass
+@dataclass(frozen=True)
 class StagingResult:
-    """Result of a staging preparation operation."""
+    """Result of a staging preparation operation.
+
+    Frozen to prevent mutation after creation. Use metadata for
+    strategy-specific data (layer mappings, partition IDs).
+    """
 
     staging_dir: Optional[str]
     staged_files: Dict[str, str]  # basename -> original absolute path
     collision_map: Dict[str, List[str]]  # basename -> all colliding paths
+    # C4: extensibility for LayeredStagingStrategy (Plan 4) —
+    # carries file_to_layer, partition IDs, etc. without bloating base type
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> StagingResult:
@@ -1016,6 +1127,14 @@ class FlatStagingStrategy(StagingStrategy):
             except OSError as exc:
                 logger.warning("Failed to create symlink for %s: %s", filepath, exc)
 
+        # C2 fix: detect total staging failure
+        if source_files and not self._staged_files:
+            logger.error(
+                "Staging failed: %d source files but no symlinks created in %s. "
+                "Include resolution will fall back to workspace root only.",
+                len(source_files), staging,
+            )
+
         return StagingResult(
             staging_dir=staging,
             staged_files=dict(self._staged_files),
@@ -1033,9 +1152,16 @@ class FlatStagingStrategy(StagingStrategy):
         return None
 
     def cleanup(self) -> None:
-        """Remove staging directory."""
+        """Remove staging directory. H4 fix: restore onerror logging."""
         if self._staging_dir and os.path.isdir(self._staging_dir):
-            shutil.rmtree(self._staging_dir, ignore_errors=True)
+
+            def _on_error(func, path, exc_info):
+                logger.warning(
+                    "Staging cleanup error: %s on %s: %s",
+                    func.__name__, path, exc_info[1],
+                )
+
+            shutil.rmtree(self._staging_dir, onerror=_on_error)
         self._staging_dir = None
         self._staged_files.clear()
         self._collision_map.clear()
@@ -1111,6 +1237,31 @@ class TestIncludeResolverIntegration:
         assert hasattr(resolver, "_staging_strategy")
         assert resolver._staging_strategy is not None
         assert resolver._staging_strategy.is_active
+        resolver.cleanup_staging()
+
+    def test_cleanup_staging_when_no_strategy(self, tmp_path):
+        """Cleanup should not crash when create_staging was never called."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.cleanup_staging()  # Should not raise
+
+    def test_delegation_collision_map_matches(self, tmp_path):
+        """Behavioral equivalence: collision_map populated correctly."""
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+        (tmp_path / "proto_a").mkdir()
+        (tmp_path / "proto_a" / "types.ivy").write_text("# a\n")
+        (tmp_path / "proto_b").mkdir()
+        (tmp_path / "proto_b" / "types.ivy").write_text("# b\n")
+        (tmp_path / "proto_a" / "unique.ivy").write_text("# u\n")
+
+        resolver = IncludeResolver(str(tmp_path))
+        resolver.create_staging_directory()
+
+        assert "types.ivy" in resolver._collision_map
+        assert len(resolver._collision_map["types.ivy"]) == 2
+        assert "unique.ivy" not in resolver._collision_map
         resolver.cleanup_staging()
 
     def test_resolve_still_works_after_injection(self, tmp_path):
@@ -1222,21 +1373,40 @@ if self._staging_strategy:
     self._staging_strategy = None
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: C5 fix — Wire strategy.resolve() into IncludeResolver.resolve()**
+
+In `IncludeResolver.resolve()` (lines 233-374), the staging directory lookup (step 2, after "same directory" check) currently reads `self._staging_dir` directly. Add a strategy delegation path so that `VirtualStagingStrategy` (Plan 4) can work:
+
+In the `resolve()` method, after the "same directory" check (step 1) and before the existing partition/staging lookup (step 2), add:
+
+```python
+# 2a. Delegate to strategy if available (enables VirtualStagingStrategy in Plan 4)
+if self._staging_strategy is not None:
+    result = self._staging_strategy.resolve(include_name, from_file_real)
+    if result is not None:
+        return result
+```
+
+This runs before the existing partition/layered staging checks. For `FlatStagingStrategy`, it returns the same result as the existing flat staging path. For future strategies, it enables custom resolution.
+
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd panther/plugins/services/testers/panther_ivy/submodules/ivy-lsp && python -m pytest tests/test_staging_strategy.py -x -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full test suite to verify no regressions**
+- [ ] **Step 6: Run full test suite to verify no regressions**
 
 Run: `cd panther/plugins/services/testers/panther_ivy/submodules/ivy-lsp && python -m pytest tests/ -x --timeout=60 2>&1 | tail -20`
 Expected: No new failures
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add ivy_lsp/core/indexer/include_resolver.py tests/test_staging_strategy.py
-git commit -m "refactor(staging): inject FlatStagingStrategy into IncludeResolver"
+git commit -m "refactor(staging): inject FlatStagingStrategy into IncludeResolver
+
+Wire strategy.resolve() into IncludeResolver.resolve() step 2
+to enable VirtualStagingStrategy in Plan 4."
 ```
 
 ---

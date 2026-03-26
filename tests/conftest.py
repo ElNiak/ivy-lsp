@@ -41,7 +41,7 @@ def _raw_json_for_legacy_tests(request):
         os.environ.pop("IVY_LSP_RAW_JSON", None)
 
 
-# Try to resolve QUIC_STACK_DIR from the ivy package (if installed),
+# Try to resolve PROTOCOL_TESTING_DIR from the ivy package (if installed),
 # otherwise fall back to a sibling layout (panther_ivy checkout).
 try:
     import ivy
@@ -51,15 +51,22 @@ except ImportError:
     _IVY_PKG_DIR = None
 
 if _IVY_PKG_DIR is not None:
-    QUIC_STACK_DIR = _IVY_PKG_DIR.parent / "protocol-testing" / "quic" / "quic_stack"
+    PROTOCOL_TESTING_DIR: Path | None = _IVY_PKG_DIR.parent / "protocol-testing"
 else:
     # Fallback: when running from a panther_ivy checkout
-    QUIC_STACK_DIR = (
-        Path(__file__).resolve().parent.parent
-        / "protocol-testing"
-        / "quic"
-        / "quic_stack"
-    )
+    PROTOCOL_TESTING_DIR = Path(__file__).resolve().parent.parent / "protocol-testing"
+
+if not PROTOCOL_TESTING_DIR.exists():
+    PROTOCOL_TESTING_DIR = None
+
+QUIC_STACK_DIR = (
+    PROTOCOL_TESTING_DIR / "quic" / "quic_stack"
+    if PROTOCOL_TESTING_DIR is not None
+    else Path(__file__).resolve().parent.parent
+    / "protocol-testing"
+    / "quic"
+    / "quic_stack"
+)
 
 
 # ---------------------------------------------------------------------------

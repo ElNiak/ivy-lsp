@@ -10,7 +10,7 @@ from typing import Any
 
 from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         # Resolve scope for graph filtering
         _scope_files: frozenset[str] | None = None
+        _resolved_scope = None
         if scope and getattr(ctx, "workspace_context", None) is not None:
             _resolved_scope = ctx.workspace_context.get_test_scope(scope)
             if _resolved_scope is not None:
@@ -119,7 +120,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
 
         graph, basename_cache, _skipped = await asyncio.to_thread(_build_graph)
 
-        # Task 3.2: Filter graph to scope's include closure when set.
+        # Filter graph to scope's include closure when set.
         # include_closure contains absolute paths; graph keys are relative.
         if _scope_files is not None:
             scope_rel_files = {os.path.relpath(f, ctx.root) for f in _scope_files}
@@ -177,13 +178,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 "included_by": included_by,
                 "transitive_includes": sorted(transitive),
             }
-            if _scope_files is not None:
-                _file_result["scope"] = scope
-                if _resolved_scope is not None:
-                    _file_result["scope_role"] = _resolved_scope.tester_role
-                    _file_result["include_closure_size"] = len(
-                        _resolved_scope.include_closure
-                    )
+            inject_scope_metadata(_file_result, scope, _resolved_scope)
             return _tc.finish(_file_result)
         else:
             # Compute entry points (files not included by any other file)
@@ -209,25 +204,13 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                         "truncated": True,
                         "showing": limit,
                     }
-                    if _scope_files is not None:
-                        _trunc_result["scope"] = scope
-                        if _resolved_scope is not None:
-                            _trunc_result["scope_role"] = _resolved_scope.tester_role
-                            _trunc_result["include_closure_size"] = len(
-                                _resolved_scope.include_closure
-                            )
+                    inject_scope_metadata(_trunc_result, scope, _resolved_scope)
                     return _tc.finish(_trunc_result)
                 _full_result: dict[str, Any] = {
                     "files": files_data,
                     "total_files": len(graph),
                 }
-                if _scope_files is not None:
-                    _full_result["scope"] = scope
-                    if _resolved_scope is not None:
-                        _full_result["scope_role"] = _resolved_scope.tester_role
-                        _full_result["include_closure_size"] = len(
-                            _resolved_scope.include_closure
-                        )
+                inject_scope_metadata(_full_result, scope, _resolved_scope)
                 return _tc.finish(_full_result)
             else:
                 # Summary mode (default) — compact overview
@@ -251,13 +234,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     "detail": "summary",
                     "hint": "Use detail='full' for the complete graph.",
                 }
-                if _scope_files is not None:
-                    _summary_result["scope"] = scope
-                    if _resolved_scope is not None:
-                        _summary_result["scope_role"] = _resolved_scope.tester_role
-                        _summary_result["include_closure_size"] = len(
-                            _resolved_scope.include_closure
-                        )
+                inject_scope_metadata(_summary_result, scope, _resolved_scope)
                 return _tc.finish(_summary_result)
 
     @mcp.tool()

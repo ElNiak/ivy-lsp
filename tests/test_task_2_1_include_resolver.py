@@ -166,17 +166,12 @@ class TestFindAllIvyFiles:
 class TestIncludeResolverQuicStack:
     def test_quic_frame_includes_resolve(self):
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from tests.conftest import QUIC_STACK_DIR
 
-        quic_stack = (
-            Path(__file__).resolve().parent.parent
-            / "protocol-testing"
-            / "quic"
-            / "quic_stack"
-        )
-        if not quic_stack.exists():
+        if not QUIC_STACK_DIR.exists():
             pytest.skip("quic_stack not found")
-        resolver = IncludeResolver(str(quic_stack))
-        frame_file = str(quic_stack / "quic_frame.ivy")
+        resolver = IncludeResolver(str(QUIC_STACK_DIR))
+        frame_file = str(QUIC_STACK_DIR / "quic_frame.ivy")
         result = resolver.resolve("quic_stream", frame_file)
         assert result is not None
         assert result.endswith("quic_stream.ivy")
@@ -186,16 +181,11 @@ class TestIncludeResolverQuicStack:
 
     def test_find_all_ivy_files_quic_stack(self):
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from tests.conftest import QUIC_STACK_DIR
 
-        quic_stack = (
-            Path(__file__).resolve().parent.parent
-            / "protocol-testing"
-            / "quic"
-            / "quic_stack"
-        )
-        if not quic_stack.exists():
+        if not QUIC_STACK_DIR.exists():
             pytest.skip("quic_stack not found")
-        resolver = IncludeResolver(str(quic_stack))
+        resolver = IncludeResolver(str(QUIC_STACK_DIR))
         files = resolver.find_all_ivy_files()
         assert len(files) >= 15
 

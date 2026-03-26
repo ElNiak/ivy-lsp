@@ -17,16 +17,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import PROTOCOL_TESTING_DIR
+
 IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 GROUND_TRUTH_DIR = Path(__file__).resolve().parent / "ground_truth"
-PROTOCOL_TESTING = IVY_ROOT / "protocol-testing"
+PROTOCOL_TESTING = PROTOCOL_TESTING_DIR
 
 # Skip entire module if protocol-testing/ doesn't exist (CI without submodule)
 pytestmark = pytest.mark.skipif(
-    not PROTOCOL_TESTING.exists(),
+    PROTOCOL_TESTING is None,
     reason="protocol-testing/ not found (submodule not initialized)",
 )
 

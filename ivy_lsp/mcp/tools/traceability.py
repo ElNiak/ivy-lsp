@@ -16,7 +16,7 @@ import os
 from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 
 logger = logging.getLogger(__name__)
 
@@ -544,7 +544,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 file is used as the test_file for scoping.  Empty string
                 (default) = no scope-based override.
         """
-        # Task 3.2: Resolve scope -> test_file when scope is provided
+        # Resolve scope -> test_file when scope is provided
         _resolved_scope = None
         if (
             scope
@@ -602,33 +602,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     result_dict["matrix"] = matrix[:max_items]
                     result_dict["matrix_truncated"] = True
                     result_dict["matrix_total"] = len(matrix)
-            if scope:
-                result_dict["scope"] = scope
-                if _resolved_scope is not None:
-                    result_dict["scope_role"] = _resolved_scope.tester_role
-                    result_dict["include_closure_size"] = len(
-                        _resolved_scope.include_closure
-                    )
+            inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
         elif mode == "gaps":
             result_dict = await _ivy_coverage_gaps(test_file, protocol)
-            if scope:
-                result_dict["scope"] = scope
-                if _resolved_scope is not None:
-                    result_dict["scope_role"] = _resolved_scope.tester_role
-                    result_dict["include_closure_size"] = len(
-                        _resolved_scope.include_closure
-                    )
+            inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
         elif mode == "diff":
             result_dict = await _ivy_coverage_diff(relative_path)
-            if scope:
-                result_dict["scope"] = scope
-                if _resolved_scope is not None:
-                    result_dict["scope_role"] = _resolved_scope.tester_role
-                    result_dict["include_closure_size"] = len(
-                        _resolved_scope.include_closure
-                    )
+            inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
         else:  # default: stats
             result_dict = await _ivy_requirement_coverage(relative_path, test_file)
@@ -640,13 +622,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                     if len(uncovered) > max_items:
                         result_dict["uncovered_ids"] = uncovered[:max_items]
                         result_dict["uncovered_ids_truncated"] = True
-            if scope:
-                result_dict["scope"] = scope
-                if _resolved_scope is not None:
-                    result_dict["scope_role"] = _resolved_scope.tester_role
-                    result_dict["include_closure_size"] = len(
-                        _resolved_scope.include_closure
-                    )
+            inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
 
     # ------------------------------------------------------------------
