@@ -64,6 +64,7 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                             "type": "state_var",
                             "name": var_node.name,
                             "qualifiedName": var_node.qualified_name,
+                            "file": var_node.file,
                             "reason": (
                                 f"Used by related requirements but not yet "
                                 f"referenced in {action_name}"
@@ -84,6 +85,7 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                         {
                             "type": "missing_guard",
                             "name": sv.name,
+                            "file": sv.file,
                             "reason": (
                                 f"State var '{sv.name}' is written by "
                                 f"{action_name} but not guarded"
@@ -132,6 +134,7 @@ def handle_smart_suggestions(server: IvyServerProtocol, params: dict) -> dict:
                         {
                             "type": "unguarded_state",
                             "name": sv_node.name,
+                            "file": sv_node.file,
                             "reason": (
                                 f"State var '{sv_node.name}' is never read "
                                 f"by any requirement — may lack invariant checks"
