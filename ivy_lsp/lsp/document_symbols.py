@@ -207,10 +207,18 @@ def register(server) -> None:
 
             # Avoid silent false-success "0 symbols" states in startup/degraded mode.
             if not result and source.strip():
-                initializing = bool(getattr(server, "initializing", False))
                 parser_available = parser is not None
                 indexer_available = indexer is not None
-                if initializing:
+                # Check actual data readiness rather than protocol init flag.
+                # The server.initializing flag reflects LSP protocol state, not
+                # indexer readiness — other ops (hover, goToDefinition) work fine
+                # during late init because the indexer is already functional.
+                indexer_has_data = (
+                    indexer_available
+                    and hasattr(indexer, "_symbol_table")
+                    and len(indexer._symbol_table._all) > 0
+                )
+                if not indexer_has_data and not parser_available:
                     status = "degraded"
                     result = [
                         _status_document_symbol(

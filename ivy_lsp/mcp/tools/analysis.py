@@ -268,9 +268,15 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             },
             "mcp_tool_count": len(get_tool_metadata()),
         }
-        # Parsing tier availability
+        # Parsing tier availability (capped at 3s to avoid blocking ivy_capabilities)
         try:
-            result["parsing_tiers"] = TieredExtractor().probe_tiers()
+            loop = asyncio.get_event_loop()
+            result["parsing_tiers"] = await asyncio.wait_for(
+                loop.run_in_executor(None, TieredExtractor().probe_tiers),
+                timeout=3.0,
+            )
+        except asyncio.TimeoutError:
+            result["parsing_tiers"] = {"error": "probe timed out (3s)"}
         except Exception:
             result["parsing_tiers"] = {"error": "probe failed"}
         if ctx.include_resolver is not None and hasattr(

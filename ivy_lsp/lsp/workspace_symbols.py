@@ -29,6 +29,26 @@ MAX_RESULTS = 100
 # compute_workspace_symbols().
 _SEARCH_INTERNAL_LIMIT = 1000
 
+
+def _derive_protocol_root(filepath: str) -> Optional[str]:
+    """Extract the protocol root directory from a file path.
+
+    Looks for ``protocol-testing/<protocol>/`` in the path and returns
+    the absolute path up to and including the protocol directory.
+    Returns ``None`` if no such segment is found.
+    """
+    norm = os.path.normpath(os.path.abspath(filepath))
+    marker = os.sep + "protocol-testing" + os.sep
+    idx = norm.find(marker)
+    if idx < 0:
+        return None
+    after = norm[idx + len(marker) :]
+    parts = after.split(os.sep)
+    if not parts or not parts[0]:
+        return None
+    return norm[: idx + len(marker) + len(parts[0])]
+
+
 # Definition kinds that should rank above references in search results.
 _DEFINITION_KINDS = frozenset(
     {
@@ -188,6 +208,18 @@ def compute_workspace_symbols(
                 or os.path.normpath(os.path.abspath(f.file_path)) not in file_to_layer
             )
         ]
+    elif active_filepath:
+        # No workspace active — derive protocol scope from active file.
+        protocol_root = _derive_protocol_root(active_filepath)
+        if protocol_root:
+            flat = [
+                f
+                for f in flat
+                if f.file_path
+                and os.path.normpath(os.path.abspath(f.file_path)).startswith(
+                    protocol_root
+                )
+            ]
 
     matches = search_symbols(flat, query)
 

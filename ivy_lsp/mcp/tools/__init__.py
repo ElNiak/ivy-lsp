@@ -415,10 +415,31 @@ def safe_tool(fn):
                     call_id=call_id,
                 )
 
-            async with sem:
+            sem_timeout = timeout * 0.5
+            try:
+                await asyncio.wait_for(sem.acquire(), timeout=sem_timeout)
+            except asyncio.TimeoutError:
+                metrics.timeout_count += 1
+                metrics.error_count += 1
+                logger.error(
+                    "MCP tool %s timed out waiting for concurrency slot (%.1fs)",
+                    tool_name,
+                    sem_timeout,
+                )
+                return _error_result(
+                    {
+                        "success": False,
+                        "message": f"Tool queued too long (>{sem_timeout:.0f}s). Other tools may be stuck.",
+                        "timeout": True,
+                        "tool": tool_name,
+                    }
+                )
+            try:
                 result = await _cancel_safe_wait_for(
                     fn(*args, **kwargs), timeout=timeout
                 )
+            finally:
+                sem.release()
             result = _format_result(tool_name, result)
 
             if cfg.debug_log:

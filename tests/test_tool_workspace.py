@@ -349,3 +349,64 @@ async def test_invalid_action(tmp_path):
 
     assert result["success"] is False
     assert "destroy" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: _handle_get fallback to persisted state
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGetFallbackToPersisted:
+    """_handle_get should fall back to persisted state when in-memory is None."""
+
+    def test_get_returns_persisted_explicit_state(self, tmp_path):
+        """Restore persisted explicit state when in-memory is None."""
+        from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
+        from ivy_lsp.mcp.tools.workspace import _handle_get
+
+        state_file = tmp_path / STATE_FILENAME
+        ws = ActiveWorkspace(
+            active_group="quic",
+            active_layers={"quic", "quic_tests"},
+            active_tests=[],
+            granularity="protocol",
+            set_by="explicit",
+        )
+        ws.save(str(state_file))
+
+        ctx = _make_ctx(tmp_path)
+        ctx.active_workspace = None
+        result = _handle_get(ctx)
+
+        assert result["status"] == "ok"
+        assert result["active_group"] == "quic"
+        assert result["set_by"] == "explicit"
+        assert ctx.active_workspace is not None
+        assert ctx.active_workspace.active_group == "quic"
+
+    def test_get_returns_cleared_when_no_state_file(self, tmp_path):
+        """When both in-memory and persisted state are missing, return cleared."""
+        from ivy_lsp.mcp.tools.workspace import _handle_get
+
+        ctx = _make_ctx(tmp_path)
+        ctx.active_workspace = None
+        result = _handle_get(ctx)
+
+        assert result["active_group"] is None
+        assert result["set_by"] == "cleared"
+
+    def test_get_returns_cleared_when_persisted_is_cleared(self, tmp_path):
+        """When persisted state is also cleared, return cleared."""
+        from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
+        from ivy_lsp.mcp.tools.workspace import _handle_get
+
+        state_file = tmp_path / STATE_FILENAME
+        ws = ActiveWorkspace.cleared()
+        ws.save(str(state_file))
+
+        ctx = _make_ctx(tmp_path)
+        ctx.active_workspace = None
+        result = _handle_get(ctx)
+
+        assert result["active_group"] is None
+        assert result["set_by"] == "cleared"

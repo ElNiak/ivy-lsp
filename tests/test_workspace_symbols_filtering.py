@@ -374,3 +374,117 @@ class TestWorkspaceSymbolsFilterWithQuery:
         # Orphan (no file_path) should be included (fail-open)
         names = [r.name for r in results]
         assert "orphan_sym" in names
+
+
+class TestWorkspaceSymbolsProtocolScopingFromFilepath:
+    """Protocol-scoped filtering when no workspace is active."""
+
+    def test_protocol_scoping_filters_to_quic(self):
+        """active_filepath in quic/ should filter out patterns/ and apt/ symbols."""
+        quic_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/quic/quic_stack/quic_types.ivy")
+        )
+        pattern_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/patterns/shims/shim_tcp_template.ivy")
+        )
+        apt_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/apt/apt_model.ivy")
+        )
+
+        syms = [
+            _make_symbol("quic_cid", quic_file),
+            _make_symbol("shim_tcp", pattern_file),
+            _make_symbol("apt_action", apt_file),
+        ]
+        indexer = _MockIndexer(syms)
+
+        results = compute_workspace_symbols(
+            indexer,
+            query="",
+            active_filepath=quic_file,
+            active_workspace=None,
+        )
+        names = [r.name for r in results]
+        assert "quic_cid" in names
+        assert "shim_tcp" not in names
+        assert "apt_action" not in names
+
+    def test_protocol_scoping_no_active_filepath_returns_all(self):
+        """Without active_filepath, no protocol scoping applied."""
+        quic_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/quic/quic_stack/quic_types.ivy")
+        )
+        pattern_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/patterns/shims/shim_tcp.ivy")
+        )
+
+        syms = [
+            _make_symbol("quic_cid", quic_file),
+            _make_symbol("shim_tcp", pattern_file),
+        ]
+        indexer = _MockIndexer(syms)
+
+        results = compute_workspace_symbols(
+            indexer,
+            query="",
+            active_filepath=None,
+            active_workspace=None,
+        )
+        names = [r.name for r in results]
+        assert "quic_cid" in names
+        assert "shim_tcp" in names
+
+    def test_protocol_scoping_non_protocol_path_returns_all(self):
+        """active_filepath without protocol-testing/ segment returns all."""
+        random_file = os.path.normpath(os.path.abspath("/ws/other/foo.ivy"))
+        quic_file = os.path.normpath(os.path.abspath("/ws/protocol-testing/quic/q.ivy"))
+
+        syms = [
+            _make_symbol("foo_sym", random_file),
+            _make_symbol("quic_sym", quic_file),
+        ]
+        indexer = _MockIndexer(syms)
+
+        results = compute_workspace_symbols(
+            indexer,
+            query="",
+            active_filepath=random_file,
+            active_workspace=None,
+        )
+        names = [r.name for r in results]
+        assert "foo_sym" in names
+        assert "quic_sym" in names
+
+    def test_workspace_filter_takes_precedence_over_protocol_scoping(self):
+        """When workspace IS active, workspace filter wins."""
+        quic_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/quic/quic_stack/quic_types.ivy")
+        )
+        apt_file = os.path.normpath(
+            os.path.abspath("/ws/protocol-testing/apt/apt_model.ivy")
+        )
+
+        syms = [
+            _make_symbol("quic_sym", quic_file),
+            _make_symbol("apt_sym", apt_file),
+        ]
+        file_to_layer = {quic_file: "quic", apt_file: "apt"}
+        indexer = _MockIndexer(syms, file_to_layer=file_to_layer)
+
+        ws = ActiveWorkspace(
+            active_group="quic",
+            active_layers={"quic"},
+            active_tests=[],
+            granularity="protocol",
+            set_by="explicit",
+        )
+
+        results = compute_workspace_symbols(
+            indexer,
+            query="",
+            active_filepath=quic_file,
+            active_workspace=ws,
+        )
+        names = [r.name for r in results]
+        assert "quic_sym" in names
+        assert "apt_sym" not in names

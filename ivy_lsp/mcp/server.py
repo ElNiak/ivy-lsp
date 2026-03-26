@@ -820,6 +820,29 @@ def start_mcp(
             level=logging.INFO,
         )
 
+    # --- Reset stale circuit breaker state from previous sessions ---
+    # The health-check hook at check-mcp-health.py persists failure counts
+    # to /tmp/ivy-mcp-health-state.json. If that file is stale (>60s old),
+    # clear it so a fresh MCP server doesn't inherit old failures.
+    _cb_state_file = "/tmp/ivy-mcp-health-state.json"
+    try:
+        if os.path.exists(_cb_state_file):
+            import json as _json
+
+            _cb_mtime = os.path.getmtime(_cb_state_file)
+            if time.time() - _cb_mtime > 60:
+                with open(_cb_state_file, "w") as _cb_f:
+                    _json.dump(
+                        {"consecutive_failures": 0, "last_update": time.time()},
+                        _cb_f,
+                    )
+                logger.info(
+                    "Reset stale circuit breaker state (age=%.0fs)",
+                    time.time() - _cb_mtime,
+                )
+    except OSError:
+        pass  # Best-effort; state file is optional
+
     # --- Workspace scoping: respect include/exclude paths from detection ---
     if ws_config is not None:
         _include_paths = ws_config.include_paths
