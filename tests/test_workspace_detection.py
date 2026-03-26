@@ -466,7 +466,7 @@ class TestV3LayerParsing:
         assert config.workspace_layers[0].include_paths == ["quic", "minip"]
         assert config.workspace_layers[1].id == "apt"
         assert config.workspace_layers[1].priority == 2
-        # Flattened include_paths for backward compat
+        # Flattened include_paths from all layers
         assert "quic" in config.include_paths
         assert "minip" in config.include_paths
         assert "apt" in config.include_paths

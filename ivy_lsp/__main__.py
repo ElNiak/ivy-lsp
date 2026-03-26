@@ -2,7 +2,7 @@
 
 Supports three modes:
   - Default:     LSP over stdio + MCP HTTP sidecar (unified process)
-  - --mcp:       Standalone MCP server over stdio (backward compat)
+  - --mcp:       Standalone MCP server over stdio
   - --lsp-only:  LSP over stdio without MCP sidecar
 """
 
@@ -276,7 +276,7 @@ def _main_impl(startup_t0: float) -> None:
     _watchdog.start()
 
     if "--mcp" in sys.argv:
-        # Standalone MCP server mode (backward compat): stdio transport
+        # Standalone MCP server mode: stdio transport
         try:
             from ivy_lsp.core.workspace.detection import detect_ivy_workspace
             from ivy_lsp.mcp.server import start_mcp

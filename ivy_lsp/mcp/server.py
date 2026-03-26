@@ -4,7 +4,9 @@ Exposes Ivy verification tools, structured diagnostics, include graph,
 and fast lint as MCP tools via the Model Context Protocol. Shares the
 same parsing and indexing code as the LSP server.
 
-Started automatically as an HTTP sidecar by the LSP server (default mode).
+Usage:
+    python -m ivy_lsp --mcp      # Standalone MCP over stdio
+    python -m ivy_lsp             # LSP + MCP HTTP sidecar (default)
 """
 
 from __future__ import annotations
