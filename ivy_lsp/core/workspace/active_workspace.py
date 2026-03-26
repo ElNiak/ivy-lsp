@@ -313,6 +313,42 @@ class ActiveWorkspace:
         logger.debug("Workspace state saved to %s", state_file_path)
 
 
+@dataclass(frozen=True)
+class ScopeProjection:
+    """Frozen query-time filter for workspace layer visibility.
+
+    Unlike :class:`ActiveWorkspace` (which manages mutable session state),
+    ``ScopeProjection`` is a lightweight, immutable snapshot used by query
+    paths to filter results based on which layers are currently active.
+
+    Attributes:
+        active_layers: The set of layer IDs considered "in scope".
+            An empty frozenset means *no restriction* (everything visible).
+        file_to_layer: Mapping of file path to its owning layer ID.
+    """
+
+    active_layers: frozenset
+    file_to_layer: dict
+
+    def is_visible(self, filepath: str) -> bool:
+        """Return ``True`` if *filepath* should be included in query results.
+
+        Decision rules:
+
+        * If ``active_layers`` is empty, every file is visible (no restriction).
+        * If *filepath* is not present in ``file_to_layer``, it is visible
+          (unknown files are included by default).
+        * Otherwise, the file is visible only when its layer is in
+          ``active_layers``.
+        """
+        if not self.active_layers:
+            return True  # no restriction
+        layer = self.file_to_layer.get(filepath)
+        if layer is None:
+            return True  # unknown files are visible by default
+        return layer in self.active_layers
+
+
 # ---------------------------------------------------------------------------
 # Module-private helpers
 # ---------------------------------------------------------------------------
