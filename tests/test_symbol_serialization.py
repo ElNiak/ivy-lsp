@@ -30,6 +30,7 @@ class TestIvySymbolSerialization:
             "detail": "action foo",
             "file_path": "/tmp/a.ivy",
             "children": [],
+            "synthetic": False,
         }
         sym = IvySymbol.from_dict(d)
         assert sym.name == "foo"
