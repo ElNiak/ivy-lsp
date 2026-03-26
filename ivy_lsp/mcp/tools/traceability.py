@@ -321,7 +321,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
     ) -> dict:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements."""
-        from ivy_lsp.lsp.visualization import handle_coverage_gaps
+        from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps
 
         server_proxy = await ctx.make_viz_server_proxy()
         params: dict[str, Any] = {}

@@ -109,7 +109,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
     ) -> dict:
         """Return the action dependency graph showing shared-state relationships."""
-        from ivy_lsp.lsp.visualization import handle_action_dependency_graph
+        from ivy_lsp.lsp.viz_graphs import handle_action_dependency_graph
 
         server_proxy = await ctx.make_viz_server_proxy()
         params: dict[str, Any] = {}
@@ -130,7 +130,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
     ) -> dict:
         """Return a state-machine view of the Ivy specification."""
-        from ivy_lsp.lsp.visualization import handle_state_machine_view
+        from ivy_lsp.lsp.viz_graphs import handle_state_machine_view
 
         server_proxy = await ctx.make_viz_server_proxy()
         params: dict[str, Any] = {}
@@ -151,7 +151,7 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
     ) -> dict:
         """Get a layered overview of the Ivy model organized by file or module."""
-        from ivy_lsp.lsp.visualization import handle_layered_overview
+        from ivy_lsp.lsp.viz_graphs import handle_layered_overview
 
         server_proxy = await ctx.make_viz_server_proxy()
         params: dict[str, Any] = {}

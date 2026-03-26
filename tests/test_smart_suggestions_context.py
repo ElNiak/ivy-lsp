@@ -140,7 +140,7 @@ class TestSmartSuggestionsContextFiltering:
 
     def test_file_path_resolves_to_scope_in_handler(self):
         """When filePath is provided without actionName, suggestions are scoped."""
-        from ivy_lsp.lsp.visualization import handle_smart_suggestions
+        from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions
 
         server = MagicMock()
         graph = MagicMock()

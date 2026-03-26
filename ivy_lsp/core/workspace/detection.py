@@ -98,7 +98,7 @@ def _apply_marker(marker_path: str, data: dict) -> Optional[WorkspaceConfig]:
         for layer in raw_layers
     ]
 
-    # Flatten all layer include_paths for backward-compat with _find_source_files
+    # Flatten all layer include_paths into a single list for _find_source_files
     flat_include_paths = []
     for layer in layers:
         flat_include_paths.extend(layer.include_paths)
@@ -246,24 +246,22 @@ def _discover_protocols(protocol_testing_dir: str) -> list[str]:
 
 def _build_panther_workspace(
     panther_ivy_root: str,
-) -> WorkspaceConfig:
+) -> Optional[WorkspaceConfig]:
     """Build a WorkspaceConfig for a PANTHER panther_ivy root directory.
 
     Dynamically discovers protocols via per-protocol ``.ivyworkspace`` markers.
-    Falls back to the legacy hardcoded list (``quic``, ``minip``, ``apt``) when no
-    markers are found, so the heuristic remains functional on uninitialized repos.
+    Returns ``None`` when no markers are found.
     """
     protocol_testing_dir = os.path.join(panther_ivy_root, "protocol-testing")
     discovered = _discover_protocols(protocol_testing_dir)
 
-    # Fallback to legacy hardcoded protocols when no per-protocol markers exist
     if not discovered:
         logger.debug(
             "No per-protocol .ivyworkspace markers found under %s; "
-            "falling back to legacy hardcoded protocol list",
+            "no workspace detected",
             protocol_testing_dir,
         )
-        discovered = ["quic", "minip", "apt"]
+        return None
 
     include_paths = [f"protocol-testing/{p}" for p in discovered]
 
@@ -299,9 +297,9 @@ def _build_panther_workspace(
 def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
     """Detect PANTHER project by looking for ``protocol-testing/`` with ``.ivy`` files.
 
-    When per-protocol ``.ivyworkspace`` markers are present under
-    ``protocol-testing/``, protocols are discovered dynamically via
-    :func:`_discover_protocols` instead of using a hardcoded list.
+    Protocols are discovered dynamically via per-protocol ``.ivyworkspace``
+    markers under ``protocol-testing/`` using :func:`_discover_protocols`.
+    Returns ``None`` when no markers are found.
     """
     current = os.path.abspath(start_dir)
     for _ in range(10):

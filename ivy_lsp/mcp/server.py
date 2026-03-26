@@ -1,11 +1,10 @@
-"""MCP server mode for ivy-lsp.
+"""MCP server for ivy-lsp.
 
 Exposes Ivy verification tools, structured diagnostics, include graph,
 and fast lint as MCP tools via the Model Context Protocol. Shares the
 same parsing and indexing code as the LSP server.
 
-Usage:
-    python -m ivy_lsp --mcp
+Started automatically as an HTTP sidecar by the LSP server (default mode).
 """
 
 from __future__ import annotations
@@ -389,9 +388,8 @@ class McpServerState:
     def _populate_semantic_model_from_graph(self, graph: Any) -> None:
         """Mirror RequirementGraph nodes and edges into the SemanticModel.
 
-        This bridges the domain-specific RequirementGraph data into the
-        unified SemanticModel so that both models stay consistent.
-        The RequirementGraph is kept as a compatibility layer — this
+        The RequirementGraph bridges domain-specific extraction data into the
+        unified SemanticModel so that both models stay consistent.  This
         function only *adds* to the SemanticModel, never replaces it.
 
         If the SemanticModel has not been built yet, this is a no-op.
@@ -613,7 +611,7 @@ class McpServerState:
                 t3 - t2,
             )
 
-            # --- Populate SemanticModel with the same data (compatibility bridge) ---
+            # --- Populate SemanticModel with the same data (sync bridge) ---
             # The SemanticModel may already be built (via get_model); if so, mirror
             # the RequirementGraph nodes and edges into it.  If the model hasn't been
             # built yet, we skip — the requirement graph remains the source of truth

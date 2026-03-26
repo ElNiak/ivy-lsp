@@ -23,15 +23,17 @@ from ivy_lsp.lsp.visualization import (  # noqa: E402
     _get_requirement_graph,
     _resolve_scope,
     _serialize_requirement,
-    handle_action_dependency_graph,
     handle_action_requirements,
-    handle_coverage_gaps,
-    handle_layered_overview,
     handle_model_summary_table,
-    handle_smart_suggestions,
-    handle_state_machine_view,
     register,
 )
+from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps  # noqa: E402
+from ivy_lsp.lsp.viz_graphs import (  # noqa: E402
+    handle_action_dependency_graph,
+    handle_layered_overview,
+    handle_state_machine_view,
+)
+from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

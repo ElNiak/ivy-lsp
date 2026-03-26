@@ -141,7 +141,11 @@ class TestPantherHeuristic:
             / "testers"
             / "panther_ivy"
         )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+        # Add a per-protocol marker so the heuristic discovers it
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
         assert config.project_type == "panther"
@@ -150,14 +154,32 @@ class TestPantherHeuristic:
 
     def test_inside_panther_ivy(self, tmp_workspace):
         # Simulate CWD being panther_ivy itself
-        (tmp_workspace / "protocol-testing").mkdir()
+        pt = tmp_workspace / "protocol-testing"
+        pt.mkdir()
         (tmp_workspace / "panther_ivy.py").write_text("# marker")
+        # Add a per-protocol marker so the heuristic discovers it
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
         assert config.project_type == "panther"
 
     def test_no_panther_structure(self, isolated_tmp):
         config = _panther_heuristic(str(isolated_tmp))
+        assert config is None
+
+    def test_no_markers_returns_none(self, tmp_workspace):
+        """PANTHER structure without per-protocol markers returns None."""
+        panther_ivy = (
+            tmp_workspace
+            / "panther"
+            / "plugins"
+            / "services"
+            / "testers"
+            / "panther_ivy"
+        )
+        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        config = _panther_heuristic(str(tmp_workspace))
         assert config is None
 
 
@@ -236,7 +258,11 @@ class TestDetectIvyWorkspace:
             / "testers"
             / "panther_ivy"
         )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+        # Add a per-protocol marker so the heuristic discovers it
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         config = detect_ivy_workspace(start_dir=str(isolated_tmp))
         assert config.detected_by == "heuristic"
         assert config.project_type == "panther"
@@ -291,7 +317,11 @@ class TestWorktreeWorkspaceDetection:
         panther_ivy = (
             main_repo / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
         )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+        # Add a per-protocol marker so the heuristic discovers it
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
 
         # Worktree with empty panther_ivy (simulates uninitialized submodule)
         worktree = isolated_tmp / "worktree"
@@ -311,12 +341,16 @@ class TestWorktreeWorkspaceDetection:
 
 
 class TestHintWithHeuristic:
-    def test_hint_with_panther_structure_no_marker(self, tmp_workspace, monkeypatch):
-        """Hint pointing to a dir with PANTHER structure but no marker should work."""
+    def test_hint_with_panther_structure_and_markers(self, tmp_workspace, monkeypatch):
+        """Hint pointing to a dir with PANTHER structure and protocol markers should work."""
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         panther_ivy = tmp_workspace / "panther_ivy"
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
         (panther_ivy / "panther_ivy.py").write_text("# marker")
+        # Add a per-protocol marker so the heuristic discovers it
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", str(panther_ivy))
         reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
@@ -448,12 +482,8 @@ class TestV3LayerParsing:
 
 
 class TestPantherHeuristicV3:
-    def test_heuristic_returns_layers(self, tmp_workspace):
-        """PANTHER heuristic should return v3-compatible WorkspaceConfig with layers.
-
-        When no per-protocol .ivyworkspace markers exist the heuristic falls back to
-        the legacy hardcoded protocol list (quic, minip, apt) — one layer per protocol.
-        """
+    def test_heuristic_returns_none_when_no_markers(self, tmp_workspace):
+        """PANTHER heuristic returns None when no per-protocol markers exist."""
         panther_ivy = (
             tmp_workspace
             / "panther"
@@ -464,12 +494,7 @@ class TestPantherHeuristicV3:
         )
         (panther_ivy / "protocol-testing").mkdir(parents=True)
         config = _panther_heuristic(str(tmp_workspace))
-        assert config is not None
-        # Falls back to legacy 3-protocol list: quic, minip, apt
-        assert len(config.workspace_layers) == 3
-        layer_ids = {layer.id for layer in config.workspace_layers}
-        assert layer_ids == {"quic", "minip", "apt"}
-        assert config.project_type == "panther"
+        assert config is None
 
 
 # ---------------------------------------------------------------------------
@@ -567,8 +592,8 @@ class TestApplyMarkerNewFields:
         assert config.workspace_root == expected_root
         assert config.workspace_root_offset == offset
 
-    def test_apply_marker_backward_compat(self, tmp_workspace):
-        """Existing markers without new fields must parse correctly with defaults."""
+    def test_apply_marker_optional_fields(self, tmp_workspace):
+        """Existing markers without optional fields must parse correctly with defaults."""
         from ivy_lsp.core.workspace.detection import _apply_marker
 
         marker_data = {
@@ -666,19 +691,3 @@ class TestPantherHeuristicDynamicDiscovery:
         assert any("protocol-testing/quic" in p for p in config.include_paths)
         assert any("protocol-testing/bgp" in p for p in config.include_paths)
         assert not any("no_marker" in p for p in config.include_paths)
-
-    def test_heuristic_falls_back_to_legacy_when_no_markers(self, tmp_path):
-        """PANTHER heuristic falls back to legacy protocol list when no markers found."""
-        panther_ivy = (
-            tmp_path / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
-        )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
-        # No per-protocol .ivyworkspace markers
-
-        config = _panther_heuristic(str(tmp_path))
-        assert config is not None
-        assert config.project_type == "panther"
-        # Legacy hardcoded protocols must still appear
-        legacy = {"quic", "minip", "apt"}
-        discovered = {p.split("/")[-1] for p in config.include_paths}
-        assert legacy == discovered

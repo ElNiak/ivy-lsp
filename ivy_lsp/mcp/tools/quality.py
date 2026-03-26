@@ -31,7 +31,7 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         max_items: int = 50,
     ) -> dict:
         """Get context-aware suggestions for improving the Ivy specification."""
-        from ivy_lsp.lsp.visualization import handle_smart_suggestions
+        from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions
 
         server_proxy = await ctx.make_viz_server_proxy()
         params: dict[str, Any] = {}

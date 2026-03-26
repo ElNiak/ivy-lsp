@@ -430,7 +430,7 @@ def test_resolve_staging_path_falls_back_to_flat_when_no_layer(tmp_path):
 
 
 def test_resolve_staging_path_no_resolver_unchanged(tmp_path):
-    """When no resolver passed, behaves exactly as before (backward compat)."""
+    """When no resolver passed, behaves exactly as before."""
     flat = tmp_path / "staging"
     flat.mkdir()
     src = tmp_path / "model.ivy"

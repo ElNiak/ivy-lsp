@@ -492,8 +492,9 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Extracted handler modules
+# LSP wiring
 # ---------------------------------------------------------------------------
+
 from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps  # noqa: E402
 from ivy_lsp.lsp.viz_graphs import (  # noqa: E402
     handle_action_dependency_graph,
@@ -501,33 +502,6 @@ from ivy_lsp.lsp.viz_graphs import (  # noqa: E402
     handle_state_machine_view,
 )
 from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions  # noqa: E402
-
-# Re-export so existing imports keep working
-__all__ = [
-    "MAX_RESPONSE_BYTES",
-    "_cap_response",
-    "_classify_direction",
-    "_filter_by_protocol",
-    "_filter_by_scope",
-    "_get_requirement_graph",
-    "_rel",
-    "_resolve_scope",
-    "_serialize_requirement",
-    "_serialize_state_var",
-    "handle_action_dependency_graph",
-    "handle_action_requirements",
-    "handle_coverage_gaps",
-    "handle_layered_overview",
-    "handle_model_summary_table",
-    "handle_smart_suggestions",
-    "handle_state_machine_view",
-    "register",
-]
-
-
-# ---------------------------------------------------------------------------
-# LSP wiring
-# ---------------------------------------------------------------------------
 
 
 def register(server: Any) -> None:
