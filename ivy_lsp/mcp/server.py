@@ -1125,3 +1125,6 @@ def start_mcp(
             logger.warning("[MCP] Cancel scope RuntimeError, exiting cleanly: %s", exc)
             sys.exit(0)
         raise
+    finally:
+        state._tool_executor.shutdown(wait=False, cancel_futures=True)
+        logger.debug("[MCP] Tool executor shut down")
