@@ -407,6 +407,7 @@ def safe_tool(_fn=None, *, ctx=None):
                     logger.warning(
                         "[DOWNGRADED] Sidecar call to %s failed, using local",
                         tool_name,
+                        exc_info=True,
                     )
                     _stale = _client
                     set_sidecar_client(None)
@@ -524,6 +525,34 @@ def safe_tool(_fn=None, *, ctx=None):
                     )
 
                 return result
+            except asyncio.CancelledError:
+                # User cancelled the tool call (MCP -32001).
+                # Catch here so CancelledError doesn't propagate up to
+                # the MCP transport and crash the server.
+                elapsed = time.monotonic() - start
+                metrics.error_count += 1
+                logger.info(
+                    "MCP tool %s cancelled by user after %.1fs",
+                    tool_name,
+                    elapsed,
+                )
+                if cfg.debug_log:
+                    logger_session.log_event(
+                        channel="mcp",
+                        event_type="call_end",
+                        name=tool_name,
+                        status="cancelled",
+                        duration_ms=elapsed * 1000,
+                        call_id=call_id,
+                    )
+                return _error_result(
+                    {
+                        "success": False,
+                        "message": f"Tool {tool_name} was cancelled.",
+                        "cancelled": True,
+                        "tool": tool_name,
+                    }
+                )
             except asyncio.TimeoutError:
                 elapsed = time.monotonic() - start
                 metrics.timeout_count += 1
@@ -626,6 +655,7 @@ def safe_tool(_fn=None, *, ctx=None):
             "_summarize_for_log": _summarize_for_log,
             "get_sidecar_client": get_sidecar_client,
             "set_sidecar_client": set_sidecar_client,
+            "_cleanup_sidecar": _cleanup_sidecar,
             "_error_result": _error_result,
             "_cancel_safe_wait_for": _cancel_safe_wait_for,
             "CallToolResult": CallToolResult,
