@@ -184,7 +184,7 @@ def _resolve_git_worktree(start_dir: str) -> Optional[str]:
     From that gitdir, reading the ``commondir`` file gives the path to the
     main ``.git`` directory, whose parent is the main working tree.
     """
-    current = os.path.abspath(start_dir)
+    current = os.path.realpath(os.path.abspath(start_dir))
     for _ in range(10):
         git_path = os.path.join(current, ".git")
         if os.path.isfile(git_path):
@@ -205,6 +205,7 @@ def _resolve_git_worktree(start_dir: str) -> Optional[str]:
                 if not os.path.isabs(commondir):
                     commondir = os.path.normpath(os.path.join(gitdir, commondir))
                 main_root = os.path.dirname(commondir)
+                main_root = os.path.realpath(main_root)
                 if os.path.isdir(main_root) and main_root != current:
                     logger.debug(
                         "Resolved git worktree %s -> main tree %s",
@@ -347,7 +348,7 @@ def detect_ivy_workspace(
     # 1. Explicit workspace
     ws = explicit_workspace or get_config().workspace
     if ws:
-        ws = os.path.abspath(ws)
+        ws = os.path.realpath(os.path.abspath(ws))
         logger.info("Using explicit workspace: %s", ws)
         # Still honour .ivyworkspace marker if present at the explicit root
         marker_path = os.path.join(ws, _IVYWORKSPACE_FILENAME)
@@ -375,7 +376,7 @@ def detect_ivy_workspace(
             detected_by="explicit",
         )
 
-    abs_start = os.path.abspath(start_dir)
+    abs_start = os.path.realpath(os.path.abspath(start_dir))
 
     # 2. Workspace hint env var
     hint = get_config().workspace_hint

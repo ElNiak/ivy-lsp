@@ -232,7 +232,7 @@ class TestDetectIvyWorkspace:
             pytest.skip("TMPDIR is inside a workspace tree")
         config = detect_ivy_workspace(start_dir=str(isolated_tmp))
         assert config.detected_by == "fallback"
-        assert config.workspace_root == str(isolated_tmp)
+        assert config.workspace_root == str(isolated_tmp.resolve())
 
     def test_explicit_include_exclude_paths(self, tmp_workspace):
         config = detect_ivy_workspace(
@@ -337,7 +337,7 @@ class TestWorktreeWorkspaceDetection:
         config = detect_ivy_workspace(start_dir=str(worktree))
         assert "worktree" in config.detected_by
         assert config.project_type == "panther"
-        assert config.workspace_root == str(panther_ivy)
+        assert config.workspace_root == str(panther_ivy.resolve())
 
 
 class TestHintWithHeuristic:
@@ -679,3 +679,32 @@ class TestPantherHeuristicDynamicDiscovery:
         assert any("protocol-testing/quic" in p for p in config.include_paths)
         assert any("protocol-testing/bgp" in p for p in config.include_paths)
         assert not any("no_marker" in p for p in config.include_paths)
+
+
+# ---------------------------------------------------------------------------
+# Task 3: symlink canonicalization via os.path.realpath
+# ---------------------------------------------------------------------------
+
+
+class TestSymlinkCanonicalization:
+    def test_detect_ivy_workspace_resolves_symlinks(self, tmp_path):
+        """Verify detect_ivy_workspace returns canonical path when given a symlink."""
+        real_dir = tmp_path / "real_workspace"
+        real_dir.mkdir()
+        (real_dir / ".ivyworkspace").write_text(
+            json.dumps(
+                {
+                    "version": 3,
+                    "workspace_layers": [
+                        {"id": "main", "include_paths": ["."], "priority": 1}
+                    ],
+                }
+            )
+        )
+        link = tmp_path / "symlink_workspace"
+        link.symlink_to(real_dir)
+
+        config = detect_ivy_workspace(str(link))
+        assert config.workspace_root == str(
+            real_dir.resolve()
+        ), f"Expected canonical path {real_dir.resolve()}, got {config.workspace_root}"
