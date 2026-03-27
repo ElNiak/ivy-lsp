@@ -203,12 +203,15 @@ class McpServerState:
         # Dedicated thread pool for MCP tool handlers — isolates tool
         # execution from the default pool used by model/graph builders,
         # preventing starvation during heavy background compilation.
-        _pool_size = int(
-            os.environ.get(
-                "IVY_LSP_TOOL_POOL_SIZE",
-                os.environ.get("IVY_LSP_MAX_CONCURRENT_TOOLS", "4"),
+        try:
+            _pool_size = int(
+                os.environ.get(
+                    "IVY_LSP_TOOL_POOL_SIZE",
+                    os.environ.get("IVY_LSP_MAX_CONCURRENT_TOOLS", "4"),
+                )
             )
-        )
+        except (ValueError, TypeError):
+            _pool_size = 4
         self._tool_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=_pool_size,
             thread_name_prefix="ivy-tool",
