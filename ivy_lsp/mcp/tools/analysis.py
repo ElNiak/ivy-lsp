@@ -118,7 +118,10 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     best = c
             return best
 
-        graph, basename_cache, _skipped = await asyncio.to_thread(_build_graph)
+        loop = asyncio.get_running_loop()
+        graph, basename_cache, _skipped = await loop.run_in_executor(
+            ctx.tool_executor, _build_graph
+        )
 
         # Filter graph to scope's include closure when set.
         # include_closure contains absolute paths; graph keys are relative.
@@ -265,7 +268,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         try:
             loop = asyncio.get_running_loop()
             result["parsing_tiers"] = await asyncio.wait_for(
-                loop.run_in_executor(None, TieredExtractor().probe_tiers),
+                loop.run_in_executor(ctx.tool_executor, TieredExtractor().probe_tiers),
                 timeout=3.0,
             )
         except asyncio.TimeoutError:
@@ -485,11 +488,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         loop = asyncio.get_running_loop()
 
         if protocol == "all":
-            summaries = await loop.run_in_executor(None, builder.build_all)
+            summaries = await loop.run_in_executor(ctx.tool_executor, builder.build_all)
         else:
             proto_dir = os.path.join(ctx.root, "protocol-testing", protocol)
             summary = await loop.run_in_executor(
-                None, builder.build_protocol, proto_dir
+                ctx.tool_executor, builder.build_protocol, proto_dir
             )
             summaries = [summary]
 

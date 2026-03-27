@@ -404,11 +404,14 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     )
 
                     start = time.monotonic()
-                    setup_result = await asyncio.to_thread(
-                        ctx.executor.execute,
-                        compile_result.setup_commands,
-                        workspace_root=ctx.root,
-                        timeout=30,
+                    loop = asyncio.get_running_loop()
+                    setup_result = await loop.run_in_executor(
+                        ctx.tool_executor,
+                        lambda: ctx.executor.execute(
+                            compile_result.setup_commands,
+                            workspace_root=ctx.root,
+                            timeout=30,
+                        ),
                     )
                     if (
                         hasattr(setup_result, "exit_code")
@@ -422,11 +425,13 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         }
                         _tt[0] = setup_fail
                         return _tt[0]
-                    exec_result = await asyncio.to_thread(
-                        ctx.executor.execute,
-                        compile_result.compile_commands,
-                        workspace_root=ctx.root,
-                        timeout=300,
+                    exec_result = await loop.run_in_executor(
+                        ctx.tool_executor,
+                        lambda: ctx.executor.execute(
+                            compile_result.compile_commands,
+                            workspace_root=ctx.root,
+                            timeout=300,
+                        ),
                     )
                     duration = time.monotonic() - start
 
@@ -701,10 +706,10 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             try:
                 from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
 
-                _symbols, error_info = await asyncio.to_thread(
-                    fallback_scan,
-                    source,
-                    abs_path,
+                loop = asyncio.get_running_loop()
+                _symbols, error_info = await loop.run_in_executor(
+                    ctx.tool_executor,
+                    lambda: fallback_scan(source, abs_path),
                 )
                 if error_info is not None:
                     all_diags.append(
