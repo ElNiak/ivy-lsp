@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from itertools import islice
 from typing import TYPE_CHECKING, Any
 
+import anyio
 from mcp.types import CallToolResult, TextContent
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,22 @@ def get_tool_metadata(tool_name: str | None = None) -> dict[str, Any]:
     return {k: dict(v) for k, v in _TOOL_METADATA.items()}
 
 
+def _model_not_ready_response(tool_name: str) -> str:
+    """Return a structured JSON response when the semantic model is still building."""
+    return json.dumps(
+        {
+            "success": False,
+            "tool": tool_name,
+            "message": (
+                "Model is still building (~30s remaining). "
+                "Use ivy_diagnostics(mode='structural') for immediate results, "
+                "or retry this tool in 30 seconds."
+            ),
+            "retry_after_seconds": 30,
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tool metrics (Phase 7 telemetry will consume these)
 # ---------------------------------------------------------------------------
@@ -196,13 +213,20 @@ from ivy_lsp.mcp.client import get_sidecar_client, set_sidecar_client
 
 
 async def _cleanup_sidecar(client: Any) -> None:
-    """Background cleanup of a stale sidecar client session."""
+    """Background cleanup of a stale sidecar client session.
+
+    Uses ``anyio.CancelScope(shield=True)`` to prevent the cancel scope
+    from leaking into the server's task group when the sidecar async
+    generator is closed from a different task context (upstream MCP SDK
+    bug: github.com/modelcontextprotocol/python-sdk/issues/577).
+    """
     try:
         from ivy_lsp.mcp.client import disconnect_sidecar
 
-        await asyncio.wait_for(disconnect_sidecar(client), timeout=3.0)
-    except Exception:
-        logger.debug("[SIDECAR-CLEANUP] Cleanup failed", exc_info=True)
+        with anyio.CancelScope(shield=True):
+            await asyncio.wait_for(disconnect_sidecar(client), timeout=3.0)
+    except BaseException as exc:
+        logger.warning("[SIDECAR-CLEANUP] Cleanup failed (non-fatal): %s", exc)
 
 
 from ivy_lsp.mcp.tools.formatters import format_error, format_tool_result
@@ -419,6 +443,26 @@ def safe_tool(_fn=None, *, ctx=None):
             # --- Original local handling below ---
             from ivy_lsp.infra.config import get_config
             from ivy_lsp.infra.observability import get_session_logger
+
+            # Pre-check: for tools needing the semantic model, return
+            # an actionable "building" message instead of blocking/erroring.
+            meta = _TOOL_METADATA.get(tool_name, {})
+            if (
+                meta.get("needs_model")
+                and ctx is not None
+                and hasattr(ctx, "semantic_model")
+            ):
+                if ctx.semantic_model is None:
+                    status = ctx.get_model_status()
+                    if status.get("state") in ("pending", "building"):
+                        logger.info(
+                            "[TOOL-SKIP] %s: model not ready (state=%s)",
+                            tool_name,
+                            status.get("state"),
+                        )
+                        return _error_result(
+                            json.loads(_model_not_ready_response(tool_name))
+                        )
 
             sem = _ensure_semaphore()
             cfg = get_config()
@@ -658,6 +702,9 @@ def safe_tool(_fn=None, *, ctx=None):
             "_cleanup_sidecar": _cleanup_sidecar,
             "_error_result": _error_result,
             "_cancel_safe_wait_for": _cancel_safe_wait_for,
+            "_TOOL_METADATA": _TOOL_METADATA,
+            "_model_not_ready_response": _model_not_ready_response,
+            "json": json,
             "CallToolResult": CallToolResult,
             "TextContent": TextContent,
         }

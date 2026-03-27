@@ -14,10 +14,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any
+
+try:
+    BaseExceptionGroup  # Python 3.11+
+except NameError:
+    from exceptiongroup import BaseExceptionGroup
 
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.infra.config import get_config
@@ -242,15 +248,28 @@ class McpServerState:
         return self._basename_cache_obj.get()
 
     def make_resolve_callback(self):
-        """Create a resolve callback for structural lint include checking."""
-        cache = self.get_basename_cache()
+        """Create a resolve callback for structural lint include checking.
+
+        The basename cache is populated lazily on first call to avoid a
+        full workspace scan when no include actually needs resolution
+        (the common case for structural-only diagnostics).
+        """
+        _cache: dict[str, list[str]] | None = None
 
         def _resolve(inc_name: str, from_file: str) -> str | None:
+            nonlocal _cache
             # Accept known stdlib modules
             if inc_name in self.discovered_stdlib:
                 return f"<stdlib>/{inc_name}.ivy"
-            # Check workspace file index
-            candidates = cache.get(inc_name)
+            # Try fast parent-directory resolution first (no cache needed)
+            parent_dir = os.path.dirname(from_file)
+            candidate = os.path.join(parent_dir, inc_name + ".ivy")
+            if os.path.isfile(candidate):
+                return candidate
+            # Fall back to full workspace basename cache (lazy build)
+            if _cache is None:
+                _cache = self.get_basename_cache()
+            candidates = _cache.get(inc_name)
             if candidates:
                 return candidates[0]  # first match is sufficient for lint
             return None
@@ -285,28 +304,109 @@ class McpServerState:
         """Write a SemanticModel to .ivy-index/ per-protocol directories.
 
         Uses :func:`write_locked_pickle` for atomic, lock-guarded writes.
-        Creates output files alongside existing index artifacts so subsequent
-        MCP startups can load them via Strategy 1.
+        **Bootstraps** the index directories if they don't exist yet — this
+        breaks the original deadlock where ``_write_model_to_index`` required
+        pre-existing ``.ivy-index/`` dirs that only ``WorkspaceContext.load()``
+        created (which in turn required ``manifest.json`` to exist).
+
+        After this method runs, the next ``WorkspaceContext.load()`` will find
+        ``manifest.json`` files and populate ``protocol_indexes``, enabling
+        Strategy 1 (instant model load from pickle) on subsequent startups.
         """
+        import hashlib
+        import json as _json
+
+        from ivy_lsp import __version__
         from ivy_lsp.infra.utils.serialization import write_locked_pickle
 
         try:
-            if self.workspace_context is None:
+            # --- Discover protocol directories ---
+            # If workspace_context has protocol_indexes, use those.
+            # Otherwise, walk protocol-testing/*/ to bootstrap.
+            proto_dirs: dict[str, str] = {}  # protocol_name -> protocol_dir
+
+            if (
+                self.workspace_context is not None
+                and self.workspace_context.protocol_indexes
+            ):
+                for proto, idx in self.workspace_context.protocol_indexes.items():
+                    if idx.index_dir:
+                        proto_dirs[proto] = os.path.dirname(idx.index_dir)
+            else:
+                # Bootstrap: discover protocol dirs from filesystem
+                pt_root = os.path.join(self.root, "protocol-testing")
+                if os.path.isdir(pt_root):
+                    for entry in os.listdir(pt_root):
+                        candidate = os.path.join(pt_root, entry)
+                        if os.path.isdir(candidate) and not entry.startswith("."):
+                            proto_dirs[entry] = candidate
+
+            if not proto_dirs:
+                logger.debug("No protocol directories found for index bootstrap")
                 return
 
-            # Write to each protocol's .ivy-index/ directory
-            for _proto, idx in self.workspace_context.protocol_indexes.items():
-                index_dir = idx.index_dir
-                if not index_dir or not os.path.isdir(index_dir):
-                    continue
-                write_locked_pickle(
-                    index_dir, "semantic_model.pickle.gz", model, logger
-                )
+            written = 0
+            for proto, proto_dir in proto_dirs.items():
+                index_dir = os.path.join(proto_dir, ".ivy-index")
+                os.makedirs(index_dir, exist_ok=True)
 
-            # Also try workspace-level .ivy-index/ if it exists
-            ws_index = os.path.join(self.root, ".ivy-index")
-            if os.path.isdir(ws_index):
-                write_locked_pickle(ws_index, "semantic_model.pickle.gz", model, logger)
+                # Write .gitignore to prevent pickle commits
+                gitignore_path = os.path.join(index_dir, ".gitignore")
+                if not os.path.isfile(gitignore_path):
+                    try:
+                        with open(gitignore_path, "w") as gf:
+                            gf.write("*\n")
+                    except OSError:
+                        pass
+
+                # Build manifest.json with file mtimes for staleness tracking
+                files_meta: dict[str, dict] = {}
+                for ivy_path in self.find_ivy_files(proto_dir):
+                    try:
+                        rel = os.path.relpath(ivy_path, proto_dir)
+                        stat = os.stat(ivy_path)
+                        sha = hashlib.sha256(open(ivy_path, "rb").read()).hexdigest()
+                        files_meta[rel] = {
+                            "mtime": stat.st_mtime,
+                            "size": stat.st_size,
+                            "sha256": sha,
+                        }
+                    except OSError:
+                        continue
+
+                manifest = {
+                    "version": 1,
+                    "protocol": proto,
+                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "builder_version": __version__,
+                    "files": files_meta,
+                }
+
+                manifest_path = os.path.join(index_dir, "manifest.json")
+                try:
+                    with open(manifest_path, "w") as mf:
+                        _json.dump(manifest, mf, indent=2)
+                    logger.info(
+                        "Wrote manifest.json for %s (%d files)", proto, len(files_meta)
+                    )
+                except OSError:
+                    logger.debug(
+                        "Failed to write manifest for %s", proto, exc_info=True
+                    )
+                    continue
+
+                # Write semantic model pickle
+                if write_locked_pickle(
+                    index_dir, "semantic_model.pickle.gz", model, logger
+                ):
+                    written += 1
+
+            if written:
+                logger.info(
+                    "[INDEX-BOOTSTRAP] Persisted model to %d protocol index(es). "
+                    "Next startup will use Strategy 1 (instant load).",
+                    written,
+                )
         except Exception:
             logger.debug("Failed to write model to .ivy-index/", exc_info=True)
 
@@ -326,12 +426,18 @@ class McpServerState:
                 self.workspace_context is not None
                 and self.workspace_context.has_index()
             ):
+                from ivy_lsp import __version__
                 from ivy_lsp.core.semantic.model import SemanticModel
 
                 merged = SemanticModel()
                 used_protos: list[str] = []
                 skipped_protos: list[str] = []
                 for proto, idx in self.workspace_context.protocol_indexes.items():
+                    # Version fingerprint: reject index built by different ivy-lsp
+                    manifest_version = idx.manifest.get("builder_version")
+                    if manifest_version and manifest_version != __version__:
+                        skipped_protos.append(f"{proto}(version mismatch)")
+                        continue
                     if idx.semantic_model is None:
                         skipped_protos.append(f"{proto}(no model)")
                         continue
@@ -979,4 +1085,27 @@ def start_mcp(
         monitor_thread.start()
         logger.info("[SIDECAR-MONITOR] Started background upgrade monitor")
 
-    mcp.run(transport="stdio")
+    try:
+        mcp.run(transport="stdio")
+    except BaseExceptionGroup as eg:
+        # Filter: only exit cleanly if ALL sub-exceptions are cancel-scope related.
+        # Mixed groups (cancel-scope + real error) must re-raise to avoid masking.
+        cancel_scope_errors = [
+            e
+            for e in eg.exceptions
+            if isinstance(e, (RuntimeError, BaseExceptionGroup))
+            and "cancel scope" in str(e).lower()
+        ]
+        non_cancel_errors = [e for e in eg.exceptions if e not in cancel_scope_errors]
+        if cancel_scope_errors and not non_cancel_errors:
+            logger.warning(
+                "[MCP] Cancel scope crash caught at transport level, exiting cleanly: %s",
+                eg,
+            )
+            sys.exit(0)  # Clean exit -> Claude Code auto-restarts
+        raise
+    except RuntimeError as exc:
+        if "cancel scope" in str(exc).lower():
+            logger.warning("[MCP] Cancel scope RuntimeError, exiting cleanly: %s", exc)
+            sys.exit(0)
+        raise

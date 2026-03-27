@@ -25,6 +25,7 @@ from ivy_lsp.infra.observability import (
     enable_package_instrumentation,
     log_phase,
 )
+from ivy_lsp.mcp.client import set_sidecar_client, set_sidecar_port
 
 
 def _fixed_params_hook(obj: dict, cls: type) -> Any:
@@ -309,6 +310,9 @@ def _main_impl(startup_t0: float) -> None:
             )
             _MAX_MCP_RESTARTS = 3
             for _attempt in range(1, _MAX_MCP_RESTARTS + 1):
+                # Reset stale sidecar state so each retry starts fresh
+                set_sidecar_client(None)
+                set_sidecar_port(None)
                 try:
                     start_mcp(
                         workspace_root=ws_config.workspace_root,
@@ -340,6 +344,22 @@ def _main_impl(startup_t0: float) -> None:
                         exc_info=True,
                     )
                     sys.exit(1)
+                except RuntimeError as exc:
+                    # Cancel-scope bug can also surface as a plain
+                    # RuntimeError (not wrapped in ExceptionGroup).
+                    if (
+                        "cancel scope" in str(exc).lower()
+                        and _attempt < _MAX_MCP_RESTARTS
+                    ):
+                        log.warning(
+                            "[MCP-RESTART] Cancel scope RuntimeError (attempt %d/%d), "
+                            "restarting... (upstream: github.com/"
+                            "modelcontextprotocol/python-sdk/issues/577)",
+                            _attempt,
+                            _MAX_MCP_RESTARTS,
+                        )
+                        continue
+                    raise  # non-cancel-scope RuntimeError — let outer handler deal with it
         except ImportError as e:
             log.critical(
                 "[MCP-FATAL] Missing dependency: %s\n"

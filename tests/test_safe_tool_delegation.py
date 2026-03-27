@@ -204,3 +204,57 @@ async def test_sidecar_connection_error_still_downgrades():
         assert sidecar_client.get_sidecar_client() is None
     finally:
         sidecar_client.set_sidecar_client(old)
+
+
+# ---------------------------------------------------------------------------
+# Fix 2A: _cleanup_sidecar tests (cancel scope shielding)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cleanup_sidecar_catches_runtime_error():
+    """RuntimeError('cancel scope') in disconnect does not propagate."""
+    from ivy_lsp.mcp.tools import _cleanup_sidecar
+
+    mock_client = AsyncMock()
+    with patch(
+        "ivy_lsp.mcp.client.disconnect_sidecar",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("Attempted to exit a cancel scope that isn't current"),
+    ):
+        # Should not raise
+        await _cleanup_sidecar(mock_client)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_sidecar_catches_cancelled_error():
+    """CancelledError in disconnect does not propagate."""
+    from ivy_lsp.mcp.tools import _cleanup_sidecar
+
+    mock_client = AsyncMock()
+    with patch(
+        "ivy_lsp.mcp.client.disconnect_sidecar",
+        new_callable=AsyncMock,
+        side_effect=asyncio.CancelledError(),
+    ):
+        await _cleanup_sidecar(mock_client)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_sidecar_timeout():
+    """Cleanup returns within 3s+ even if disconnect hangs."""
+    from ivy_lsp.mcp.tools import _cleanup_sidecar
+
+    mock_client = AsyncMock()
+
+    async def hang(*_args, **_kwargs):
+        await asyncio.sleep(999)
+
+    with patch("ivy_lsp.mcp.client.disconnect_sidecar", new=hang):
+        import time as _time
+
+        start = _time.monotonic()
+        await _cleanup_sidecar(mock_client)
+        elapsed = _time.monotonic() - start
+        # Should complete within ~3s timeout + small margin
+        assert elapsed < 5.0

@@ -14,4 +14,5 @@ tmp*/
 *.coverage*
 coverage.xml
 .observability/
+.ivy-index/
 *.log
