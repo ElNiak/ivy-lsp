@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import sys
@@ -198,6 +199,20 @@ class McpServerState:
         self._cached_ivy_files: list[str] | None = None
         self._cached_ivy_files_lock = threading.Lock()
         self._basename_cache_obj = BasenameCache(self.find_ivy_files_cached, root)
+
+        # Dedicated thread pool for MCP tool handlers — isolates tool
+        # execution from the default pool used by model/graph builders,
+        # preventing starvation during heavy background compilation.
+        _pool_size = int(
+            os.environ.get(
+                "IVY_LSP_TOOL_POOL_SIZE",
+                os.environ.get("IVY_LSP_MAX_CONCURRENT_TOOLS", "4"),
+            )
+        )
+        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=_pool_size,
+            thread_name_prefix="ivy-tool",
+        )
 
         # Include resolution
         self._resolver = resolver
@@ -837,6 +852,7 @@ class McpServerState:
         ctx.get_basename_cache = self.get_basename_cache
         ctx.make_resolve_callback = self.make_resolve_callback
         ctx.include_resolver = self._resolver
+        ctx.tool_executor = self._tool_executor
 
         return ctx
 
