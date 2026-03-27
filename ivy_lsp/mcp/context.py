@@ -6,6 +6,7 @@ object can be imported without pulling in the full MCP server machinery.
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -77,6 +78,11 @@ class ToolContext:
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
     include_resolver: Any = None
     _basename_cache_invalidate: Callable[[], None] = field(default=lambda: None)
+
+    # Dedicated thread pool for tool-originated blocking calls.
+    # Isolates tool execution from the default pool used by model/graph builders,
+    # preventing thread pool starvation during heavy background compilation.
+    tool_executor: concurrent.futures.ThreadPoolExecutor | None = None
 
     # Active workspace management
     active_workspace: Any = None  # Optional[ActiveWorkspace]
