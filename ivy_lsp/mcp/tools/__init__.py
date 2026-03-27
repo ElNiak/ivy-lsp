@@ -259,24 +259,9 @@ def _error_result(data: dict) -> CallToolResult:
     )
 
 
-async def _cancel_safe_wait_for(coro, timeout):
-    """Like ``asyncio.wait_for`` but prevents ``CancelledError`` from leaking.
-
-    Uses ``asyncio.wait()`` + manual cancel instead of ``wait_for()``, so the
-    cancellation happens on a child task — not on the transport-bound calling
-    task.  This prevents ``CancelledError`` from disrupting the HTTP/SSE
-    connection that delivers the timeout response to the client.
-    """
-    task = asyncio.ensure_future(coro)
-    done, _ = await asyncio.wait({task}, timeout=timeout)
-    if task in done:
-        return task.result()
-    task.cancel()
-    try:
-        await task
-    except (asyncio.CancelledError, Exception):
-        pass
-    raise asyncio.TimeoutError()
+from ivy_lsp.mcp.client import (  # moved here to avoid circular import
+    _cancel_safe_wait_for,
+)
 
 
 def _format_result(tool_name: str, result: object) -> str | object:
