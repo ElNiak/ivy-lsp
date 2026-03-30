@@ -236,27 +236,25 @@ class ScopedRequirementModel(RequirementGraph):
             self._scope_cache.pop((scope.test_file, True), None)
 
     def remap_paths(self, base_dir: str) -> None:
-        """Convert relative/stale paths in _test_scopes and graph nodes to absolute.
+        """Canonicalize all paths in scopes and graph nodes to absolute form.
 
-        Follows the same rel->abs pattern used by T1 (symbols),
-        T2 (includes), and T3 (exports) in _prepopulate_from_offline_index.
-        Also patches RequirementNode, PropertyNode, ActionNode, StateVarNode
-        file fields and path-embedded IDs.
+        Called after loading an offline index so that relative/stale paths
+        stored in the pickle are resolved against *base_dir*.
         """
-        from ivy_lsp.infra.utils.path_normalize import PathResolver
+        from ivy_lsp.infra.utils.path_normalize import PathResolver, remap_node_id
 
         resolver = PathResolver(base_dir)
+        canon = resolver.canonicalize
 
         with self._lock:
-            # --- 1. Remap _test_scopes ---
             remapped: Dict[str, "TestScope"] = {}
             for path, scope in self._test_scopes.items():
-                abs_path = resolver.canonicalize(path)
+                abs_path = canon(path)
                 if abs_path != path:
                     scope = TestScope(
                         test_file=abs_path,
                         include_closure=frozenset(
-                            resolver.canonicalize(f) for f in scope.include_closure
+                            canon(f) for f in scope.include_closure
                         ),
                         exported_actions=scope.exported_actions,
                         imported_actions=scope.imported_actions,
@@ -265,53 +263,29 @@ class ScopedRequirementModel(RequirementGraph):
                 remapped[abs_path] = scope
             self._test_scopes = remapped
 
-            # Rebuild file_to_tests from remapped scopes
             self._file_to_tests.clear()
             for test_file, scope in self._test_scopes.items():
                 for f in scope.include_closure:
                     self._file_to_tests[f].add(test_file)
             self._scope_cache.clear()
 
-            # --- 2. Remap RequirementNode paths ---
-            # RequirementNode.id = "filepath:line", .file = filepath
-            patched_reqs: Dict[str, Any] = {}
-            for old_id, node in self.requirements.items():
-                node.file = resolver.canonicalize(node.file)
-                parts = old_id.split(":")
-                if len(parts) >= 2:
-                    parts[0] = resolver.canonicalize(parts[0])
-                    node.id = ":".join(parts)
-                patched_reqs[node.id] = node
-            self.requirements = patched_reqs
+            # Node IDs use the format "filepath:line"
+            for collection_attr in ("requirements", "properties"):
+                old_dict = getattr(self, collection_attr)
+                patched: Dict[str, Any] = {}
+                for _old_id, node in old_dict.items():
+                    node.file = canon(node.file)
+                    node.id = remap_node_id(node.id, canon)
+                    patched[node.id] = node
+                setattr(self, collection_attr, patched)
 
-            # --- 3. Remap PropertyNode paths ---
-            # PropertyNode.id = "filepath:line", .file = filepath
-            patched_props: Dict[str, Any] = {}
-            for old_id, node in self.properties.items():
-                node.file = resolver.canonicalize(node.file)
-                parts = old_id.split(":")
-                if len(parts) >= 2:
-                    parts[0] = resolver.canonicalize(parts[0])
-                    node.id = ":".join(parts)
-                patched_props[node.id] = node
-            self.properties = patched_props
-
-            # --- 4. Remap ActionNode/StateVarNode .file (defensive) ---
             for collection in (self.actions, self.state_vars):
                 for node in collection.values():
                     if hasattr(node, "file") and node.file:
-                        node.file = resolver.canonicalize(node.file)
-
-            # --- 5. Remap edge IDs ---
-            def _patch_id(node_id: str) -> str:
-                parts = node_id.split(":")
-                if len(parts) >= 2:
-                    parts[0] = resolver.canonicalize(parts[0])
-                    return ":".join(parts)
-                return node_id
+                        node.file = canon(node.file)
 
             self.edges = [
-                (_patch_id(src), etype, _patch_id(tgt))
+                (remap_node_id(src, canon), etype, remap_node_id(tgt, canon))
                 for src, etype, tgt in self.edges
             ]
             self._edge_set = set(self.edges)
@@ -330,9 +304,14 @@ class ScopedRequirementModel(RequirementGraph):
             return None
         return self._test_scopes.get(self._active_test)
 
-    def get_tests_for_file(self, filepath: str) -> Set[str]:
-        """Return test files whose scope includes the given file."""
-        return set(self._file_to_tests.get(filepath, set()))
+    _EMPTY_FROZENSET: FrozenSet[str] = frozenset()
+
+    def get_tests_for_file(self, filepath: str) -> FrozenSet[str]:
+        """Return test files whose scope includes the given file (read-only)."""
+        result = self._file_to_tests.get(filepath)
+        if result is None:
+            return self._EMPTY_FROZENSET
+        return frozenset(result)
 
     def get_scoped_requirements(
         self,

@@ -6,6 +6,7 @@ Supports three modes:
   - --lsp-only:  LSP over stdio without MCP sidecar
 """
 
+import atexit
 import logging
 import os
 import signal
@@ -256,9 +257,16 @@ def _main_impl(startup_t0: float) -> None:
     # destroyed by exec, so we register cleanup in the Python process.
     _pid_file = os.environ.get("IVY_PID_FILE")
     if _pid_file:
-        import atexit
 
-        atexit.register(lambda f=_pid_file: os.unlink(f) if os.path.exists(f) else None)
+        def _cleanup_pid(path: str = _pid_file) -> None:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logging.getLogger(__name__).debug("PID file cleanup failed: %s", exc)
+
+        atexit.register(_cleanup_pid)
 
     # Parent-process watchdog: detect when Claude Code (our parent) dies.
     # On macOS/Linux, an orphaned process is reparented to PID 1 (launchd/init).

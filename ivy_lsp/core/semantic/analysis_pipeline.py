@@ -14,7 +14,10 @@ import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 
 from ivy_lsp.core.adapters.protocols import (
     IAstEnrichmentAdapter,
@@ -106,9 +109,9 @@ class AnalysisPipeline:
         # Bulk compilation state (workspace-wide T3)
         self._bulk_compile = _TierState()
         self._file_generation: Dict[str, int] = {}
-        self._scope_provider = None
+        self._scope_provider: Optional[ScopedRequirementModel] = None
 
-    def set_scope_provider(self, provider: Any) -> None:
+    def set_scope_provider(self, provider: "ScopedRequirementModel") -> None:
         """Set the ScopedRequirementModel for scope-aware bulk filtering."""
         self._scope_provider = provider
 

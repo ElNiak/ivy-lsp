@@ -1,7 +1,7 @@
 """Path normalization for consistent path handling across MCP/LSP tools."""
 
 import os
-from typing import Optional
+from typing import Callable, Dict, Optional
 
 
 def normalize_ivy_path(
@@ -63,6 +63,20 @@ def normalize_file_filter(
     return None
 
 
+def remap_node_id(node_id: str, path_fn: Callable[[str], str]) -> str:
+    """Remap the file-path component of a 'filepath:line' node ID.
+
+    Node IDs in the requirement graph use the format ``filepath:line``.
+    This applies *path_fn* to the filepath prefix and reassembles the ID.
+    Returns *node_id* unchanged when it doesn't contain a ``:``.
+    """
+    parts = node_id.split(":")
+    if len(parts) >= 2:
+        parts[0] = path_fn(parts[0])
+        return ":".join(parts)
+    return node_id
+
+
 def relativize_path(abs_path: str, workspace_root: str) -> str:
     """Strip workspace root prefix to produce a relative path."""
     if not abs_path or not workspace_root:
@@ -83,6 +97,7 @@ class PathResolver:
     def __init__(self, protocol_dir: str) -> None:
         """Initialize with the protocol directory as the resolution base."""
         self._protocol_dir = os.path.realpath(os.path.abspath(protocol_dir))
+        self._canon_cache: Dict[str, str] = {}
 
     @property
     def protocol_dir(self) -> str:
@@ -101,4 +116,11 @@ class PathResolver:
 
     def canonicalize(self, path: str) -> str:
         """Canonicalize any path (abs or rel) to its resolved absolute form."""
-        return os.path.realpath(path) if os.path.isabs(path) else self.to_absolute(path)
+        cached = self._canon_cache.get(path)
+        if cached is not None:
+            return cached
+        result = (
+            os.path.realpath(path) if os.path.isabs(path) else self.to_absolute(path)
+        )
+        self._canon_cache[path] = result
+        return result

@@ -148,6 +148,7 @@ class IndexBuilder:
         )
         from ivy_lsp.core.parsing.symbols import IncludeGraph
         from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
+        from ivy_lsp.infra.utils.path_normalize import remap_node_id
 
         extractor = TieredExtractor(
             resolve_callback=resolver.resolve,
@@ -208,11 +209,7 @@ class IndexBuilder:
                 # Normalize paths to protocol-relative for portable pickle
                 for r in reqs:
                     r.file = rel_path
-                    # Normalize id from "abs_path:line" to "rel_path:line"
-                    id_parts = r.id.split(":")
-                    if len(id_parts) >= 2:
-                        id_parts[0] = rel_path
-                        r.id = ":".join(id_parts)
+                    r.id = remap_node_id(r.id, lambda _p: rel_path)
                 requirements_map[rel_path] = [
                     {
                         "id": r.id,
