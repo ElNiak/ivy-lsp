@@ -7,57 +7,127 @@ import pytest
 from mcp.types import CallToolResult, TextContent
 
 from ivy_lsp.mcp import client as sidecar_client
+from ivy_lsp.mcp.client import _list_tools_cache, call_sidecar_once
 from ivy_lsp.mcp.tools import _cancel_safe_wait_for, _error_result
 
+# ---------------------------------------------------------------------------
+# call_sidecar_once tests
+# ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
-async def test_delegation_calls_sidecar_when_client_set():
-    """When _sidecar_client is set, get_sidecar_client returns it."""
-    mock_client = AsyncMock()
-    mock_result = MagicMock()
+async def test_call_sidecar_once_success():
+    """call_sidecar_once returns the CallToolResult on success."""
+    mock_result = MagicMock(spec=CallToolResult)
     mock_result.content = [MagicMock(text='{"delegated": true}')]
-    mock_client.call_tool.return_value = mock_result
 
-    old = sidecar_client.get_sidecar_client()
-    try:
-        sidecar_client.set_sidecar_client(mock_client)
-        client = sidecar_client.get_sidecar_client()
-        assert client is mock_client
+    mock_session = AsyncMock()
+    mock_session.call_tool.return_value = mock_result
+    mock_session.list_tools.return_value = MagicMock(tools=[])
+    mock_session.initialize.return_value = None
 
-        result = await client.call_tool("ivy_capabilities", {})
-        mock_client.call_tool.assert_called_once_with("ivy_capabilities", {})
-    finally:
-        sidecar_client.set_sidecar_client(old)
+    _list_tools_cache.clear()
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_transport:
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = (AsyncMock(), AsyncMock(), None)
+        mock_transport.return_value = mock_ctx
+
+        with patch("mcp.ClientSession") as mock_session_cls:
+            mock_session_ctx = AsyncMock()
+            mock_session_ctx.__aenter__.return_value = mock_session
+            mock_session_cls.return_value = mock_session_ctx
+
+            result = await call_sidecar_once(19847, "ivy_capabilities", {}, 5.0)
+
+    assert result is mock_result
+    mock_session.call_tool.assert_called_once_with("ivy_capabilities", {})
 
 
 @pytest.mark.asyncio
-async def test_delegation_resets_client_on_error():
-    """On connection error, set_sidecar_client(None) reverts to local."""
-    mock_client = AsyncMock()
-    mock_client.call_tool.side_effect = ConnectionError("sidecar gone")
+async def test_call_sidecar_once_connection_failure():
+    """call_sidecar_once returns None when connection fails."""
+    _list_tools_cache.clear()
 
-    old = sidecar_client.get_sidecar_client()
+    with patch(
+        "mcp.client.streamable_http.streamablehttp_client",
+        side_effect=ConnectionError("refused"),
+    ):
+        result = await call_sidecar_once(19847, "ivy_capabilities", {}, 5.0)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_call_sidecar_once_timeout():
+    """call_sidecar_once returns None on timeout (caught internally)."""
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(999)
+
+    mock_session = AsyncMock()
+    mock_session.call_tool.side_effect = hang
+    mock_session.list_tools.return_value = MagicMock(tools=[])
+    mock_session.initialize.return_value = None
+
+    _list_tools_cache.clear()
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_transport:
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = (AsyncMock(), AsyncMock(), None)
+        mock_transport.return_value = mock_ctx
+
+        with patch("mcp.ClientSession") as mock_session_cls:
+            mock_session_ctx = AsyncMock()
+            mock_session_ctx.__aenter__.return_value = mock_session
+            mock_session_cls.return_value = mock_session_ctx
+
+            result = await call_sidecar_once(19847, "ivy_test", {}, 0.05)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_list_tools_cache_hit():
+    """Second call with same port skips list_tools()."""
+    mock_session = AsyncMock()
+    mock_session.call_tool.return_value = MagicMock(spec=CallToolResult)
+    mock_session.list_tools.return_value = MagicMock(tools=[])
+    mock_session.initialize.return_value = None
+
+    _list_tools_cache.clear()
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_transport:
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = (AsyncMock(), AsyncMock(), None)
+        mock_transport.return_value = mock_ctx
+
+        with patch("mcp.ClientSession") as mock_session_cls:
+            mock_session_ctx = AsyncMock()
+            mock_session_ctx.__aenter__.return_value = mock_session
+            mock_session_cls.return_value = mock_session_ctx
+
+            # First call — list_tools should be called
+            await call_sidecar_once(19847, "ivy_test", {}, 5.0)
+            assert mock_session.list_tools.call_count == 1
+
+            # Second call — list_tools should be skipped (cached)
+            await call_sidecar_once(19847, "ivy_test", {}, 5.0)
+            assert mock_session.list_tools.call_count == 1  # Still 1
+
+
+def test_list_tools_cache_cleared_on_port_change():
+    """set_sidecar_port with a different port clears _list_tools_cache."""
+    old_port = sidecar_client.get_sidecar_port()
     try:
-        sidecar_client.set_sidecar_client(mock_client)
+        _list_tools_cache[19847] = True
+        assert 19847 in _list_tools_cache
 
-        try:
-            await mock_client.call_tool("ivy_capabilities", {})
-        except ConnectionError:
-            sidecar_client.set_sidecar_client(None)
-
-        assert sidecar_client.get_sidecar_client() is None
+        sidecar_client.set_sidecar_port(19848)
+        assert len(_list_tools_cache) == 0
     finally:
-        sidecar_client.set_sidecar_client(old)
-
-
-def test_no_client_returns_none():
-    """When no sidecar is set, get_sidecar_client returns None."""
-    old = sidecar_client.get_sidecar_client()
-    try:
-        sidecar_client.set_sidecar_client(None)
-        assert sidecar_client.get_sidecar_client() is None
-    finally:
-        sidecar_client.set_sidecar_client(old)
+        sidecar_client.set_sidecar_port(old_port)
+        _list_tools_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -147,63 +217,6 @@ async def test_cancel_safe_wait_for_propagates_exception():
 
     with pytest.raises(ValueError, match="test error"):
         await _cancel_safe_wait_for(broken(), timeout=5.0)
-
-
-# ---------------------------------------------------------------------------
-# Sidecar timeout integration tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_sidecar_timeout_disconnects_client():
-    """After sidecar call_tool timeout, the client is set to None."""
-    mock_client = AsyncMock()
-
-    async def hang(*args, **kwargs):
-        await asyncio.sleep(999)
-
-    mock_client.call_tool.side_effect = hang
-
-    old = sidecar_client.get_sidecar_client()
-    try:
-        sidecar_client.set_sidecar_client(mock_client)
-        assert sidecar_client.get_sidecar_client() is mock_client
-
-        # Simulate what safe_tool does on timeout
-        try:
-            await _cancel_safe_wait_for(
-                mock_client.call_tool("ivy_test", {}),
-                timeout=0.05,
-            )
-        except asyncio.TimeoutError:
-            sidecar_client.set_sidecar_client(None)
-
-        assert sidecar_client.get_sidecar_client() is None
-    finally:
-        sidecar_client.set_sidecar_client(old)
-
-
-@pytest.mark.asyncio
-async def test_sidecar_connection_error_still_downgrades():
-    """Non-timeout exceptions still trigger downgrade (client reset)."""
-    mock_client = AsyncMock()
-    mock_client.call_tool.side_effect = ConnectionError("sidecar crashed")
-
-    old = sidecar_client.get_sidecar_client()
-    try:
-        sidecar_client.set_sidecar_client(mock_client)
-
-        # Simulate what safe_tool does on general exception
-        try:
-            await mock_client.call_tool("ivy_test", {})
-        except asyncio.TimeoutError:
-            pass  # Not expected
-        except Exception:
-            sidecar_client.set_sidecar_client(None)
-
-        assert sidecar_client.get_sidecar_client() is None
-    finally:
-        sidecar_client.set_sidecar_client(old)
 
 
 # ---------------------------------------------------------------------------

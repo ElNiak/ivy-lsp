@@ -209,7 +209,12 @@ def error_response(message: str) -> dict:
 # Markdown formatting layer
 # ---------------------------------------------------------------------------
 
-from ivy_lsp.mcp.client import get_sidecar_client, set_sidecar_client
+from ivy_lsp.mcp.client import (
+    call_sidecar_once,
+    get_sidecar_client,
+    get_sidecar_port,
+    set_sidecar_client,
+)
 
 
 async def _cleanup_sidecar(client: Any) -> None:
@@ -355,73 +360,26 @@ def safe_tool(_fn=None, *, ctx=None):
             tool_name = fn.__name__
             timeout = _get_effective_timeout(tool_name)
 
-            # --- Sidecar delegation (lazy bridge) ---
-            # Check BEFORE semaphore/timeout — sidecar handles its own concurrency.
-            #
-            # Connection is established here (in the MCP server's event loop),
-            # NOT in the monitor thread.  The monitor only discovers the port;
-            # we connect lazily on first tool call so the ClientSession is bound
-            # to the correct asyncio event loop.
-            #
-            # Uses a SHORT sidecar-specific timeout to avoid hanging on
-            # transport-level deadlocks (MCP SDK streamable HTTP issue).
-            # On timeout, falls back to local execution.
-            from ivy_lsp.mcp.client import connect_to_sidecar, get_sidecar_port
-
-            _client = get_sidecar_client()
-            if _client is None:
-                _port = get_sidecar_port()
-                if _port is not None:
-                    _client = await connect_to_sidecar(_port)
-                    if _client is not None:
-                        set_sidecar_client(_client)
-                        logger.info(
-                            "[UPGRADED] Connected to sidecar on port %d from MCP event loop",
-                            _port,
-                        )
-
-            if _client is not None:
+            # --- Sidecar delegation (per-call connection) ---
+            # Each call opens a fresh transport+session, avoiding the
+            # CancelledError / GeneratorExit freeze from long-lived sessions.
+            _port = get_sidecar_port()
+            if _port is not None:
                 from ivy_lsp.infra.config import get_config as _get_cfg
 
                 _sidecar_timeout = _get_cfg().sidecar_delegation_timeout
-                _sidecar_port = get_sidecar_port()
                 logger.debug(
                     "[TOOL-ROUTE] %s -> sidecar (port %s, timeout=%.1fs)",
                     tool_name,
-                    _sidecar_port,
+                    _port,
                     _sidecar_timeout,
                 )
-                try:
-                    result = await _cancel_safe_wait_for(
-                        _client.call_tool(tool_name, kwargs),
-                        timeout=_sidecar_timeout,
-                    )
-                    return result  # verbatim from sidecar
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "[SIDECAR-TIMEOUT] %s delegation timed out after %.1fs, "
-                        "falling back to local execution",
-                        tool_name,
-                        _sidecar_timeout,
-                    )
-                    _stale = _client
-                    set_sidecar_client(None)
-                    asyncio.ensure_future(_cleanup_sidecar(_stale))
-                    logger.debug(
-                        "[TOOL-ROUTE] %s -> local (sidecar timeout fallback)",
-                        tool_name,
-                    )
-                    # Fall through to local handling
-                except Exception:
-                    logger.warning(
-                        "[DOWNGRADED] Sidecar call to %s failed, using local",
-                        tool_name,
-                        exc_info=True,
-                    )
-                    _stale = _client
-                    set_sidecar_client(None)
-                    asyncio.ensure_future(_cleanup_sidecar(_stale))
-                    # Fall through to local handling
+                result = await call_sidecar_once(
+                    _port, tool_name, kwargs, _sidecar_timeout
+                )
+                if result is not None:
+                    return result
+                logger.debug("[TOOL-ROUTE] %s -> local (sidecar fallback)", tool_name)
             else:
                 logger.debug("[TOOL-ROUTE] %s -> local (no sidecar)", tool_name)
 
@@ -682,9 +640,8 @@ def safe_tool(_fn=None, *, ctx=None):
             "_format_result": _format_result,
             "_truncate_if_needed": _truncate_if_needed,
             "_summarize_for_log": _summarize_for_log,
-            "get_sidecar_client": get_sidecar_client,
-            "set_sidecar_client": set_sidecar_client,
-            "_cleanup_sidecar": _cleanup_sidecar,
+            "call_sidecar_once": call_sidecar_once,
+            "get_sidecar_port": get_sidecar_port,
             "_error_result": _error_result,
             "_cancel_safe_wait_for": _cancel_safe_wait_for,
             "_TOOL_METADATA": _TOOL_METADATA,

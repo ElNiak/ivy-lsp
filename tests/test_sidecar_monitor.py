@@ -34,7 +34,7 @@ async def test_monitor_sets_client_on_valid_sidecar():
             mock_sc.workspace_hash.return_value = "abc123"
             mock_sc.read_port_file.return_value = 19847
             mock_sc.validate_sidecar_workspace = AsyncMock(return_value=True)
-            mock_sc.get_sidecar_client.return_value = None
+            mock_sc.get_sidecar_port = sidecar_client.get_sidecar_port
             mock_sc.set_sidecar_port = sidecar_client.set_sidecar_port
 
             task = asyncio.create_task(
@@ -66,7 +66,7 @@ async def test_monitor_skips_workspace_mismatch():
             mock_sc.workspace_hash.return_value = "abc123"
             mock_sc.read_port_file.return_value = 19847
             mock_sc.validate_sidecar_workspace = AsyncMock(return_value=False)
-            mock_sc.get_sidecar_client.return_value = None
+            mock_sc.get_sidecar_port = sidecar_client.get_sidecar_port
 
             task = asyncio.create_task(
                 _sidecar_monitor("/workspace", _poll_interval=0.05, _max_iterations=2)
@@ -78,6 +78,6 @@ async def test_monitor_skips_workspace_mismatch():
             except asyncio.CancelledError:
                 pass
 
-        assert sidecar_client.get_sidecar_client() is None
+        assert sidecar_client.get_sidecar_port() is None
     finally:
-        sidecar_client.set_sidecar_client(old)
+        sidecar_client.set_sidecar_port(old)

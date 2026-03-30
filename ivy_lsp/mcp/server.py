@@ -100,7 +100,7 @@ async def _sidecar_monitor(
             logger.debug("[SIDECAR-MONITOR] Backing off to 10s polling")
 
         # Already upgraded — just keep a slow heartbeat
-        if sidecar_client.get_sidecar_client() is not None:
+        if sidecar_client.get_sidecar_port() is not None:
             poll = 30.0
             continue
 

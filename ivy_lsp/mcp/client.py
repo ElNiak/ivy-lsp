@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # --- Global sidecar client state ---
 _sidecar_client: Any | None = None
 _sidecar_port: int | None = None  # Discovered port (set by monitor thread)
+_list_tools_cache: dict[int, bool] = {}  # Keyed by port; cleared on port change
 
 
 def get_sidecar_client() -> Any | None:
@@ -46,6 +47,8 @@ def get_sidecar_port() -> int | None:
 def set_sidecar_port(port: int | None) -> None:
     """Store the discovered sidecar port (monitor thread writes, safe_tool reads)."""
     global _sidecar_port
+    if port != _sidecar_port:
+        _list_tools_cache.clear()
     _sidecar_port = port
 
 
@@ -173,3 +176,34 @@ async def _cancel_safe_wait_for(coro, timeout):
     except (asyncio.CancelledError, Exception):
         pass
     raise asyncio.TimeoutError()
+
+
+async def call_sidecar_once(
+    port: int, tool_name: str, kwargs: dict, timeout: float
+) -> Any:
+    """Single-shot sidecar call with per-call connection lifecycle.
+
+    Creates a fresh streamablehttp_client + ClientSession, calls the tool,
+    and lets async-with scoping handle all cleanup. Returns the CallToolResult
+    on success, or None on any failure (caller falls through to local).
+    """
+    try:
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamablehttp_client
+
+        url = f"http://127.0.0.1:{port}/mcp"
+        async with streamablehttp_client(url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                if port not in _list_tools_cache:
+                    await session.list_tools()
+                    _list_tools_cache[port] = True
+                return await _cancel_safe_wait_for(
+                    session.call_tool(tool_name, kwargs), timeout
+                )
+    except asyncio.TimeoutError:
+        logger.warning("[SIDECAR-TIMEOUT] %s timed out after %.1fs", tool_name, timeout)
+        return None
+    except Exception:
+        logger.warning("[SIDECAR-ERROR] %s call failed", tool_name, exc_info=True)
+        return None
