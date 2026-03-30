@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.parsing.symbols import is_monitor_symbol
+from ivy_lsp.core.semantic.node_filters import nodes_of_type
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
@@ -97,7 +98,7 @@ def _find_symbol_node_id(
     from ivy_lsp.core.semantic.nodes import SymbolNode
 
     last = get_last_component(name)
-    candidates = [n for n in model.get_nodes_by_name(last) if isinstance(n, SymbolNode)]
+    candidates = nodes_of_type(model.get_nodes_by_name(last), SymbolNode)
     # Prefer match scoped to the file.
     for sn in candidates:
         if (sn.name == last or sn.qualified_name == name) and (

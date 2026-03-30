@@ -546,11 +546,12 @@ def _enrich_items_from_semantic_model(
     if semantic_model is None or not items:
         return
     try:
+        from ivy_lsp.core.semantic.node_filters import first_node_of_type
         from ivy_lsp.core.semantic.nodes import SymbolNode
 
         for item in items:
             candidates = semantic_model.get_nodes_by_name(item.label)
-            sn = next((n for n in candidates if isinstance(n, SymbolNode)), None)
+            sn = first_node_of_type(candidates, SymbolNode)
             if sn is None:
                 continue
             parts = []

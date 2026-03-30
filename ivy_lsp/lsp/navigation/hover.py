@@ -10,6 +10,7 @@ from lsprotocol import types as lsp
 from lsprotocol.types import SymbolKind
 
 from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.core.semantic.node_filters import first_node_of_type, nodes_of_type
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import word_at_position
@@ -155,10 +156,7 @@ def _enrich_with_semantic_model(
 
     # Enrich with sort/arity from SymbolNode (O(1) name lookup)
     matches = semantic_model.get_nodes_by_name(symbol_name)
-    sn = next(
-        (n for n in matches if isinstance(n, SymbolNode)),
-        None,
-    )
+    sn = first_node_of_type(matches, SymbolNode)
     if sn is None and "." in symbol_name:
         last = get_last_component(symbol_name)
         matches = semantic_model.get_nodes_by_name(last)
@@ -212,13 +210,13 @@ def _hover_from_semantic_model(
 
     # Search entries matching the word via O(1) name index
     all_matches = semantic_model.get_nodes_by_name(word)
-    matches = [n for n in all_matches if isinstance(n, SymbolNode)]
-    type_matches = [n for n in all_matches if isinstance(n, TypeNode)]
+    matches = nodes_of_type(all_matches, SymbolNode)
+    type_matches = nodes_of_type(all_matches, TypeNode)
 
     if not matches and not type_matches and "." in word:
         last = get_last_component(word)
         all_by_last = semantic_model.get_nodes_by_name(last)
-        by_last = [n for n in all_by_last if isinstance(n, SymbolNode)]
+        by_last = nodes_of_type(all_by_last, SymbolNode)
         suffix = [sn for sn in by_last if sn.qualified_name.endswith(word)]
         matches = suffix if suffix else by_last
         if not type_matches:
