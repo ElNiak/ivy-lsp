@@ -235,6 +235,38 @@ class ScopedRequirementModel(RequirementGraph):
             self._scope_cache.pop((scope.test_file, False), None)
             self._scope_cache.pop((scope.test_file, True), None)
 
+    def remap_paths(self, base_dir: str) -> None:
+        """Convert relative paths in _test_scopes to absolute.
+
+        Follows the same rel→abs pattern used by T1 (symbols),
+        T2 (includes), and T3 (exports) in _prepopulate_from_offline_index.
+        """
+        with self._lock:
+            remapped: Dict[str, TestScope] = {}
+            for path, scope in self._test_scopes.items():
+                if not os.path.isabs(path):
+                    abs_path = os.path.join(base_dir, path)
+                    scope = TestScope(
+                        test_file=abs_path,
+                        include_closure=frozenset(
+                            os.path.join(base_dir, f) if not os.path.isabs(f) else f
+                            for f in scope.include_closure
+                        ),
+                        exported_actions=scope.exported_actions,
+                        imported_actions=scope.imported_actions,
+                        tester_role=scope.tester_role,
+                    )
+                    remapped[abs_path] = scope
+                else:
+                    remapped[path] = scope
+            self._test_scopes = remapped
+            # Rebuild file_to_tests from remapped scopes
+            self._file_to_tests.clear()
+            for test_file, scope in self._test_scopes.items():
+                for f in scope.include_closure:
+                    self._file_to_tests[f].add(test_file)
+            self._scope_cache.clear()
+
     def set_active_test(self, test_file: Optional[str]) -> None:
         """Set the active test file for scoped queries."""
         if test_file is None or test_file in self._test_scopes:

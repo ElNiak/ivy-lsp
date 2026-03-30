@@ -557,6 +557,7 @@ class ServerSetupMixin:
 
             # -- 4. Requirement graph (optional pickle) --------------------
             if proto_idx.requirement_graph is not None:
+                proto_idx.requirement_graph.remap_paths(protocol_dir)
                 self._indexer._requirement_graph = proto_idx.requirement_graph
 
         slog.info(
