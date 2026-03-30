@@ -162,8 +162,14 @@ class IvyParserWrapper:
 
         Never raises for parse errors — captures those into ParseResult.
         """
-        import ivy.ivy_parser as ip
-        import ivy.ivy_utils as iu
+        try:
+            import ivy.ivy_parser as ip
+            import ivy.ivy_utils as iu
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise RuntimeError(
+                f"Z3 is required but not available: {exc}. "
+                "Install via 'pip install z3-solver'."
+            ) from exc
 
         with ParserSession(timeout=timeout):
             iu.filename = filename
