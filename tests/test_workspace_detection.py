@@ -687,8 +687,12 @@ class TestPantherHeuristicDynamicDiscovery:
 
 
 class TestSymlinkCanonicalization:
-    def test_detect_ivy_workspace_resolves_symlinks(self, tmp_path):
+    def test_detect_ivy_workspace_resolves_symlinks(self, tmp_path, monkeypatch):
         """Verify detect_ivy_workspace returns canonical path when given a symlink."""
+        monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
+        monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        reset_config()
+
         real_dir = tmp_path / "real_workspace"
         real_dir.mkdir()
         (real_dir / ".ivyworkspace").write_text(
