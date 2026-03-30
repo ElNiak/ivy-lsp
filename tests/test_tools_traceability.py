@@ -17,35 +17,11 @@ if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 
+from tests.helpers.mcp_helpers import extract_text, get_mcp_app
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp.server import start_mcp
-
-    root = workspace_root or "/tmp/test-workspace"
-    return start_mcp(workspace_root=root, _return_app=True)
-
-
-def _extract_text(result) -> str:
-    if isinstance(result, dict):
-        if "result" in result:
-            return result["result"]
-        return json.dumps(result)
-    if isinstance(result, tuple):
-        content_blocks = result[0]
-        if len(result) > 1 and isinstance(result[1], dict) and "result" in result[1]:
-            return result[1]["result"]
-        result = content_blocks
-    texts = []
-    for block in result:
-        if hasattr(block, "text"):
-            texts.append(block.text)
-        elif isinstance(block, dict) and "text" in block:
-            texts.append(block["text"])
-    return "\n".join(texts)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +33,7 @@ class TestIvyExtractRequirements:
     @pytest.mark.asyncio
     async def test_extract_structured(self):
         """Structured output extracts MUST/SHOULD/MAY requirements."""
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         rfc_text = (
             "The sender MUST open a connection before transmitting. "
             "The receiver SHOULD validate the address. "
@@ -67,7 +43,7 @@ class TestIvyExtractRequirements:
             "ivy_extract_requirements",
             {"rfc_text": rfc_text, "output": "structured"},
         )
-        text = _extract_text(result)
+        text = extract_text(result)
         data = json.loads(text)
         assert data["total"] == 3
         assert "MUST" in data["by_level"]
@@ -77,12 +53,12 @@ class TestIvyExtractRequirements:
     @pytest.mark.asyncio
     async def test_extract_manifest_requires_rfc_name(self):
         """Manifest output requires rfc_name parameter."""
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         result = await mcp.call_tool(
             "ivy_extract_requirements",
             {"rfc_text": "MUST do something.", "output": "manifest"},
         )
-        text = _extract_text(result)
+        text = extract_text(result)
         data = json.loads(text)
         assert data["success"] is False
         assert "rfc_name" in data["message"]
@@ -90,7 +66,7 @@ class TestIvyExtractRequirements:
     @pytest.mark.asyncio
     async def test_extract_manifest_generates_yaml(self):
         """Manifest output generates YAML with correct structure."""
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         rfc_text = "The endpoint MUST send an ACK."
         result = await mcp.call_tool(
             "ivy_extract_requirements",
@@ -101,7 +77,7 @@ class TestIvyExtractRequirements:
                 "protocol": "quic",
             },
         )
-        text = _extract_text(result)
+        text = extract_text(result)
         data = json.loads(text)
         assert data["total_requirements"] >= 1
         assert "yaml" in data
@@ -111,13 +87,13 @@ class TestIvyExtractRequirements:
     @pytest.mark.asyncio
     async def test_extract_normalizes_shall_to_must(self):
         """SHALL and REQUIRED are normalized to MUST."""
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         rfc_text = "The client SHALL open a connection. The server REQUIRED respond."
         result = await mcp.call_tool(
             "ivy_extract_requirements",
             {"rfc_text": rfc_text, "output": "structured"},
         )
-        text = _extract_text(result)
+        text = extract_text(result)
         data = json.loads(text)
         levels = {r["level"] for r in data["requirements"]}
         # Both should be normalized to MUST
@@ -135,9 +111,9 @@ class TestCoverageDiff:
     @pytest.mark.asyncio
     async def test_diff_without_baseline_returns_error(self):
         """ivy_coverage(mode='diff') without prior stats returns an error."""
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         result = await mcp.call_tool("ivy_coverage", {"mode": "diff"})
-        text = _extract_text(result)
+        text = extract_text(result)
         data = json.loads(text)
         assert data["success"] is False
         assert "baseline" in data["message"].lower()
@@ -145,17 +121,17 @@ class TestCoverageDiff:
     @pytest.mark.asyncio
     async def test_diff_after_stats_returns_delta(self, annotated_workspace):
         """ivy_coverage(mode='diff') after stats returns delta with direction."""
-        mcp = _get_mcp_app(workspace_root=str(annotated_workspace))
+        mcp = get_mcp_app(workspace_root=str(annotated_workspace))
         # First call: build stats baseline
         result1 = await mcp.call_tool("ivy_coverage", {"mode": "stats"})
-        data1 = json.loads(_extract_text(result1))
+        data1 = json.loads(extract_text(result1))
         # The workspace may or may not have coverage, but stats should succeed
         if data1.get("total", 0) == 0:
             pytest.skip("No requirements found in annotated_workspace")
 
         # Second call: diff should work now
         result2 = await mcp.call_tool("ivy_coverage", {"mode": "diff"})
-        data2 = json.loads(_extract_text(result2))
+        data2 = json.loads(extract_text(result2))
         # Should have diff fields, not an error
         assert "delta_percent" in data2
         assert "delta_direction" in data2
@@ -173,7 +149,7 @@ class TestCoverageModeValidation:
         """ivy_coverage with unknown mode is rejected by Literal type validation."""
         from mcp.shared.exceptions import McpError
 
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         with pytest.raises((McpError, Exception)) as exc_info:
             await mcp.call_tool("ivy_coverage", {"mode": "bogus"})
         # The error message should mention valid modes
@@ -212,12 +188,12 @@ class TestCoverageStatsScoping:
     @pytest.mark.asyncio
     async def test_coverage_stats_nonexistent_protocol_returns_zero(self):
         """relative_path='new_prot/' with no annotations should return total=0."""
-        mcp = _get_mcp_app()
+        mcp = get_mcp_app()
         result = await mcp.call_tool(
             "ivy_coverage",
             {"mode": "stats", "relative_path": "new_prot/"},
         )
-        text = _extract_text(result)
+        text = extract_text(result)
         data = json.loads(text)
         # FX2 fix: should return 0, not global requirement count
         assert data.get("total", 0) == 0

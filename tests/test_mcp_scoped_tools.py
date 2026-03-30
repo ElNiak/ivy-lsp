@@ -23,35 +23,11 @@ if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 
+from tests.helpers.mcp_helpers import extract_text, get_mcp_app
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp.server import start_mcp
-
-    root = workspace_root or "/tmp/test-workspace"
-    return start_mcp(workspace_root=root, _return_app=True)
-
-
-def _extract_text(result) -> str:
-    if isinstance(result, dict):
-        if "result" in result:
-            return result["result"]
-        return json.dumps(result)
-    if isinstance(result, tuple):
-        content_blocks = result[0]
-        if len(result) > 1 and isinstance(result[1], dict) and "result" in result[1]:
-            return result[1]["result"]
-        result = content_blocks
-    texts = []
-    for block in result:
-        if hasattr(block, "text"):
-            texts.append(block.text)
-        elif isinstance(block, dict) and "text" in block:
-            texts.append(block["text"])
-    return "\n".join(texts)
 
 
 def _make_mock_workspace_context(
@@ -86,13 +62,13 @@ class TestVerifyScope:
         """Empty scope (default) produces same result as no scope."""
         ivy_file = tmp_path / "model.ivy"
         ivy_file.write_text("#lang ivy1.7\ntype t\n")
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
 
         # Call with default scope (empty string)
         result = await mcp.call_tool(
             "ivy_verify", {"relative_path": "model.ivy", "scope": ""}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # Should not have scope keys
         assert "scope" not in data or data.get("scope") == ""
 
@@ -116,7 +92,7 @@ class TestVerifyScope:
                 "ivy_verify",
                 {"relative_path": "model.ivy", "scope": "nonexistent_scope"},
             )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # Should still get a result (file not found is fine — no ivy_check)
         assert isinstance(data, dict)
         # Warning should have been logged
@@ -141,7 +117,7 @@ class TestVerifyScope:
             "ivy_verify",
             {"relative_path": "model.ivy", "scope": "my_test"},
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # Result should carry scope annotation (even if ivy_check fails)
         # We just check that the tool accepted the parameter without error
         assert isinstance(data, dict)
@@ -162,12 +138,12 @@ class TestCompileScope:
         """Empty scope should not affect compile result."""
         ivy_file = tmp_path / "model.ivy"
         ivy_file.write_text("#lang ivy1.7\ntype t\n")
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
 
         result = await mcp.call_tool(
             "ivy_compile", {"relative_path": "model.ivy", "scope": ""}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert "scope" not in data or data.get("scope") == ""
 
 
@@ -182,13 +158,13 @@ class TestDiagnosticsScope:
         """Empty scope: diagnostics run as normal."""
         ivy_file = tmp_path / "model.ivy"
         ivy_file.write_text("#lang ivy1.7\ntype t\n")
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
 
         result = await mcp.call_tool(
             "ivy_diagnostics",
             {"relative_path": "model.ivy", "mode": "structural", "scope": ""},
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["success"] is True
         assert "scope" not in data
 
@@ -217,7 +193,7 @@ class TestDiagnosticsScope:
                 "scope": "narrow_scope",
             },
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["success"] is True
         assert data["scope_filtered"] is True
         assert data["diagnostic_count"] == 0
@@ -247,7 +223,7 @@ class TestDiagnosticsScope:
                 "scope": "wide_scope",
             },
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["success"] is True
         assert data.get("scope_filtered") is not True
         assert data.get("scope") == "wide_scope"
@@ -274,7 +250,7 @@ class TestDiagnosticsScope:
                     "scope": "bogus",
                 },
             )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["success"] is True
         # No scope_filtered — unknown scope just proceeds
         assert data.get("scope_filtered") is not True
@@ -294,11 +270,11 @@ class TestIncludeGraphScope:
         (tmp_path / "conn.ivy").write_text(
             "#lang ivy1.7\ninclude types\nrelation r(X:cid)\n"
         )
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
             "ivy_include_graph", {"relative_path": "conn.ivy", "scope": ""}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["file"] == "conn.ivy"
         assert "scope" not in data
 
@@ -325,7 +301,7 @@ class TestIncludeGraphScope:
         result = await mcp.call_tool(
             "ivy_include_graph", {"detail": "full", "scope": "ab_scope"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # c.ivy should be filtered out
         file_keys = list(data.get("files", {}).keys())
         assert "c.ivy" not in file_keys
@@ -341,9 +317,9 @@ class TestCoverageScope:
     @pytest.mark.asyncio
     async def test_empty_scope_backward_compatible(self, tmp_path):
         """Empty scope should not change coverage behavior."""
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool("ivy_coverage", {"mode": "stats", "scope": ""})
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # Should produce a result without scope key
         assert isinstance(data, dict)
 
@@ -366,7 +342,7 @@ class TestCoverageScope:
         result = await mcp.call_tool(
             "ivy_coverage", {"mode": "stats", "scope": "my_scope"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert isinstance(data, dict)
         # The scope should be annotated in the result
         assert data.get("scope") == "my_scope"
@@ -385,7 +361,7 @@ class TestCoverageScope:
             result = await mcp.call_tool(
                 "ivy_coverage", {"mode": "stats", "scope": "unknown_scope"}
             )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert isinstance(data, dict)
         assert any("unknown_scope" in rec.message for rec in caplog.records)
 

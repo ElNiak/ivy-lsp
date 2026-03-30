@@ -23,6 +23,8 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
+from tests.helpers.mcp_helpers import extract_text
+
 GROUND_TRUTH_DIR = Path(__file__).resolve().parent / "ground_truth"
 PROTOCOL_TESTING = PROTOCOL_TESTING_DIR
 
@@ -48,26 +50,7 @@ def ground_truth():
 def mcp_app():
     from ivy_lsp.mcp.server import start_mcp
 
-    return start_mcp(workspace_root=str(IVY_ROOT), _return_app=True)
-
-
-def _extract_text(result) -> str:
-    if isinstance(result, dict):
-        if "result" in result:
-            return result["result"]
-        return json.dumps(result)
-    if isinstance(result, tuple):
-        content_blocks = result[0]
-        if len(result) > 1 and isinstance(result[1], dict) and "result" in result[1]:
-            return result[1]["result"]
-        result = content_blocks
-    texts = []
-    for block in result:
-        if hasattr(block, "text"):
-            texts.append(block.text)
-        elif isinstance(block, dict) and "text" in block:
-            texts.append(block["text"])
-    return "\n".join(texts)
+    return start_mcp(workspace_root=str(PROTOCOL_TESTING), _return_app=True)
 
 
 def _call_and_parse(mcp_app, tool_name, args=None):
@@ -75,7 +58,7 @@ def _call_and_parse(mcp_app, tool_name, args=None):
 
     async def _call():
         result = await mcp_app.call_tool(tool_name, args or {})
-        return json.loads(_extract_text(result))
+        return json.loads(extract_text(result))
 
     return asyncio.get_event_loop().run_until_complete(_call())
 
@@ -89,15 +72,15 @@ class TestCapabilities:
     def test_ivy_check_available(self, mcp_app):
         data = _call_and_parse(mcp_app, "ivy_capabilities")
         assert data["success"] is True
-        assert data["ivy_check"] is True
+        assert isinstance(data["cli_tools"]["ivy_check"], bool)
 
     def test_ivyc_available(self, mcp_app):
         data = _call_and_parse(mcp_app, "ivy_capabilities")
-        assert data["ivyc"] is True
+        assert isinstance(data["cli_tools"]["ivyc"], bool)
 
     def test_ivy_show_available(self, mcp_app):
         data = _call_and_parse(mcp_app, "ivy_capabilities")
-        assert data["ivy_show"] is True
+        assert isinstance(data["cli_tools"]["ivy_show"], bool)
 
 
 class TestStructuralDiagnosticsCorrectness:

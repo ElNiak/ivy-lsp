@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 
 def get_mcp_app(workspace_root: str | None = None):
     """Create a FastMCP app for testing.
@@ -18,17 +20,27 @@ def extract_text(result) -> str:
     """Normalize MCP tool response to a plain text string.
 
     Handles multiple response shapes:
-    - dict with 'content' key containing TextContent blocks
-    - tuple (content_list, is_error)
-    - list of content blocks
     - direct string
+    - dict with 'result' key (returns the result value)
+    - dict with 'content' key containing TextContent blocks
+    - other dict (json.dumps fallback)
+    - tuple (content_list, ...) with optional result in second element
+    - list of content blocks
     """
     if isinstance(result, str):
         return result
+    if isinstance(result, dict):
+        if "result" in result:
+            return result["result"]
+        if "content" in result:
+            result = result["content"]
+        else:
+            return json.dumps(result)
     if isinstance(result, tuple):
-        result = result[0]
-    if isinstance(result, dict) and "content" in result:
-        result = result["content"]
+        content_blocks = result[0]
+        if len(result) > 1 and isinstance(result[1], dict) and "result" in result[1]:
+            return result[1]["result"]
+        result = content_blocks
     if isinstance(result, list):
         parts = []
         for item in result:

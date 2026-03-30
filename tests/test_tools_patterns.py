@@ -20,35 +20,11 @@ if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
 
+from tests.helpers.mcp_helpers import extract_text, get_mcp_app
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp.server import start_mcp
-
-    root = workspace_root or "/tmp/test-workspace"
-    return start_mcp(workspace_root=root, _return_app=True)
-
-
-def _extract_text(result) -> str:
-    if isinstance(result, dict):
-        if "result" in result:
-            return result["result"]
-        return json.dumps(result)
-    if isinstance(result, tuple):
-        content_blocks = result[0]
-        if len(result) > 1 and isinstance(result[1], dict) and "result" in result[1]:
-            return result[1]["result"]
-        result = content_blocks
-    texts = []
-    for block in result:
-        if hasattr(block, "text"):
-            texts.append(block.text)
-        elif isinstance(block, dict) and "text" in block:
-            texts.append(block["text"])
-    return "\n".join(texts)
 
 
 def _create_layered_workspace(tmp_path, protocol="minip"):
@@ -89,11 +65,11 @@ class TestScaffoldCheck:
     async def test_layers_present_detected(self, tmp_path):
         """Scaffold check detects which layers are present."""
         ws = _create_layered_workspace(tmp_path)
-        mcp = _get_mcp_app(workspace_root=str(ws))
+        mcp = get_mcp_app(workspace_root=str(ws))
         result = await mcp.call_tool(
             "ivy_patterns", {"protocol": "minip", "mode": "check"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         present_names = {lp["layer"] for lp in data["layers_present"]}
         assert "types" in present_names
         assert "connection" in present_names
@@ -103,11 +79,11 @@ class TestScaffoldCheck:
     async def test_layers_missing_detected(self, tmp_path):
         """Scaffold check identifies missing layers."""
         ws = _create_layered_workspace(tmp_path)
-        mcp = _get_mcp_app(workspace_root=str(ws))
+        mcp = get_mcp_app(workspace_root=str(ws))
         result = await mcp.call_tool(
             "ivy_patterns", {"protocol": "minip", "mode": "check"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # These layers are not created in _create_layered_workspace
         # and their content markers don't appear in any file
         assert "codec" in data["layers_missing"]
@@ -126,11 +102,11 @@ class TestScaffoldCheck:
         (prot_dir / "minip_other.ivy").write_text(
             "#lang ivy1.7\n\ninstance idx : unbounded_sequence\n"
         )
-        mcp = _get_mcp_app(workspace_root=str(ws))
+        mcp = get_mcp_app(workspace_root=str(ws))
         result = await mcp.call_tool(
             "ivy_patterns", {"protocol": "minip", "mode": "check"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         present_names = {lp["layer"] for lp in data["layers_present"]}
         assert "entities" in present_names
 
@@ -138,11 +114,11 @@ class TestScaffoldCheck:
     async def test_completeness_score(self, tmp_path):
         """Scaffold check returns a completeness score."""
         ws = _create_layered_workspace(tmp_path)
-        mcp = _get_mcp_app(workspace_root=str(ws))
+        mcp = get_mcp_app(workspace_root=str(ws))
         result = await mcp.call_tool(
             "ivy_patterns", {"protocol": "minip", "mode": "check"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert "completeness_score" in data
         assert 0 <= data["completeness_score"] <= 100
         assert data["present"] + data["missing"] == data["total_layers"]
@@ -150,11 +126,11 @@ class TestScaffoldCheck:
     @pytest.mark.asyncio
     async def test_nonexistent_protocol_error(self, tmp_path):
         """Scaffold check returns error for nonexistent protocol directory."""
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
             "ivy_patterns", {"protocol": "nonexistent", "mode": "check"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["success"] is False
         assert "not found" in data["message"].lower()
 
@@ -168,10 +144,10 @@ class TestModeValidation:
     @pytest.mark.asyncio
     async def test_unknown_mode_returns_error(self, tmp_path):
         """ivy_patterns with unknown mode returns error."""
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
             "ivy_patterns", {"protocol": "test", "mode": "bogus"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert data["success"] is False
         assert "bogus" in data["message"]

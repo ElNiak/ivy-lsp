@@ -17,6 +17,12 @@ from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
+from ivy_lsp.mcp.tools._helpers import (
+    apply_scope_filter,
+    get_model_if_ready,
+    get_model_or_error,
+    load_requirements_from_manifests,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,42 +37,14 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     # Private helpers (former standalone tool bodies)
     # ------------------------------------------------------------------
 
-    def _model_unavailable_response() -> dict:
-        """Error response with indexing status note."""
-        status = ctx.get_model_status()
-        if status.get("state") == "not_built":
-            return {
-                "success": False,
-                "message": "Semantic model unavailable",
-                "note": "LSP is still indexing. Results may be incomplete. Try again shortly.",
-            }
-        if status.get("state") == "building":
-            return {
-                "success": False,
-                "message": "Semantic model is currently building",
-                "note": "The model is being built (this can take 2-4 minutes on first use). Try again shortly.",
-            }
-        if status.get("state") == "failed":
-            return {
-                "success": False,
-                "message": "Semantic model unavailable",
-                "note": f"Model build failed: {status.get('error', 'unknown')}. "
-                f"Retry in {status.get('retry_in_seconds', '?')}s.",
-            }
-        return error_response("Semantic model unavailable")
-
     async def _ivy_traceability_matrix(
         relative_path: str | None = None,
         test_file: str | None = None,
     ) -> dict:
         """RFC requirement-to-annotation traceability matrix."""
-        # Check model status first to avoid blocking
-        status = ctx.get_model_status()
-        if status.get("state") not in ("ready", "not_built"):
-            return _model_unavailable_response()
-        model = await ctx.get_model()
-        if model is None:
-            return _model_unavailable_response()
+        model, err = await get_model_or_error(ctx)
+        if err:
+            return err
 
         from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
         from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_with_diagnostics
@@ -76,39 +54,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         # Fallback: if semantic model has no requirements, load from manifests
         if not requirements:
-            from ivy_lsp.core.semantic.rfc_annotations import (
-                find_manifests,
-                load_requirement_manifest,
-            )
+            requirements.extend(load_requirements_from_manifests(ctx.root))
 
-            for manifest_path in find_manifests(ctx.root):
-                manifest_reqs = load_requirement_manifest(manifest_path)
-                requirements.extend(manifest_reqs.values())
-
-        if test_file:
-            # Endpoint-mirror scoping: filter to include closure of test file.
-            try:
-                abs_test = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
-            graph = await ctx.get_req_graph()
-            if graph is not None:
-                scope = graph.get_test_scope(abs_test)
-                if scope is not None:
-                    scope_files = scope.include_closure
-                    annotations = [a for a in annotations if a.file in scope_files]
-                else:
-                    annotations = [a for a in annotations if a.file == abs_test]
-        elif relative_path:
-            try:
-                abs_path = ctx.validate_path(relative_path)
-            except ValueError as exc:
-                return error_response(str(exc))
-            if os.path.isdir(abs_path):
-                prefix = abs_path.rstrip(os.sep) + os.sep
-                annotations = [a for a in annotations if a.file.startswith(prefix)]
-            else:
-                annotations = [a for a in annotations if a.file == abs_path]
+        filtered = await apply_scope_filter(
+            annotations,
+            test_file=test_file,
+            relative_path=relative_path,
+            ctx=ctx,
+        )
+        if isinstance(filtered, dict):
+            return filtered  # error_response
+        annotations = filtered
 
         req_ids = {r.id for r in requirements}
         covered_tags: dict[str, list[dict]] = {}
@@ -163,13 +119,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         test_file: str | None = None,
     ) -> dict:
         """RFC requirement coverage statistics by level and layer."""
-        # Check model status first to avoid blocking
-        status = ctx.get_model_status()
-        if status.get("state") not in ("ready", "not_built"):
-            return _model_unavailable_response()
-        model = await ctx.get_model()
-        if model is None:
-            return _model_unavailable_response()
+        model, err = await get_model_or_error(ctx)
+        if err:
+            return err
 
         from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
         from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_with_diagnostics
@@ -179,41 +131,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         # Fallback: if semantic model has no requirements, load from manifests
         if not requirements:
-            from ivy_lsp.core.semantic.rfc_annotations import (
-                find_manifests,
-                load_requirement_manifest,
-            )
+            requirements.extend(load_requirements_from_manifests(ctx.root))
 
-            for manifest_path in find_manifests(ctx.root):
-                manifest_reqs = load_requirement_manifest(manifest_path)
-                requirements.extend(manifest_reqs.values())
-
-        if test_file:
-            # Endpoint-mirror scoping: filter annotations to include closure
-            # of test file.  Requirements are manifest-level (RfcRequirement
-            # has no .file attribute) so they must NOT be filtered by path.
-            try:
-                abs_test = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
-            graph = await ctx.get_req_graph()
-            if graph is not None:
-                scope = graph.get_test_scope(abs_test)
-                if scope is not None:
-                    scope_files = scope.include_closure
-                    annotations = [a for a in annotations if a.file in scope_files]
-                else:
-                    annotations = [a for a in annotations if a.file == abs_test]
-        elif relative_path:
-            try:
-                abs_path = ctx.validate_path(relative_path)
-            except ValueError as exc:
-                return error_response(str(exc))
-            if os.path.isdir(abs_path):
-                prefix = abs_path.rstrip(os.sep) + os.sep
-                annotations = [a for a in annotations if a.file.startswith(prefix)]
-            else:
-                annotations = [a for a in annotations if a.file == abs_path]
+        filtered = await apply_scope_filter(
+            annotations,
+            test_file=test_file,
+            relative_path=relative_path,
+            ctx=ctx,
+        )
+        if isinstance(filtered, dict):
+            return filtered  # error_response
+        annotations = filtered
 
         # FX2 fix: when relative_path scoping yields no annotations,
         # return zero coverage instead of counting global requirements.
@@ -339,12 +267,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         stats = await _ivy_requirement_coverage(relative_path=None, test_file=test_file)
         try:
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
-            # Check model status first to avoid blocking
-            _status = ctx.get_model_status()
-            if _status.get("state") not in ("ready", "not_built"):
-                model = None
-            else:
-                model = await ctx.get_model()
+            model = await get_model_if_ready(ctx)
 
             # Build req_map from the semantic model first
             req_map: dict[str, Any] = {}

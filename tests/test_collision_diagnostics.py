@@ -19,36 +19,11 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
+from tests.helpers.mcp_helpers import extract_text, get_mcp_app
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_mcp_app(workspace_root=None):
-    from ivy_lsp.mcp.server import start_mcp
-
-    root = workspace_root or "/tmp/test-workspace"
-    return start_mcp(workspace_root=root, _return_app=True)
-
-
-def _extract_text(result) -> str:
-    if isinstance(result, dict):
-        if "result" in result:
-            return result["result"]
-        return json.dumps(result)
-    if isinstance(result, tuple):
-        content_blocks = result[0]
-        if len(result) > 1 and isinstance(result[1], dict) and "result" in result[1]:
-            return result[1]["result"]
-        result = content_blocks
-    texts = []
-    for block in result:
-        if hasattr(block, "text"):
-            texts.append(block.text)
-        elif isinstance(block, dict) and "text" in block:
-            texts.append(block["text"])
-    return "\n".join(texts)
 
 
 def _make_mock_resolver(collision_map, file_to_layer, active_layers=None):
@@ -247,11 +222,11 @@ class TestCollisionDiagnosticsMCPTool:
     async def test_collisions_mode_returns_success(self, tmp_path):
         """ivy_diagnostics with mode='collisions' returns a valid response."""
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
             "ivy_diagnostics", {"relative_path": "types.ivy", "mode": "collisions"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # Should have the collision response structure
         assert "total_collisions" in data or "error" in data
 
@@ -259,24 +234,24 @@ class TestCollisionDiagnosticsMCPTool:
     async def test_invalid_mode_returns_error(self, tmp_path):
         """ivy_diagnostics with an unknown mode returns an error."""
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
             "ivy_diagnostics",
             {"relative_path": "types.ivy", "mode": "bogus_mode_xyz"},
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         assert "error" in data or "success" not in data or data.get("success") is False
 
     @pytest.mark.asyncio
     async def test_collisions_mode_no_resolver_graceful(self, tmp_path):
         """Mode='collisions' without resolver degrades gracefully."""
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
-        mcp = _get_mcp_app(workspace_root=str(tmp_path))
+        mcp = get_mcp_app(workspace_root=str(tmp_path))
         # Fresh workspace has no collisions since no workspace layers
         result = await mcp.call_tool(
             "ivy_diagnostics", {"relative_path": "types.ivy", "mode": "collisions"}
         )
-        data = json.loads(_extract_text(result))
+        data = json.loads(extract_text(result))
         # Either succeeds with empty collisions or returns an error gracefully
         assert isinstance(data, dict)
         # Should not raise an exception

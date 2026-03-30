@@ -38,6 +38,17 @@ class MockToolContext:
     workspace_groups: dict = field(default_factory=dict)
     include_resolver: Any = field(default_factory=MagicMock)
 
+    def build_context_metadata(self) -> dict:
+        """Minimal mock of ToolContext.build_context_metadata()."""
+        ctx: dict = {}
+        ws = self.active_workspace
+        if ws is None or not getattr(ws, "active_group", None):
+            return ctx
+        ctx["workspace"] = ws.active_group
+        ctx["layers"] = sorted(ws.active_layers)
+        ctx["set_by"] = getattr(ws, "set_by", "unknown")
+        return ctx
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,23 +69,11 @@ def _make_ctx(tmp_path: Path, groups: dict | None = None) -> MockToolContext:
     return ctx
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_set_workspace_protocol(tmp_path):
-    """Setting a workspace by protocol name activates the group's layers."""
+def _register_and_capture(ctx: MockToolContext):
+    """Register workspace tools on a mock MCP and return the captured tool function."""
     from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
-    groups = {
-        "quic": ["quic_stack", "quic_tests", "tls_stack"],
-        "minip": ["minip_stack", "minip_tests"],
-    }
-    ctx = _make_ctx(tmp_path, groups)
     mcp = MagicMock()
-    # Capture the tool function registered via @mcp.tool()
     tool_fn = None
 
     def capture_tool():
@@ -88,8 +87,35 @@ async def test_set_workspace_protocol(tmp_path):
     mcp.tool = capture_tool
     register_workspace_tools(mcp, ctx)
     assert tool_fn is not None, "ivy_workspace tool was not registered"
+    return tool_fn
 
-    # Call the raw function (bypassing safe_tool since we mock MCP)
+
+@pytest.fixture
+def make_workspace_tool(tmp_path):
+    """Factory fixture: create a MockToolContext and register the workspace tool."""
+
+    def _factory(groups: dict | None = None):
+        ctx = _make_ctx(tmp_path, groups)
+        tool_fn = _register_and_capture(ctx)
+        return tool_fn, ctx
+
+    return _factory
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_set_workspace_protocol(make_workspace_tool):
+    """Setting a workspace by protocol name activates the group's layers."""
+    groups = {
+        "quic": ["quic_stack", "quic_tests", "tls_stack"],
+        "minip": ["minip_stack", "minip_tests"],
+    }
+    tool_fn, ctx = make_workspace_tool(groups)
+
     result = await tool_fn(action="set", target="quic")
 
     assert result["status"] == "ok"
@@ -102,25 +128,10 @@ async def test_set_workspace_protocol(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_workspace_unknown_target(tmp_path):
+async def test_set_workspace_unknown_target(make_workspace_tool):
     """Setting an unknown target returns an error listing available groups."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
     groups = {"quic": ["quic_stack"], "minip": ["minip_stack"]}
-    ctx = _make_ctx(tmp_path, groups)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool(groups)
 
     result = await tool_fn(action="set", target="coap")
 
@@ -132,25 +143,10 @@ async def test_set_workspace_unknown_target(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_workspace(tmp_path):
+async def test_get_workspace(make_workspace_tool):
     """Get action returns current workspace state."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
     groups = {"quic": ["quic_stack", "quic_tests"]}
-    ctx = _make_ctx(tmp_path, groups)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool(groups)
 
     # First set a workspace
     await tool_fn(action="set", target="quic")
@@ -165,24 +161,9 @@ async def test_get_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_not_set(tmp_path):
+async def test_get_workspace_not_set(make_workspace_tool):
     """Get action when no workspace is set returns appropriate message."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
-    ctx = _make_ctx(tmp_path)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool()
 
     result = await tool_fn(action="get")
 
@@ -192,28 +173,13 @@ async def test_get_workspace_not_set(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_list_workspaces(tmp_path):
+async def test_list_workspaces(make_workspace_tool):
     """List action returns available groups and current workspace."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
     groups = {
         "quic": ["quic_stack", "quic_tests"],
         "minip": ["minip_stack"],
     }
-    ctx = _make_ctx(tmp_path, groups)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool(groups)
 
     # Set quic first
     await tool_fn(action="set", target="quic")
@@ -229,25 +195,10 @@ async def test_list_workspaces(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_clear_workspace(tmp_path):
+async def test_clear_workspace(make_workspace_tool):
     """Clear action resets workspace state."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
     groups = {"quic": ["quic_stack", "quic_tests"]}
-    ctx = _make_ctx(tmp_path, groups)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool(groups)
 
     # Set then clear
     await tool_fn(action="set", target="quic")
@@ -266,25 +217,10 @@ async def test_clear_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_workspace_persists(tmp_path):
+async def test_set_workspace_persists(make_workspace_tool, tmp_path):
     """State file is written to disk after set."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
     groups = {"quic": ["quic_stack", "quic_tests"]}
-    ctx = _make_ctx(tmp_path, groups)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool(groups)
 
     await tool_fn(action="set", target="quic")
 
@@ -298,25 +234,10 @@ async def test_set_workspace_persists(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_workspace_with_roles(tmp_path):
+async def test_set_workspace_with_roles(make_workspace_tool):
     """Setting workspace with roles filters to role_pair granularity."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
     groups = {"quic": ["quic_stack", "quic_tests", "tls_stack"]}
-    ctx = _make_ctx(tmp_path, groups)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool(groups)
 
     result = await tool_fn(action="set", target="quic", roles="client,server")
 
@@ -326,24 +247,9 @@ async def test_set_workspace_with_roles(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_invalid_action(tmp_path):
+async def test_invalid_action(make_workspace_tool):
     """An unrecognized action returns an error."""
-    from ivy_lsp.mcp.tools.workspace import register_workspace_tools
-
-    ctx = _make_ctx(tmp_path)
-    mcp = MagicMock()
-    tool_fn = None
-
-    def capture_tool():
-        def decorator(fn):
-            nonlocal tool_fn
-            tool_fn = fn
-            return fn
-
-        return decorator
-
-    mcp.tool = capture_tool
-    register_workspace_tools(mcp, ctx)
+    tool_fn, ctx = make_workspace_tool()
 
     result = await tool_fn(action="destroy")
 

@@ -42,21 +42,34 @@ class GraphSnapshot:
     outgoing: Dict[str, List[Tuple["EdgeType", str]]]
     incoming: Dict[str, List[Tuple["EdgeType", str]]]
 
+    def _query_edges(
+        self,
+        node_id: str,
+        direction: str,
+        edge_type: "EdgeType",
+        node_dict: dict,
+    ) -> list:
+        """Generic edge traversal returning nodes matching *edge_type*."""
+        edges = (self.outgoing if direction == "outgoing" else self.incoming).get(
+            node_id, []
+        )
+        return [
+            node_dict[tid]
+            for etype, tid in edges
+            if etype == edge_type and tid in node_dict
+        ]
+
     def get_requirements_for_action(self, action_name: str) -> List["RequirementNode"]:
         """Return requirements constraining the given action."""
-        result = []
-        for etype, source_id in self.incoming.get(action_name, []):
-            if etype == EdgeType.CONSTRAINS and source_id in self.requirements:
-                result.append(self.requirements[source_id])
-        return result
+        return self._query_edges(
+            action_name, "incoming", EdgeType.CONSTRAINS, self.requirements
+        )
 
     def get_state_vars_read_by(self, requirement_id: str) -> List["StateVarNode"]:
         """Return state variables read by a requirement."""
-        result = []
-        for etype, target_id in self.outgoing.get(requirement_id, []):
-            if etype == EdgeType.READS and target_id in self.state_vars:
-                result.append(self.state_vars[target_id])
-        return result
+        return self._query_edges(
+            requirement_id, "outgoing", EdgeType.READS, self.state_vars
+        )
 
     def get_all_state_vars_written(self) -> List["StateVarNode"]:
         """Return all state variables with WRITES edges."""
@@ -100,11 +113,9 @@ class GraphSnapshot:
         self, var_name: str
     ) -> List["RequirementNode"]:
         """Return requirements that read the given state variable."""
-        result = []
-        for etype, source_id in self.incoming.get(var_name, []):
-            if etype == EdgeType.READS and source_id in self.requirements:
-                result.append(self.requirements[source_id])
-        return result
+        return self._query_edges(
+            var_name, "incoming", EdgeType.READS, self.requirements
+        )
 
     def get_state_vars_written_by_action(self, action_id: str) -> List["StateVarNode"]:
         """Return state vars written within the same files as an action's monitors.
@@ -626,23 +637,35 @@ class RequirementGraph:
 
     # -- Queries ------------------------------------------------------------
 
+    def _query_edges(
+        self,
+        node_id: str,
+        direction: str,
+        edge_type: EdgeType,
+        node_dict: dict,
+    ) -> list:
+        """Generic locked edge traversal returning nodes matching *edge_type*."""
+        with self._lock:
+            edges = (self._outgoing if direction == "outgoing" else self._incoming).get(
+                node_id, []
+            )
+            return [
+                node_dict[tid]
+                for etype, tid in edges
+                if etype == edge_type and tid in node_dict
+            ]
+
     def get_requirements_for_action(self, action_name: str) -> List[RequirementNode]:
         """Return all requirements constraining *action_name*."""
-        with self._lock:
-            result = []
-            for etype, source_id in self._incoming.get(action_name, []):
-                if etype == EdgeType.CONSTRAINS and source_id in self.requirements:
-                    result.append(self.requirements[source_id])
-            return result
+        return self._query_edges(
+            action_name, "incoming", EdgeType.CONSTRAINS, self.requirements
+        )
 
     def get_state_vars_read_by(self, requirement_id: str) -> List[StateVarNode]:
         """Return state variables read by a requirement."""
-        with self._lock:
-            result = []
-            for etype, target_id in self._outgoing.get(requirement_id, []):
-                if etype == EdgeType.READS and target_id in self.state_vars:
-                    result.append(self.state_vars[target_id])
-            return result
+        return self._query_edges(
+            requirement_id, "outgoing", EdgeType.READS, self.state_vars
+        )
 
     def get_all_state_vars_written(self) -> List[StateVarNode]:
         """Return all state vars with WRITES edges in the graph.
@@ -662,21 +685,15 @@ class RequirementGraph:
         self, var_name: str
     ) -> List[RequirementNode]:
         """Return requirements that read *var_name*."""
-        with self._lock:
-            result = []
-            for etype, source_id in self._incoming.get(var_name, []):
-                if etype == EdgeType.READS and source_id in self.requirements:
-                    result.append(self.requirements[source_id])
-            return result
+        return self._query_edges(
+            var_name, "incoming", EdgeType.READS, self.requirements
+        )
 
     def get_properties_depending_on_axiom(self, axiom_id: str) -> List[PropertyNode]:
         """Return properties that depend on *axiom_id*."""
-        with self._lock:
-            result = []
-            for etype, source_id in self._incoming.get(axiom_id, []):
-                if etype == EdgeType.DEPENDS_ON and source_id in self.properties:
-                    result.append(self.properties[source_id])
-            return result
+        return self._query_edges(
+            axiom_id, "incoming", EdgeType.DEPENDS_ON, self.properties
+        )
 
     def get_active_requirements_for_file(
         self, filepath: str, include_graph: Any
