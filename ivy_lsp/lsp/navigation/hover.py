@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import List, Optional
@@ -358,48 +357,44 @@ def get_hover_info(
 
 def register(server) -> None:
     """Register the textDocument/hover feature handler."""
+    from ivy_lsp.lsp.navigation._handler import run_navigation_handler
 
     @server.feature(lsp.TEXT_DOCUMENT_HOVER)
     async def hover(params: lsp.HoverParams) -> Optional[lsp.Hover]:
+        result = await run_navigation_handler(
+            params,
+            server,
+            lambda ctx: get_hover_info(
+                ctx.indexer,
+                ctx.filepath,
+                ctx.position,
+                ctx.lines,
+                ctx.model,
+            ),
+            track_active_uri=True,
+            trace_method="textDocument/hover",
+        )
         try:
-            uri = params.text_document.uri
-            server._last_active_uri = uri
-            doc = server.workspace.get_text_document(uri)
-            if server.indexer is None:
-                return None
-            lines = doc.source.split("\n") if doc.source else []
-            filepath = uri_to_path(uri)
-            model = server.semantic_model
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,
-                get_hover_info,
-                server.indexer,
-                filepath,
-                params.position,
-                lines,
-                model,
-            )
-
             from ivy_lsp.infra.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:
+                lines = server.workspace.get_text_document(
+                    params.text_document.uri
+                ).source.split("\n")
                 word = word_at_position(lines, params.position) if lines else None
                 content_len = 0
                 if result and result.contents:
                     content_len = len(getattr(result.contents, "value", ""))
                 tracer.trace_lsp_request(
                     method="textDocument/hover",
-                    filepath=filepath,
+                    filepath=uri_to_path(params.text_document.uri),
                     position=f"{params.position.line}:{params.position.character}",
                     word=word,
                     result_summary=(
                         f"Hover content, {content_len} chars" if result else None
                     ),
                 )
-
-            return result
         except Exception:
-            logger.warning("hover handler failed", exc_info=True)
-            return None
+            pass
+        return result

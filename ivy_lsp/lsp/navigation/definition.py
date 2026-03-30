@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from pathlib import Path
@@ -164,57 +163,48 @@ def _lookup_via_semantic_model(word: str, semantic_model: Any) -> list:
 
 
 def register(server) -> None:
-    """Register the ``textDocument/definition`` feature handler.
-
-    Args:
-        server: The pygls ``LanguageServer`` instance to register on.
-    """
+    """Register the ``textDocument/definition`` feature handler."""
+    from ivy_lsp.lsp.navigation._handler import run_navigation_handler
 
     @server.feature(lsp.TEXT_DOCUMENT_DEFINITION)
     async def definition(
         params: lsp.DefinitionParams,
     ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
         """Handle textDocument/definition requests."""
+        result = await run_navigation_handler(
+            params,
+            server,
+            lambda ctx: goto_definition(
+                ctx.indexer,
+                ctx.filepath,
+                ctx.position,
+                ctx.lines,
+                semantic_model=ctx.model,
+            ),
+            track_active_uri=True,
+            trace_method="textDocument/definition",
+        )
         try:
-            uri = params.text_document.uri
-            server._last_active_uri = uri
-            doc = server.workspace.get_text_document(uri)
-            if server.indexer is None:
-                return None
-            lines = doc.source.split("\n") if doc.source else []
-            filepath = uri_to_path(uri)
-            model = server.semantic_model
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: goto_definition(
-                    server.indexer,
-                    filepath,
-                    params.position,
-                    lines,
-                    semantic_model=model,
-                ),
-            )
-
             from ivy_lsp.infra.observability import get_tracer
 
             tracer = get_tracer()
             if tracer is not None:
+                lines = server.workspace.get_text_document(
+                    params.text_document.uri
+                ).source.split("\n")
                 word = word_at_position(lines, params.position) if lines else None
-                loc_count = 0
-                if isinstance(result, list):
-                    loc_count = len(result)
-                elif result is not None:
-                    loc_count = 1
+                loc_count = (
+                    len(result)
+                    if isinstance(result, list)
+                    else (1 if result is not None else 0)
+                )
                 tracer.trace_lsp_request(
                     method="textDocument/definition",
-                    filepath=filepath,
+                    filepath=uri_to_path(params.text_document.uri),
                     position=f"{params.position.line}:{params.position.character}",
                     word=word,
-                    result_summary=f"{loc_count} location(s)" if result else None,
+                    result_summary=(f"{loc_count} location(s)" if result else None),
                 )
-
-            return result
         except Exception:
-            logger.warning("definition handler failed", exc_info=True)
-            return None
+            pass
+        return result

@@ -463,31 +463,24 @@ def _get_outgoing_calls_regex(
 
 def register(server) -> None:
     """Register call hierarchy feature handlers."""
+    from ivy_lsp.lsp.navigation._handler import run_navigation_handler
 
     @server.feature(lsp.TEXT_DOCUMENT_PREPARE_CALL_HIERARCHY)
     async def prepare(
         params: lsp.CallHierarchyPrepareParams,
     ) -> Optional[List[lsp.CallHierarchyItem]]:
         """Handle textDocument/prepareCallHierarchy requests."""
-        try:
-            uri = params.text_document.uri
-            doc = server.workspace.get_text_document(uri)
-            if server.indexer is None:
-                return None
-            lines = doc.source.split("\n") if doc.source else []
-            filepath = uri_to_path(uri)
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None,
-                prepare_call_hierarchy,
-                server.indexer,
-                filepath,
-                params.position,
-                lines,
-            )
-        except Exception:
-            logger.warning("prepareCallHierarchy handler failed", exc_info=True)
-            return None
+        return await run_navigation_handler(
+            params,
+            server,
+            lambda ctx: prepare_call_hierarchy(
+                ctx.indexer,
+                ctx.filepath,
+                ctx.position,
+                ctx.lines,
+            ),
+            trace_method="textDocument/prepareCallHierarchy",
+        )
 
     @server.feature(lsp.CALL_HIERARCHY_INCOMING_CALLS)
     async def incoming_calls(

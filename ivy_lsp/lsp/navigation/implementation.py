@@ -12,7 +12,6 @@ In Ivy, ``before`` and ``after`` monitors are the closest analogue to
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from pathlib import Path
@@ -143,29 +142,22 @@ def _find_action_declaration(
 
 def register(server) -> None:
     """Register the ``textDocument/implementation`` feature handler."""
+    from ivy_lsp.lsp.navigation._handler import run_navigation_handler
 
     @server.feature(lsp.TEXT_DOCUMENT_IMPLEMENTATION)
     async def implementation(
         params: lsp.ImplementationParams,
     ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
         """Handle textDocument/implementation requests."""
-        try:
-            uri = params.text_document.uri
-            server._last_active_uri = uri
-            doc = server.workspace.get_text_document(uri)
-            if server.indexer is None:
-                return None
-            lines = doc.source.split("\n") if doc.source else []
-            filepath = uri_to_path(uri)
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None,
-                goto_implementation,
-                server.indexer,
-                filepath,
-                params.position,
-                lines,
-            )
-        except Exception:
-            logger.warning("implementation handler failed", exc_info=True)
-            return None
+        return await run_navigation_handler(
+            params,
+            server,
+            lambda ctx: goto_implementation(
+                ctx.indexer,
+                ctx.filepath,
+                ctx.position,
+                ctx.lines,
+            ),
+            track_active_uri=True,
+            trace_method="textDocument/implementation",
+        )
