@@ -332,15 +332,15 @@ class ServerSetupMixin:
         return resolver, ws_root
 
     def _create_parser(self, resolver: "IncludeResolver") -> None:
-        """Create the Ivy parser, falling back to lexer-only mode without z3.
+        """Create the Ivy parser.  Z3 is mandatory.
 
         Sets self._parser and self._full_mode.
+        Raises RuntimeError if Z3 / ivy.ivy_parser is not importable.
         """
         try:
-            # Eagerly verify z3 is actually available --- IvyParserWrapper
-            # defers ivy imports to method bodies, so the import above
-            # succeeds even without z3.
-            import ivy.ivy_utils  # noqa: F401 --- triggers z3_shim
+            # Verify the full Z3-dependent import chain is available.
+            # ivy.ivy_parser -> ivy_actions -> ivy_module -> ivy_solver -> z3_shim
+            import ivy.ivy_parser  # noqa: F401
 
             from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
@@ -351,12 +351,8 @@ class ServerSetupMixin:
                 extra={"event": LogEvent(LogCategory.MILESTONE, "startup")},
             )
         except Exception as e:
-            from ivy_lsp.core.parsing.fallback_parser import FallbackOnlyParser
-
-            self._parser = FallbackOnlyParser()
-            self._full_mode = False
-            slog.info(
-                "z3 not available (%s); running in light mode",
+            slog.error(
+                "Z3 is required but ivy.ivy_parser could not be imported: %s",
                 e,
                 extra={
                     "event": LogEvent(
@@ -366,6 +362,10 @@ class ServerSetupMixin:
                     )
                 },
             )
+            raise RuntimeError(
+                f"Z3 is required but not available: {e}. "
+                "Install via 'pip install z3-solver'."
+            ) from e
 
     def _create_indexer(self, ws_root: str, resolver: "IncludeResolver") -> bool:
         """Create the workspace indexer and run initial indexing.
