@@ -106,6 +106,20 @@ class AnalysisPipeline:
         # Bulk compilation state (workspace-wide T3)
         self._bulk_compile = _TierState()
         self._file_generation: Dict[str, int] = {}
+        self._scope_provider = None
+
+    def set_scope_provider(self, provider: Any) -> None:
+        """Set the ScopedRequirementModel for scope-aware bulk filtering."""
+        self._scope_provider = provider
+
+    def _files_in_any_scope(self, filepaths: List[str]) -> List[str]:
+        """Filter to files in at least one test scope's include_closure.
+
+        When no scope provider is set, returns all files unchanged.
+        """
+        if self._scope_provider is None:
+            return filepaths
+        return [f for f in filepaths if self._scope_provider.get_tests_for_file(f)]
 
     # -- Tier 1 ----------------------------------------------------------------
 
@@ -430,6 +444,14 @@ class AnalysisPipeline:
                     remaining = [f for f in filepaths if f not in self._tier2_files]
                 else:
                     remaining = [f for f in filepaths if f not in self._tier1_files]
+            remaining = self._files_in_any_scope(remaining)
+            if len(remaining) < len(filepaths):
+                logger.info(
+                    "Scope filtering: %d/%d files in test scopes",
+                    len(remaining),
+                    len(filepaths),
+                )
+            with self._state_lock:
                 self._bulk.running = True
                 self._bulk.total = len(remaining)
                 self._bulk.completed = 0

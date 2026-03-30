@@ -71,3 +71,34 @@ def relativize_path(abs_path: str, workspace_root: str) -> str:
         rel = abs_path[len(workspace_root) :]
         return rel.lstrip(os.sep)
     return abs_path
+
+
+class PathResolver:
+    """Single source of truth for path canonicalization within a protocol workspace.
+
+    All internal ivy-lsp components should use this instead of bare
+    os.path.abspath() calls to ensure consistent path representation.
+    """
+
+    def __init__(self, protocol_dir: str) -> None:
+        """Initialize with the protocol directory as the resolution base."""
+        self._protocol_dir = os.path.realpath(os.path.abspath(protocol_dir))
+
+    @property
+    def protocol_dir(self) -> str:
+        """Return the canonical absolute protocol directory."""
+        return self._protocol_dir
+
+    def to_absolute(self, rel_path: str) -> str:
+        """Convert offline-index relative path to canonical absolute."""
+        if os.path.isabs(rel_path):
+            return os.path.realpath(rel_path)
+        return os.path.realpath(os.path.join(self._protocol_dir, rel_path))
+
+    def to_relative(self, abs_path: str) -> str:
+        """Convert absolute path to protocol-relative."""
+        return os.path.relpath(abs_path, self._protocol_dir)
+
+    def canonicalize(self, path: str) -> str:
+        """Canonicalize any path (abs or rel) to its resolved absolute form."""
+        return os.path.realpath(path) if os.path.isabs(path) else self.to_absolute(path)

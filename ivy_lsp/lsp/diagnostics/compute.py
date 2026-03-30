@@ -112,6 +112,10 @@ def compute_requirement_diagnostics(
     abs_path = os.path.abspath(filepath)
     lines = source.split("\n")
 
+    active_scope = None
+    if isinstance(graph, ScopedRequirementModel):
+        active_scope = graph.get_active_scope()
+
     # 1. Include chain propagation (per-include deduplicated counts)
     if include_graph:
         resolver = getattr(indexer, "resolver", None)
@@ -142,6 +146,9 @@ def compute_requirement_diagnostics(
             inherited_reqs = [
                 r for r in graph.requirements.values() if r.file in new_files
             ]
+            if active_scope is not None:
+                scope_files = active_scope.include_closure
+                inherited_reqs = [r for r in inherited_reqs if r.file in scope_files]
 
             if not inherited_reqs:
                 continue
@@ -177,10 +184,6 @@ def compute_requirement_diagnostics(
             )
 
     # 2. Unmonitored actions (Hint)
-    active_scope = None
-    if isinstance(graph, ScopedRequirementModel):
-        active_scope = graph.get_active_scope()
-
     for match in _ACTION_RE.finditer(source):
         action_name = match.group(1)
         line_no = source[: match.start()].count("\n")
@@ -231,6 +234,9 @@ def compute_requirement_diagnostics(
         line_text = lines[line_no] if line_no < len(lines) else ""
 
         readers = graph.get_requirements_sharing_state_var(var_name)
+        if active_scope is not None:
+            scope_files = active_scope.include_closure
+            readers = [r for r in readers if r.file in scope_files]
         if len(readers) >= impact_threshold:
             files = {r.file for r in readers}
             diags.append(

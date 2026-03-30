@@ -504,7 +504,11 @@ def register(server) -> None:
         for doc_uri in server.workspace.text_documents:
             uris.add(doc_uri)
         if server.indexer is not None:
+            graph = getattr(server.indexer, "requirement_graph", None)
             for fp in server.indexer.get_all_ivy_file_paths():
+                # Skip files not in any test scope (orphans)
+                if graph is not None and not graph.get_tests_for_file(fp):
+                    continue
                 uris.add(f"file://{fp}")
 
         for uri in sorted(uris):

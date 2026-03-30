@@ -713,6 +713,9 @@ class ServerSetupMixin:
                 requirement_graph=requirement_graph,
                 notification_callback=self._send_compilation_progress,
             )
+            # Wire scope provider for scope-aware bulk T1/T2 filtering
+            if requirement_graph is not None:
+                self._analysis_pipeline.set_scope_provider(requirement_graph)
             if self._indexer is not None:
                 self._indexer.set_analysis_pipeline(self._analysis_pipeline)
             slog.info(

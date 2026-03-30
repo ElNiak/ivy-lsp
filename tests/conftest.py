@@ -125,6 +125,99 @@ def quic_stack_ivy_files():
 
 
 # ---------------------------------------------------------------------------
+# MiniP workspace fixtures (self-contained test repo)
+# ---------------------------------------------------------------------------
+
+MINIP_REPO_ROOT = Path(__file__).resolve().parent / "resources" / "repos" / "minip"
+MINIP_DIR = MINIP_REPO_ROOT / "protocol-testing" / "minip"
+MINIP_STACK_DIR = MINIP_DIR / "minip_stack"
+MINIP_TESTS_DIR = MINIP_DIR / "minip_tests"
+
+
+@pytest.fixture
+def minip_workspace_dir():
+    """Path to the minip workspace root (protocol-testing/minip/)."""
+    if not MINIP_DIR.exists():
+        pytest.skip(f"minip workspace not found at {MINIP_DIR}")
+    return MINIP_DIR
+
+
+@pytest.fixture
+def minip_stack_dir():
+    """Path to the minip_stack/ directory."""
+    if not MINIP_STACK_DIR.exists():
+        pytest.skip(f"minip stack not found at {MINIP_STACK_DIR}")
+    return MINIP_STACK_DIR
+
+
+@pytest.fixture
+def minip_stack_ivy_files():
+    """List of all .ivy files in the minip stack directory."""
+    if not MINIP_STACK_DIR.exists():
+        pytest.skip(f"minip stack not found at {MINIP_STACK_DIR}")
+    return sorted(MINIP_STACK_DIR.glob("*.ivy"))
+
+
+@pytest.fixture
+def minip_all_ivy_files():
+    """List of ALL .ivy files across all minip subdirectories."""
+    if not MINIP_DIR.exists():
+        pytest.skip(f"minip workspace not found at {MINIP_DIR}")
+    return sorted(MINIP_DIR.rglob("*.ivy"))
+
+
+@pytest.fixture
+def minip_test_ivy_files():
+    """List of all .ivy test spec files across minip_tests/."""
+    if not MINIP_TESTS_DIR.exists():
+        pytest.skip(f"minip tests not found at {MINIP_TESTS_DIR}")
+    return sorted(MINIP_TESTS_DIR.rglob("*.ivy"))
+
+
+@pytest.fixture
+def minip_types_path():
+    """Path to ping_types.ivy (richest type file in minip)."""
+    path = MINIP_STACK_DIR / "ping_types.ivy"
+    if not path.exists():
+        pytest.skip(f"ping_types.ivy not found at {path}")
+    return path
+
+
+@pytest.fixture
+def minip_types_source(minip_types_path):
+    """Source content of ping_types.ivy."""
+    return minip_types_path.read_text()
+
+
+@pytest.fixture(scope="module")
+def minip_indexer():
+    """Pre-built WorkspaceIndexer for the full minip workspace (module-scoped).
+
+    Uses MINIP_DIR as workspace root with staging so cross-directory
+    includes resolve via flat symlinks.
+
+    Requires the ``ivy`` package for tokenization — skips when unavailable.
+    """
+    if not MINIP_DIR.exists():
+        pytest.skip(f"minip workspace not found at {MINIP_DIR}")
+    try:
+        import ivy  # noqa: F401
+    except ImportError:
+        pytest.skip("ivy package not installed (required for indexer)")
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+
+    parser = IvyParserWrapper()
+    resolver = IncludeResolver(str(MINIP_DIR))
+    resolver.create_staging_directory()
+    indexer = WorkspaceIndexer(str(MINIP_DIR), parser, resolver)
+    indexer.index_workspace()
+    yield indexer
+    resolver.cleanup_staging()
+
+
+# ---------------------------------------------------------------------------
 # Multi-file workspace fixtures (tmp_path-based)
 # ---------------------------------------------------------------------------
 
