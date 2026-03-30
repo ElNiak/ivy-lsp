@@ -252,6 +252,14 @@ def _main_impl(startup_t0: float) -> None:
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
+    # Clean up PID file on exit. The bash trap in start-ivy-server.sh is
+    # destroyed by exec, so we register cleanup in the Python process.
+    _pid_file = os.environ.get("IVY_PID_FILE")
+    if _pid_file:
+        import atexit
+
+        atexit.register(lambda f=_pid_file: os.unlink(f) if os.path.exists(f) else None)
+
     # Parent-process watchdog: detect when Claude Code (our parent) dies.
     # On macOS/Linux, an orphaned process is reparented to PID 1 (launchd/init).
     # When this happens, the stdio pipes are broken and the server is useless.
