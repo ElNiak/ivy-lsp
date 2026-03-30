@@ -517,10 +517,12 @@ class TestSetActiveTestDiagnosticRefresh:
         mock_ivy = MagicMock()
         mock_ivy.uri = "file:///workspace/quic_stack.ivy"
         mock_ivy.source = "action quic.send(x:t)\n"
+        mock_ivy.version = 1
 
         mock_untitled = MagicMock()
         mock_untitled.uri = "untitled:Untitled-1"
         mock_untitled.source = "some text"
+        mock_untitled.version = 1
 
         server.workspace.text_documents = {
             mock_ivy.uri: mock_ivy,
@@ -528,7 +530,7 @@ class TestSetActiveTestDiagnosticRefresh:
         }
 
         with patch(
-            "ivy_lsp.lsp.diagnostics.publisher.compute_diagnostics",
+            "ivy_lsp.lsp.diagnostics.compute.compute_diagnostics",
             return_value=[],
         ) as mock_compute:
             params = _make_namedtuple_params(

@@ -7,7 +7,7 @@ import pytest
 
 def test_path_traversal_blocked(tmp_path):
     """MCP ivy_verify must reject paths that escape the workspace root."""
-    from ivy_lsp.mcp.server import _validate_path
+    from ivy_lsp.mcp.context import _validate_path
 
     root = str(tmp_path)
     with pytest.raises(ValueError):
@@ -20,7 +20,7 @@ def test_path_traversal_blocked(tmp_path):
 
 def test_valid_path_accepted(tmp_path):
     """MCP must accept normal relative paths within workspace."""
-    from ivy_lsp.mcp.server import _validate_path
+    from ivy_lsp.mcp.context import _validate_path
 
     root = str(tmp_path)
     (tmp_path / "test.ivy").touch()
@@ -30,7 +30,7 @@ def test_valid_path_accepted(tmp_path):
 
 def test_root_itself_accepted(tmp_path):
     """Edge case: path resolving to root itself should be accepted."""
-    from ivy_lsp.mcp.server import _validate_path
+    from ivy_lsp.mcp.context import _validate_path
 
     root = str(tmp_path)
     result = _validate_path(root, ".")
@@ -39,7 +39,7 @@ def test_root_itself_accepted(tmp_path):
 
 def test_subdirectory_accepted(tmp_path):
     """Paths in subdirectories should be accepted."""
-    from ivy_lsp.mcp.server import _validate_path
+    from ivy_lsp.mcp.context import _validate_path
 
     root = str(tmp_path)
     sub = tmp_path / "subdir"
@@ -51,7 +51,7 @@ def test_subdirectory_accepted(tmp_path):
 
 def test_symlink_escape_blocked(tmp_path):
     """Symlinks pointing outside root should be rejected."""
-    from ivy_lsp.mcp.server import _validate_path
+    from ivy_lsp.mcp.context import _validate_path
 
     root = str(tmp_path / "workspace")
     (tmp_path / "workspace").mkdir()
@@ -71,7 +71,7 @@ def test_symlink_escape_blocked(tmp_path):
 
 def test_absolute_path_outside_root_rejected(tmp_path):
     """Absolute paths outside workspace root should be rejected."""
-    from ivy_lsp.mcp.server import _validate_path
+    from ivy_lsp.mcp.context import _validate_path
 
     root = str(tmp_path)
     with pytest.raises(ValueError):

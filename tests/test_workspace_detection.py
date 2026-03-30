@@ -1,6 +1,7 @@
 """Tests for ivy_lsp.core.workspace.detection module."""
 
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -164,8 +165,20 @@ class TestPantherHeuristic:
         assert config is not None
         assert config.project_type == "panther"
 
-    def test_no_panther_structure(self, isolated_tmp):
-        config = _panther_heuristic(str(isolated_tmp))
+    def test_no_panther_structure(self, isolated_tmp, monkeypatch):
+        # Prevent walk-up from escaping the temp dir by making dirname
+        # return the same path (simulates hitting filesystem root).
+        _real_dirname = os.path.dirname
+        root = str(isolated_tmp)
+
+        def _capped_dirname(p):
+            result = _real_dirname(p)
+            if not result.startswith(root):
+                return p  # stop walk
+            return result
+
+        monkeypatch.setattr(os.path, "dirname", _capped_dirname)
+        config = _panther_heuristic(root)
         assert config is None
 
     def test_no_markers_returns_none(self, tmp_workspace):
@@ -429,20 +442,20 @@ class TestWorkspaceConfig:
 
 
 class TestV2Rejection:
-    def test_v2_marker_returns_none(self, tmp_workspace):
+    def test_v2_marker_returns_none(self, isolated_tmp):
         """v2 .ivyworkspace should be gracefully ignored (return None)."""
         marker = {"version": 2, "include_paths": ["protocol-testing"]}
-        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path = isolated_tmp / ".ivyworkspace"
         marker_path.write_text(json.dumps(marker))
-        result = _walk_up_for_marker(str(tmp_workspace))
+        result = _walk_up_for_marker(str(isolated_tmp), max_depth=1)
         assert result is None
 
-    def test_v1_marker_returns_none(self, tmp_workspace):
+    def test_v1_marker_returns_none(self, isolated_tmp):
         """v1 .ivyworkspace should be gracefully ignored (return None)."""
         marker = {"version": 1}
-        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path = isolated_tmp / ".ivyworkspace"
         marker_path.write_text(json.dumps(marker))
-        result = _walk_up_for_marker(str(tmp_workspace))
+        result = _walk_up_for_marker(str(isolated_tmp), max_depth=1)
         assert result is None
 
 

@@ -50,6 +50,7 @@ class TestPhase2FullPipeline:
                 "quic_fsm_sending",
                 "quic_fsm_receiving",
                 "quic_ack_frequency_extension",
+                "quic_time",
                 "ip",
                 "ipv6",
             }, f"Unexpected unresolved: {fname} -> {inc_name}"

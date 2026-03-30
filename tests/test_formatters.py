@@ -304,7 +304,14 @@ class TestCapabilitiesFormatter:
     def test_all_available(self):
         md = format_tool_result(
             "ivy_capabilities",
-            {"success": True, "ivy_check": True, "ivyc": True, "ivy_show": False},
+            {
+                "success": True,
+                "cli_tools": {
+                    "ivy_check": True,
+                    "ivyc": True,
+                    "ivy_show": False,
+                },
+            },
         )
         assert "[+] `ivy_check`" in md
         assert "[-] `ivy_show`" in md

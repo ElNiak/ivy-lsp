@@ -373,45 +373,10 @@ class IncludeResolver:
                         if os.path.isfile(candidate):
                             return os.path.realpath(candidate)
 
-            # Broader priority-ordered layer fallback with proximity scoring
-            cross_candidates = []
-            for lid in _partition_staging:
-                if lid == layer_id:
-                    continue
-                if _active_layers and lid not in _active_layers:
-                    continue  # Skip non-active layers
-                cand = os.path.join(_partition_staging[lid], fname)
-                if os.path.isfile(cand):
-                    cross_candidates.append((lid, cand))
-
-            if cross_candidates:
-                if len(cross_candidates) == 1:
-                    _lid, _cand = cross_candidates[0]
-                    logger.debug(
-                        "Cross-layer resolve: '%s' found in layer '%s' (from layer '%s')",
-                        include_name,
-                        _lid,
-                        layer_id,
-                    )
-                    return os.path.realpath(_cand)
-
-                # Multiple candidates: score by path proximity to from_file
-                def _proximity(item):
-                    _item_lid, _item_cand = item
-                    real = os.path.realpath(_item_cand)
-                    common = os.path.commonpath([from_file_real, real])
-                    return len(common)
-
-                best_lid, best_cand = max(cross_candidates, key=_proximity)
-                logger.debug(
-                    "Cross-layer resolve (proximity): '%s' -> layer '%s' "
-                    "(from layer '%s', %d candidates)",
-                    include_name,
-                    best_lid,
-                    layer_id,
-                    len(cross_candidates),
-                )
-                return os.path.realpath(best_cand)
+            # No cross-layer proximity fallback. If a file isn't in own-layer
+            # or depends_on, it's unresolved. This prevents cross-protocol
+            # leakage (e.g., APT file resolving to standard QUIC variant).
+            return None
 
         elif not layer_id and _file_to_layer:
             # File should be in a layer but isn't in _file_to_partition
@@ -458,19 +423,13 @@ class IncludeResolver:
         Returns:
             Resolved absolute path, or None.
         """
-        # Refuse to resolve colliding basenames via flat staging when layers
-        # are active — the correct variant can only be determined through
-        # layer routing (step 2). Fall through to workspace root / stdlib.
-        basename = os.path.basename(fname)
-        if _file_to_layer and basename in _collision_map:
-            logger.warning(
-                "Ambiguous include '%s' from %s: basename has %d variants "
-                "across layers — skipping flat staging, trying workspace root",
-                include_name,
-                os.path.relpath(from_file, self._workspace_root),
-                len(_collision_map[basename]),
-            )
-        elif self._staging_strategy is not None:
+        # When layers are active, resolution is strictly:
+        # own-layer → depends_on → stdlib. Skip flat staging and workspace
+        # root entirely to prevent cross-protocol leakage.
+        if _file_to_layer:
+            return None
+
+        if self._staging_strategy is not None:
             result = self._staging_strategy.resolve(include_name, from_file_real)
             if result is not None:
                 return result
@@ -479,7 +438,7 @@ class IncludeResolver:
             if os.path.isfile(candidate):
                 return os.path.realpath(candidate)
 
-        # Workspace root fallback
+        # Workspace root fallback (non-layered workspaces only)
         candidate = os.path.join(self._workspace_root, fname)
         if os.path.isfile(candidate):
             return os.path.realpath(candidate)

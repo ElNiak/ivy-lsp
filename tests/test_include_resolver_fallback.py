@@ -7,8 +7,8 @@ import pytest
 from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
 
-def test_collision_guard_falls_through_to_workspace_root(tmp_path):
-    """When layer_id is None and basename collides, still try workspace root."""
+def test_collision_guard_blocks_when_layers_active(tmp_path):
+    """When layers are active, colliding basenames do NOT fall through to workspace root."""
     ws = tmp_path / "workspace"
     ws.mkdir()
 
@@ -22,21 +22,19 @@ def test_collision_guard_falls_through_to_workspace_root(tmp_path):
     requester.write_text("#lang ivy1.7\ninclude random_value\n")
 
     resolver = IncludeResolver(str(ws))
-    # Simulate collision state
+    # Simulate collision state with layers active
     resolver._collision_map = {
         "random_value.ivy": [str(target), "/fake/random_value.ivy"]
     }
-    resolver._file_to_layer = {
-        "some_other_file": "apt"
-    }  # non-empty but requester not in it
+    resolver._file_to_layer = {"some_other_file": "apt"}  # non-empty = layers active
     resolver._staging_dir = str(tmp_path / "staging")
     os.makedirs(resolver._staging_dir, exist_ok=True)
     staged = os.path.join(resolver._staging_dir, "random_value.ivy")
     os.symlink(str(target), staged)
 
     result = resolver.resolve("random_value", str(requester))
-    assert result is not None
-    assert result.endswith("random_value.ivy")
+    # With layers active, flat staging + workspace root are skipped entirely
+    assert result is None
 
 
 def test_collision_guard_still_blocks_flat_staging_for_collisions(tmp_path):
