@@ -30,6 +30,24 @@ logger = logging.getLogger(__name__)
 DEBOUNCE_DELAY = float(os.environ.get("IVY_LSP_DEBOUNCE_DELAY", "0.3"))
 
 
+def _cancel_task(tasks: dict[str, asyncio.Task], key: str) -> None:
+    """Cancel and remove an existing task if it's still running."""
+    old = tasks.pop(key, None)
+    if old and not old.done():
+        old.cancel()
+
+
+def _register_task(tasks: dict[str, asyncio.Task], key: str, coro) -> asyncio.Task:
+    """Cancel any existing task for key, create new one with auto-cleanup."""
+    _cancel_task(tasks, key)
+    task = asyncio.get_running_loop().create_task(coro)
+    task.add_done_callback(
+        lambda t, k=key: tasks.pop(k, None) if tasks.get(k) is t else None
+    )
+    tasks[key] = task
+    return task
+
+
 @dataclass
 class _CachedDiagnosticEntry:
     """Per-URI cached diagnostic result for pull diagnostics."""
@@ -258,10 +276,6 @@ def register(server) -> None:
         except Exception:
             logger.debug("Immediate T1 push failed for %s", uri, exc_info=True)
 
-        old_task = _debounce_tasks.pop(uri, None)
-        if old_task and not old_task.done():
-            old_task.cancel()
-
         async def _debounced():
             try:
                 await asyncio.sleep(DEBOUNCE_DELAY)
@@ -295,14 +309,7 @@ def register(server) -> None:
                     "Debounced diagnostics failed for %s", uri, exc_info=True
                 )
 
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(_debounced())
-        task.add_done_callback(
-            lambda t, u=uri: (
-                _debounce_tasks.pop(u, None) if _debounce_tasks.get(u) is t else None
-            )
-        )
-        _debounce_tasks[uri] = task
+        _register_task(_debounce_tasks, uri, _debounced())
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
     async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
@@ -383,30 +390,13 @@ def register(server) -> None:
                     "Deep diagnostics task failed for %s", uri, exc_info=True
                 )
 
-        # Cancel any prior deep task for this URI
-        old_deep = _deep_tasks.pop(uri, None)
-        if old_deep and not old_deep.done():
-            old_deep.cancel()
-        loop = asyncio.get_running_loop()
-        deep_task = loop.create_task(_deep())
-        deep_task.add_done_callback(
-            lambda t, u=uri: (
-                _deep_tasks.pop(u, None) if _deep_tasks.get(u) is t else None
-            )
-        )
-        _deep_tasks[uri] = deep_task
+        _register_task(_deep_tasks, uri, _deep())
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
     def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
         uri = params.text_document.uri
-        # Cancel any pending debounce task for this URI
-        old_task = _debounce_tasks.pop(uri, None)
-        if old_task and not old_task.done():
-            old_task.cancel()
-        # Cancel any pending deep diagnostics task
-        old_deep = _deep_tasks.pop(uri, None)
-        if old_deep and not old_deep.done():
-            old_deep.cancel()
+        _cancel_task(_debounce_tasks, uri)
+        _cancel_task(_deep_tasks, uri)
         # Clear diagnostics for the closed document
         server.diagnostic_cache.invalidate(uri)
         server.text_document_publish_diagnostics(
