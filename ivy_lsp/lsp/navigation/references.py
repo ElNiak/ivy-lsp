@@ -11,6 +11,7 @@ from typing import List, Optional, Set
 from lsprotocol import types as lsp
 
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 from ivy_lsp.infra.utils.scope_ranking import get_layer_scope
 
@@ -66,7 +67,7 @@ def find_references(
         return []
 
     # For dotted names like ``frame.ack``, match only the last component.
-    name = word.rsplit(".", 1)[-1] if "." in word else word
+    name = get_last_component(word)
     pattern = re.compile(r"\b" + re.escape(name) + r"\b")
 
     resolver = indexer.resolver

@@ -11,6 +11,7 @@ from typing import List, Optional, Sequence
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 
 
@@ -59,7 +60,7 @@ def compute_selection_ranges(
         # 1. Word under cursor
         word = word_at_position(source_lines, pos)
         if word:
-            name = word.rsplit(".", 1)[-1] if "." in word else word
+            name = get_last_component(word)
             line = source_lines[pos.line]
             for m in re.finditer(r"\b" + re.escape(name) + r"\b", line):
                 if m.start() <= pos.character <= m.end():

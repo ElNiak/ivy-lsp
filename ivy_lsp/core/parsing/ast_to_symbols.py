@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from lsprotocol.types import SymbolKind
 
 from ivy_lsp.core.parsing.symbols import IvySymbol, SymbolReference
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import ivy_location_to_range
 
 logger = logging.getLogger(__name__)
@@ -345,7 +346,7 @@ def _convert_action(decl: Any, filename: str, source: str) -> List[IvySymbol]:
     loc = defs[0][1] if len(defs[0]) >= 2 else None
     # Use the leaf name (after last dot) for source scanning, since nested
     # actions have dotted names like "quic_packet_type.next".
-    leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
+    leaf_name = get_last_component(name)
     rng = _loc_to_tuple(loc, source, name=leaf_name, keyword="action")
     detail = _extract_action_detail(decl)
 
@@ -624,7 +625,7 @@ def _convert_definition(decl: Any, filename: str, source: str) -> List[IvySymbol
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
+    leaf_name = get_last_component(name)
     rng = _loc_to_tuple(loc, source, name=leaf_name, keyword="definition")
 
     return [
@@ -633,7 +634,7 @@ def _convert_definition(decl: Any, filename: str, source: str) -> List[IvySymbol
             kind=SymbolKind.Function,
             range=rng,
             file_path=filename,
-            synthetic=re.fullmatch(r"def\d+", name.rsplit(".", 1)[-1]) is not None,
+            synthetic=re.fullmatch(r"def\d+", get_last_component(name)) is not None,
         )
     ]
 
@@ -651,7 +652,7 @@ def _convert_derived(decl: Any, filename: str, source: str) -> List[IvySymbol]:
 
     name = defs[0][0]
     loc = defs[0][1] if len(defs[0]) >= 2 else None
-    leaf_name = name.rsplit(".", 1)[-1] if "." in name else name
+    leaf_name = get_last_component(name)
     rng = _loc_to_tuple(loc, source, name=leaf_name, keyword="derived")
 
     return [

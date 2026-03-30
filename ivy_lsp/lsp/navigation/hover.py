@@ -11,6 +11,7 @@ from lsprotocol.types import SymbolKind
 
 from ivy_lsp.core.parsing.symbols import IvySymbol
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import word_at_position
 from ivy_lsp.infra.utils.symbol_resolver import (
     ensure_deep_parsed,
@@ -159,7 +160,7 @@ def _enrich_with_semantic_model(
         None,
     )
     if sn is None and "." in symbol_name:
-        last = symbol_name.rsplit(".", 1)[-1]
+        last = get_last_component(symbol_name)
         matches = semantic_model.get_nodes_by_name(last)
         sn = next(
             (
@@ -215,7 +216,7 @@ def _hover_from_semantic_model(
     type_matches = [n for n in all_matches if isinstance(n, TypeNode)]
 
     if not matches and not type_matches and "." in word:
-        last = word.rsplit(".", 1)[-1]
+        last = get_last_component(word)
         all_by_last = semantic_model.get_nodes_by_name(last)
         by_last = [n for n in all_by_last if isinstance(n, SymbolNode)]
         suffix = [sn for sn in by_last if sn.qualified_name.endswith(word)]

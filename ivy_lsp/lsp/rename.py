@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 
 
@@ -46,7 +47,7 @@ def compute_rename(
     if not word:
         return None
 
-    name = word.rsplit(".", 1)[-1] if "." in word else word
+    name = get_last_component(word)
     pattern = re.compile(r"\b" + re.escape(name) + r"\b")
 
     if indexer is None:

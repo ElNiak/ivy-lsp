@@ -18,6 +18,7 @@ from typing import List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ _DEFINITION_KINDS = frozenset(
 
 def _def_boost(fs: "FlatSymbol", q_lower: str) -> int:
     """Return 0 if the symbol's leaf name exactly matches the query, else 1."""
-    leaf = fs.qualified_name.rsplit(".", 1)[-1].lower()
+    leaf = get_last_component(fs.qualified_name).lower()
     return 0 if (leaf == q_lower and fs.kind in _DEFINITION_KINDS) else 1
 
 
@@ -136,7 +137,7 @@ def search_symbols(flat: List[FlatSymbol], query: str) -> List[FlatSymbol]:
 
     # Sort by relevance before truncation: exact leaf > prefix > substring
     def _relevance(fs: FlatSymbol) -> tuple:
-        leaf = fs.qualified_name.rsplit(".", 1)[-1].lower()
+        leaf = get_last_component(fs.qualified_name).lower()
         if leaf == q:
             return (0, fs.qualified_name)
         if leaf.startswith(q):

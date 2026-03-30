@@ -14,6 +14,8 @@ import os
 import time
 from typing import Any, Callable, Optional
 
+from ivy_lsp.infra.utils.name_utils import get_last_component
+
 logger = logging.getLogger(__name__)
 
 
@@ -223,7 +225,7 @@ def _wire_semantic_edges(
 
         def _resolve_name(name: str) -> str | None:
             """Resolve a symbol name to a node ID using O(1) name index."""
-            last = name.rsplit(".", 1)[-1] if "." in name else name
+            last = get_last_component(name)
             candidates = model.get_nodes_by_name(last)
             # Prefer qualified name match
             for c in candidates:

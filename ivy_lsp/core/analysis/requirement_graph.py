@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
+from ivy_lsp.infra.utils.name_utils import get_last_component
+
 if TYPE_CHECKING:
     from ivy_lsp.core.semantic.nodes import RfcRequirement
 
@@ -491,7 +493,7 @@ class RequirementGraph:
                         self.add_action(
                             ActionNode(
                                 id=sym.name,
-                                name=sym.name.rsplit(".", 1)[-1],
+                                name=get_last_component(sym.name),
                                 qualified_name=sym.name,
                                 file=sym.file_path or "",
                                 line=sym.range[0] if sym.range else 0,
@@ -503,7 +505,7 @@ class RequirementGraph:
                     self.add_action(
                         ActionNode(
                             id=req.monitor_action,
-                            name=req.monitor_action.rsplit(".", 1)[-1],
+                            name=get_last_component(req.monitor_action),
                             qualified_name=req.monitor_action,
                             file=req.file,
                             line=req.line,
@@ -526,7 +528,7 @@ class RequirementGraph:
                     self.add_state_var(
                         StateVarNode(
                             id=var_name,
-                            name=var_name.rsplit(".", 1)[-1],
+                            name=get_last_component(var_name),
                             qualified_name=var_name,
                             file=sym.file_path if sym and sym.file_path else "",
                             line=sym.range[0] if sym and sym.range else 0,

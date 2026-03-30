@@ -29,6 +29,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.parsing.symbols import is_monitor_symbol
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 from ivy_lsp.infra.utils.symbol_resolver import lookup_with_dotted_fallback
 
@@ -95,7 +96,7 @@ def _find_symbol_node_id(
     """Find a :class:`SymbolNode` ID in *model* matching *name* and *file*."""
     from ivy_lsp.core.semantic.nodes import SymbolNode
 
-    last = name.rsplit(".", 1)[-1] if "." in name else name
+    last = get_last_component(name)
     candidates = [n for n in model.get_nodes_by_name(last) if isinstance(n, SymbolNode)]
     # Prefer match scoped to the file.
     for sn in candidates:
@@ -255,7 +256,7 @@ def _get_incoming_calls_regex(
 ) -> List[lsp.CallHierarchyIncomingCall]:
     """Regex-based incoming-call scanner (brute-force fallback)."""
     # Search for references across the workspace (same approach as references.py).
-    last_component = item_name.rsplit(".", 1)[-1] if "." in item_name else item_name
+    last_component = get_last_component(item_name)
     pattern = re.compile(r"\b" + re.escape(last_component) + r"\b")
 
     all_files = indexer.resolver.find_all_ivy_files()
@@ -388,7 +389,7 @@ def _get_outgoing_calls_regex(
     file_symbols = indexer.get_symbols(item_filepath)
 
     # Find the declaration line for item_name.
-    last_component = item_name.rsplit(".", 1)[-1] if "." in item_name else item_name
+    last_component = get_last_component(item_name)
     decl_line = None
     for sym in file_symbols:
         if sym.name == last_component or sym.name == item_name:

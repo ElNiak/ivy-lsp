@@ -13,6 +13,7 @@ from typing import Any, List
 
 from ivy_lsp.core.adapters.protocols import TypeAnnotation
 from ivy_lsp.core.parsing.ast_to_symbols import is_from_included_file
+from ivy_lsp.infra.utils.name_utils import get_last_component
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class AstEnrichmentAdapter:
                     variants.append(ext_name)
 
         line = _extract_line(decl)
-        short_name = name.rsplit(".", 1)[-1] if "." in name else name
+        short_name = get_last_component(name)
 
         annotations.append(
             TypeAnnotation(
@@ -168,7 +169,7 @@ class AstEnrichmentAdapter:
             logger.debug("Failed to extract action params for %s", name, exc_info=True)
 
         line = _extract_line(decl)
-        short_name = name.rsplit(".", 1)[-1] if "." in name else name
+        short_name = get_last_component(name)
 
         annotations.append(
             TypeAnnotation(

@@ -12,6 +12,7 @@ from typing import Any, List, Tuple
 from ivy_lsp.core.compilation.ir import CompiledModuleIR
 from ivy_lsp.core.semantic.edges import SemanticEdgeType
 from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
+from ivy_lsp.infra.utils.name_utils import get_last_component
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def enrich_semantic_model(
         nodes.append(
             TypeNode(
                 id=node_id,
-                name=sort_name.rsplit(".", 1)[-1],
+                name=get_last_component(sort_name),
                 qualified_name=sort_name,
                 file=filepath,
                 line=0,
@@ -69,7 +70,7 @@ def enrich_semantic_model(
         nodes.append(
             SymbolNode(
                 id=node_id,
-                name=sym_name.rsplit(".", 1)[-1],
+                name=get_last_component(sym_name),
                 qualified_name=sym_name,
                 kind=kind,
                 file=filepath,
@@ -91,7 +92,7 @@ def enrich_semantic_model(
         nodes.append(
             SymbolNode(
                 id=node_id,
-                name=action_name.rsplit(".", 1)[-1],
+                name=get_last_component(action_name),
                 qualified_name=action_name,
                 kind="action",
                 file=filepath,
@@ -154,7 +155,7 @@ def enrich_requirement_graph(
         graph.add_action_if_absent(
             ActionNode(
                 id=action_name,
-                name=action_name.rsplit(".", 1)[-1],
+                name=get_last_component(action_name),
                 qualified_name=action_name,
                 file=ir.source_file,
                 line=0,

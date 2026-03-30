@@ -10,6 +10,7 @@ from typing import Any, List, Optional, Union
 from lsprotocol import types as lsp
 
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 from ivy_lsp.infra.utils.symbol_resolver import (
     ensure_deep_parsed,
@@ -151,7 +152,7 @@ def _lookup_via_semantic_model(word: str, semantic_model: Any) -> list:
                 results.append(_SemanticSymbolLoc(node.file, node.line))
         if not results and "." in word:
             # Fallback: qualified name — try last segment
-            last = word.rsplit(".", 1)[-1]
+            last = get_last_component(word)
             for node in semantic_model.get_nodes_by_name(last):
                 qn = getattr(node, "qualified_name", None)
                 if qn == word and node.file and node.line:

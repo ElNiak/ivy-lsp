@@ -36,6 +36,7 @@ from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.infra.observability.session import workspace_hash
 from ivy_lsp.infra.utils.basename_cache import BasenameCache
 from ivy_lsp.infra.utils.lazy_builder import LazyAsyncBuilder
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.mcp import client as sidecar_client
 from ivy_lsp.mcp.context import ToolContext
 
@@ -670,7 +671,7 @@ class McpServerState:
                     graph.add_action_if_absent(
                         ActionNode(
                             id=req.monitor_action,
-                            name=req.monitor_action.rsplit(".", 1)[-1],
+                            name=get_last_component(req.monitor_action),
                             qualified_name=req.monitor_action,
                             file=req.file,
                             line=req.line,
@@ -683,7 +684,7 @@ class McpServerState:
                     graph.add_state_var(
                         StateVarNode(
                             id=var_name,
-                            name=var_name.rsplit(".", 1)[-1],
+                            name=get_last_component(var_name),
                             qualified_name=var_name,
                             file=filepath_w,
                             line=line_w,

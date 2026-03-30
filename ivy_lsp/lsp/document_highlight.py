@@ -12,6 +12,7 @@ from typing import List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
 
 
@@ -29,7 +30,7 @@ def compute_document_highlights(
     if not word:
         return []
 
-    name = word.rsplit(".", 1)[-1] if "." in word else word
+    name = get_last_component(word)
     pattern = re.compile(r"\b" + re.escape(name) + r"\b")
 
     definition_lines: set[int] = set()
