@@ -26,6 +26,17 @@ from ivy_lsp.lsp.workspace_symbols import (
 # ---------------------------------------------------------------------------
 
 
+def _quic_workspace():
+    """Standard quic-only workspace used in most tests."""
+    return ActiveWorkspace(
+        active_group="quic",
+        active_layers={"quic"},
+        active_tests=[],
+        granularity="protocol",
+        set_by="explicit",
+    )
+
+
 def _make_symbol(name: str, file_path: str) -> IvySymbol:
     return IvySymbol(
         name=name,
@@ -80,13 +91,7 @@ class TestWorkspaceSymbolsFilterActiveLayers:
         }
         indexer = _MockIndexer(syms, file_to_layer=file_to_layer)
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(indexer, query="", active_workspace=ws)
         names = [r.name for r in results]
@@ -111,13 +116,7 @@ class TestWorkspaceSymbolsFilterActiveLayers:
         }
         indexer = _MockIndexer(syms, file_to_layer=file_to_layer)
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(indexer, query="sym", active_workspace=ws)
         names = [r.name for r in results]
@@ -184,13 +183,7 @@ class TestWorkspaceSymbolsStdlibAlwaysIncluded:
         }
         indexer = _MockIndexer(syms, file_to_layer=file_to_layer)
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(indexer, query="", active_workspace=ws)
         names = [r.name for r in results]
@@ -206,13 +199,7 @@ class TestWorkspaceSymbolsStdlibAlwaysIncluded:
         syms = [_make_symbol("net_sym", stdlib_file)]
         indexer = _MockIndexer(syms, file_to_layer={})
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(indexer, query="", active_workspace=ws)
         names = [r.name for r in results]
@@ -270,13 +257,7 @@ class TestWorkspaceSymbolsNoFilterWhenCleared:
             def get_scope_files_for_file(self, fp):
                 return None
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(
             _NoResolverIndexer(), query="", active_workspace=ws
@@ -322,13 +303,7 @@ class TestWorkspaceSymbolsFilterWithQuery:
         file_to_layer = {quic_file: "quic", apt_file: "apt"}
         indexer = _MockIndexer(syms, file_to_layer=file_to_layer)
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(indexer, query="conn", active_workspace=ws)
         names = [r.name for r in results]
@@ -362,13 +337,7 @@ class TestWorkspaceSymbolsFilterWithQuery:
             def get_scope_files_for_file(self, fp):
                 return None
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(
             _NullIndexer(), query="", active_workspace=ws
@@ -473,13 +442,7 @@ class TestWorkspaceSymbolsProtocolScopingFromFilepath:
         file_to_layer = {quic_file: "quic", apt_file: "apt"}
         indexer = _MockIndexer(syms, file_to_layer=file_to_layer)
 
-        ws = ActiveWorkspace(
-            active_group="quic",
-            active_layers={"quic"},
-            active_tests=[],
-            granularity="protocol",
-            set_by="explicit",
-        )
+        ws = _quic_workspace()
 
         results = compute_workspace_symbols(
             indexer,

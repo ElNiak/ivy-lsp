@@ -174,6 +174,45 @@ def clean_env(monkeypatch):
     monkeypatch.delenv("IVY_WORKSPACE_ROOT", raising=False)
 
 
+QUIC_WORKSPACE_FILES = {
+    "quic": {
+        "main.ivy": IVY_MAIN,
+        "types.ivy": IVY_TYPES,
+    },
+}
+
+DUAL_PROTOCOL_WORKSPACE_FILES = {
+    "quic": {
+        "main.ivy": IVY_MAIN,
+        "types.ivy": IVY_TYPES,
+    },
+    "minip": {
+        "main.ivy": IVY_MINIP_MAIN,
+        "minip_types.ivy": IVY_MINIP_TYPES,
+    },
+}
+
+
+@pytest.fixture
+def build_index(tmp_path, clean_env):
+    """Build workspace index(es) and return (ctx, ws_root, summaries)."""
+
+    def _build(workspace_files, protocols=None):
+        ws_root = _make_workspace(tmp_path, workspace_files)
+        config = _make_workspace_config(ws_root)
+        summaries = []
+        if protocols is None:
+            protocols = list(workspace_files.keys())
+        for proto in protocols:
+            proto_dir = os.path.join(ws_root, "protocol-testing", proto)
+            builder = IndexBuilder(ws_root, config)
+            summaries.append(builder.build_protocol(proto_dir))
+        ctx = WorkspaceContext.load(ws_root)
+        return ctx, ws_root, summaries
+
+    return _build
+
+
 # ---------------------------------------------------------------------------
 # Test 1: Full roundtrip -- build then load
 # ---------------------------------------------------------------------------
@@ -182,47 +221,17 @@ def clean_env(monkeypatch):
 class TestFullRoundtrip:
     """Build index with IndexBuilder, load via WorkspaceContext, verify."""
 
-    def test_roundtrip_has_index(self, tmp_path, clean_env):
+    def test_roundtrip_has_index(self, build_index):
         """After building, WorkspaceContext.load finds the index."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-        proto_dir = os.path.join(ws_root, "protocol-testing", "quic")
-
-        builder = IndexBuilder(ws_root, config)
-        summary = builder.build_protocol(proto_dir)
-        assert summary["status"] == "ok"
-        assert summary["files"] == 2
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, summaries = build_index(QUIC_WORKSPACE_FILES)
+        assert summaries[0]["status"] == "ok"
+        assert summaries[0]["files"] == 2
         assert ctx.has_index() is True
         assert "quic" in ctx.list_protocols()
 
-    def test_roundtrip_symbol_count(self, tmp_path, clean_env):
+    def test_roundtrip_symbol_count(self, build_index):
         """Loaded index has symbols for both files."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-        proto_dir = os.path.join(ws_root, "protocol-testing", "quic")
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(proto_dir)
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, summaries = build_index(QUIC_WORKSPACE_FILES)
         idx = ctx.protocol_indexes["quic"]
 
         # Both files should have symbol entries
@@ -233,24 +242,9 @@ class TestFullRoundtrip:
         total_symbols = sum(len(syms) for syms in idx.symbols.values())
         assert total_symbols > 0, "Expected at least one symbol in the index"
 
-    def test_roundtrip_include_edges(self, tmp_path, clean_env):
+    def test_roundtrip_include_edges(self, build_index):
         """Loaded IncludeGraph has the main.ivy -> types.ivy edge."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-        proto_dir = os.path.join(ws_root, "protocol-testing", "quic")
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(proto_dir)
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(QUIC_WORKSPACE_FILES)
         idx = ctx.protocol_indexes["quic"]
 
         includes = idx.includes.get_includes("main.ivy")
@@ -258,24 +252,9 @@ class TestFullRoundtrip:
             "types.ivy" in includes
         ), f"Expected main.ivy -> types.ivy edge, got: {includes}"
 
-    def test_roundtrip_test_scope_exists(self, tmp_path, clean_env):
+    def test_roundtrip_test_scope_exists(self, build_index):
         """At least one test scope is created for the file with exports."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-        proto_dir = os.path.join(ws_root, "protocol-testing", "quic")
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(proto_dir)
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(QUIC_WORKSPACE_FILES)
         idx = ctx.protocol_indexes["quic"]
 
         # main.ivy has "export action send_packet" -> should produce a scope
@@ -288,24 +267,9 @@ class TestFullRoundtrip:
             "main" in idx.scopes
         ), f"Expected scope key 'main', got keys: {list(idx.scopes.keys())}"
 
-    def test_roundtrip_scope_include_closure(self, tmp_path, clean_env):
+    def test_roundtrip_scope_include_closure(self, build_index):
         """The test scope's include_closure contains the included file."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-        proto_dir = os.path.join(ws_root, "protocol-testing", "quic")
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(proto_dir)
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(QUIC_WORKSPACE_FILES)
         scope = ctx.get_test_scope("main")
         assert scope is not None
 
@@ -316,24 +280,9 @@ class TestFullRoundtrip:
         # And also the test file itself
         assert "main.ivy" in scope.include_closure
 
-    def test_roundtrip_staleness_fresh(self, tmp_path, clean_env):
+    def test_roundtrip_staleness_fresh(self, build_index):
         """Immediately after building, the index should be fresh."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-        proto_dir = os.path.join(ws_root, "protocol-testing", "quic")
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(proto_dir)
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(QUIC_WORKSPACE_FILES)
         idx = ctx.protocol_indexes["quic"]
 
         assert idx.staleness.status == "fresh"
@@ -412,55 +361,17 @@ class TestStalenessDetection:
 class TestTwoProtocols:
     """Build indexes for two protocols, verify independence."""
 
-    def test_both_protocols_listed(self, tmp_path, clean_env):
+    def test_both_protocols_listed(self, build_index):
         """Both protocols appear in list_protocols()."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-                "minip": {
-                    "main.ivy": IVY_MINIP_MAIN,
-                    "minip_types.ivy": IVY_MINIP_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(os.path.join(ws_root, "protocol-testing", "quic"))
-        builder.build_protocol(os.path.join(ws_root, "protocol-testing", "minip"))
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(DUAL_PROTOCOL_WORKSPACE_FILES)
         protocols = ctx.list_protocols()
         assert "quic" in protocols
         assert "minip" in protocols
         assert len(protocols) == 2
 
-    def test_scopes_are_independent(self, tmp_path, clean_env):
+    def test_scopes_are_independent(self, build_index):
         """Scopes from each protocol are separate."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-                "minip": {
-                    "main.ivy": IVY_MINIP_MAIN,
-                    "minip_types.ivy": IVY_MINIP_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(os.path.join(ws_root, "protocol-testing", "quic"))
-        builder.build_protocol(os.path.join(ws_root, "protocol-testing", "minip"))
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(DUAL_PROTOCOL_WORKSPACE_FILES)
 
         quic_idx = ctx.protocol_indexes["quic"]
         minip_idx = ctx.protocol_indexes["minip"]
@@ -479,28 +390,9 @@ class TestTwoProtocols:
         assert "minip_types.ivy" in minip_closure
         assert "minip_types.ivy" not in quic_closure
 
-    def test_symbols_are_independent(self, tmp_path, clean_env):
+    def test_symbols_are_independent(self, build_index):
         """Symbols from each protocol are separate."""
-        ws_root = _make_workspace(
-            tmp_path,
-            {
-                "quic": {
-                    "main.ivy": IVY_MAIN,
-                    "types.ivy": IVY_TYPES,
-                },
-                "minip": {
-                    "main.ivy": IVY_MINIP_MAIN,
-                    "minip_types.ivy": IVY_MINIP_TYPES,
-                },
-            },
-        )
-        config = _make_workspace_config(ws_root)
-
-        builder = IndexBuilder(ws_root, config)
-        builder.build_protocol(os.path.join(ws_root, "protocol-testing", "quic"))
-        builder.build_protocol(os.path.join(ws_root, "protocol-testing", "minip"))
-
-        ctx = WorkspaceContext.load(ws_root)
+        ctx, ws_root, _ = build_index(DUAL_PROTOCOL_WORKSPACE_FILES)
 
         quic_idx = ctx.protocol_indexes["quic"]
         minip_idx = ctx.protocol_indexes["minip"]
