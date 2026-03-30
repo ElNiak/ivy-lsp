@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 # --- Global sidecar client state ---
 _sidecar_client: Any | None = None
 _sidecar_port: int | None = None  # Discovered port (set by monitor thread)
-_list_tools_cache: dict[int, bool] = {}  # Keyed by port; cleared on port change
+_list_tools_cache: set[int] = (
+    set()
+)  # Ports with warm list_tools; cleared on port change
 
 
 def get_sidecar_client() -> Any | None:
@@ -197,7 +199,7 @@ async def call_sidecar_once(
                 await session.initialize()
                 if port not in _list_tools_cache:
                     await session.list_tools()
-                    _list_tools_cache[port] = True
+                    _list_tools_cache.add(port)
                 return await _cancel_safe_wait_for(
                     session.call_tool(tool_name, kwargs), timeout
                 )

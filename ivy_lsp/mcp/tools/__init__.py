@@ -113,20 +113,18 @@ def get_tool_metadata(tool_name: str | None = None) -> dict[str, Any]:
     return {k: dict(v) for k, v in _TOOL_METADATA.items()}
 
 
-def _model_not_ready_response(tool_name: str) -> str:
-    """Return a structured JSON response when the semantic model is still building."""
-    return json.dumps(
-        {
-            "success": False,
-            "tool": tool_name,
-            "message": (
-                "Model is still building (~30s remaining). "
-                "Use ivy_diagnostics(mode='structural') for immediate results, "
-                "or retry this tool in 30 seconds."
-            ),
-            "retry_after_seconds": 30,
-        }
-    )
+def _model_not_ready_response(tool_name: str) -> dict:
+    """Return a structured dict when the semantic model is still building."""
+    return {
+        "success": False,
+        "tool": tool_name,
+        "message": (
+            "Model is still building (~30s remaining). "
+            "Use ivy_diagnostics(mode='structural') for immediate results, "
+            "or retry this tool in 30 seconds."
+        ),
+        "retry_after_seconds": 30,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -209,12 +207,7 @@ def error_response(message: str) -> dict:
 # Markdown formatting layer
 # ---------------------------------------------------------------------------
 
-from ivy_lsp.mcp.client import (
-    call_sidecar_once,
-    get_sidecar_client,
-    get_sidecar_port,
-    set_sidecar_client,
-)
+from ivy_lsp.mcp.client import call_sidecar_once, get_sidecar_port
 
 
 async def _cleanup_sidecar(client: Any) -> None:
@@ -403,9 +396,7 @@ def safe_tool(_fn=None, *, ctx=None):
                             tool_name,
                             status.get("state"),
                         )
-                        return _error_result(
-                            json.loads(_model_not_ready_response(tool_name))
-                        )
+                        return _error_result(_model_not_ready_response(tool_name))
 
             sem = _ensure_semaphore()
             cfg = get_config()

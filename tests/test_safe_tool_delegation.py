@@ -120,7 +120,7 @@ def test_list_tools_cache_cleared_on_port_change():
     """set_sidecar_port with a different port clears _list_tools_cache."""
     old_port = sidecar_client.get_sidecar_port()
     try:
-        _list_tools_cache[19847] = True
+        _list_tools_cache.add(19847)
         assert 19847 in _list_tools_cache
 
         sidecar_client.set_sidecar_port(19848)

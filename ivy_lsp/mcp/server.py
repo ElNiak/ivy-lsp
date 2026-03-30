@@ -383,7 +383,8 @@ class McpServerState:
                     try:
                         rel = os.path.relpath(ivy_path, proto_dir)
                         stat = os.stat(ivy_path)
-                        sha = hashlib.sha256(open(ivy_path, "rb").read()).hexdigest()
+                        with open(ivy_path, "rb") as fh:
+                            sha = hashlib.sha256(fh.read()).hexdigest()
                         files_meta[rel] = {
                             "mtime": stat.st_mtime,
                             "size": stat.st_size,

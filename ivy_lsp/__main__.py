@@ -327,7 +327,7 @@ def _main_impl(startup_t0: float) -> None:
                         e
                         for e in eg.exceptions
                         if isinstance(e, (RuntimeError, BaseExceptionGroup))
-                        and "cancel scope" in str(e)
+                        and "cancel scope" in str(e).lower()
                     ]
                     if cancel_scope_errors and _attempt < _MAX_MCP_RESTARTS:
                         log.warning(
