@@ -358,7 +358,75 @@ class IndexBuilder:
         # can resolve cross-directory includes.
         resolver_config = resolver.to_config_dict()
 
+        # -- Load existing index cache from .ivy-index/ --------------------
+        # We load cached artifacts so that files whose SHA-256 hasn't changed
+        # can skip re-parsing entirely (only SHA-256 computation is needed).
+        index_dir_existing = os.path.join(protocol_dir, ".ivy-index")
+        cached_manifest = self._load_json(
+            os.path.join(index_dir_existing, "manifest.json")
+        )
+        cached_symbols = self._load_json(
+            os.path.join(index_dir_existing, "symbols.json")
+        )
+        cached_includes_raw = self._load_json(
+            os.path.join(index_dir_existing, "includes_raw.json")
+        )
+        cached_exports = self._load_json(
+            os.path.join(index_dir_existing, "exports.json")
+        )
+        cached_requirements = self._load_json(
+            os.path.join(index_dir_existing, "requirements.json")
+        )
+
+        # Build a sha256 lookup from the cached manifest: {rel_path -> sha256}
+        cached_sha256: Dict[str, str] = {}
+        if isinstance(cached_manifest, dict):
+            for rel_p, entry in cached_manifest.get("files", {}).items():
+                if isinstance(entry, dict) and entry.get("sha256"):
+                    cached_sha256[rel_p] = entry["sha256"]
+
+        cache_hits = 0
+        cache_misses = 0
+
         for filepath in ivy_files:
+            rel_path = os.path.relpath(filepath, protocol_dir)
+
+            # -- Cache lookup: compute SHA-256 and compare against manifest --
+            try:
+                current_sha = _file_sha256(filepath)
+            except OSError:
+                current_sha = ""
+
+            cached_hit = (
+                current_sha
+                and current_sha == cached_sha256.get(rel_path)
+                and isinstance(cached_symbols, dict)
+                and rel_path in cached_symbols
+                and isinstance(cached_includes_raw, dict)
+                and rel_path in cached_includes_raw
+                and isinstance(cached_exports, dict)
+                and rel_path in cached_exports
+                and isinstance(cached_requirements, dict)
+                and rel_path in cached_requirements
+                and isinstance(cached_manifest, dict)
+                and rel_path in cached_manifest.get("files", {})
+            )
+
+            if cached_hit:
+                cache_hits += 1
+                # Restore all data directly from cache — no parsing needed
+                symbols_map[rel_path] = cached_symbols[rel_path]
+                includes_raw[rel_path] = cached_includes_raw[rel_path]
+                exports_map[rel_path] = cached_exports[rel_path]
+                requirements_map[rel_path] = cached_requirements[rel_path]
+                manifest_files[rel_path] = cached_manifest["files"][rel_path]
+                cached_tier = cached_manifest["files"][rel_path].get(
+                    "parse_tier", "unknown"
+                )
+                tier_counts[cached_tier] = tier_counts.get(cached_tier, 0) + 1
+                continue
+
+            cache_misses += 1
             file_result = _extract_one_file(
                 filepath=filepath,
                 protocol_dir=protocol_dir,
@@ -400,6 +468,20 @@ class IndexBuilder:
             # Propagate soft errors (export / requirement extraction failures)
             if file_result.error:
                 errors.append(file_result.error)
+
+        # -- Log cache hit rate -------------------------------------------
+        total_processed = cache_hits + cache_misses
+        if total_processed > 0:
+            hit_pct = 100.0 * cache_hits / total_processed
+            logger.info(
+                "Cache hit rate for %s: %d/%d files (%.1f%%) — %d parsed, %d from cache",
+                protocol,
+                cache_hits,
+                total_processed,
+                hit_pct,
+                cache_misses,
+                cache_hits,
+            )
 
         # -- 5. Build IncludeGraph from resolved includes ------------------
         include_graph = IncludeGraph()
@@ -524,6 +606,10 @@ class IndexBuilder:
         self._write_json(
             os.path.join(index_dir, "includes.json"), include_graph.to_edges()
         )
+        # includes_raw.json stores per-file raw include name lists for the
+        # incremental cache.  This is separate from includes.json which stores
+        # the resolved graph edges.
+        self._write_json(os.path.join(index_dir, "includes_raw.json"), includes_raw)
         self._write_json(os.path.join(index_dir, "exports.json"), exports_map)
         self._write_json(os.path.join(index_dir, "requirements.json"), requirements_map)
 
@@ -706,10 +792,13 @@ class IndexBuilder:
     # -- Private helpers ----------------------------------------------------
 
     @staticmethod
-    def _read_file(filepath: str) -> str:
-        """Read a file as UTF-8 text with error replacement."""
-        with open(filepath, encoding="utf-8", errors="replace") as f:
-            return f.read()
+    def _load_json(path: str) -> Any:
+        """Load JSON from *path*, returning ``None`` on any error."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
 
     @staticmethod
     def _write_json(path: str, data: Any) -> None:
@@ -723,38 +812,6 @@ class IndexBuilder:
         from ivy_lsp.infra.utils.serialization import write_locked_pickle
 
         write_locked_pickle(index_dir, filename, obj, logger)
-
-    @staticmethod
-    def _manifest_entry_missing(filepath: str) -> dict:
-        """Manifest entry for a file that could not be read."""
-        return {
-            "mtime": 0.0,
-            "size": 0,
-            "sha256": "",
-            "completeness": "missing",
-            "parse_tier": "unknown",
-        }
-
-    @staticmethod
-    def _manifest_entry_error(filepath: str) -> dict:
-        """Manifest entry for a file that failed parsing."""
-        try:
-            stat = os.stat(filepath)
-            return {
-                "mtime": stat.st_mtime,
-                "size": stat.st_size,
-                "sha256": _file_sha256(filepath),
-                "completeness": "partial",
-                "parse_tier": "unknown",
-            }
-        except OSError:
-            return {
-                "mtime": 0.0,
-                "size": 0,
-                "sha256": "",
-                "completeness": "missing",
-                "parse_tier": "unknown",
-            }
 
 
 # ---------------------------------------------------------------------------

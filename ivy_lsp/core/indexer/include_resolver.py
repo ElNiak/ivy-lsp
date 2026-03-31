@@ -194,7 +194,18 @@ class IncludeResolver:
 
     @classmethod
     def from_config(cls, d: dict) -> "IncludeResolver":
-        """Restore an IncludeResolver from a config dict."""
+        """Restore an IncludeResolver from a config dict.
+
+        Reconstructs all staging state so that worker processes can resolve
+        includes exactly as the main process did.  When a staging directory
+        is present the method:
+
+        1. Restores ``_staging_dir``.
+        2. Scans for ``layer_<id>`` subdirectories and rebuilds
+           ``_partition_staging``, ``_file_to_partition``,
+           ``_file_to_layer``, and ``_layer_by_id`` by following the
+           symlinks that ``build_layered_staging()`` placed there.
+        """
         from ivy_lsp.core.workspace.detection import WorkspaceLayer
 
         layers = [
@@ -213,7 +224,48 @@ class IncludeResolver:
             include_paths=d.get("include_paths", []),
             workspace_layers=layers,
         )
-        instance._staging_dir = d.get("staging_dir")
+        staging_dir = d.get("staging_dir")
+        instance._staging_dir = staging_dir
+
+        # Rebuild partition maps from existing layer_* subdirectories so that
+        # worker processes can route resolves to the correct staging dir.
+        if staging_dir and os.path.isdir(staging_dir) and layers:
+            instance._layer_by_id = {l.id: l for l in layers}
+            for layer in layers:
+                layer_dir = os.path.join(staging_dir, f"layer_{layer.id}")
+                if not os.path.isdir(layer_dir):
+                    continue
+                instance._partition_staging[layer.id] = layer_dir
+                # Walk symlinks to reconstruct file → partition/layer maps.
+                for entry in os.scandir(layer_dir):
+                    if not entry.is_symlink():
+                        continue
+                    target = os.path.realpath(entry.path)
+                    if not os.path.isfile(target):
+                        continue
+                    # Only map files that actually belong to this layer
+                    # (i.e. they live under one of the layer's include_paths).
+                    # Dependency-injected symlinks point to files outside this
+                    # layer's include_paths and are already mapped to their own
+                    # layer, so we skip them here to avoid mis-routing.
+                    target_rel = os.path.relpath(target, instance._workspace_root)
+                    layer_paths = [
+                        ip.rstrip(os.sep) for ip in (layer.include_paths or [])
+                    ]
+                    in_own_layer = any(
+                        target_rel == ip or target_rel.startswith(ip + os.sep)
+                        for ip in layer_paths
+                    )
+                    if in_own_layer:
+                        instance._file_to_layer[target] = layer.id
+                        instance._file_to_partition[target] = layer.id
+
+            logger.debug(
+                "from_config: rebuilt %d partition staging dirs, " "%d files mapped",
+                len(instance._partition_staging),
+                len(instance._file_to_partition),
+            )
+
         return instance
 
     def resolve(self, include_name: str, from_file: str) -> Optional[str]:
