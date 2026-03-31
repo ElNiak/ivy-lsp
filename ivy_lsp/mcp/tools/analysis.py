@@ -282,6 +282,25 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 result["staging_health"] = ctx.include_resolver.staging_health()
             except Exception:
                 pass  # staging health is optional
+        if "staging_health" not in result and ctx.workspace_context is not None:
+            ws_cfg = getattr(ctx.workspace_context, "workspace_config", None)
+            layers = getattr(ws_cfg, "workspace_layers", None) if ws_cfg else None
+            if layers is None:
+                # Try ProtocolIndex-level layer info from manifest
+                layers = []
+                for _proto, idx in ctx.workspace_context.protocol_indexes.items():
+                    manifest = getattr(idx, "manifest", {})
+                    ws_layers = manifest.get("workspace_layers", [])
+                    if ws_layers:
+                        layers = ws_layers
+                        break
+            result["staging_health"] = {
+                "layers_active": bool(layers),
+                "layer_count": len(layers) if layers else 0,
+                "total_staged": 0,
+                "files_mapped_to_layers": 0,
+                "source": "workspace_config_fallback",
+            }
         return _tc.finish(result)
 
     @mcp.tool()
