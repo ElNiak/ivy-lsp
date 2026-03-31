@@ -565,12 +565,12 @@ class ServerSetupMixin:
         for proto_name, proto_idx in ws_ctx.protocol_indexes.items():
             if proto_idx.semantic_model is not None:
                 if self._semantic_model is None:
-                    logger.warning(
-                        "Skipping semantic model merge for %s: "
-                        "server model not initialized (analysis pipeline may have failed)",
-                        proto_name,
+                    from ivy_lsp.core.semantic.model import SemanticModel
+
+                    self._semantic_model = SemanticModel()
+                    logger.info(
+                        "Lazy-initialized SemanticModel for offline cache merge"
                     )
-                    continue
                 try:
                     self._semantic_model.merge_from(proto_idx.semantic_model)
                     loaded_model_protocols += 1
@@ -645,7 +645,8 @@ class ServerSetupMixin:
             from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
             from ivy_lsp.core.semantic.model import SemanticModel
 
-            self._semantic_model = SemanticModel()
+            if self._semantic_model is None:
+                self._semantic_model = SemanticModel()
 
             if self._full_mode:
                 try:
