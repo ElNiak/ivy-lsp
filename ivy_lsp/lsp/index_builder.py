@@ -28,8 +28,9 @@ import logging
 import os
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import ivy_lsp
 from ivy_lsp.core.workspace.detection import detect_ivy_workspace
@@ -55,6 +56,206 @@ def _file_sha256(filepath: str) -> str:
 def _tier_label(tier: int) -> str:
     """Map tier number to a human-readable label."""
     return {1: "ast", 2: "lexer", 3: "regex"}.get(tier, "unknown")
+
+
+# ---------------------------------------------------------------------------
+# Per-file extraction (top-level for ProcessPoolExecutor picklability)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FileExtractionResult:
+    """Result of extracting a single .ivy file.
+
+    All fields are plain Python objects so instances are picklable and can be
+    transferred across process boundaries via :mod:`multiprocessing`.
+    """
+
+    rel_path: str
+    symbols: list = field(default_factory=list)
+    includes: list = field(default_factory=list)
+    exports: dict = field(default_factory=dict)
+    requirements: list = field(default_factory=list)
+    manifest_entry: dict = field(default_factory=dict)
+    tier_label: str = "unknown"
+    tier1_errors: list = field(default_factory=list)
+    sha256: str = ""
+    error: Optional[str] = None
+
+
+def _extract_one_file(
+    filepath: str,
+    protocol_dir: str,
+    resolver_config: dict,
+    fast: bool,
+    parser_timeout: float,
+) -> FileExtractionResult:
+    """Extract symbols, includes, exports, requirements, and manifest data for one file.
+
+    This function is intentionally defined at module level (not as a method) so
+    that it can be pickled and dispatched to worker processes via
+    :class:`concurrent.futures.ProcessPoolExecutor`.
+
+    Args:
+        filepath: Absolute path to the ``.ivy`` file to process.
+        protocol_dir: Absolute path to the protocol directory (used to compute
+            relative paths for the output maps).
+        resolver_config: Serialised :class:`IncludeResolver` config dict produced
+            by :meth:`IncludeResolver.to_config_dict`.  The resolver is
+            reconstructed inside this function so no non-picklable objects are
+            passed across the process boundary.
+        fast: If ``True``, skip Tier 1 (AST parser) and use Tier 2/3 only.
+        parser_timeout: Seconds to allow the parser lock to be acquired (Tier 1).
+
+    Returns:
+        :class:`FileExtractionResult` populated with all extracted data.
+        If the file cannot be read, ``result.error`` is set and all other
+        collection fields are empty.
+    """
+    from ivy_lsp.core.analysis.light_mode_extractor import (
+        extract_exports_imports_light,
+        extract_requirements_light,
+    )
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
+    from ivy_lsp.infra.utils.path_normalize import remap_node_id
+
+    rel_path = os.path.relpath(filepath, protocol_dir)
+
+    # Reconstruct the resolver from its serialised config
+    resolver = IncludeResolver.from_config(resolver_config)
+
+    # -- Read source ----------------------------------------------------------
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as fh:
+            source = fh.read()
+    except OSError as exc:
+        manifest_entry = {
+            "mtime": 0.0,
+            "size": 0,
+            "sha256": "",
+            "completeness": "missing",
+            "parse_tier": "unknown",
+        }
+        return FileExtractionResult(
+            rel_path=rel_path,
+            manifest_entry=manifest_entry,
+            error=f"read error: {rel_path}: {exc}",
+        )
+
+    # -- Parse with TieredExtractor ------------------------------------------
+    extractor = TieredExtractor(
+        resolve_callback=resolver.resolve,
+        parser_timeout=0.0 if fast else parser_timeout,
+    )
+    if fast:
+        extractor._parser_available = False
+
+    try:
+        result = extractor.extract(source, filepath)
+    except Exception as exc:
+        try:
+            stat = os.stat(filepath)
+            sha = _file_sha256(filepath)
+        except OSError:
+            stat = None
+            sha = ""
+        manifest_entry = {
+            "mtime": stat.st_mtime if stat else 0.0,
+            "size": stat.st_size if stat else 0,
+            "sha256": sha,
+            "completeness": "partial",
+            "parse_tier": "unknown",
+        }
+        return FileExtractionResult(
+            rel_path=rel_path,
+            manifest_entry=manifest_entry,
+            error=f"parse error: {rel_path}: {exc}",
+        )
+
+    # -- Symbols and includes ------------------------------------------------
+    symbols = [s.to_dict() for s in result.symbols]
+    includes = list(result.includes)
+
+    # -- Exports / imports ---------------------------------------------------
+    try:
+        export_info = extract_exports_imports_light(source, filepath)
+        exports = export_info.to_dict()
+        export_error: Optional[str] = None
+    except Exception as exc:
+        from ivy_lsp.core.analysis.test_scope import ExportImportInfo
+
+        export_info = ExportImportInfo(file=filepath)
+        exports = export_info.to_dict()
+        export_error = f"export error: {rel_path}: {exc}"
+
+    # -- Requirements --------------------------------------------------------
+    requirements: list = []
+    req_error: Optional[str] = None
+    try:
+        reqs, _writes = extract_requirements_light(source, filepath)
+        for r in reqs:
+            r.file = rel_path
+            r.id = remap_node_id(r.id, lambda _p: rel_path)
+        requirements = [
+            {
+                "id": r.id,
+                "kind": r.kind,
+                "formula_text": r.formula_text,
+                "line": r.line,
+                "file": r.file,
+                "monitor_action": r.monitor_action,
+                "mixin_kind": r.mixin_kind,
+            }
+            for r in reqs
+        ]
+    except Exception as exc:
+        req_error = f"requirement error: {rel_path}: {exc}"
+
+    # -- Manifest entry ------------------------------------------------------
+    completeness = "complete" if not result.errors else "partial"
+    try:
+        stat = os.stat(filepath)
+        sha = _file_sha256(filepath)
+    except OSError:
+        stat = None
+        sha = ""
+    tier = _tier_label(result.tier_used)
+    manifest_entry = {
+        "mtime": stat.st_mtime if stat else 0.0,
+        "size": stat.st_size if stat else 0,
+        "sha256": sha,
+        "completeness": completeness,
+        "parse_tier": tier,
+    }
+
+    # -- Tier-1 error details ------------------------------------------------
+    tier1_errors = [
+        {
+            "file": rel_path,
+            "error_type": e.error_type,
+            "message": e.message,
+        }
+        for e in result.errors
+        if e.tier == 1
+    ]
+
+    # Aggregate any soft errors into a single string
+    soft_errors = [e for e in [export_error, req_error] if e is not None]
+    combined_error: Optional[str] = "; ".join(soft_errors) if soft_errors else None
+
+    return FileExtractionResult(
+        rel_path=rel_path,
+        symbols=symbols,
+        includes=includes,
+        exports=exports,
+        requirements=requirements,
+        manifest_entry=manifest_entry,
+        tier_label=tier,
+        tier1_errors=tier1_errors,
+        sha256=sha,
+        error=combined_error,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -142,21 +343,7 @@ class IndexBuilder:
         logger.info("Found %d .ivy files for protocol %s", len(ivy_files), protocol)
 
         # -- 2-4. Parse files, collect artifacts ---------------------------
-        from ivy_lsp.core.analysis.light_mode_extractor import (
-            extract_exports_imports_light,
-            extract_requirements_light,
-        )
         from ivy_lsp.core.parsing.symbols import IncludeGraph
-        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
-        from ivy_lsp.infra.utils.path_normalize import remap_node_id
-
-        extractor = TieredExtractor(
-            resolve_callback=resolver.resolve,
-            parser_timeout=0.0 if self.fast else 5.0,
-        )
-        if self.fast:
-            # Skip Tier 1 (parser) entirely in fast mode
-            extractor._parser_available = False
 
         manifest_files: Dict[str, dict] = {}
         symbols_map: Dict[str, list] = {}
@@ -166,95 +353,53 @@ class IndexBuilder:
         tier_counts: Dict[str, int] = {"ast": 0, "lexer": 0, "regex": 0, "unknown": 0}
         tier1_failures: List[Dict[str, str]] = []
 
+        # Serialise the resolver once so _extract_one_file() can reconstruct it.
+        # The staging_dir is included in the config dict so the worker process
+        # can resolve cross-directory includes.
+        resolver_config = resolver.to_config_dict()
+
         for filepath in ivy_files:
-            rel_path = os.path.relpath(filepath, protocol_dir)
-            try:
-                source = self._read_file(filepath)
-            except OSError as exc:
-                logger.warning("Cannot read %s: %s", filepath, exc)
-                manifest_files[rel_path] = self._manifest_entry_missing(filepath)
-                errors.append(f"read error: {rel_path}: {exc}")
+            file_result = _extract_one_file(
+                filepath=filepath,
+                protocol_dir=protocol_dir,
+                resolver_config=resolver_config,
+                fast=self.fast,
+                parser_timeout=5.0,
+            )
+            rel_path = file_result.rel_path
+
+            if file_result.error and file_result.manifest_entry.get("completeness") in (
+                "missing",
+                None,
+            ):
+                # Unreadable file — only a manifest entry was produced
+                logger.warning("Cannot read %s: %s", filepath, file_result.error)
+                manifest_files[rel_path] = file_result.manifest_entry
+                errors.append(file_result.error)
                 continue
 
-            # Parse with TieredExtractor
-            try:
-                result = extractor.extract(source, filepath)
-            except Exception as exc:
-                logger.warning("Extraction failed for %s: %s", filepath, exc)
-                manifest_files[rel_path] = self._manifest_entry_error(filepath)
-                errors.append(f"parse error: {rel_path}: {exc}")
+            if file_result.error and not file_result.symbols:
+                # Parse failure — manifest entry with parse-error metadata
+                logger.warning(
+                    "Extraction failed for %s: %s", filepath, file_result.error
+                )
+                manifest_files[rel_path] = file_result.manifest_entry
+                errors.append(file_result.error)
                 continue
 
-            # Symbols
-            symbols_map[rel_path] = [s.to_dict() for s in result.symbols]
-
-            # Includes (raw names)
-            includes_raw[rel_path] = list(result.includes)
-
-            # Exports/imports
-            try:
-                export_info = extract_exports_imports_light(source, filepath)
-                exports_map[rel_path] = export_info.to_dict()
-            except Exception as exc:
-                logger.debug("Export extraction failed for %s: %s", filepath, exc)
-                from ivy_lsp.core.analysis.test_scope import ExportImportInfo
-
-                export_info = ExportImportInfo(file=filepath)
-                exports_map[rel_path] = export_info.to_dict()
-                errors.append(f"export error: {rel_path}: {exc}")
-
-            # Requirements
-            try:
-                reqs, _writes = extract_requirements_light(source, filepath)
-                # Normalize paths to protocol-relative for portable pickle
-                for r in reqs:
-                    r.file = rel_path
-                    r.id = remap_node_id(r.id, lambda _p: rel_path)
-                requirements_map[rel_path] = [
-                    {
-                        "id": r.id,
-                        "kind": r.kind,
-                        "formula_text": r.formula_text,
-                        "line": r.line,
-                        "file": r.file,
-                        "monitor_action": r.monitor_action,
-                        "mixin_kind": r.mixin_kind,
-                    }
-                    for r in reqs
-                ]
-            except Exception as exc:
-                logger.debug("Requirement extraction failed for %s: %s", filepath, exc)
-                requirements_map[rel_path] = []
-                errors.append(f"requirement error: {rel_path}: {exc}")
-
-            # Manifest entry
-            completeness = "complete" if not result.errors else "partial"
-            try:
-                stat = os.stat(filepath)
-                sha = _file_sha256(filepath)
-            except OSError:
-                stat = None
-                sha = ""
-            tier_label = _tier_label(result.tier_used)
-            manifest_files[rel_path] = {
-                "mtime": stat.st_mtime if stat else 0.0,
-                "size": stat.st_size if stat else 0,
-                "sha256": sha,
-                "completeness": completeness,
-                "parse_tier": tier_label,
-            }
+            # Happy path: populate all maps
+            symbols_map[rel_path] = file_result.symbols
+            includes_raw[rel_path] = file_result.includes
+            exports_map[rel_path] = file_result.exports
+            requirements_map[rel_path] = file_result.requirements
+            manifest_files[rel_path] = file_result.manifest_entry
+            tier_label = file_result.tier_label
             tier_counts[tier_label] = tier_counts.get(tier_label, 0) + 1
+            tier1_failures.extend(file_result.tier1_errors)
 
-            # Collect tier-1 failure details for CLI reporting
-            for tier_err in result.errors:
-                if tier_err.tier == 1:
-                    tier1_failures.append(
-                        {
-                            "file": rel_path,
-                            "error_type": tier_err.error_type,
-                            "message": tier_err.message,
-                        }
-                    )
+            # Propagate soft errors (export / requirement extraction failures)
+            if file_result.error:
+                errors.append(file_result.error)
 
         # -- 5. Build IncludeGraph from resolved includes ------------------
         include_graph = IncludeGraph()
