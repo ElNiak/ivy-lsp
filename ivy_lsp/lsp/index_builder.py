@@ -365,22 +365,29 @@ class IndexBuilder:
         # -- Load existing index cache from .ivy-index/ --------------------
         # We load cached artifacts so that files whose SHA-256 hasn't changed
         # can skip re-parsing entirely (only SHA-256 computation is needed).
+        # When --force is set, skip the cache entirely to ensure a full rebuild.
         index_dir_existing = os.path.join(protocol_dir, ".ivy-index")
-        cached_manifest = self._load_json(
-            os.path.join(index_dir_existing, "manifest.json")
-        )
-        cached_symbols = self._load_json(
-            os.path.join(index_dir_existing, "symbols.json")
-        )
-        cached_includes_raw = self._load_json(
-            os.path.join(index_dir_existing, "includes_raw.json")
-        )
-        cached_exports = self._load_json(
-            os.path.join(index_dir_existing, "exports.json")
-        )
-        cached_requirements = self._load_json(
-            os.path.join(index_dir_existing, "requirements.json")
-        )
+        cached_manifest: Any = None
+        cached_symbols: Any = None
+        cached_includes_raw: Any = None
+        cached_exports: Any = None
+        cached_requirements: Any = None
+        if not self.force:
+            cached_manifest = self._load_json(
+                os.path.join(index_dir_existing, "manifest.json")
+            )
+            cached_symbols = self._load_json(
+                os.path.join(index_dir_existing, "symbols.json")
+            )
+            cached_includes_raw = self._load_json(
+                os.path.join(index_dir_existing, "includes_raw.json")
+            )
+            cached_exports = self._load_json(
+                os.path.join(index_dir_existing, "exports.json")
+            )
+            cached_requirements = self._load_json(
+                os.path.join(index_dir_existing, "requirements.json")
+            )
 
         # Build a sha256 lookup from the cached manifest: {rel_path -> sha256}
         cached_sha256: Dict[str, str] = {}
@@ -725,9 +732,21 @@ class IndexBuilder:
 
         results: List[FileExtractionResult] = []
 
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=self.workers
-        ) as executor:
+        try:
+            executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers)
+        except (PermissionError, OSError) as exc:
+            logger.warning(
+                "ProcessPoolExecutor unavailable (%s), falling back to sequential",
+                exc,
+            )
+            return [
+                _extract_one_file(
+                    fp, protocol_dir, resolver_config, self.fast, parser_timeout
+                )
+                for fp in files_to_extract
+            ]
+
+        with executor:
             future_to_path = {}
             for filepath in files_to_extract:
                 future = executor.submit(

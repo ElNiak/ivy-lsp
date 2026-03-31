@@ -648,6 +648,7 @@ class TestParallelExtraction:
           - exports.json keys
         """
         import json
+        import os
 
         ws_root, proto_dir, config = multi_file_workspace
 
