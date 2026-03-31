@@ -34,6 +34,47 @@ class BulkOrchestrationMixin:
             except Exception:
                 logger.exception("Failed to clean up staging directory")
 
+    def _filter_files_to_workspace(self, all_files: list[str]) -> list[str]:
+        """Filter file list to only files within active workspace layers.
+
+        If no workspace is active or no layer routing is available,
+        returns all files unchanged.
+        """
+        resolver = self._indexer.resolver if self._indexer else None
+        if resolver is None or not hasattr(resolver, "_active_layers"):
+            return all_files
+
+        active = getattr(resolver, "_active_layers", set())
+        if not active:
+            return all_files
+
+        file_to_layer = getattr(resolver, "_file_to_layer", {})
+        if not file_to_layer:
+            return all_files
+
+        filtered = [
+            f for f in all_files if file_to_layer.get(os.path.basename(f)) in active
+        ]
+
+        if filtered:
+            slog.info(
+                "Workspace-scoped bulk analysis: %d/%d files (layers: %s)",
+                len(filtered),
+                len(all_files),
+                sorted(active),
+                extra={
+                    "event": LogEvent(LogCategory.DIAGNOSTIC, "bulk_workspace_filter")
+                },
+            )
+            return filtered
+
+        # Fallback: if filtering produced empty set, use all files
+        logger.debug(
+            "Workspace filter produced empty set — using all %d files",
+            len(all_files),
+        )
+        return all_files
+
     def _send_model_ready_notification(self) -> None:
         """Send ``ivy/modelReady`` notification so the client can refresh immediately."""
         if self._shutdown_event.is_set():
@@ -267,6 +308,7 @@ class BulkOrchestrationMixin:
 
         include_t2 = get_config().bulk_analysis_t2
         all_files = self._indexer.get_all_ivy_file_paths()
+        all_files = self._filter_files_to_workspace(all_files)
         if not all_files:
             return
 
