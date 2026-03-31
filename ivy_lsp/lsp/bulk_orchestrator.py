@@ -320,6 +320,43 @@ class BulkOrchestrationMixin:
 
         def _run():
             try:
+                # If semantic model was loaded from offline cache AND all
+                # protocol indexes are fresh, skip T1/T2 entirely.
+                if getattr(self, "_semantic_model_from_cache", False):
+                    ws_ctx = getattr(self, "_workspace_context", None)
+                    all_fresh = True
+                    if ws_ctx is not None:
+                        for proto_idx in ws_ctx.protocol_indexes.values():
+                            if proto_idx.staleness.status != "fresh":
+                                all_fresh = False
+                                break
+                    if all_fresh:
+                        slog.info(
+                            "Cached semantic model is fresh; skipping T1/T2 for %d files",
+                            len(all_files),
+                            extra={
+                                "event": LogEvent(
+                                    LogCategory.MILESTONE,
+                                    "cached_t1t2_skip",
+                                )
+                            },
+                        )
+                        self._write_shared_cache()
+                        self._send_model_ready_notification()
+                        if progress_cb:
+                            progress_cb(len(all_files), len(all_files))
+                        return
+                    else:
+                        slog.info(
+                            "Cached model loaded but index is stale; running T1/T2",
+                            extra={
+                                "event": LogEvent(
+                                    LogCategory.DIAGNOSTIC,
+                                    "cached_t1t2_stale",
+                                )
+                            },
+                        )
+
                 result = self._analysis_pipeline.run_bulk_t1_t2(
                     filepaths=all_files,
                     progress_callback=progress_cb,

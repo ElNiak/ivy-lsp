@@ -560,6 +560,37 @@ class ServerSetupMixin:
                 proto_idx.requirement_graph.remap_paths(protocol_dir)
                 self._indexer._requirement_graph = proto_idx.requirement_graph
 
+        # -- 5. Semantic model (optional pickle) ----------------------------
+        loaded_model_protocols = 0
+        for proto_name, proto_idx in ws_ctx.protocol_indexes.items():
+            if (
+                proto_idx.semantic_model is not None
+                and self._semantic_model is not None
+            ):
+                try:
+                    self._semantic_model.merge_from(proto_idx.semantic_model)
+                    loaded_model_protocols += 1
+                except Exception:
+                    logger.debug(
+                        "Skipping incompatible semantic model for %s",
+                        proto_name,
+                        exc_info=True,
+                    )
+
+        self._semantic_model_from_cache = loaded_model_protocols > 0
+        if loaded_model_protocols > 0:
+            slog.info(
+                "Loaded cached semantic model from %d protocol(s)",
+                loaded_model_protocols,
+                extra={
+                    "event": LogEvent(
+                        LogCategory.MILESTONE,
+                        "offline_semantic_model",
+                        {"protocols_loaded": loaded_model_protocols},
+                    )
+                },
+            )
+
         slog.info(
             "Pre-populated from offline index: %d files, %d symbols, %d include edges",
             total_files,
