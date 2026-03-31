@@ -458,6 +458,7 @@ def safe_tool(_fn=None, *, ctx=None):
                     sem.release()
 
                 # Inject workspace context metadata into dict results
+                raw_dict = None
                 if ctx is not None and isinstance(result, dict):
                     _ctx_meta = ctx.build_context_metadata()
                     # Enrich with mirror info if handler provided scope
@@ -478,6 +479,9 @@ def safe_tool(_fn=None, *, ctx=None):
                         _ctx_meta["closure_size"] = closure_size
                     if _ctx_meta:
                         result["_context"] = _ctx_meta
+                    raw_dict = result  # Capture before formatting
+                elif isinstance(result, dict):
+                    raw_dict = result
 
                 result = _format_result(tool_name, result)
 
@@ -502,6 +506,14 @@ def safe_tool(_fn=None, *, ctx=None):
                         call_id=call_id,
                     )
 
+                # Return CallToolResult with both formatted content AND
+                # structuredContent so Claude Code can display the output.
+                if raw_dict is not None and isinstance(result, str):
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=result)],
+                        structuredContent=raw_dict,
+                        isError=False,
+                    )
                 return result
             except asyncio.CancelledError:
                 # User cancelled the tool call (MCP -32001).
