@@ -276,6 +276,7 @@ class IndexBuilder:
         workspace_config: Any,
         fast: bool = False,
         force: bool = False,
+        workers: int = 1,
     ) -> None:
         """Initialize the builder.
 
@@ -287,11 +288,14 @@ class IndexBuilder:
             fast: If ``True``, use Tier 2 (lexer) only.  Default
                 ``False`` (Tier 1 full parse).
             force: If ``True``, rebuild even if index appears fresh.
+            workers: Number of parallel worker processes for file
+                extraction.  Values < 1 are clamped to 1 (sequential).
         """
         self.workspace_root = os.path.abspath(workspace_root)
         self.workspace_config = workspace_config
         self.fast = fast
         self.force = force
+        self.workers = max(1, workers)
 
     # -- Public API ---------------------------------------------------------
 
@@ -387,7 +391,9 @@ class IndexBuilder:
 
         cache_hits = 0
         cache_misses = 0
+        files_to_extract: List[str] = []
 
+        # -- Phase A: split files into cache hits vs cache misses ----------
         for filepath in ivy_files:
             rel_path = os.path.relpath(filepath, protocol_dir)
 
@@ -424,16 +430,34 @@ class IndexBuilder:
                     "parse_tier", "unknown"
                 )
                 tier_counts[cached_tier] = tier_counts.get(cached_tier, 0) + 1
-                continue
+            else:
+                cache_misses += 1
+                files_to_extract.append(filepath)
 
-            cache_misses += 1
-            file_result = _extract_one_file(
-                filepath=filepath,
+        # -- Phase B: extract cache misses (parallel or sequential) --------
+        parser_timeout = 5.0
+
+        if self.workers > 1 and len(files_to_extract) > 3:
+            extraction_results = self._extract_parallel(
+                files_to_extract=files_to_extract,
                 protocol_dir=protocol_dir,
                 resolver_config=resolver_config,
-                fast=self.fast,
-                parser_timeout=5.0,
+                parser_timeout=parser_timeout,
             )
+        else:
+            extraction_results = [
+                _extract_one_file(
+                    filepath=filepath,
+                    protocol_dir=protocol_dir,
+                    resolver_config=resolver_config,
+                    fast=self.fast,
+                    parser_timeout=parser_timeout,
+                )
+                for filepath in files_to_extract
+            ]
+
+        # -- Phase C: integrate extraction results into maps ---------------
+        for file_result in extraction_results:
             rel_path = file_result.rel_path
 
             if file_result.error and file_result.manifest_entry.get("completeness") in (
@@ -441,7 +465,7 @@ class IndexBuilder:
                 None,
             ):
                 # Unreadable file — only a manifest entry was produced
-                logger.warning("Cannot read %s: %s", filepath, file_result.error)
+                logger.warning("Cannot read %s: %s", rel_path, file_result.error)
                 manifest_files[rel_path] = file_result.manifest_entry
                 errors.append(file_result.error)
                 continue
@@ -449,7 +473,7 @@ class IndexBuilder:
             if file_result.error and not file_result.symbols:
                 # Parse failure — manifest entry with parse-error metadata
                 logger.warning(
-                    "Extraction failed for %s: %s", filepath, file_result.error
+                    "Extraction failed for %s: %s", rel_path, file_result.error
                 )
                 manifest_files[rel_path] = file_result.manifest_entry
                 errors.append(file_result.error)
@@ -678,6 +702,70 @@ class IndexBuilder:
             "tier1_failures": failure_summary if failure_summary else None,
         }
 
+    def _extract_parallel(
+        self,
+        files_to_extract: List[str],
+        protocol_dir: str,
+        resolver_config: dict,
+        parser_timeout: float,
+    ) -> List[FileExtractionResult]:
+        """Extract multiple files in parallel using a process pool.
+
+        Args:
+            files_to_extract: Absolute paths to ``.ivy`` files.
+            protocol_dir: Protocol directory for relative path computation.
+            resolver_config: Serialised resolver config (picklable).
+            parser_timeout: Timeout for the Tier 1 parser lock.
+
+        Returns:
+            List of :class:`FileExtractionResult`, one per input file.
+            Failed workers produce results with ``error`` set.
+        """
+        import concurrent.futures
+
+        results: List[FileExtractionResult] = []
+
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=self.workers
+        ) as executor:
+            future_to_path = {}
+            for filepath in files_to_extract:
+                future = executor.submit(
+                    _extract_one_file,
+                    filepath=filepath,
+                    protocol_dir=protocol_dir,
+                    resolver_config=resolver_config,
+                    fast=self.fast,
+                    parser_timeout=parser_timeout,
+                )
+                future_to_path[future] = filepath
+
+            for future in concurrent.futures.as_completed(future_to_path):
+                filepath = future_to_path[future]
+                rel_path = os.path.relpath(filepath, protocol_dir)
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as exc:
+                    logger.warning("Worker failed for %s: %s", rel_path, exc)
+                    # Produce a minimal error result so the caller can
+                    # record the failure in the manifest.
+                    results.append(
+                        FileExtractionResult(
+                            rel_path=rel_path,
+                            manifest_entry={
+                                "mtime": 0.0,
+                                "size": 0,
+                                "sha256": "",
+                                "completeness": "missing",
+                                "parse_tier": "unknown",
+                            },
+                            error=f"worker error: {rel_path}: {exc}",
+                        )
+                    )
+
+        return results
+
     def build_all(self) -> List[dict]:
         """Glob ``protocol-testing/*/``, build each.
 
@@ -862,6 +950,13 @@ def cli_index(args: list) -> int:
         action="store_true",
         help="Check staleness without rebuilding.",
     )
+    parser.add_argument(
+        "--workers",
+        "-j",
+        type=int,
+        default=1,
+        help="Number of parallel worker processes for file extraction (default: 1).",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -882,6 +977,7 @@ def cli_index(args: list) -> int:
         workspace_config=ws_config,
         fast=parsed.fast,
         force=parsed.force,
+        workers=parsed.workers,
     )
 
     try:
