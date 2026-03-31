@@ -52,9 +52,7 @@ class BulkOrchestrationMixin:
         if not file_to_layer:
             return all_files
 
-        filtered = [
-            f for f in all_files if file_to_layer.get(os.path.basename(f)) in active
-        ]
+        filtered = [f for f in all_files if file_to_layer.get(f) in active]
 
         if filtered:
             slog.info(
@@ -341,7 +339,8 @@ class BulkOrchestrationMixin:
                                 )
                             },
                         )
-                        self._write_shared_cache()
+                        # Skip _write_shared_cache() — data hasn't changed,
+                        # avoids unnecessary 113MB serialize + file lock.
                         self._send_model_ready_notification()
                         if progress_cb:
                             progress_cb(len(all_files), len(all_files))

@@ -563,10 +563,14 @@ class ServerSetupMixin:
         # -- 5. Semantic model (optional pickle) ----------------------------
         loaded_model_protocols = 0
         for proto_name, proto_idx in ws_ctx.protocol_indexes.items():
-            if (
-                proto_idx.semantic_model is not None
-                and self._semantic_model is not None
-            ):
+            if proto_idx.semantic_model is not None:
+                if self._semantic_model is None:
+                    logger.warning(
+                        "Skipping semantic model merge for %s: "
+                        "server model not initialized (analysis pipeline may have failed)",
+                        proto_name,
+                    )
+                    continue
                 try:
                     self._semantic_model.merge_from(proto_idx.semantic_model)
                     loaded_model_protocols += 1
