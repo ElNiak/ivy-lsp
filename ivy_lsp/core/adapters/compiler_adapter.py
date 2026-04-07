@@ -101,7 +101,7 @@ class CompilerAdapter:
         self._manager = compiler_manager
         self._staging_dir = staging_dir
 
-    def compile(self, source: str, filename: str) -> CompileResult:
+    def compile(self, source: str, filename: str) -> CompileResult:  # type: ignore[return-value]
         """Compile *source* through the full Ivy compiler pipeline.
 
         Returns a :class:`CompileResult` with module/signature snapshots.

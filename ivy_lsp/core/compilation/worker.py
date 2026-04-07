@@ -203,7 +203,7 @@ def compiler_worker(
         with im.Module():
             # Add _generating symbol for test target (QUIC tests use this)
             try:
-                im.module.sig.add_symbol("_generating", il.BooleanSort())
+                im.module.sig.add_symbol("_generating", il.BooleanSort())  # type: ignore[union-attr]
             except (AttributeError, TypeError) as sym_err:
                 logger.debug("Could not add _generating symbol: %s", sym_err)
 
@@ -212,26 +212,27 @@ def compiler_worker(
                 with open(source_path, "r") as sf:
                     ic.ivy_load_file(sf, create_isolate=False)
                 try:
-                    im.module.name = basename[: basename.rindex(".")]
+                    im.module.name = basename[: basename.rindex(".")]  # type: ignore[union-attr]
                 except ValueError:
-                    im.module.name = basename
+                    im.module.name = basename  # type: ignore[union-attr]
 
             # Isolate selection (outside SourceFile context, matching ivyc)
             isolate = ic.isolate.get()
             if isolate is not None:
                 isolates = [isolate]
             else:
+                assert ivy_ast is not None, "ivy_ast import failed earlier"
                 extracts = [
                     (x, y)
-                    for x, y in im.module.isolates.items()
+                    for x, y in im.module.isolates.items()  # type: ignore[union-attr]
                     if isinstance(y, ivy_ast.ExtractDef)
                 ]
                 if not extracts:
                     isol = ivy_ast.ExtractDef(
                         ivy_ast.Atom("extract"), ivy_ast.Atom("this")
                     )
-                    isol.with_args = 1
-                    im.module.isolates["extract"] = isol
+                    isol.with_args = 1  # type: ignore[attr-defined]
+                    im.module.isolates["extract"] = isol  # type: ignore[union-attr]
                     isolates = ["extract"]
                 else:
                     isolates = [ex[0] for ex in extracts]
@@ -240,8 +241,8 @@ def compiler_worker(
             try:
                 if isolates and iso is not None:
                     iso.create_isolate(isolates[0])
-                    im.module.labeled_axioms.extend(im.module.labeled_props)
-                    im.module.labeled_props = []
+                    im.module.labeled_axioms.extend(im.module.labeled_props)  # type: ignore[union-attr]
+                    im.module.labeled_props = []  # type: ignore[union-attr]
             except Exception as iso_err:
                 logger.debug(
                     "Isolate creation failed (non-fatal for LSP): %s",

@@ -265,6 +265,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         # C4 fix: override RFC uncovered requirements using the same
         # logic as _ivy_requirement_coverage() so stats and gaps agree.
         stats = await _ivy_requirement_coverage(relative_path=None, test_file=test_file)
+        model = None
         try:
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
             model = await get_model_if_ready(ctx)

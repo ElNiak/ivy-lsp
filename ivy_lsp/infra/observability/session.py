@@ -320,7 +320,7 @@ class SessionJsonLogHandler(logging.Handler):
             if hasattr(record, "funcName"):
                 payload["function"] = record.funcName
             if hasattr(record, "lineno"):
-                payload["line"] = record.lineno
+                payload["line"] = str(record.lineno)
 
             logger.log_event(
                 channel="python-log",

@@ -123,7 +123,7 @@ def parse_counterexample(raw_output: str) -> Counterexample | None:
             }
         )
 
-    return {
+    return {  # type: ignore[return-value]
         "assertion": assertion_text,
         "assertion_line": assertion_line,
         "steps": steps,

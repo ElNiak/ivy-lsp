@@ -10,7 +10,10 @@ import shutil
 import tempfile
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from ivy_lsp.core.staging.flat import FlatStagingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -696,6 +699,7 @@ class IncludeResolver:
             sum(len(v) for v in result.collision_map.values()),
             len(result.collision_map),
         )
+        assert self._staging_dir is not None
         return self._staging_dir
 
     def cleanup_staging(self) -> None:

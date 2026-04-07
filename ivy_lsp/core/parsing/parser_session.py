@@ -99,7 +99,10 @@ class ParserSession:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Restore saved Ivy parser globals and release the parser lock."""
         try:
-            ip, iu, ia = self._ip, self._iu, self._ia
+            import ivy.ivy_ast as ia
+            import ivy.ivy_parser as ip
+            import ivy.ivy_utils as iu
+
             ip.error_list = self._saved["ip.error_list"]
             ip.stack = self._saved["ip.stack"]
             ip.special_attribute = self._saved["ip.special_attribute"]

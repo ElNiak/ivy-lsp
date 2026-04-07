@@ -107,7 +107,7 @@ def _patch_pygls_closed_pipe() -> None:
 
         _original_set_writer(
             self,
-            _ClosedPipeGuardWriter(writer, _on_pipe_break),
+            _ClosedPipeGuardWriter(writer, _on_pipe_break),  # type: ignore[arg-type]
             include_headers,
         )
 

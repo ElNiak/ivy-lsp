@@ -396,7 +396,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 try:
                     from pathlib import Path as P
 
-                    from panther_ivy.api.compiler import generate_compile_commands
+                    from panther_ivy.api.compiler import (  # type: ignore[import-not-found]
+                        generate_compile_commands,
+                    )
 
                     compile_result = generate_compile_commands(
                         ivy_file=P(abs_path),
@@ -758,10 +760,10 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     )
                     from ivy_lsp.core.semantic.rfc_annotations import is_tag_covered
 
-                    rfc_reqs = model.get_nodes_by_type(RfcRequirement)
+                    rfc_reqs = model.get_nodes_by_type(RfcRequirement)  # type: ignore[union-attr]
                     annotations = [
                         n
-                        for n in model.get_nodes_by_type(RfcAnnotation)
+                        for n in model.get_nodes_by_type(RfcAnnotation)  # type: ignore[union-attr]
                         if n.file == abs_path
                     ]
                     if rfc_reqs:

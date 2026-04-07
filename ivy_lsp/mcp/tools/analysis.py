@@ -481,7 +481,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             return _tc.finish(
                 error_response(
                     f"Index builder not available: {exc}",
-                    "ivy_index",
                 )
             )
 

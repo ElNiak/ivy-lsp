@@ -112,8 +112,10 @@ async def connect_to_sidecar(port: int) -> Any:
     for cleanup by :func:`disconnect_sidecar`.
     """
     try:
-        from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp import ClientSession  # type: ignore[import-not-found]
+        from mcp.client.streamable_http import (
+            streamablehttp_client,  # type: ignore[import-not-found]
+        )
 
         url = f"http://127.0.0.1:{port}/mcp"
         transport_ctx = streamablehttp_client(url)
@@ -190,8 +192,10 @@ async def call_sidecar_once(
     on success, or None on any failure (caller falls through to local).
     """
     try:
-        from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp import ClientSession  # type: ignore[import-not-found]
+        from mcp.client.streamable_http import (
+            streamablehttp_client,  # type: ignore[import-not-found]
+        )
 
         url = f"http://127.0.0.1:{port}/mcp"
         async with streamablehttp_client(url) as (read, write, _):

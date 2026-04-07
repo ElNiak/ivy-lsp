@@ -180,7 +180,7 @@ async def _handle_show_action_requirements(
         return {"error": "No indexer available"}
 
     proxy = _ServerProxy(indexer=indexer)
-    return handle_action_requirements(proxy, viz_params)
+    return handle_action_requirements(proxy, viz_params)  # type: ignore[arg-type]
 
 
 async def _handle_show_property_details(

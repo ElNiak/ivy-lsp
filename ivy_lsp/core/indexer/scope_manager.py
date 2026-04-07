@@ -28,12 +28,16 @@ from ivy_lsp.core.analysis.test_scope import TestScope, detect_test_role
 from ivy_lsp.core.parsing.symbols import IvySymbol
 
 if TYPE_CHECKING:
-    pass
+    from ivy_lsp.core.indexer._protocols import WorkspaceIndexerHost
+
+    _ScopeManagerBase = WorkspaceIndexerHost
+else:
+    _ScopeManagerBase = object
 
 logger = logging.getLogger(__name__)
 
 
-class ScopeManagerMixin:
+class ScopeManagerMixin(_ScopeManagerBase):
     """Requirement graph wiring, test scope computation, and incremental re-indexing."""
 
     # ------------------------------------------------------------------

@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+
+if TYPE_CHECKING:
+    from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 from ivy_lsp.core.semantic.rfc_annotations import parse_rfc_tags
 
 logger = logging.getLogger(__name__)

@@ -23,19 +23,27 @@ from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.lsp.lsp_log_handler import LspLogHandler
 
 if TYPE_CHECKING:
+    from pygls.lsp.server import LanguageServer as _LS
+
     from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.lsp._protocols import IvyServerHost
+
+    class _SetupBase(IvyServerHost, _LS): ...  # type: ignore[misc]
+
+else:
+    _SetupBase = object
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
 
 
-class ServerSetupMixin:
+class ServerSetupMixin(_SetupBase):
     """Server initialization and setup pipeline for IvyLanguageServer."""
 
     def _install_lsp_log_handler(self) -> None:
         """Add LSP notification handler and demote stderr to WARNING-only."""
         root = logging.getLogger()
-        handler = LspLogHandler(self)
+        handler = LspLogHandler(self)  # type: ignore[arg-type]
         handler.setFormatter(logging.Formatter("%(message)s"))
         root.addHandler(handler)
         # Raise stderr handler level to WARNING so critical errors remain
@@ -414,7 +422,7 @@ class ServerSetupMixin:
 
             index_duration = time.time() - index_start
             self.state_tracker.set_indexed(index_duration)
-            n_files = len(self._indexer._cache._cache) if self._indexer._cache else 0
+            n_files = len(self._indexer._cache._cache) if self._indexer._cache else 0  # type: ignore[attr-defined]
             if n_files == 0:
                 # Offline index pre-population bypasses the file cache;
                 # fall back to progress-tracked file count.
@@ -739,6 +747,7 @@ class ServerSetupMixin:
                 return _find_enclosing_test(self, filepath)
 
             requirement_graph = getattr(self._indexer, "requirement_graph", None)
+            assert self._parser is not None
             self._analysis_pipeline = AnalysisPipeline(
                 self._semantic_model,
                 self._parser,

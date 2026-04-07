@@ -138,8 +138,8 @@ async def _forward_to_sidecar(
     pending: dict[str | int, Any],
 ) -> None:
     """Dequeue messages from *stdin_queue*, track requests, forward to sidecar."""
-    from mcp.shared.message import SessionMessage
-    from mcp.types import JSONRPCMessage
+    from mcp.shared.message import SessionMessage  # type: ignore[import-not-found]
+    from mcp.types import JSONRPCMessage  # type: ignore[import-not-found]
 
     try:
         while True:
@@ -302,7 +302,9 @@ async def run(port: int, port_file: str | None = None) -> None:
     reconnection attempts are exhausted, falls back to spawning a
     standalone ``ivy_lsp --mcp`` process.
     """
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import (
+        streamablehttp_client,  # type: ignore[import-not-found]
+    )
 
     # Decouple stdin reading from forwarding so buffered input survives reconnects
     stdin_queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # type: ignore[type-arg]

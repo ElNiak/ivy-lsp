@@ -141,6 +141,7 @@ reportUnusedVariable = "warning"
 reportIncompatibleMethodOverride = "warning"
 pythonVersion = "3.10"
 pythonPlatform = "All"
+stubPath = "ivy_lsp/stubs"
 
 [tool.bandit]
 exclude_dirs = ["tests", "scripts"]

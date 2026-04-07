@@ -19,7 +19,7 @@ from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 import anyio
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, TextContent  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
@@ -656,11 +656,11 @@ def safe_tool(_fn=None, *, ctx=None):
         patched_globals = {**fn.__globals__, **_injected_names}
 
         wrapper = types.FunctionType(
-            _wrapper.__code__,
+            _wrapper.__code__,  # type: ignore[attr-defined]
             patched_globals,
-            _wrapper.__name__,
-            _wrapper.__defaults__,
-            _wrapper.__closure__,
+            _wrapper.__name__,  # type: ignore[attr-defined]
+            _wrapper.__defaults__,  # type: ignore[attr-defined]
+            _wrapper.__closure__,  # type: ignore[attr-defined]
         )
         functools.update_wrapper(wrapper, fn)
         return wrapper

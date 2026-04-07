@@ -489,13 +489,13 @@ def _isolate_to_ir(name: str, iso_obj: Any) -> IsolateIR:
 
     if hasattr(iso_obj, "verified") and callable(iso_obj.verified):
         try:
-            verified = tuple(str(getattr(v, "relname", v)) for v in iso_obj.verified())
+            verified = tuple(str(getattr(v, "relname", v)) for v in iso_obj.verified())  # type: ignore[union-attr]
         except Exception:
             logger.debug("Failed to get verified for %s", name, exc_info=True)
 
     if hasattr(iso_obj, "present") and callable(iso_obj.present):
         try:
-            present = tuple(str(getattr(p, "relname", p)) for p in iso_obj.present())
+            present = tuple(str(getattr(p, "relname", p)) for p in iso_obj.present())  # type: ignore[union-attr]
         except Exception:
             logger.debug("Failed to get present for %s", name, exc_info=True)
 

@@ -215,7 +215,7 @@ def fallback_scan(
         # -- INCLUDE (special: not in _KEYWORD_TO_KIND) -----------------
         if tok.type == "INCLUDE":
             if i + 1 < len(tokens) and _is_name_token(tokens[i + 1]):
-                name = tokens[i + 1].value
+                name = tokens[i + 1].value or ""
                 line_idx = max(0, tok.lineno - 1)
                 line_len = len(lines[line_idx]) if line_idx < len(lines) else 0
                 sym = IvySymbol(

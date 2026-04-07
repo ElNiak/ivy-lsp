@@ -11,10 +11,13 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 from ivy_lsp.core.parsing.ast_to_symbols import is_from_included_file
+
+if TYPE_CHECKING:
+    from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
 logger = logging.getLogger(__name__)
 

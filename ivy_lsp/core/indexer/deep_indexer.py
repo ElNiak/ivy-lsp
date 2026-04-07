@@ -22,12 +22,16 @@ from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, LogEvent
 
 if TYPE_CHECKING:
-    pass
+    from ivy_lsp.core.indexer._protocols import WorkspaceIndexerHost
+
+    _DeepIndexBase = WorkspaceIndexerHost
+else:
+    _DeepIndexBase = object
 
 logger = logging.getLogger(__name__)
 
 
-class DeepIndexMixin:
+class DeepIndexMixin(_DeepIndexBase):
     """Deep indexing methods: background parse upgrade and on-demand deep parsing."""
 
     # ------------------------------------------------------------------

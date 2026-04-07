@@ -10,7 +10,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from ivy_lsp.core.semantic.nodes import ManifestMetadata, RfcAnnotation, RfcRequirement
 
@@ -212,7 +212,7 @@ def load_requirement_manifest(path: str) -> Dict[str, RfcRequirement]:
             rfc=str(rfc_name),
             section=str(req_data.get("section", "")),
             text=str(req_data.get("text", "")),
-            level=str(req_data.get("level", "MUST")),
+            level=cast(Any, str(req_data.get("level", "MUST"))),
             layer=str(req_data.get("layer", "")),
             testable=bool(req_data.get("testable", True)),
         )

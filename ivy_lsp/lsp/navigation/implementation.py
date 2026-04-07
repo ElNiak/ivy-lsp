@@ -100,7 +100,7 @@ def _find_monitors_for_action(
 def _find_action_declaration(
     indexer,
     action_name: str,
-    filepath: str = None,
+    filepath: Optional[str] = None,
 ) -> Optional[Union[lsp.Location, List[lsp.Location]]]:
     """Find the declaration of an action by name (excluding monitors)."""
     results = lookup_with_dotted_fallback(indexer, action_name)

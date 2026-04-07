@@ -18,8 +18,20 @@ from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdap
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
 
+from typing import TYPE_CHECKING
 
-class BulkOrchestrationMixin:
+if TYPE_CHECKING:
+    from pygls.lsp.server import LanguageServer as _LS
+
+    from ivy_lsp.lsp._protocols import IvyServerHost
+
+    class _BulkBase(IvyServerHost, _LS): ...  # type: ignore[misc]
+
+else:
+    _BulkBase = object
+
+
+class BulkOrchestrationMixin(_BulkBase):
     """Background analysis and compilation orchestration for IvyLanguageServer."""
 
     def _cleanup_staging(self) -> None:
@@ -343,7 +355,7 @@ class BulkOrchestrationMixin:
                         # avoids unnecessary 113MB serialize + file lock.
                         self._send_model_ready_notification()
                         if progress_cb:
-                            progress_cb(len(all_files), len(all_files))
+                            progress_cb(len(all_files), len(all_files), None)
                         return
                     else:
                         slog.info(
@@ -397,7 +409,7 @@ class BulkOrchestrationMixin:
 
         # Schedule on event loop if available; fall back to daemon thread
         try:
-            loop = self.loop  # pygls LanguageServer exposes the event loop
+            loop = self.loop  # type: ignore[attr-defined]  # pygls LanguageServer exposes the event loop
             if loop is not None and loop.is_running():
                 loop.run_in_executor(None, _run)
                 return

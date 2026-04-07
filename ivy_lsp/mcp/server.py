@@ -21,10 +21,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-try:
-    BaseExceptionGroup  # Python 3.11+
-except NameError:
-    from exceptiongroup import BaseExceptionGroup
+if sys.version_info >= (3, 11):
+    _BaseExceptionGroup = BaseExceptionGroup
+else:
+    from exceptiongroup import BaseExceptionGroup as _BaseExceptionGroup
 
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
 from ivy_lsp.infra.config import get_config
@@ -892,7 +892,7 @@ def create_mcp_app(ctx: ToolContext) -> Any:
     Returns:
         A configured FastMCP instance.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp import FastMCP  # type: ignore[import-not-found]
 
     mcp = FastMCP("ivy-lsp", instructions=_MCP_INSTRUCTIONS)
 
@@ -941,7 +941,7 @@ def start_mcp(
         payload={"workspace_root": workspace_root, "docker_image": docker_image},
     ):
         try:
-            import mcp.server.fastmcp  # noqa: F401 — validate dependency
+            import mcp.server.fastmcp  # type: ignore[import-not-found]  # noqa: F401 — validate dependency
         except ImportError:
             raise ImportError(
                 "MCP mode requires the 'mcp' package. "
@@ -1043,7 +1043,9 @@ def start_mcp(
     executor = None
     if docker_image:
         try:
-            from panther_ivy.api.executor import IvyExecutor
+            from panther_ivy.api.executor import (  # type: ignore[import-not-found]
+                IvyExecutor,
+            )
 
             executor = IvyExecutor(docker_image=docker_image)
             logger.info("Docker executor configured with image: %s", docker_image)
@@ -1126,13 +1128,13 @@ def start_mcp(
 
     try:
         mcp.run(transport="stdio")
-    except BaseExceptionGroup as eg:
+    except _BaseExceptionGroup as eg:
         # Filter: only exit cleanly if ALL sub-exceptions are cancel-scope related.
         # Mixed groups (cancel-scope + real error) must re-raise to avoid masking.
         cancel_scope_errors = [
             e
             for e in eg.exceptions
-            if isinstance(e, (RuntimeError, BaseExceptionGroup))
+            if isinstance(e, (RuntimeError, _BaseExceptionGroup))
             and "cancel scope" in str(e).lower()
         ]
         non_cancel_errors = [e for e in eg.exceptions if e not in cancel_scope_errors]

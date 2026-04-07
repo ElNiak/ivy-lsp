@@ -15,10 +15,10 @@ import threading
 import time
 from typing import Any
 
-try:
-    BaseExceptionGroup  # Python 3.11+
-except NameError:
-    from exceptiongroup import BaseExceptionGroup
+if sys.version_info >= (3, 11):
+    _BaseExceptionGroup = BaseExceptionGroup
+else:
+    from exceptiongroup import BaseExceptionGroup as _BaseExceptionGroup
 
 from ivy_lsp.infra.observability import (
     LogCategory,
@@ -338,11 +338,11 @@ def _main_impl(startup_t0: float) -> None:
                         staging_dir=staging_dir,
                     )
                     break  # Clean exit
-                except BaseExceptionGroup as eg:
+                except _BaseExceptionGroup as eg:
                     cancel_scope_errors = [
                         e
                         for e in eg.exceptions
-                        if isinstance(e, (RuntimeError, BaseExceptionGroup))
+                        if isinstance(e, (RuntimeError, _BaseExceptionGroup))
                         and "cancel scope" in str(e).lower()
                     ]
                     if cancel_scope_errors and _attempt < _MAX_MCP_RESTARTS:
