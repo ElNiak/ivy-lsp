@@ -274,7 +274,7 @@ def register(server) -> None:
                 )
             )
         except Exception:
-            logger.debug("Immediate T1 push failed for %s", uri, exc_info=True)
+            logger.warning("Immediate T1 push failed for %s", uri, exc_info=True)
 
         async def _debounced():
             try:

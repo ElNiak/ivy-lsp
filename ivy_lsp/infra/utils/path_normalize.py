@@ -4,6 +4,14 @@ import os
 from typing import Callable, Dict, Optional
 
 
+def _has_prefix(path: str, prefix: str) -> tuple[bool, str]:
+    """Check if *path* starts with *prefix*/ and return (matched, remainder)."""
+    for p in [prefix + "/", prefix + os.sep]:
+        if path.startswith(p):
+            return True, path[len(p) :]
+    return False, path
+
+
 def normalize_ivy_path(
     path: str,
     workspace_root: str,
@@ -22,27 +30,25 @@ def normalize_ivy_path(
     with_prefix = os.path.join(workspace_root, prefix, path)
     if os.path.exists(with_prefix):
         return with_prefix
-    for p in [prefix + "/", prefix + os.sep]:
-        if path.startswith(p):
-            without = os.path.join(workspace_root, path[len(p) :])
-            if os.path.exists(without):
-                return without
+    matched, remainder = _has_prefix(path, prefix)
+    if matched:
+        without = os.path.join(workspace_root, remainder)
+        if os.path.exists(without):
+            return without
     return direct
 
 
 def strip_prefix(path: str, prefix: str = "protocol-testing") -> str:
     """Remove protocol-testing/ prefix if present."""
-    for p in [prefix + "/", prefix + os.sep]:
-        if path.startswith(p):
-            return path[len(p) :]
-    return path
+    _, remainder = _has_prefix(path, prefix)
+    return remainder
 
 
 def ensure_prefix(path: str, prefix: str = "protocol-testing") -> str:
     """Add protocol-testing/ prefix if not present."""
-    for p in [prefix + "/", prefix + os.sep]:
-        if path.startswith(p):
-            return path
+    matched, _ = _has_prefix(path, prefix)
+    if matched:
+        return path
     return os.path.join(prefix, path)
 
 

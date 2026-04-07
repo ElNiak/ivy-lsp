@@ -18,6 +18,12 @@ from ivy_lsp.core.analysis.impl_block_parser import analyze_impl_blocks
 
 logger = logging.getLogger(__name__)
 
+
+def _line_of(source: str, match: re.Match) -> int:  # type: ignore[type-arg]
+    """Return the 0-based line number where *match* starts in *source*."""
+    return source[: match.start()].count("\n")
+
+
 # ---------------------------------------------------------------------------
 # Compiled regex patterns
 # ---------------------------------------------------------------------------
@@ -148,10 +154,7 @@ def detect_serdes(source: str, filepath: str) -> List[PatternInstance]:
 
     for cls in impl.classes:
         if cls.is_serializer:
-            states = []
-            for es in impl.enum_states:
-                states = es.states
-                break
+            states = next((es.states for es in impl.enum_states), [])
             instances.append(
                 PatternInstance(
                     kind=PatternKind.SERDES,
@@ -167,10 +170,7 @@ def detect_serdes(source: str, filepath: str) -> List[PatternInstance]:
                 )
             )
         elif cls.is_deserializer:
-            states = []
-            for es in impl.enum_states:
-                states = es.states
-                break
+            states = next((es.states for es in impl.enum_states), [])
             instances.append(
                 PatternInstance(
                     kind=PatternKind.SERDES,
@@ -188,7 +188,7 @@ def detect_serdes(source: str, filepath: str) -> List[PatternInstance]:
 
     # Also detect serdes instance declarations
     for m in SERDES_INSTANCE_RE.finditer(source):
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         args = [a.strip() for a in m.group(2).split(",")]
         instances.append(
             PatternInstance(
@@ -233,7 +233,7 @@ def detect_variants(source: str, filepath: str) -> List[PatternInstance]:
                     fname, ftype = f.split(":", 1)
                     fields.append({"name": fname.strip(), "type": ftype.strip()})
 
-            line = source[: m.start()].count("\n")
+            line = _line_of(source, m)
             instances.append(
                 PatternInstance(
                     kind=PatternKind.VARIANTS,
@@ -250,7 +250,7 @@ def detect_variants(source: str, filepath: str) -> List[PatternInstance]:
     # Find variant declarations
     for m in VARIANT_RE.finditer(source):
         parent = m.group(1)
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         instances.append(
             PatternInstance(
                 kind=PatternKind.VARIANTS,
@@ -267,7 +267,7 @@ def detect_variants(source: str, filepath: str) -> List[PatternInstance]:
     # Find type enums (like endpoint_id = {client, server})
     for m in TYPE_ENUM_RE.finditer(source):
         values = [v.strip() for v in m.group(1).split(",") if v.strip()]
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         instances.append(
             PatternInstance(
                 kind=PatternKind.VARIANTS,
@@ -295,7 +295,7 @@ def detect_monitors(source: str, filepath: str) -> List[PatternInstance]:
     for m in MONITOR_RE.finditer(source):
         mixin_kind = m.group(1)
         action_name = m.group(2)
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
 
         # Check if block contains _generating guard
         block_start = m.end()
@@ -341,7 +341,7 @@ def detect_monitors(source: str, filepath: str) -> List[PatternInstance]:
 
     # Check for export actions
     for m in EXPORT_RE.finditer(source):
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         instances.append(
             PatternInstance(
                 kind=PatternKind.MONITORS,
@@ -354,7 +354,7 @@ def detect_monitors(source: str, filepath: str) -> List[PatternInstance]:
 
     # Check for weight attributes
     for m in WEIGHT_ATTR_RE.finditer(source):
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         instances.append(
             PatternInstance(
                 kind=PatternKind.MONITORS,
@@ -380,7 +380,7 @@ def detect_shims(source: str, filepath: str) -> List[PatternInstance]:
     # Check for implement net.recv or similar patterns
     for m in MONITOR_RE.finditer(source):
         if m.group(1) == "implement" and ".recv" in m.group(2):
-            line = source[: m.start()].count("\n")
+            line = _line_of(source, m)
             instances.append(
                 PatternInstance(
                     kind=PatternKind.SHIM,
@@ -394,7 +394,7 @@ def detect_shims(source: str, filepath: str) -> List[PatternInstance]:
                 )
             )
         elif m.group(1) == "implement" and ".connected" in m.group(2):
-            line = source[: m.start()].count("\n")
+            line = _line_of(source, m)
             instances.append(
                 PatternInstance(
                     kind=PatternKind.SHIM,
@@ -408,7 +408,7 @@ def detect_shims(source: str, filepath: str) -> List[PatternInstance]:
                 )
             )
         elif m.group(1) == "implement" and ".accept" in m.group(2):
-            line = source[: m.start()].count("\n")
+            line = _line_of(source, m)
             instances.append(
                 PatternInstance(
                     kind=PatternKind.SHIM,
@@ -495,7 +495,7 @@ def detect_modules(source: str, filepath: str) -> List[PatternInstance]:
         name = m.group(1)
         params_raw = m.group(2)
         params = [p.strip() for p in params_raw.split(",") if p.strip()]
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         instances.append(
             PatternInstance(
                 kind=PatternKind.MODULE,
@@ -514,7 +514,7 @@ def detect_modules(source: str, filepath: str) -> List[PatternInstance]:
         module_name = m.group(2)
         args_raw = m.group(3) or ""
         args = [a.strip() for a in args_raw.split(",") if a.strip()]
-        line = source[: m.start()].count("\n")
+        line = _line_of(source, m)
         instances.append(
             PatternInstance(
                 kind=PatternKind.MODULE,
@@ -606,7 +606,7 @@ def detect_include_chain(
             includes.append({"name": name, "line": 0})
     else:
         for m in INCLUDE_RE.finditer(source):
-            line = source[: m.start()].count("\n")
+            line = _line_of(source, m)
             includes.append({"name": m.group(1), "line": line})
 
     if includes:

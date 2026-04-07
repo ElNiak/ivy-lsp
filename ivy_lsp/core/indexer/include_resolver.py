@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import atexit
 import fnmatch
 import logging
 import os
 import shutil
-import tempfile
 import threading
-import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -516,6 +513,24 @@ class IncludeResolver:
                 return os.path.realpath(candidate)
         return None
 
+    def _prune_walk_dirs(self, dirpath: str, dirnames: List[str]) -> bool:
+        """Prune *dirnames* in-place and return True if *dirpath* itself should be skipped."""
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in _EXCLUDED_DIR_BASENAMES
+            and not any(fnmatch.fnmatch(d, pat) for pat in _EXCLUDED_DIR_PATTERNS)
+        ]
+        if self._exclude_paths:
+            rel_dir = os.path.relpath(dirpath, self._workspace_root)
+            if any(
+                rel_dir == ep or rel_dir.startswith(ep + os.sep)
+                for ep in self._exclude_paths
+            ):
+                dirnames.clear()
+                return True
+        return False
+
     def _find_source_files(self, search_root: Optional[str] = None) -> List[str]:
         """Walk the directory tree and return all .ivy file paths, sorted.
 
@@ -555,24 +570,8 @@ class IncludeResolver:
                 logger.warning("Include path does not exist: %s", root)
                 continue
             for dirpath, dirnames, filenames in os.walk(root):
-                # Prune excluded directories in-place.
-                dirnames[:] = [
-                    d
-                    for d in dirnames
-                    if d not in _EXCLUDED_DIR_BASENAMES
-                    and not any(
-                        fnmatch.fnmatch(d, pat) for pat in _EXCLUDED_DIR_PATTERNS
-                    )
-                ]
-                # Path-based exclusions (relative to workspace root).
-                if self._exclude_paths:
-                    rel_dir = os.path.relpath(dirpath, self._workspace_root)
-                    if any(
-                        rel_dir == ep or rel_dir.startswith(ep + os.sep)
-                        for ep in self._exclude_paths
-                    ):
-                        dirnames.clear()
-                        continue
+                if self._prune_walk_dirs(dirpath, dirnames):
+                    continue
                 for fn in filenames:
                     if fn.endswith(".ivy"):
                         result.append(os.path.join(dirpath, fn))
@@ -978,22 +977,8 @@ class IncludeResolver:
                     )
                     continue
                 for dirpath, dirnames, filenames in os.walk(root):
-                    dirnames[:] = [
-                        d
-                        for d in dirnames
-                        if d not in _EXCLUDED_DIR_BASENAMES
-                        and not any(
-                            fnmatch.fnmatch(d, pat) for pat in _EXCLUDED_DIR_PATTERNS
-                        )
-                    ]
-                    if self._exclude_paths:
-                        rel_dir = os.path.relpath(dirpath, self._workspace_root)
-                        if any(
-                            rel_dir == ep or rel_dir.startswith(ep + os.sep)
-                            for ep in self._exclude_paths
-                        ):
-                            dirnames.clear()
-                            continue
+                    if self._prune_walk_dirs(dirpath, dirnames):
+                        continue
                     for fn in filenames:
                         if fn.endswith(".ivy"):
                             filepath = os.path.realpath(os.path.join(dirpath, fn))

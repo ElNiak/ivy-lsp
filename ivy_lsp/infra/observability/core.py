@@ -514,8 +514,8 @@ def get_logger(name: str, *, subsystem: str | None = None) -> logging.Logger:
             level_str = get_config().subsystem_levels.get(resolved_subsystem)
             if level_str:
                 logger.setLevel(getattr(logging, level_str.upper(), logging.NOTSET))
-        except Exception:
-            pass  # Config not yet initialized
+        except (AttributeError, TypeError, ValueError):
+            pass  # Config not yet initialized or malformed
 
     _logger_cache[name] = logger
     return logger

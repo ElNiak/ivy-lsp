@@ -10,6 +10,18 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _build_serdes_class_index(detected: List[Any]) -> Dict[str, Any]:
+    """Build a name→pattern index of serializer/deserializer class patterns."""
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
+
+    return {
+        pat.name: pat
+        for pat in detected
+        if pat.kind == PatternKind.SERDES
+        and pat.details.get("type") in ("serializer", "deserializer")
+    }
+
+
 def _get_analysis(protocol_dir: str, _analysis: Any = None) -> Any:
     """Return *_analysis* if provided, otherwise run ``analyze_protocol``."""
     if _analysis is not None:
@@ -434,13 +446,7 @@ def _add_ser_deser_from_containing_struct(
 
     containing_structs = _find_containing_structs(type_name, detected)
 
-    class_index: Dict[str, Any] = {}
-    for pat in detected:
-        if pat.kind == PatternKind.SERDES and pat.details.get("type") in (
-            "serializer",
-            "deserializer",
-        ):
-            class_index[pat.name] = pat
+    class_index = _build_serdes_class_index(detected)
 
     for pat in detected:
         if pat.kind != PatternKind.SERDES or pat.details.get("type") != "instance":
@@ -504,13 +510,7 @@ def serdes_correlation_impl(
 
     result = _get_analysis(protocol_dir, _analysis)
 
-    class_index: Dict[str, Any] = {}
-    for pat in result.detected:
-        if pat.kind == PatternKind.SERDES and pat.details.get("type") in (
-            "serializer",
-            "deserializer",
-        ):
-            class_index[pat.name] = pat
+    class_index = _build_serdes_class_index(result.detected)
 
     def _class_info(p: Any) -> Dict[str, Any]:
         rel = os.path.relpath(p.file, protocol_dir)
