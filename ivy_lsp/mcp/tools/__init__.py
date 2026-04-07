@@ -47,6 +47,9 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "ivy_health_check": 10.0,
     "ivy_index": 300.0,
     "ivy_workspace": 10.0,
+    "ivy_find_variants": 30.0,
+    "ivy_serdes_correlation": 30.0,
+    "ivy_change_impact": 60.0,
 }
 
 _DEFAULT_TIMEOUT: float = 60.0
@@ -103,6 +106,21 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
     "ivy_health_check": {"cost": "low", "category": "analysis", "needs_model": False},
     "ivy_index": {"cost": "high", "category": "analysis", "needs_model": False},
     "ivy_workspace": {"cost": "low", "category": "workspace", "needs_model": False},
+    "ivy_find_variants": {
+        "cost": "low",
+        "category": "propagation",
+        "needs_model": True,
+    },
+    "ivy_serdes_correlation": {
+        "cost": "low",
+        "category": "propagation",
+        "needs_model": True,
+    },
+    "ivy_change_impact": {
+        "cost": "medium",
+        "category": "propagation",
+        "needs_model": True,
+    },
 }
 
 
@@ -688,6 +706,7 @@ def inject_scope_metadata(
 
 from ivy_lsp.mcp.tools.analysis import register_analysis_tools
 from ivy_lsp.mcp.tools.patterns import register_pattern_tools
+from ivy_lsp.mcp.tools.propagation import register_propagation_tools
 from ivy_lsp.mcp.tools.quality import register_quality_tools
 from ivy_lsp.mcp.tools.traceability import register_traceability_tools
 from ivy_lsp.mcp.tools.verification import register_verification_tools
@@ -707,6 +726,7 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_pattern_tools(mcp, ctx)
     register_quality_tools(mcp, ctx)
     register_workspace_tools(mcp, ctx)
+    register_propagation_tools(mcp, ctx)
 
 
 __all__ = [
