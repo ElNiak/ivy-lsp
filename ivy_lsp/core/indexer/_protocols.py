@@ -29,7 +29,6 @@ class WorkspaceIndexerHost(Protocol):
     _table_lock: threading.Lock
     _exports_lock: threading.Lock
     _stop_requested: threading.Event
-    _source_cache_lock: threading.Lock
 
     # -- Data stores --
     _symbol_table: "SymbolTable"

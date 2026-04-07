@@ -311,7 +311,7 @@ class SessionJsonLogHandler(logging.Handler):
         self._guard.emitting = True
         try:
             logger = get_session_logger()
-            payload = {
+            payload: dict[str, object] = {
                 "logger": record.name,
                 "level": record.levelname,
             }
@@ -320,7 +320,7 @@ class SessionJsonLogHandler(logging.Handler):
             if hasattr(record, "funcName"):
                 payload["function"] = record.funcName
             if hasattr(record, "lineno"):
-                payload["line"] = str(record.lineno)
+                payload["line"] = record.lineno
 
             logger.log_event(
                 channel="python-log",

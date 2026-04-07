@@ -9,6 +9,7 @@ import os
 import threading
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 from lsprotocol import types as lsp
 
@@ -17,8 +18,6 @@ from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdap
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pygls.lsp.server import LanguageServer as _LS
