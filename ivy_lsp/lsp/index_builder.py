@@ -95,15 +95,7 @@ def _tier_label(tier: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _worker_init(parent_sys_path: list) -> None:
-    """Initialize worker process with parent's sys.path.
-
-    ``ProcessPoolExecutor`` with the ``spawn`` start method creates fresh
-    Python interpreters that may not inherit the parent's ``sys.path``
-    (especially when running under ``uvx`` or similar tools).
-    """
-    new_paths = [p for p in parent_sys_path if p not in sys.path]
-    sys.path[0:0] = new_paths
+from ivy_lsp.infra.utils.process import worker_init as _worker_init
 
 
 @dataclass
@@ -349,6 +341,17 @@ class IndexBuilder:
 
         logger.info("Building index for protocol %s at %s", protocol, protocol_dir)
 
+        # Skip protocols with no .ivy files before investing in staging
+        if not glob.glob(os.path.join(protocol_dir, "**", "*.ivy"), recursive=True):
+            logger.info("No .ivy files in %s, skipping", protocol_dir)
+            return {
+                "protocol": protocol,
+                "files": 0,
+                "tests": 0,
+                "elapsed_ms": round((time.monotonic() - t0) * 1000, 1),
+                "status": "empty",
+            }
+
         # -- 1. Discover .ivy files ----------------------------------------
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
@@ -456,42 +459,45 @@ class IndexBuilder:
         )
 
         # -- Phase A: split files into cache hits vs cache misses ----------
-        for filepath in ivy_files:
-            rel_path = os.path.relpath(filepath, protocol_dir)
+        if self.force or not caches_valid:
+            # --force or no usable cache: extract everything, skip SHA upfront
+            # (_extract_one_file computes SHA from the raw bytes it reads).
+            files_to_extract = list(ivy_files)
+            cache_misses = len(files_to_extract)
+        else:
+            for filepath in ivy_files:
+                rel_path = os.path.relpath(filepath, protocol_dir)
 
-            # -- Cache lookup: compute SHA-256 and compare against manifest --
-            try:
-                current_sha = _file_sha256(filepath)
-            except OSError:
-                current_sha = ""
+                try:
+                    current_sha = _file_sha256(filepath)
+                except OSError:
+                    current_sha = ""
 
-            cached_hit = (
-                caches_valid
-                and current_sha
-                and current_sha == cached_sha256.get(rel_path)
-                and rel_path in cached_symbols
-                and rel_path in cached_includes_raw
-                and rel_path in cached_exports
-                and rel_path in cached_requirements
-                and rel_path in cached_manifest.get("files", {})
-            )
-
-            if cached_hit:
-                cache_hits += 1
-                # Restore all data directly from cache — no parsing needed
-                symbols_map[rel_path] = cached_symbols[rel_path]
-                includes_raw[rel_path] = cached_includes_raw[rel_path]
-                exports_map[rel_path] = cached_exports[rel_path]
-                requirements_map[rel_path] = cached_requirements[rel_path]
-                manifest_files[rel_path] = cached_manifest["files"][rel_path]
-                cached_tier = cached_manifest["files"][rel_path].get(
-                    "parse_tier", TIER_UNKNOWN
+                cached_hit = (
+                    current_sha
+                    and current_sha == cached_sha256.get(rel_path)
+                    and rel_path in cached_symbols
+                    and rel_path in cached_includes_raw
+                    and rel_path in cached_exports
+                    and rel_path in cached_requirements
+                    and rel_path in cached_manifest.get("files", {})
                 )
-                tier_counts[cached_tier] = tier_counts.get(cached_tier, 0) + 1
-            else:
-                cache_misses += 1
-                files_to_extract.append(filepath)
-                sha_for_file[filepath] = current_sha
+
+                if cached_hit:
+                    cache_hits += 1
+                    symbols_map[rel_path] = cached_symbols[rel_path]
+                    includes_raw[rel_path] = cached_includes_raw[rel_path]
+                    exports_map[rel_path] = cached_exports[rel_path]
+                    requirements_map[rel_path] = cached_requirements[rel_path]
+                    manifest_files[rel_path] = cached_manifest["files"][rel_path]
+                    cached_tier = cached_manifest["files"][rel_path].get(
+                        "parse_tier", TIER_UNKNOWN
+                    )
+                    tier_counts[cached_tier] = tier_counts.get(cached_tier, 0) + 1
+                else:
+                    cache_misses += 1
+                    files_to_extract.append(filepath)
+                    sha_for_file[filepath] = current_sha
 
         # -- Phase B: extract cache misses (parallel or sequential) --------
         parser_timeout = 5.0
