@@ -10,32 +10,47 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _get_analysis(protocol_dir: str, _analysis: Any = None) -> Any:
+    """Return *_analysis* if provided, otherwise run ``analyze_protocol``."""
+    if _analysis is not None:
+        return _analysis
+    from ivy_lsp.core.analysis.pattern_library import analyze_protocol
+
+    return analyze_protocol(protocol_dir)
+
+
+def _find_containing_structs(type_name: str, detected: List[Any]) -> List[str]:
+    """Return names of struct objects that have a field referencing *type_name*."""
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
+
+    structs: List[str] = []
+    for pat in detected:
+        if (
+            pat.kind == PatternKind.VARIANTS
+            and pat.details.get("type") == "struct_object"
+        ):
+            for field in pat.details.get("fields", []):
+                if field.get("type", "").startswith(f"{type_name}."):
+                    structs.append(pat.name)
+                    break
+    return structs
+
+
 def find_variants_impl(
     type_name: str,
     protocol_dir: str,
+    _analysis: Any = None,
 ) -> Dict[str, Any]:
     """Return the structure of an Ivy type (struct fields or variant members).
-
-    Uses ``analyze_protocol`` from the pattern library to scan all ``.ivy``
-    files under *protocol_dir*, then filters for VARIANTS patterns whose
-    name matches *type_name*.
 
     Args:
         type_name: Unqualified Ivy object name (e.g. ``"ping_packet"``).
         protocol_dir: Absolute path to the protocol directory to scan.
-
-    Returns:
-        Dict with keys ``type_name``, ``kind``, ``file``, ``line``, and
-        ``fields`` (for structs).  Returns an error dict when the type is
-        not found.
+        _analysis: Pre-computed ``analyze_protocol`` result (avoids re-scan).
     """
-    from ivy_lsp.core.analysis.pattern_library import (
-        INSTANCE_RE,
-        PatternKind,
-        analyze_protocol,
-    )
+    from ivy_lsp.core.analysis.pattern_library import INSTANCE_RE, PatternKind
 
-    result = analyze_protocol(protocol_dir)
+    result = _get_analysis(protocol_dir, _analysis)
 
     for pat in result.detected:
         if pat.kind != PatternKind.VARIANTS:
@@ -183,16 +198,7 @@ def _find_serializer_source(
     """
     from ivy_lsp.core.analysis.pattern_library import PatternKind
 
-    containing_structs: List[str] = []
-    for pat in detected:
-        if (
-            pat.kind == PatternKind.VARIANTS
-            and pat.details.get("type") == "struct_object"
-        ):
-            for field in pat.details.get("fields", []):
-                if field.get("type", "").startswith(f"{type_name}."):
-                    containing_structs.append(pat.name)
-                    break
+    containing_structs = _find_containing_structs(type_name, detected)
 
     ser_name: Optional[str] = None
     for pat in detected:
@@ -302,14 +308,10 @@ def change_impact_impl(
         Dict with keys ``type_name``, ``change_type``, ``auto_propagate``,
         ``manual_review``, and ``unaffected``.
     """
-    from ivy_lsp.core.analysis.pattern_library import (
-        PatternKind,
-        analyze_protocol,
-        detect_all_patterns,
-    )
+    from ivy_lsp.core.analysis.pattern_library import PatternKind, detect_all_patterns
 
-    analysis = analyze_protocol(protocol_dir)
-    variant_info = find_variants_impl(type_name, protocol_dir)
+    analysis = _get_analysis(protocol_dir)
+    variant_info = find_variants_impl(type_name, protocol_dir, _analysis=analysis)
 
     type_def_file: Optional[str] = variant_info.get("file")
     if type_def_file is None or "error" in variant_info:
@@ -331,7 +333,7 @@ def change_impact_impl(
         }
     ]
 
-    serdes = serdes_correlation_impl(type_name, protocol_dir)
+    serdes = serdes_correlation_impl(type_name, protocol_dir, _analysis=analysis)
     if serdes["correlations"]:
         for corr in serdes["correlations"]:
             if corr.get("serializer"):
@@ -362,23 +364,18 @@ def change_impact_impl(
         stem = os.path.splitext(os.path.basename(entry["file"]))[0]
         auto_stems.add(stem)
 
+    # Build include graph from already-computed INCLUDE_CHAIN patterns
+    # (avoids re-reading every .ivy file from disk)
     file_includes: Dict[str, List[str]] = {}
     all_ivy_files: List[str] = []
-    for dirpath, _, files in os.walk(protocol_dir):
-        for f in sorted(files):
-            if f.endswith(".ivy"):
-                full = os.path.join(dirpath, f)
-                all_ivy_files.append(full)
-                try:
-                    with open(full, encoding="utf-8", errors="replace") as fh:
-                        source = fh.read()
-                except OSError:
-                    continue
-                includes = []
-                for m in re.finditer(r"^\s*include\s+(\w+)", source, re.MULTILINE):
-                    includes.append(m.group(1))
-                stem = os.path.splitext(f)[0]
-                file_includes[stem] = includes
+    for pat in analysis.detected:
+        if pat.kind == PatternKind.INCLUDE_CHAIN:
+            all_ivy_files.append(pat.file)
+            stem = os.path.splitext(os.path.basename(pat.file))[0]
+            raw_includes = pat.details.get("includes", [])
+            file_includes[stem] = [
+                inc["name"] if isinstance(inc, dict) else inc for inc in raw_includes
+            ]
 
     auto_rel_set = {e["file"] for e in auto_entries}
 
@@ -435,16 +432,7 @@ def _add_ser_deser_from_containing_struct(
     """For variant types, find ser/deser via the parent struct's SERDES instance."""
     from ivy_lsp.core.analysis.pattern_library import PatternKind
 
-    containing_structs: List[str] = []
-    for pat in detected:
-        if (
-            pat.kind == PatternKind.VARIANTS
-            and pat.details.get("type") == "struct_object"
-        ):
-            for field in pat.details.get("fields", []):
-                if field.get("type", "").startswith(f"{type_name}."):
-                    containing_structs.append(pat.name)
-                    break
+    containing_structs = _find_containing_structs(type_name, detected)
 
     class_index: Dict[str, Any] = {}
     for pat in detected:
@@ -503,26 +491,18 @@ def _categorize_file(patterns: List[Any], rel_path: str) -> str:
 def serdes_correlation_impl(
     type_name: str,
     protocol_dir: str,
+    _analysis: Any = None,
 ) -> Dict[str, Any]:
     """Return the serializer/deserializer files correlated with *type_name*.
-
-    Walks all SERDES patterns in *protocol_dir* to find every instance whose
-    ``message_type`` matches *type_name*, then resolves the corresponding
-    serializer and deserializer class patterns by name.
 
     Args:
         type_name: Unqualified Ivy message type name (e.g. ``"ping_packet"``).
         protocol_dir: Absolute path to the protocol directory to scan.
-
-    Returns:
-        Dict with keys ``type_name`` and ``correlations``.  Each entry in
-        ``correlations`` has ``serializer``, ``deserializer``, and ``instance``
-        sub-dicts.  Returns an empty ``correlations`` list when *type_name* is
-        not found.
+        _analysis: Pre-computed ``analyze_protocol`` result (avoids re-scan).
     """
-    from ivy_lsp.core.analysis.pattern_library import PatternKind, analyze_protocol
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
 
-    result = analyze_protocol(protocol_dir)
+    result = _get_analysis(protocol_dir, _analysis)
 
     class_index: Dict[str, Any] = {}
     for pat in result.detected:
@@ -531,6 +511,16 @@ def serdes_correlation_impl(
             "deserializer",
         ):
             class_index[pat.name] = pat
+
+    def _class_info(p: Any) -> Dict[str, Any]:
+        rel = os.path.relpath(p.file, protocol_dir)
+        states = p.details.get("states", [])
+        return {
+            "file": rel,
+            "class": p.name,
+            "base": p.details.get("base_class", ""),
+            "states": len(states),
+        }
 
     correlations: List[Dict[str, Any]] = []
     for pat in result.detected:
@@ -546,16 +536,6 @@ def serdes_correlation_impl(
 
         ser_pat = class_index.get(ser_name)
         deser_pat = class_index.get(deser_name)
-
-        def _class_info(p: Any) -> Dict[str, Any]:
-            rel = os.path.relpath(p.file, protocol_dir)
-            states = p.details.get("states", [])
-            return {
-                "file": rel,
-                "class": p.name,
-                "base": p.details.get("base_class", ""),
-                "states": len(states),
-            }
 
         correlations.append(
             {
