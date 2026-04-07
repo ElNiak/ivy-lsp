@@ -228,7 +228,36 @@ def test_get_session_id_falls_back_to_file(tmp_path, monkeypatch):
 def test_get_session_id_returns_unknown_when_no_source(tmp_path, monkeypatch):
     monkeypatch.delenv("IVY_SESSION_ID", raising=False)
     monkeypatch.delenv("IVY_WORKSPACE_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
     assert get_session_id(session_dir=str(tmp_path)) == "unknown"
+
+
+def test_get_session_id_falls_back_to_claude_session_id(tmp_path, monkeypatch):
+    """CLAUDE_SESSION_ID is used when IVY_SESSION_ID and file are both absent."""
+    monkeypatch.delenv("IVY_SESSION_ID", raising=False)
+    monkeypatch.delenv("IVY_WORKSPACE_ROOT", raising=False)
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "claude-abc123")
+    reset_session_cache()
+    assert get_session_id(session_dir=str(tmp_path)) == "claude-abc123"
+
+
+def test_get_session_id_ivy_env_wins_over_claude(monkeypatch):
+    """IVY_SESSION_ID takes precedence over CLAUDE_SESSION_ID."""
+    monkeypatch.setenv("IVY_SESSION_ID", "from-ivy")
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "from-claude")
+    assert get_session_id() == "from-ivy"
+
+
+def test_get_session_id_file_wins_over_claude(tmp_path, monkeypatch):
+    """Session file takes precedence over CLAUDE_SESSION_ID."""
+    monkeypatch.delenv("IVY_SESSION_ID", raising=False)
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "from-claude")
+    ws = str(tmp_path / "workspace")
+    monkeypatch.setenv("IVY_WORKSPACE_ROOT", ws)
+    ws_hash = hashlib.sha256(ws.encode()).hexdigest()[:12]
+    (tmp_path / f"ivy-session-{ws_hash}.id").write_text("from-file\n")
+    reset_session_cache()
+    assert get_session_id(session_dir=str(tmp_path)) == "from-file"
 
 
 def test_get_session_id_race_then_resolve(tmp_path, monkeypatch):

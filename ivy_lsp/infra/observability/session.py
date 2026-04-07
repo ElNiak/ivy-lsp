@@ -68,7 +68,8 @@ def get_session_id(*, session_dir: str = "/tmp") -> str:
     Resolution order:
       1. ``IVY_SESSION_ID`` environment variable (explicit override)
       2. ``/tmp/ivy-session-<ws_hash>.id`` file (written by SessionStart hook)
-      3. ``"unknown"`` fallback
+      3. ``CLAUDE_SESSION_ID`` environment variable (inherited from Claude Code)
+      4. ``"unknown"`` fallback
     """
     from_env = os.environ.get("IVY_SESSION_ID", "").strip()
     if from_env:
@@ -78,6 +79,10 @@ def get_session_id(*, session_dir: str = "/tmp") -> str:
     from_file = _read_session_file(ws_root, session_dir=session_dir)
     if from_file:
         return from_file
+
+    claude_sid = os.environ.get("CLAUDE_SESSION_ID", "").strip()
+    if claude_sid:
+        return claude_sid
 
     return "unknown"
 
