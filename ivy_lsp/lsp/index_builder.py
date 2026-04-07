@@ -354,18 +354,35 @@ class IndexBuilder:
 
         # -- 1. Discover .ivy files ----------------------------------------
         from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.workspace.detection import _apply_marker, _read_marker
 
         protocol_rel = os.path.relpath(protocol_dir, self.workspace_root)
+
+        # Load per-protocol .ivyworkspace for fine-grained layers.
+        # Falls back to the heuristic global config when no marker exists.
+        marker_path = os.path.join(protocol_dir, ".ivyworkspace")
+        marker_data = _read_marker(marker_path)
+        proto_config = None
+        if marker_data is not None:
+            proto_config = _apply_marker(marker_path, marker_data)
+
+        if proto_config is not None:
+            layers = proto_config.workspace_layers
+            exclude = proto_config.exclude_paths
+        else:
+            layers = self.workspace_config.workspace_layers
+            exclude = self.workspace_config.exclude_paths
+
         resolver = IncludeResolver(
             workspace_root=self.workspace_root,
-            exclude_paths=self.workspace_config.exclude_paths,
+            exclude_paths=exclude,
             include_paths=[protocol_rel],
-            workspace_layers=self.workspace_config.workspace_layers,
+            workspace_layers=layers,
         )
         # Create staging so resolver.resolve() can find cross-directory includes
         try:
             resolver.create_staging_directory()
-            if self.workspace_config.workspace_layers:
+            if layers:
                 resolver.build_layered_staging()
         except Exception:
             logger.warning(
@@ -507,6 +524,7 @@ class IndexBuilder:
                 files_to_extract=files_to_extract,
                 protocol_dir=protocol_dir,
                 resolver_config=resolver_config,
+                fast=self.fast,
                 parser_timeout=parser_timeout,
                 sha_for_file=sha_for_file,
             )
@@ -774,6 +792,7 @@ class IndexBuilder:
         files_to_extract: List[str],
         protocol_dir: str,
         resolver_config: dict,
+        fast: bool,
         parser_timeout: float,
         sha_for_file: Optional[Dict[str, str]] = None,
     ) -> List[FileExtractionResult]:
@@ -783,6 +802,7 @@ class IndexBuilder:
             files_to_extract: Absolute paths to ``.ivy`` files.
             protocol_dir: Protocol directory for relative path computation.
             resolver_config: Serialised resolver config (picklable).
+            fast: If ``True``, skip Tier 1 (AST parser) and use Tier 2/3 only.
             parser_timeout: Timeout for the Tier 1 parser lock.
             sha_for_file: Pre-computed SHA-256 per filepath (avoids double hash).
 
@@ -795,10 +815,6 @@ class IndexBuilder:
         sha_map = sha_for_file or {}
         results: List[FileExtractionResult] = []
 
-        # Use the same pattern as parallel_indexer.py: default spawn context
-        # with a _worker_init that fixes sys.path in spawned workers.
-        # The `if __name__ == "__main__":` guard in __main__.py prevents
-        # workers from re-executing the CLI entry point.
         parent_path = list(sys.path)
 
         try:
@@ -817,7 +833,7 @@ class IndexBuilder:
                     fp,
                     protocol_dir,
                     resolver_config,
-                    self.fast,
+                    fast,
                     parser_timeout,
                     precomputed_sha=sha_map.get(fp, ""),
                 )
@@ -832,7 +848,7 @@ class IndexBuilder:
                     filepath=filepath,
                     protocol_dir=protocol_dir,
                     resolver_config=resolver_config,
-                    fast=self.fast,
+                    fast=fast,
                     parser_timeout=parser_timeout,
                     precomputed_sha=sha_map.get(filepath, ""),
                 )
