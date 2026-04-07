@@ -7,6 +7,7 @@ import os
 import time
 
 import pytest
+from _ivy_samples import SAMPLE_IVY_MAIN, SAMPLE_IVY_TYPES
 
 from ivy_lsp.core.workspace.detection import WorkspaceConfig
 from ivy_lsp.lsp.index_builder import IndexBuilder, _file_sha256, cli_index
@@ -71,31 +72,6 @@ def _force_regex_tier_if_no_lexer(monkeypatch):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-# Minimal Ivy source with exports, imports, includes, and requirements.
-SAMPLE_IVY_MAIN = """\
-#lang ivy1.7
-
-include types
-
-type packet
-action send(p: packet)
-action recv(p: packet)
-
-export send
-import recv
-
-after send {
-    require p ~= 0;
-}
-"""
-
-SAMPLE_IVY_TYPES = """\
-#lang ivy1.7
-
-type cid
-type quic_packet_type = {initial, handshake, zero_rtt, one_rtt}
-"""
 
 # Broken syntax file for error recovery testing.
 SAMPLE_IVY_BROKEN = """\

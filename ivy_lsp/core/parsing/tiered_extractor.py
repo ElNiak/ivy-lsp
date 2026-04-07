@@ -115,12 +115,19 @@ class TieredExtractor:
         self,
         resolve_callback: Optional[Callable[[str, str], Optional[str]]] = None,
         parser_timeout: float = 5.0,
+        skip_tier1: bool = False,
     ) -> None:
-        """Initialize with optional resolve callback and parser timeout."""
+        """Initialize with optional resolve callback and parser timeout.
+
+        Args:
+            resolve_callback: Resolve include names to file paths.
+            parser_timeout: Seconds to wait for the parser lock (Tier 1).
+            skip_tier1: If ``True``, disable Tier 1 (AST parser) entirely.
+        """
         self._resolve_callback = resolve_callback
         self._parser_timeout = parser_timeout
         # Cached import-availability flags (None = not checked yet)
-        self._parser_available: Optional[bool] = None
+        self._parser_available: Optional[bool] = False if skip_tier1 else None
         self._lexer_available: Optional[bool] = None
 
     # -- Public API ---------------------------------------------------------

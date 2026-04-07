@@ -189,8 +189,7 @@ class SessionOverlay:
         now = time.time()
 
         # Use Tier 2/3 only (skip parser to keep latency low).
-        extractor = TieredExtractor(parser_timeout=0.0)
-        extractor._parser_available = False
+        extractor = TieredExtractor(parser_timeout=0.0, skip_tier1=True)
 
         try:
             result = extractor.extract(source=content, filepath=path)

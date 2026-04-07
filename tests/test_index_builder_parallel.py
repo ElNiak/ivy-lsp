@@ -11,10 +11,10 @@ These tests verify that:
 
 from __future__ import annotations
 
-import os
 import pickle
 
 import pytest
+from _ivy_samples import SAMPLE_IVY_MAIN, SAMPLE_IVY_TYPES
 
 from ivy_lsp.core.workspace.detection import WorkspaceConfig
 from ivy_lsp.lsp.index_builder import (
@@ -22,34 +22,6 @@ from ivy_lsp.lsp.index_builder import (
     IndexBuilder,
     _extract_one_file,
 )
-
-# ---------------------------------------------------------------------------
-# Helpers shared with test_index_builder.py
-# ---------------------------------------------------------------------------
-
-SAMPLE_IVY_TYPES = """\
-#lang ivy1.7
-
-type cid
-type quic_packet_type = {initial, handshake, zero_rtt, one_rtt}
-"""
-
-SAMPLE_IVY_MAIN = """\
-#lang ivy1.7
-
-include types
-
-type packet
-action send(p: packet)
-action recv(p: packet)
-
-export send
-import recv
-
-after send {
-    require p ~= 0;
-}
-"""
 
 
 def _make_workspace_config(ws_root: str) -> WorkspaceConfig:

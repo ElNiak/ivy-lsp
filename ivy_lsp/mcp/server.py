@@ -100,9 +100,27 @@ async def _sidecar_monitor(
             poll = 10.0
             logger.debug("[SIDECAR-MONITOR] Backing off to 10s polling")
 
-        # Already upgraded — just keep a slow heartbeat
-        if sidecar_client.get_sidecar_port() is not None:
+        # Already upgraded — slow heartbeat but re-check port file
+        # to detect sidecar restarts (e.g. new LSP on a different port).
+        current_port = sidecar_client.get_sidecar_port()
+        if current_port is not None:
             poll = 30.0
+            new_port = sidecar_client.read_port_file(ws_hash=ws_hash)
+            if new_port is not None and new_port != current_port:
+                if await sidecar_client.validate_sidecar_workspace(
+                    new_port, workspace_root
+                ):
+                    sidecar_client.set_sidecar_port(new_port)
+                    logger.info(
+                        "[SIDECAR-MONITOR] Port changed %d -> %d, updated",
+                        current_port,
+                        new_port,
+                    )
+                else:
+                    logger.debug(
+                        "[SIDECAR-MONITOR] Port file says %d but workspace mismatch",
+                        new_port,
+                    )
             continue
 
         port = sidecar_client.read_port_file(ws_hash=ws_hash)

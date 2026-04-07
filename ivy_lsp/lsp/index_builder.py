@@ -43,6 +43,17 @@ logger = logging.getLogger(__name__)
 
 _BUILDER_VERSION = ivy_lsp.__version__
 
+# Tier labels — used in manifest entries and CLI reporting.
+TIER_AST = "ast"
+TIER_LEXER = "lexer"
+TIER_REGEX = "regex"
+TIER_UNKNOWN = "unknown"
+
+# Completeness labels — used in manifest entries.
+COMPLETENESS_COMPLETE = "complete"
+COMPLETENESS_PARTIAL = "partial"
+COMPLETENESS_MISSING = "missing"
+
 
 def _file_sha256(filepath: str) -> str:
     """Compute SHA-256 hex digest of a file."""
@@ -53,14 +64,46 @@ def _file_sha256(filepath: str) -> str:
     return h.hexdigest()
 
 
+def _sha256_from_bytes(data: bytes) -> str:
+    """Compute SHA-256 hex digest from in-memory bytes."""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _error_manifest_entry(
+    mtime: float = 0.0,
+    size: int = 0,
+    sha256: str = "",
+    completeness: str = COMPLETENESS_MISSING,
+) -> dict:
+    """Build a manifest entry for a file that failed reading or parsing."""
+    return {
+        "mtime": mtime,
+        "size": size,
+        "sha256": sha256,
+        "completeness": completeness,
+        "parse_tier": TIER_UNKNOWN,
+    }
+
+
 def _tier_label(tier: int) -> str:
     """Map tier number to a human-readable label."""
-    return {1: "ast", 2: "lexer", 3: "regex"}.get(tier, "unknown")
+    return {1: TIER_AST, 2: TIER_LEXER, 3: TIER_REGEX}.get(tier, TIER_UNKNOWN)
 
 
 # ---------------------------------------------------------------------------
-# Per-file extraction (top-level for ProcessPoolExecutor picklability)
+# Worker process helpers (top-level for ProcessPoolExecutor picklability)
 # ---------------------------------------------------------------------------
+
+
+def _worker_init(parent_sys_path: list) -> None:
+    """Initialize worker process with parent's sys.path.
+
+    ``ProcessPoolExecutor`` with the ``spawn`` start method creates fresh
+    Python interpreters that may not inherit the parent's ``sys.path``
+    (especially when running under ``uvx`` or similar tools).
+    """
+    new_paths = [p for p in parent_sys_path if p not in sys.path]
+    sys.path[0:0] = new_paths
 
 
 @dataclass
@@ -77,7 +120,7 @@ class FileExtractionResult:
     exports: dict = field(default_factory=dict)
     requirements: list = field(default_factory=list)
     manifest_entry: dict = field(default_factory=dict)
-    tier_label: str = "unknown"
+    tier_label: str = TIER_UNKNOWN
     tier1_errors: list = field(default_factory=list)
     sha256: str = ""
     error: Optional[str] = None
@@ -89,6 +132,7 @@ def _extract_one_file(
     resolver_config: dict,
     fast: bool,
     parser_timeout: float,
+    precomputed_sha: str = "",
 ) -> FileExtractionResult:
     """Extract symbols, includes, exports, requirements, and manifest data for one file.
 
@@ -106,6 +150,7 @@ def _extract_one_file(
             passed across the process boundary.
         fast: If ``True``, skip Tier 1 (AST parser) and use Tier 2/3 only.
         parser_timeout: Seconds to allow the parser lock to be acquired (Tier 1).
+        precomputed_sha: If non-empty, reuse this SHA-256 instead of recomputing.
 
     Returns:
         :class:`FileExtractionResult` populated with all extracted data.
@@ -126,50 +171,43 @@ def _extract_one_file(
     resolver = IncludeResolver.from_config(resolver_config)
 
     # -- Read source ----------------------------------------------------------
+    # Read raw bytes once: compute SHA from the binary representation (matching
+    # _file_sha256 semantics), then decode for the parser.
     try:
-        with open(filepath, encoding="utf-8", errors="replace") as fh:
-            source = fh.read()
+        with open(filepath, "rb") as fh:
+            raw = fh.read()
     except OSError as exc:
-        manifest_entry = {
-            "mtime": 0.0,
-            "size": 0,
-            "sha256": "",
-            "completeness": "missing",
-            "parse_tier": "unknown",
-        }
         return FileExtractionResult(
             rel_path=rel_path,
-            manifest_entry=manifest_entry,
+            manifest_entry=_error_manifest_entry(),
             error=f"read error: {rel_path}: {exc}",
         )
+
+    sha = precomputed_sha or _sha256_from_bytes(raw)
+    source = raw.decode("utf-8", errors="replace")
 
     # -- Parse with TieredExtractor ------------------------------------------
     extractor = TieredExtractor(
         resolve_callback=resolver.resolve,
         parser_timeout=0.0 if fast else parser_timeout,
+        skip_tier1=fast,
     )
-    if fast:
-        extractor._parser_available = False
 
     try:
         result = extractor.extract(source, filepath)
     except Exception as exc:
         try:
             stat = os.stat(filepath)
-            sha = _file_sha256(filepath)
         except OSError:
             stat = None
-            sha = ""
-        manifest_entry = {
-            "mtime": stat.st_mtime if stat else 0.0,
-            "size": stat.st_size if stat else 0,
-            "sha256": sha,
-            "completeness": "partial",
-            "parse_tier": "unknown",
-        }
         return FileExtractionResult(
             rel_path=rel_path,
-            manifest_entry=manifest_entry,
+            manifest_entry=_error_manifest_entry(
+                mtime=stat.st_mtime if stat else 0.0,
+                size=stat.st_size if stat else 0,
+                sha256=sha,
+                completeness=COMPLETENESS_PARTIAL,
+            ),
             error=f"parse error: {rel_path}: {exc}",
         )
 
@@ -213,13 +251,11 @@ def _extract_one_file(
         req_error = f"requirement error: {rel_path}: {exc}"
 
     # -- Manifest entry ------------------------------------------------------
-    completeness = "complete" if not result.errors else "partial"
+    completeness = COMPLETENESS_COMPLETE if not result.errors else COMPLETENESS_PARTIAL
     try:
         stat = os.stat(filepath)
-        sha = _file_sha256(filepath)
     except OSError:
         stat = None
-        sha = ""
     tier = _tier_label(result.tier_used)
     manifest_entry = {
         "mtime": stat.st_mtime if stat else 0.0,
@@ -354,7 +390,12 @@ class IndexBuilder:
         includes_raw: Dict[str, List[str]] = {}
         exports_map: Dict[str, dict] = {}
         requirements_map: Dict[str, list] = {}
-        tier_counts: Dict[str, int] = {"ast": 0, "lexer": 0, "regex": 0, "unknown": 0}
+        tier_counts: Dict[str, int] = {
+            TIER_AST: 0,
+            TIER_LEXER: 0,
+            TIER_REGEX: 0,
+            TIER_UNKNOWN: 0,
+        }
         tier1_failures: List[Dict[str, str]] = []
 
         # Serialise the resolver once so _extract_one_file() can reconstruct it.
@@ -399,6 +440,20 @@ class IndexBuilder:
         cache_hits = 0
         cache_misses = 0
         files_to_extract: List[str] = []
+        # Map filepath -> pre-computed SHA so _extract_one_file doesn't recompute
+        sha_for_file: Dict[str, str] = {}
+
+        # Validate all cache dicts once upfront instead of per-file isinstance checks
+        caches_valid = all(
+            isinstance(c, dict)
+            for c in [
+                cached_symbols,
+                cached_includes_raw,
+                cached_exports,
+                cached_requirements,
+                cached_manifest,
+            ]
+        )
 
         # -- Phase A: split files into cache hits vs cache misses ----------
         for filepath in ivy_files:
@@ -411,17 +466,13 @@ class IndexBuilder:
                 current_sha = ""
 
             cached_hit = (
-                current_sha
+                caches_valid
+                and current_sha
                 and current_sha == cached_sha256.get(rel_path)
-                and isinstance(cached_symbols, dict)
                 and rel_path in cached_symbols
-                and isinstance(cached_includes_raw, dict)
                 and rel_path in cached_includes_raw
-                and isinstance(cached_exports, dict)
                 and rel_path in cached_exports
-                and isinstance(cached_requirements, dict)
                 and rel_path in cached_requirements
-                and isinstance(cached_manifest, dict)
                 and rel_path in cached_manifest.get("files", {})
             )
 
@@ -434,12 +485,13 @@ class IndexBuilder:
                 requirements_map[rel_path] = cached_requirements[rel_path]
                 manifest_files[rel_path] = cached_manifest["files"][rel_path]
                 cached_tier = cached_manifest["files"][rel_path].get(
-                    "parse_tier", "unknown"
+                    "parse_tier", TIER_UNKNOWN
                 )
                 tier_counts[cached_tier] = tier_counts.get(cached_tier, 0) + 1
             else:
                 cache_misses += 1
                 files_to_extract.append(filepath)
+                sha_for_file[filepath] = current_sha
 
         # -- Phase B: extract cache misses (parallel or sequential) --------
         parser_timeout = 5.0
@@ -450,6 +502,7 @@ class IndexBuilder:
                 protocol_dir=protocol_dir,
                 resolver_config=resolver_config,
                 parser_timeout=parser_timeout,
+                sha_for_file=sha_for_file,
             )
         else:
             extraction_results = [
@@ -459,6 +512,7 @@ class IndexBuilder:
                     resolver_config=resolver_config,
                     fast=self.fast,
                     parser_timeout=parser_timeout,
+                    precomputed_sha=sha_for_file.get(filepath, ""),
                 )
                 for filepath in files_to_extract
             ]
@@ -468,7 +522,7 @@ class IndexBuilder:
             rel_path = file_result.rel_path
 
             if file_result.error and file_result.manifest_entry.get("completeness") in (
-                "missing",
+                COMPLETENESS_MISSING,
                 None,
             ):
                 # Unreadable file — only a manifest entry was produced
@@ -622,7 +676,7 @@ class IndexBuilder:
         os.makedirs(index_dir, exist_ok=True)
 
         # Build manifest
-        default_tier = "lexer" if self.fast else "ast"
+        default_tier = TIER_LEXER if self.fast else TIER_AST
         manifest = {
             "version": 1,
             "protocol": protocol,
@@ -715,6 +769,7 @@ class IndexBuilder:
         protocol_dir: str,
         resolver_config: dict,
         parser_timeout: float,
+        sha_for_file: Optional[Dict[str, str]] = None,
     ) -> List[FileExtractionResult]:
         """Extract multiple files in parallel using a process pool.
 
@@ -723,6 +778,7 @@ class IndexBuilder:
             protocol_dir: Protocol directory for relative path computation.
             resolver_config: Serialised resolver config (picklable).
             parser_timeout: Timeout for the Tier 1 parser lock.
+            sha_for_file: Pre-computed SHA-256 per filepath (avoids double hash).
 
         Returns:
             List of :class:`FileExtractionResult`, one per input file.
@@ -730,10 +786,21 @@ class IndexBuilder:
         """
         import concurrent.futures
 
+        sha_map = sha_for_file or {}
         results: List[FileExtractionResult] = []
 
+        # Use the same pattern as parallel_indexer.py: default spawn context
+        # with a _worker_init that fixes sys.path in spawned workers.
+        # The `if __name__ == "__main__":` guard in __main__.py prevents
+        # workers from re-executing the CLI entry point.
+        parent_path = list(sys.path)
+
         try:
-            executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers)
+            executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.workers,
+                initializer=_worker_init,
+                initargs=(parent_path,),
+            )
         except (PermissionError, OSError) as exc:
             logger.warning(
                 "ProcessPoolExecutor unavailable (%s), falling back to sequential",
@@ -741,7 +808,12 @@ class IndexBuilder:
             )
             return [
                 _extract_one_file(
-                    fp, protocol_dir, resolver_config, self.fast, parser_timeout
+                    fp,
+                    protocol_dir,
+                    resolver_config,
+                    self.fast,
+                    parser_timeout,
+                    precomputed_sha=sha_map.get(fp, ""),
                 )
                 for fp in files_to_extract
             ]
@@ -756,6 +828,7 @@ class IndexBuilder:
                     resolver_config=resolver_config,
                     fast=self.fast,
                     parser_timeout=parser_timeout,
+                    precomputed_sha=sha_map.get(filepath, ""),
                 )
                 future_to_path[future] = filepath
 
@@ -772,13 +845,7 @@ class IndexBuilder:
                     results.append(
                         FileExtractionResult(
                             rel_path=rel_path,
-                            manifest_entry={
-                                "mtime": 0.0,
-                                "size": 0,
-                                "sha256": "",
-                                "completeness": "missing",
-                                "parse_tier": "unknown",
-                            },
+                            manifest_entry=_error_manifest_entry(),
                             error=f"worker error: {rel_path}: {exc}",
                         )
                     )

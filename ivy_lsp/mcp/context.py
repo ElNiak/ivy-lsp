@@ -225,6 +225,11 @@ class ToolContext:
                 return {"state": "ready"}
             if server._initializing:
                 return {"state": "building"}
+            # _setup_analysis_pipeline completed (pipeline exists) but
+            # _semantic_model is still None — treat as ready with empty
+            # model rather than "not_built", which blocks all tools.
+            if getattr(server, "_analysis_pipeline", None) is not None:
+                return {"state": "ready"}
             return {"state": "not_built"}
 
         ctx.get_model = _get_model
