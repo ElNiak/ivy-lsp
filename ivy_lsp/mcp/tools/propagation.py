@@ -85,9 +85,196 @@ def find_variants_impl(
             "fields": enriched,
         }
 
+    variant_result = _find_variant_type(type_name, result, protocol_dir)
+    if variant_result is not None:
+        return variant_result
+
     return {
         "type_name": type_name,
         "error": f"type '{type_name}' not found in {protocol_dir}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Variant-type helpers
+# ---------------------------------------------------------------------------
+
+# Variant struct body: ``variant this of <parent> = struct { field : type, ... }``
+_VARIANT_STRUCT_RE = re.compile(
+    r"variant\s+this\s+of\s+(\w+)\s*=\s*struct\s*\{([^}]+)\}",
+    re.DOTALL,
+)
+
+# Nearest enclosing ``object <name> = {`` before a given position.
+_ENCLOSING_OBJECT_RE = re.compile(r"object\s+(\w+)\s*=\s*\{", re.MULTILINE)
+
+# Tag dispatch inside C++ open_tag(): ``if (tag == N) { ... frame_type = 0xNN``
+_OPEN_TAG_ENTRY_RE = re.compile(
+    r"tag\s*==\s*(\d+)\s*\).*?frame_type\s*=\s*(0x[0-9a-fA-F]+)",
+    re.DOTALL,
+)
+
+
+def _parse_variant_members(
+    source: str,
+    parent: str,
+) -> List[Dict[str, Any]]:
+    """Extract variant member name + fields from Ivy source.
+
+    For each ``variant this of <parent> = struct { ... }`` match, walks
+    backwards to find the nearest enclosing ``object <name> = {`` to
+    determine the member name.
+    """
+    members: List[Dict[str, Any]] = []
+    for m in _VARIANT_STRUCT_RE.finditer(source):
+        if m.group(1) != parent:
+            continue
+
+        fields_raw = m.group(2)
+        fields: List[Dict[str, str]] = []
+        for f in fields_raw.split(","):
+            f = f.strip()
+            if ":" in f:
+                fname, ftype = f.split(":", 1)
+                fields.append({"name": fname.strip(), "type": ftype.strip()})
+
+        prefix = source[: m.start()]
+        obj_name: Optional[str] = None
+        for obj_m in _ENCLOSING_OBJECT_RE.finditer(prefix):
+            obj_name = obj_m.group(1)
+        if obj_name is None or obj_name == parent:
+            continue
+
+        members.append({"name": obj_name, "fields": fields})
+    return members
+
+
+def _extract_tag_map(ser_source: str) -> Dict[int, str]:
+    """Parse ``open_tag()`` in a serializer's C++ impl block.
+
+    Returns a mapping from integer tag to hex wire-type string
+    (e.g. ``{0: "0x01", 1: "0x02", 2: "0x03"}``).
+    """
+    from ivy_lsp.core.analysis.impl_block_parser import analyze_impl_blocks
+
+    impl = analyze_impl_blocks(ser_source)
+    cpp = " ".join(b.content for b in impl.impl_blocks)
+
+    tag_map: Dict[int, str] = {}
+    for m in _OPEN_TAG_ENTRY_RE.finditer(cpp):
+        tag = int(m.group(1))
+        wire = m.group(2)
+        tag_map[tag] = wire
+    return tag_map
+
+
+def _find_serializer_source(
+    type_name: str,
+    detected: List[Any],
+    protocol_dir: str,
+) -> Optional[str]:
+    """Locate the serializer file for the packet type that contains *type_name*.
+
+    Strategy:
+    1. Find struct types whose fields reference ``<type_name>.arr``
+       (e.g. ``ping_packet`` has ``payload : frame.arr``).
+    2. Find a SERDES *instance* whose ``message_type`` matches that struct.
+    3. Read the file containing the serializer class (matched by ``ser_name``).
+    """
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
+
+    containing_structs: List[str] = []
+    for pat in detected:
+        if (
+            pat.kind == PatternKind.VARIANTS
+            and pat.details.get("type") == "struct_object"
+        ):
+            for field in pat.details.get("fields", []):
+                if field.get("type", "").startswith(f"{type_name}."):
+                    containing_structs.append(pat.name)
+                    break
+
+    ser_name: Optional[str] = None
+    for pat in detected:
+        if pat.kind == PatternKind.SERDES and pat.details.get("type") == "instance":
+            if pat.details.get("message_type") in containing_structs:
+                ser_name = pat.details.get("ser_name")
+                break
+
+    if ser_name is None:
+        return None
+
+    for pat in detected:
+        if (
+            pat.kind == PatternKind.SERDES
+            and pat.details.get("type") == "serializer"
+            and pat.name == ser_name
+        ):
+            try:
+                with open(pat.file, encoding="utf-8", errors="replace") as fh:
+                    return fh.read()
+            except OSError:
+                return None
+
+    return None
+
+
+def _find_variant_type(
+    type_name: str,
+    analysis_result: Any,
+    protocol_dir: str,
+) -> Optional[Dict[str, Any]]:
+    """Build a variant-type result dict if *type_name* is a variant parent."""
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
+
+    variant_pats = [
+        p
+        for p in analysis_result.detected
+        if p.kind == PatternKind.VARIANTS
+        and p.details.get("type") == "variant"
+        and p.details.get("parent") == type_name
+    ]
+    if not variant_pats:
+        return None
+
+    first = variant_pats[0]
+    try:
+        with open(first.file, encoding="utf-8", errors="replace") as fh:
+            source = fh.read()
+    except OSError:
+        return None
+
+    members = _parse_variant_members(source, type_name)
+    if not members:
+        return None
+
+    ser_source = _find_serializer_source(
+        type_name, analysis_result.detected, protocol_dir
+    )
+    tag_map: Dict[int, str] = {}
+    if ser_source is not None:
+        tag_map = _extract_tag_map(ser_source)
+
+    enriched: List[Dict[str, Any]] = []
+    for idx, mem in enumerate(members):
+        enriched.append(
+            {
+                "name": mem["name"],
+                "tag": idx,
+                "wire_type": tag_map.get(idx, ""),
+                "fields": mem["fields"],
+            }
+        )
+
+    rel_file = os.path.relpath(first.file, protocol_dir)
+    line = first.line
+
+    return {
+        "type_name": type_name,
+        "kind": "variant",
+        "file": rel_file,
+        "line": line,
+        "members": enriched,
     }
 
 
