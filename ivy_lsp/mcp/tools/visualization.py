@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools._helpers import build_viz_params
 
 logger = logging.getLogger(__name__)
 
@@ -35,22 +36,14 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         """Get requirements organized by action boundaries."""
         from ivy_lsp.lsp.visualization import handle_action_requirements
 
+        params, err = build_viz_params(
+            ctx, file_path=file_path, test_file=test_file, protocol=protocol
+        )
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
         if action_name:
             params["actionName"] = action_name
-        if file_path:
-            try:
-                params["filePath"] = ctx.validate_path(file_path)
-            except ValueError as exc:
-                return error_response(str(exc))
-        if test_file:
-            try:
-                params["testFile"] = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         if offset:
             params["offset"] = offset
         if limit is not None:
@@ -66,15 +59,10 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         """Get per-action requirement counts, state variable usage, and RFC coverage."""
         from ivy_lsp.lsp.visualization import handle_model_summary_table
 
+        params, err = build_viz_params(ctx, test_file=test_file, protocol=protocol)
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
-        if test_file:
-            try:
-                params["testFile"] = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         result = handle_model_summary_table(server_proxy, params)
 
         # P1: Post-process rows with sort_by and limit
@@ -111,17 +99,12 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         """Return the action dependency graph showing shared-state relationships."""
         from ivy_lsp.lsp.viz_graphs import handle_action_dependency_graph
 
+        params, err = build_viz_params(ctx, test_file=test_file, protocol=protocol)
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
-        if test_file:
-            try:
-                params["testFile"] = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
         if include_state_vars:
             params["includeStateVars"] = True
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return handle_action_dependency_graph(server_proxy, params)
 
     async def _ivy_state_machine_view(
@@ -132,17 +115,12 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         """Return a state-machine view of the Ivy specification."""
         from ivy_lsp.lsp.viz_graphs import handle_state_machine_view
 
+        params, err = build_viz_params(ctx, test_file=test_file, protocol=protocol)
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
-        if test_file:
-            try:
-                params["testFile"] = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
         if state_var_filter:
             params["stateVarFilter"] = state_var_filter
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return handle_state_machine_view(server_proxy, params)
 
     async def _ivy_layered_overview(
@@ -153,17 +131,12 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
         """Get a layered overview of the Ivy model organized by file or module."""
         from ivy_lsp.lsp.viz_graphs import handle_layered_overview
 
+        params, err = build_viz_params(ctx, test_file=test_file, protocol=protocol)
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
-        if test_file:
-            try:
-                params["testFile"] = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
         if group_by:
             params["groupBy"] = group_by
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         return handle_layered_overview(server_proxy, params)
 
     # ------------------------------------------------------------------

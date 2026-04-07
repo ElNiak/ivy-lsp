@@ -5,11 +5,27 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
+from lsprotocol import types as lsp
+
 from ivy_lsp.infra.utils import uri_to_path
+from ivy_lsp.infra.utils.position_utils import make_range
 
 logger = logging.getLogger(__name__)
+
+
+def scoped_lookup_to_location(sl) -> lsp.Location:
+    """Convert a ``ScopedLookupResult`` to an LSP ``Location``."""
+    uri = Path(sl.filepath).as_uri() if sl.filepath else ""
+    return lsp.Location(uri=uri, range=make_range(*sl.range))
+
+
+def symbol_to_location(sym) -> lsp.Location:
+    """Convert an ``IvySymbol`` to an LSP ``Location``."""
+    uri = Path(sym.file_path).as_uri() if sym.file_path else ""
+    return lsp.Location(uri=uri, range=make_range(*sym.range))
 
 
 @dataclass(frozen=True)

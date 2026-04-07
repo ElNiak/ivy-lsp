@@ -11,6 +11,47 @@ from ivy_lsp.mcp.tools import error_response
 logger = logging.getLogger(__name__)
 
 
+def validated_path_or_error(ctx: Any, path: str) -> tuple[str | None, dict | None]:
+    """Validate a path against the workspace root.
+
+    Returns ``(abs_path, None)`` on success, or ``(None, error_dict)``
+    when validation fails.
+    """
+    try:
+        return ctx.validate_path(path), None
+    except ValueError as exc:
+        return None, error_response(str(exc))
+
+
+def build_viz_params(
+    ctx: Any,
+    *,
+    file_path: str | None = None,
+    test_file: str | None = None,
+    protocol: str | None = None,
+) -> tuple[dict[str, Any], dict | None]:
+    """Build a params dict for visualization/quality handlers.
+
+    Validates path arguments and adds protocol filter.  Returns
+    ``(params, None)`` on success, or ``(params, error_dict)`` on the
+    first validation failure.
+    """
+    params: dict[str, Any] = {}
+    if file_path:
+        abs_path, err = validated_path_or_error(ctx, file_path)
+        if err:
+            return params, err
+        params["filePath"] = abs_path
+    if test_file:
+        abs_path, err = validated_path_or_error(ctx, test_file)
+        if err:
+            return params, err
+        params["testFile"] = abs_path
+    if protocol:
+        params["protocolFilter"] = f"protocol-testing/{protocol}/"
+    return params, None
+
+
 def model_unavailable_response(ctx: Any) -> dict:
     """Build a rich error response based on the model's build state."""
     status = ctx.get_model_status()

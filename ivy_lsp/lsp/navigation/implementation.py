@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import List, Optional, Union
 
 from lsprotocol import types as lsp
 
-from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.name_utils import get_last_component
-from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
+from ivy_lsp.infra.utils.position_utils import word_at_position
 from ivy_lsp.infra.utils.symbol_resolver import lookup_with_dotted_fallback
+from ivy_lsp.lsp.navigation._handler import (
+    scoped_lookup_to_location,
+    symbol_to_location,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +92,7 @@ def _find_monitors_for_action(
         # Check if this monitor targets the action we're looking for.
         # The symbol name is the dotted path after before/after (e.g. "connect" or "foo.step").
         if sym.name == action_name or sym.name == last_component:
-            uri = Path(sym.file_path).as_uri() if sym.file_path else ""
-            r = make_range(*sym.range)
-            locations.append(lsp.Location(uri=uri, range=r))
+            locations.append(symbol_to_location(sym))
 
     return locations
 
@@ -128,11 +128,7 @@ def _find_action_declaration(
         resolver = getattr(indexer, "resolver", None)
         filtered = rank_by_scope(filtered, filepath, scope_files, resolver=resolver)
 
-    locations = []
-    for sl in filtered:
-        uri = Path(sl.filepath).as_uri() if sl.filepath else ""
-        r = make_range(*sl.range)
-        locations.append(lsp.Location(uri=uri, range=r))
+    locations = [scoped_lookup_to_location(sl) for sl in filtered]
 
     if len(locations) == 1:
         return locations[0]

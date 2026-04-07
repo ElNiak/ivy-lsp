@@ -17,6 +17,7 @@ from ivy_lsp.infra.observability import ToolTraceContext, trace_tool
 from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
+from ivy_lsp.mcp.tools._helpers import validated_path_or_error
 
 logger = logging.getLogger(__name__)
 
@@ -193,11 +194,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 "scope": scope,
             },
         ) as _tt:
-            try:
-                abs_path = ctx.validate_path(relative_path)
-            except ValueError as exc:
-                _tt[0] = error_response(str(exc))
-                return _tt[0]
+            abs_path, err = validated_path_or_error(ctx, relative_path)
+            if err:
+                _tt[0] = err
+                return err
+            assert abs_path is not None
             if not os.path.isfile(abs_path):
                 _tt[0] = error_response(f"File not found: {relative_path}")
                 return _tt[0]
@@ -372,11 +373,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             "ivy_compile",
             {"relative_path": relative_path, "target": target, "isolate": isolate},
         ) as _tt:
-            try:
-                abs_path = ctx.validate_path(relative_path)
-            except ValueError as exc:
-                _tt[0] = error_response(str(exc))
-                return _tt[0]
+            abs_path, err = validated_path_or_error(ctx, relative_path)
+            if err:
+                _tt[0] = err
+                return err
+            assert abs_path is not None
             if not os.path.isfile(abs_path):
                 _tt[0] = error_response(f"File not found: {relative_path}")
                 return _tt[0]
@@ -514,11 +515,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         with trace_tool(
             "ivy_model_info", {"relative_path": relative_path, "isolate": isolate}
         ) as _tt:
-            try:
-                abs_path = ctx.validate_path(relative_path)
-            except ValueError as exc:
-                _tt[0] = error_response(str(exc))
-                return _tt[0]
+            abs_path, err = validated_path_or_error(ctx, relative_path)
+            if err:
+                _tt[0] = err
+                return err
+            assert abs_path is not None
             if not os.path.isfile(abs_path):
                 _tt[0] = error_response(f"File not found: {relative_path}")
                 return _tt[0]
@@ -673,10 +674,10 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             collision_result = await _handle_collisions_mode(ctx)
             return _tc.finish(collision_result)
 
-        try:
-            abs_path = ctx.validate_path(relative_path)
-        except ValueError as exc:
-            return _tc.finish(error_response(str(exc)))
+        abs_path, err = validated_path_or_error(ctx, relative_path)
+        if err:
+            return _tc.finish(err)
+        assert abs_path is not None
         if not os.path.isfile(abs_path):
             return _tc.finish(error_response(f"File not found: {relative_path}"))
 

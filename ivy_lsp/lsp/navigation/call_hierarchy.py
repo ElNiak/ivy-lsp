@@ -196,6 +196,37 @@ def prepare_call_hierarchy(
 
 
 # ---------------------------------------------------------------------------
+# Shared model-query helper
+# ---------------------------------------------------------------------------
+
+
+def _query_model_edges(
+    model: SemanticModel,
+    item_name: str,
+    item_filepath: str,
+    direction: str,
+    edge_types: frozenset,
+    make_result,
+) -> Optional[list]:
+    """Query the semantic model for call hierarchy edges.
+
+    Returns a list of results when edges are found, or ``None`` to signal
+    that the caller should fall back to regex scanning.
+    """
+    node_id = _find_symbol_node_id(model, item_name, item_filepath)
+    if node_id is None:
+        return None
+    get_edges = model.get_incoming if direction == "incoming" else model.get_outgoing
+    results = []
+    for etype, other_id in get_edges(node_id):
+        if etype in edge_types:
+            item = _node_to_call_hierarchy_item(model, other_id)
+            if item:
+                results.append(make_result(item))
+    return results if results else None
+
+
+# ---------------------------------------------------------------------------
 # incomingCalls
 # ---------------------------------------------------------------------------
 
@@ -211,42 +242,23 @@ def get_incoming_calls(
     When *model* is provided the semantic graph is queried first; the
     regex-based scanner is used as a fallback.
     """
-    # Try semantic model first.
     if model is not None:
-        node_id = _find_symbol_node_id(model, item_name, item_filepath)
-        if node_id is not None:
-            from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
-            results: List[lsp.CallHierarchyIncomingCall] = []
+        results = _query_model_edges(
+            model,
+            item_name,
+            item_filepath,
+            direction="incoming",
+            edge_types=frozenset({SemanticEdgeType.CALLS, SemanticEdgeType.MONITORS}),
+            make_result=lambda item: lsp.CallHierarchyIncomingCall(
+                from_=item,
+                from_ranges=[item.range],
+            ),
+        )
+        if results is not None:
+            return results
 
-            # CALLS edges (callers).
-            for etype, src_id in model.get_incoming(node_id):
-                if etype == SemanticEdgeType.CALLS:
-                    item = _node_to_call_hierarchy_item(model, src_id)
-                    if item:
-                        results.append(
-                            lsp.CallHierarchyIncomingCall(
-                                from_=item,
-                                from_ranges=[item.range],
-                            )
-                        )
-
-            # MONITORS edges (monitors of this action).
-            for etype, src_id in model.get_incoming(node_id):
-                if etype == SemanticEdgeType.MONITORS:
-                    item = _node_to_call_hierarchy_item(model, src_id)
-                    if item:
-                        results.append(
-                            lsp.CallHierarchyIncomingCall(
-                                from_=item,
-                                from_ranges=[item.range],
-                            )
-                        )
-
-            if results:
-                return results
-
-    # Fallback to regex scanning.
     return _get_incoming_calls_regex(indexer, item_name, item_filepath)
 
 
@@ -348,29 +360,23 @@ def get_outgoing_calls(
     When *model* is provided the semantic graph is queried first; the
     regex-based scanner is used as a fallback.
     """
-    # Try semantic model first.
     if model is not None:
-        node_id = _find_symbol_node_id(model, item_name, item_filepath)
-        if node_id is not None:
-            from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
 
-            results: List[lsp.CallHierarchyOutgoingCall] = []
+        results = _query_model_edges(
+            model,
+            item_name,
+            item_filepath,
+            direction="outgoing",
+            edge_types=frozenset({SemanticEdgeType.CALLS}),
+            make_result=lambda item: lsp.CallHierarchyOutgoingCall(
+                to=item,
+                from_ranges=[item.range],
+            ),
+        )
+        if results is not None:
+            return results
 
-            for etype, tgt_id in model.get_outgoing(node_id):
-                if etype == SemanticEdgeType.CALLS:
-                    item = _node_to_call_hierarchy_item(model, tgt_id)
-                    if item:
-                        results.append(
-                            lsp.CallHierarchyOutgoingCall(
-                                to=item,
-                                from_ranges=[item.range],
-                            )
-                        )
-
-            if results:
-                return results
-
-    # Fallback to regex scanning.
     return _get_outgoing_calls_regex(indexer, item_name, item_filepath)
 
 

@@ -341,6 +341,59 @@ def _summarize_for_log(value: Any, max_len: int = 240) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# safe_tool helpers – extracted phases for readability and testability
+# ---------------------------------------------------------------------------
+
+
+async def _try_sidecar_delegation(tool_name: str, kwargs: dict) -> Any | None:
+    """Delegate a tool call to the sidecar process if available.
+
+    Returns the sidecar result on success, or ``None`` to fall through
+    to local execution.
+    """
+    port = get_sidecar_port()
+    if port is None:
+        logger.debug("[TOOL-ROUTE] %s -> local (no sidecar)", tool_name)
+        return None
+    from ivy_lsp.infra.config import get_config as _get_cfg
+
+    sidecar_timeout = _get_cfg().sidecar_delegation_timeout
+    logger.debug(
+        "[TOOL-ROUTE] %s -> sidecar (port %s, timeout=%.1fs)",
+        tool_name,
+        port,
+        sidecar_timeout,
+    )
+    result = await call_sidecar_once(port, tool_name, kwargs, sidecar_timeout)
+    if result is not None:
+        return result
+    logger.debug("[TOOL-ROUTE] %s -> local (sidecar fallback)", tool_name)
+    return None
+
+
+def _check_model_readiness(ctx: Any, tool_name: str) -> dict | None:
+    """Return an early-exit error if the tool needs a model that isn't ready.
+
+    Returns ``None`` when the tool can proceed.
+    """
+    meta = _TOOL_METADATA.get(tool_name, {})
+    if not meta.get("needs_model"):
+        return None
+    if ctx is None or not hasattr(ctx, "semantic_model"):
+        return None
+    if ctx.semantic_model is None:
+        status = ctx.get_model_status()
+        if status.get("state") in ("pending", "building"):
+            logger.info(
+                "[TOOL-SKIP] %s: model not ready (state=%s)",
+                tool_name,
+                status.get("state"),
+            )
+            return _error_result(_model_not_ready_response(tool_name))
+    return None
+
+
+# ---------------------------------------------------------------------------
 # safe_tool – the single decorator applied to every MCP tool handler
 # ---------------------------------------------------------------------------
 
@@ -371,50 +424,18 @@ def safe_tool(_fn=None, *, ctx=None):
             tool_name = fn.__name__
             timeout = _get_effective_timeout(tool_name)
 
-            # --- Sidecar delegation (per-call connection) ---
-            # Each call opens a fresh transport+session, avoiding the
-            # CancelledError / GeneratorExit freeze from long-lived sessions.
-            _port = get_sidecar_port()
-            if _port is not None:
-                from ivy_lsp.infra.config import get_config as _get_cfg
+            # --- Sidecar delegation ---
+            sidecar_result = await _try_sidecar_delegation(tool_name, kwargs)
+            if sidecar_result is not None:
+                return sidecar_result
 
-                _sidecar_timeout = _get_cfg().sidecar_delegation_timeout
-                logger.debug(
-                    "[TOOL-ROUTE] %s -> sidecar (port %s, timeout=%.1fs)",
-                    tool_name,
-                    _port,
-                    _sidecar_timeout,
-                )
-                result = await call_sidecar_once(
-                    _port, tool_name, kwargs, _sidecar_timeout
-                )
-                if result is not None:
-                    return result
-                logger.debug("[TOOL-ROUTE] %s -> local (sidecar fallback)", tool_name)
-            else:
-                logger.debug("[TOOL-ROUTE] %s -> local (no sidecar)", tool_name)
-
-            # --- Original local handling below ---
+            # --- Model readiness pre-check ---
             from ivy_lsp.infra.config import get_config
             from ivy_lsp.infra.observability import get_session_logger
 
-            # Pre-check: for tools needing the semantic model, return
-            # an actionable "building" message instead of blocking/erroring.
-            meta = _TOOL_METADATA.get(tool_name, {})
-            if (
-                meta.get("needs_model")
-                and ctx is not None
-                and hasattr(ctx, "semantic_model")
-            ):
-                if ctx.semantic_model is None:
-                    status = ctx.get_model_status()
-                    if status.get("state") in ("pending", "building"):
-                        logger.info(
-                            "[TOOL-SKIP] %s: model not ready (state=%s)",
-                            tool_name,
-                            status.get("state"),
-                        )
-                        return _error_result(_model_not_ready_response(tool_name))
+            model_err = _check_model_readiness(ctx, tool_name)
+            if model_err is not None:
+                return model_err
 
             sem = _ensure_semaphore()
             cfg = get_config()
@@ -667,6 +688,8 @@ def safe_tool(_fn=None, *, ctx=None):
             "_cancel_safe_wait_for": _cancel_safe_wait_for,
             "_TOOL_METADATA": _TOOL_METADATA,
             "_model_not_ready_response": _model_not_ready_response,
+            "_try_sidecar_delegation": _try_sidecar_delegation,
+            "_check_model_readiness": _check_model_readiness,
             "json": json,
             "CallToolResult": CallToolResult,
             "TextContent": TextContent,

@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools._helpers import build_viz_params
 
 logger = logging.getLogger(__name__)
 
@@ -33,19 +34,14 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         """Get context-aware suggestions for improving the Ivy specification."""
         from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions
 
+        params, err = build_viz_params(ctx, file_path=file_path, protocol=protocol)
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
-        if file_path:
-            try:
-                params["filePath"] = ctx.validate_path(file_path)
-            except ValueError as exc:
-                return error_response(str(exc))
         if line is not None:
             params["line"] = line
         if context:
             params["context"] = context
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         result = handle_smart_suggestions(server_proxy, params)
 
         # Apply output size limit

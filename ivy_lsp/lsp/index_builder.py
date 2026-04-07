@@ -325,6 +325,110 @@ class IndexBuilder:
         self.force = force
         self.workers = max(1, workers)
 
+    # -- Private helpers for build_protocol phases --------------------------
+
+    def _create_protocol_resolver(self, protocol_dir: str) -> Optional[tuple]:
+        """Create an IncludeResolver with staging for *protocol_dir*.
+
+        Returns ``(resolver, ivy_files, layers)`` on success, or ``None``
+        when no ``.ivy`` files are found after staging.
+        """
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.workspace.detection import _apply_marker, _read_marker
+
+        protocol_rel = os.path.relpath(protocol_dir, self.workspace_root)
+
+        marker_path = os.path.join(protocol_dir, ".ivyworkspace")
+        marker_data = _read_marker(marker_path)
+        proto_config = None
+        if marker_data is not None:
+            proto_config = _apply_marker(marker_path, marker_data)
+
+        if proto_config is not None:
+            layers = proto_config.workspace_layers
+            exclude = proto_config.exclude_paths
+        else:
+            layers = self.workspace_config.workspace_layers
+            exclude = self.workspace_config.exclude_paths
+
+        resolver = IncludeResolver(
+            workspace_root=self.workspace_root,
+            exclude_paths=exclude,
+            include_paths=[protocol_rel],
+            workspace_layers=layers,
+        )
+        try:
+            resolver.create_staging_directory()
+            if layers:
+                resolver.build_layered_staging()
+        except Exception:
+            logger.warning(
+                "Staging creation failed for %s; Tier 1 may not resolve all includes",
+                os.path.basename(protocol_dir),
+            )
+        ivy_files = resolver.find_all_ivy_files(root=protocol_dir)
+        if not ivy_files:
+            return None
+        return resolver, ivy_files, layers
+
+    def _build_models(
+        self,
+        protocol_dir: str,
+        protocol: str,
+        resolver,
+        ivy_files: List[str],
+        requirements_map: Dict[str, list],
+        scopes: Dict,
+    ) -> tuple:
+        """Build the optional SemanticModel and ScopedRequirementModel.
+
+        Returns ``(semantic_model, requirement_graph)``; either may be ``None``.
+        """
+        semantic_model = None
+        try:
+            from ivy_lsp.core.semantic.model_builder import build_semantic_model
+
+            def _find_files(root: str) -> List[str]:
+                return [os.path.relpath(f, root) for f in ivy_files]
+
+            semantic_model = build_semantic_model(
+                root=protocol_dir,
+                find_files_fn=_find_files,
+                include_resolver=resolver.resolve,
+            )
+        except Exception as exc:
+            logger.debug("Semantic model build failed for %s: %s", protocol, exc)
+
+        requirement_graph = None
+        try:
+            from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+            from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+
+            req_graph = ScopedRequirementModel()
+            for rel_path, reqs_list in requirements_map.items():
+                for req_dict in reqs_list:
+                    try:
+                        node = RequirementNode(
+                            id=req_dict["id"],
+                            kind=req_dict["kind"],
+                            formula_text=req_dict["formula_text"],
+                            line=req_dict["line"],
+                            col=0,
+                            file=req_dict["file"],
+                            monitor_action=req_dict["monitor_action"],
+                            mixin_kind=req_dict.get("mixin_kind", ""),
+                        )
+                        req_graph.add_requirement(node)
+                    except Exception:
+                        pass
+            for scope in scopes.values():
+                req_graph.register_test_scope(scope)
+            requirement_graph = req_graph
+        except Exception as exc:
+            logger.debug("Requirement graph build failed for %s: %s", protocol, exc)
+
+        return semantic_model, requirement_graph
+
     # -- Public API ---------------------------------------------------------
 
     def build_protocol(self, protocol_dir: str) -> dict:
@@ -353,44 +457,8 @@ class IndexBuilder:
             }
 
         # -- 1. Discover .ivy files ----------------------------------------
-        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.core.workspace.detection import _apply_marker, _read_marker
-
-        protocol_rel = os.path.relpath(protocol_dir, self.workspace_root)
-
-        # Load per-protocol .ivyworkspace for fine-grained layers.
-        # Falls back to the heuristic global config when no marker exists.
-        marker_path = os.path.join(protocol_dir, ".ivyworkspace")
-        marker_data = _read_marker(marker_path)
-        proto_config = None
-        if marker_data is not None:
-            proto_config = _apply_marker(marker_path, marker_data)
-
-        if proto_config is not None:
-            layers = proto_config.workspace_layers
-            exclude = proto_config.exclude_paths
-        else:
-            layers = self.workspace_config.workspace_layers
-            exclude = self.workspace_config.exclude_paths
-
-        resolver = IncludeResolver(
-            workspace_root=self.workspace_root,
-            exclude_paths=exclude,
-            include_paths=[protocol_rel],
-            workspace_layers=layers,
-        )
-        # Create staging so resolver.resolve() can find cross-directory includes
-        try:
-            resolver.create_staging_directory()
-            if layers:
-                resolver.build_layered_staging()
-        except Exception:
-            logger.warning(
-                "Staging creation failed for %s; Tier 1 may not resolve all includes",
-                protocol,
-            )
-        ivy_files = resolver.find_all_ivy_files(root=protocol_dir)
-        if not ivy_files:
+        result = self._create_protocol_resolver(protocol_dir)
+        if result is None:
             logger.warning("No .ivy files found in %s", protocol_dir)
             return {
                 "protocol": protocol,
@@ -399,6 +467,7 @@ class IndexBuilder:
                 "elapsed_ms": 0.0,
                 "status": "empty",
             }
+        resolver, ivy_files, _layers = result
 
         logger.info("Found %d .ivy files for protocol %s", len(ivy_files), protocol)
 
@@ -650,50 +719,15 @@ class IndexBuilder:
             test_name = os.path.basename(rel_path).replace(".ivy", "")
             scopes[test_name] = scope
 
-        # -- 8. Optional: SemanticModel ------------------------------------
-        semantic_model = None
-        try:
-            from ivy_lsp.core.semantic.model_builder import build_semantic_model
-
-            def _find_files(root: str) -> List[str]:
-                return [os.path.relpath(f, root) for f in ivy_files]
-
-            semantic_model = build_semantic_model(
-                root=protocol_dir,
-                find_files_fn=_find_files,
-                include_resolver=resolver.resolve,
-            )
-        except Exception as exc:
-            logger.debug("Semantic model build failed for %s: %s", protocol, exc)
-
-        # -- 9. Optional: ScopedRequirementModel ---------------------------
-        requirement_graph = None
-        try:
-            from ivy_lsp.core.analysis.requirement_graph import RequirementNode
-            from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
-
-            req_graph = ScopedRequirementModel()
-            for rel_path, reqs_list in requirements_map.items():
-                for req_dict in reqs_list:
-                    try:
-                        node = RequirementNode(
-                            id=req_dict["id"],
-                            kind=req_dict["kind"],
-                            formula_text=req_dict["formula_text"],
-                            line=req_dict["line"],
-                            col=0,
-                            file=req_dict["file"],
-                            monitor_action=req_dict["monitor_action"],
-                            mixin_kind=req_dict.get("mixin_kind", ""),
-                        )
-                        req_graph.add_requirement(node)
-                    except Exception:
-                        pass
-            for scope in scopes.values():
-                req_graph.register_test_scope(scope)
-            requirement_graph = req_graph
-        except Exception as exc:
-            logger.debug("Requirement graph build failed for %s: %s", protocol, exc)
+        # -- 8-9. Build optional SemanticModel and ScopedRequirementModel ---
+        semantic_model, requirement_graph = self._build_models(
+            protocol_dir,
+            protocol,
+            resolver,
+            ivy_files,
+            requirements_map,
+            scopes,
+        )
 
         # -- 10. Write output to .ivy-index/ --------------------------------
         index_dir = os.path.join(protocol_dir, ".ivy-index")

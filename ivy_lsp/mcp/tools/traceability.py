@@ -19,6 +19,7 @@ from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 from ivy_lsp.mcp.tools._helpers import (
     apply_scope_filter,
+    build_viz_params,
     get_model_if_ready,
     get_model_or_error,
     load_requirements_from_manifests,
@@ -251,15 +252,10 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements."""
         from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps
 
+        params, err = build_viz_params(ctx, test_file=test_file, protocol=protocol)
+        if err:
+            return err
         server_proxy = await ctx.make_viz_server_proxy()
-        params: dict[str, Any] = {}
-        if test_file:
-            try:
-                params["testFile"] = ctx.validate_path(test_file)
-            except ValueError as exc:
-                return error_response(str(exc))
-        if protocol:
-            params["protocolFilter"] = f"protocol-testing/{protocol}/"
         result = handle_coverage_gaps(server_proxy, params)
 
         # C4 fix: override RFC uncovered requirements using the same
