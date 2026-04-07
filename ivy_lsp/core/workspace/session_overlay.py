@@ -195,7 +195,7 @@ class SessionOverlay:
             result = extractor.extract(source=content, filepath=path)
             symbols = result.symbols
             includes = result.includes
-            completeness = "complete" if result.tier_used in (2, 3) else "partial"
+            completeness = "partial"
         except Exception:
             logger.debug(
                 "overlay: fast-index extraction failed for %s", path, exc_info=True

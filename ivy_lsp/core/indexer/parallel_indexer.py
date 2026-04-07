@@ -24,15 +24,7 @@ class WorkerResult:
     includes: List[str] = field(default_factory=list)
 
 
-def _worker_init(parent_sys_path: list[str]) -> None:
-    """Initialize worker process with parent's sys.path.
-
-    ``ProcessPoolExecutor`` with the ``spawn`` start method creates fresh
-    Python interpreters that may not inherit the parent's ``sys.path``
-    (especially when running under ``uvx`` or similar tools).
-    """
-    new_paths = [p for p in parent_sys_path if p not in sys.path]
-    sys.path[0:0] = new_paths
+from ivy_lsp.infra.utils.process import worker_init as _worker_init
 
 
 def worker_parse_file(

@@ -254,18 +254,8 @@ class ToolContext:
 
         ctx.make_resolve_callback = _make_resolve_callback
 
-        # Visualization server proxy
-        from dataclasses import dataclass as _dc
-
-        @_dc
-        class _IndexerProxy:
-            requirement_graph: Any
-
-        @_dc
-        class _ServerProxy:
-            indexer: _IndexerProxy
-            initializing: bool = False
-            workspace_root: str = ""
+        # Visualization server proxy (canonical definitions in server.py)
+        from ivy_lsp.mcp.server import _IndexerProxy, _ServerProxy
 
         async def _make_viz_server_proxy():
             graph = await _get_req_graph()

@@ -680,7 +680,7 @@ class ServerSetupMixin:
                                 (
                                     self._indexer.resolver is not None
                                     if self._indexer
-                                    else False if self._indexer else False
+                                    else False
                                 ),
                             )
                         else:
