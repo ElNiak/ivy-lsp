@@ -1,6 +1,7 @@
 """Shared fixtures for Ivy LSP tests."""
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -267,3 +268,68 @@ def annotated_workspace(tmp_path):
         "}\n"
     )
     return tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Real protocol-testing dir fixtures (propagation integration tests)
+# ---------------------------------------------------------------------------
+
+# Path to the REAL MiniP protocol files (not the test-resources copy).
+# The propagation tools need actual ser/deser files with C++ impl blocks.
+_REAL_PROTOCOL_TESTING = (
+    PROTOCOL_TESTING_DIR
+    if PROTOCOL_TESTING_DIR is not None
+    else Path(__file__).resolve().parent.parent / "protocol-testing"
+)
+_REAL_MINIP_DIR = _REAL_PROTOCOL_TESTING / "minip"
+
+
+@pytest.fixture(scope="session")
+def minip_protocol_dir():
+    """Path to the REAL MiniP protocol files for propagation tool tests."""
+    env_dir = os.environ.get("PANTHER_IVY_PROTOCOL_DIR")
+    if env_dir and os.path.isdir(env_dir):
+        return env_dir
+    if _REAL_MINIP_DIR.exists():
+        return str(_REAL_MINIP_DIR)
+    pytest.skip(f"Real MiniP protocol dir not found at {_REAL_MINIP_DIR}")
+
+
+@pytest.fixture
+def minip_worktree(tmp_path):
+    """Create an isolated Git worktree copy of MiniP for destructive tests.
+
+    Yields the path to the worktree's minip/ directory.
+    Cleans up the worktree after the test.
+    """
+    repo_root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True
+    ).strip()
+    worktree_path = str(tmp_path / "propagation-test")
+
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", worktree_path, "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    try:
+        minip_dir = os.path.join(
+            worktree_path,
+            "panther",
+            "plugins",
+            "services",
+            "testers",
+            "panther_ivy",
+            "protocol-testing",
+            "minip",
+        )
+        if not os.path.isdir(minip_dir):
+            pytest.skip(f"MiniP not found in worktree: {minip_dir}")
+        yield minip_dir
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree_path],
+            cwd=repo_root,
+            capture_output=True,
+        )
