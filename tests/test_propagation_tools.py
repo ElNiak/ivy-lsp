@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from ivy_lsp.mcp.tools.propagation import find_variants_impl
+from ivy_lsp.mcp.tools.propagation import find_variants_impl, serdes_correlation_impl
 
 MINIP_DIR = os.environ.get(
     "PANTHER_IVY_PROTOCOL_DIR",
@@ -65,3 +65,27 @@ class TestFindVariants:
         result = find_variants_impl("nonexistent_type", MINIP_DIR)
         assert "error" in result
         assert result["type_name"] == "nonexistent_type"
+
+
+class TestSerdesCorrelation:
+    def test_ping_packet(self):
+        """ping_packet maps to ping_ser + ping_deser via ping_packet_serdes."""
+        result = serdes_correlation_impl("ping_packet", MINIP_DIR)
+        assert result["type_name"] == "ping_packet"
+        assert len(result["correlations"]) == 1
+        c = result["correlations"][0]
+        assert c["serializer"]["file"].endswith("ping_ser.ivy")
+        assert c["serializer"]["class"] == "ping_ser"
+        assert c["serializer"]["base"] == "ivy_binary_ser_128"
+        assert c["serializer"]["states"] == 4
+        assert c["deserializer"]["file"].endswith("ping_deser.ivy")
+        assert c["deserializer"]["class"] == "ping_deser"
+        assert c["deserializer"]["base"] == "ivy_binary_deser_128"
+        assert c["deserializer"]["states"] == 4
+        assert c["instance"]["name"] == "ping_packet_serdes"
+        assert c["instance"]["file"].endswith("ping_shim.ivy")
+
+    def test_unknown_type(self):
+        result = serdes_correlation_impl("nonexistent_type", MINIP_DIR)
+        assert result["type_name"] == "nonexistent_type"
+        assert len(result["correlations"]) == 0

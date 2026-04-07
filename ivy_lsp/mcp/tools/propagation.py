@@ -278,6 +278,80 @@ def _find_variant_type(
     }
 
 
+def serdes_correlation_impl(
+    type_name: str,
+    protocol_dir: str,
+) -> Dict[str, Any]:
+    """Return the serializer/deserializer files correlated with *type_name*.
+
+    Walks all SERDES patterns in *protocol_dir* to find every instance whose
+    ``message_type`` matches *type_name*, then resolves the corresponding
+    serializer and deserializer class patterns by name.
+
+    Args:
+        type_name: Unqualified Ivy message type name (e.g. ``"ping_packet"``).
+        protocol_dir: Absolute path to the protocol directory to scan.
+
+    Returns:
+        Dict with keys ``type_name`` and ``correlations``.  Each entry in
+        ``correlations`` has ``serializer``, ``deserializer``, and ``instance``
+        sub-dicts.  Returns an empty ``correlations`` list when *type_name* is
+        not found.
+    """
+    from ivy_lsp.core.analysis.pattern_library import PatternKind, analyze_protocol
+
+    result = analyze_protocol(protocol_dir)
+
+    class_index: Dict[str, Any] = {}
+    for pat in result.detected:
+        if pat.kind == PatternKind.SERDES and pat.details.get("type") in (
+            "serializer",
+            "deserializer",
+        ):
+            class_index[pat.name] = pat
+
+    correlations: List[Dict[str, Any]] = []
+    for pat in result.detected:
+        if pat.kind != PatternKind.SERDES:
+            continue
+        if pat.details.get("type") != "instance":
+            continue
+        if pat.details.get("message_type") != type_name:
+            continue
+
+        ser_name = pat.details.get("ser_name")
+        deser_name = pat.details.get("deser_name")
+
+        ser_pat = class_index.get(ser_name)
+        deser_pat = class_index.get(deser_name)
+
+        def _class_info(p: Any) -> Dict[str, Any]:
+            rel = os.path.relpath(p.file, protocol_dir)
+            states = p.details.get("states", [])
+            return {
+                "file": rel,
+                "class": p.name,
+                "base": p.details.get("base_class", ""),
+                "states": len(states),
+            }
+
+        correlations.append(
+            {
+                "serializer": _class_info(ser_pat) if ser_pat is not None else None,
+                "deserializer": (
+                    _class_info(deser_pat) if deser_pat is not None else None
+                ),
+                "instance": {
+                    "name": pat.name,
+                    "file": os.path.relpath(pat.file, protocol_dir),
+                    "line": pat.line,
+                },
+            }
+        )
+
+    return {"type_name": type_name, "correlations": correlations}
+
+
 def register_propagation_tools(mcp: Any, ctx: Any) -> None:
     """Register propagation analysis MCP tools."""
     pass  # Tools added in subsequent tasks
