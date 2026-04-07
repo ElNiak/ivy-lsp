@@ -795,8 +795,14 @@ class McpServerState:
         server object with ``server.indexer.requirement_graph``.  This
         lazily builds the requirement graph on first use and returns a
         lightweight proxy that satisfies that contract.
+
+        Uses ``get_or_wait`` to handle the case where another coroutine
+        is already building the graph (``get`` would return None
+        immediately in that case).
         """
-        graph = await self.get_req_graph()
+        graph = await self._graph_builder.get_or_wait(timeout=15.0)
+        if graph is None:
+            graph = await self.get_req_graph()
         return _ServerProxy(
             indexer=_IndexerProxy(requirement_graph=graph),
             workspace_root=self.root,

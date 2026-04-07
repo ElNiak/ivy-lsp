@@ -33,6 +33,7 @@ def handle_action_dependency_graph(server: IvyServerProtocol, params: dict) -> d
             "edges": [],
             "scopeInfo": {"testFile": None, "scoped": False},
             "reason": "requirement_graph_not_available",
+            "hint": "The requirement graph is built lazily. Try calling ivy_coverage(mode='stats') or ivy_verify first, then retry.",
         }
 
     try:
@@ -177,6 +178,7 @@ def handle_state_machine_view(server: IvyServerProtocol, params: dict) -> dict:
             "transitions": [],
             "scopeInfo": {"testFile": None, "scoped": False},
             "reason": "requirement_graph_not_available",
+            "hint": "The requirement graph is built lazily. Try calling ivy_coverage(mode='stats') or ivy_verify first, then retry.",
         }
 
     try:
@@ -321,6 +323,7 @@ def handle_layered_overview(server: IvyServerProtocol, params: dict) -> dict:
             "layers": [],
             "scopeInfo": {"testFile": None, "scoped": False},
             "reason": "requirement_graph_not_available",
+            "hint": "The requirement graph is built lazily. Try calling ivy_coverage(mode='stats') or ivy_verify first, then retry.",
         }
 
     try:

@@ -530,13 +530,36 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     _tt[0] = error_response(str(exc))
                     return _tt[0]
 
+            # Auto-redirect: if no isolate specified, try finding a test
+            # entry point that includes this file so ivy_show has context.
+            effective_path = abs_path
+            if not isolate:
+                try:
+                    graph = await ctx.get_req_graph()
+                    if graph is not None and hasattr(graph, "get_tests_for_file"):
+                        tests = sorted(graph.get_tests_for_file(abs_path))
+                        if tests:
+                            effective_path = tests[0]
+                            logger.debug(
+                                "[ivy_model_info] auto-redirected %s → %s",
+                                os.path.basename(abs_path),
+                                os.path.basename(effective_path),
+                            )
+                except Exception:
+                    pass
+
             result = await shared_ivy_show(
-                filepath=abs_path,
+                filepath=effective_path,
                 workspace_root=ctx.root,
                 isolate=isolate,
                 staging_dir=ctx.staging_dir,
                 resolver=ctx.include_resolver,
             )
+
+            # If redirected, note the original file in the result
+            if effective_path != abs_path:
+                result["redirected_from"] = relative_path
+                result["redirected_to"] = os.path.relpath(effective_path, ctx.root)
 
             # If the error mentions isolates, detect available isolates
             if not result.get("success", True):
@@ -544,9 +567,10 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     "raw_output", ""
                 )
                 if "isolate" in err_msg.lower() or "no isolate" in err_msg.lower():
-                    # Scan file for isolate declarations
                     try:
-                        with open(abs_path, encoding="utf-8", errors="replace") as f:
+                        with open(
+                            effective_path, encoding="utf-8", errors="replace"
+                        ) as f:
                             source = f.read()
                         isolates = re.findall(
                             r"^\s*isolate\s+([\w.]+)\s*", source, re.MULTILINE

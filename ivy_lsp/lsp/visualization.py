@@ -495,17 +495,18 @@ def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
 # LSP wiring
 # ---------------------------------------------------------------------------
 
-from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps  # noqa: E402
-from ivy_lsp.lsp.viz_graphs import (  # noqa: E402
-    handle_action_dependency_graph,
-    handle_layered_overview,
-    handle_state_machine_view,
-)
-from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions  # noqa: E402
-
 
 def register(server: Any) -> None:
     """Register visualization request handlers on the server."""
+    # Deferred imports: these modules import from this file, so importing
+    # them at module level creates a circular dependency.
+    from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps
+    from ivy_lsp.lsp.viz_graphs import (
+        handle_action_dependency_graph,
+        handle_layered_overview,
+        handle_state_machine_view,
+    )
+    from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions
 
     @server.feature("ivy/actionRequirements")
     async def on_action_requirements(params: Any = None) -> Dict[str, Any]:
