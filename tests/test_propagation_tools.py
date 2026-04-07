@@ -4,7 +4,11 @@ import os
 
 import pytest
 
-from ivy_lsp.mcp.tools.propagation import find_variants_impl, serdes_correlation_impl
+from ivy_lsp.mcp.tools.propagation import (
+    change_impact_impl,
+    find_variants_impl,
+    serdes_correlation_impl,
+)
 
 MINIP_DIR = os.environ.get(
     "PANTHER_IVY_PROTOCOL_DIR",
@@ -89,3 +93,43 @@ class TestSerdesCorrelation:
         result = serdes_correlation_impl("nonexistent_type", MINIP_DIR)
         assert result["type_name"] == "nonexistent_type"
         assert len(result["correlations"]) == 0
+
+
+class TestChangeImpact:
+    def test_add_field_to_ping_packet(self):
+        result = change_impact_impl("ping_packet", "add_field", MINIP_DIR)
+        assert result["type_name"] == "ping_packet"
+        assert result["change_type"] == "add_field"
+        assert len(result["auto_propagate"]) == 3
+        auto_files = [e["file"] for e in result["auto_propagate"]]
+        assert any("ping_packet.ivy" in f for f in auto_files)
+        assert any("ping_ser.ivy" in f for f in auto_files)
+        assert any("ping_deser.ivy" in f for f in auto_files)
+        assert len(result["manual_review"]) >= 7
+        assert len(result["unaffected"]) >= 4
+
+    def test_add_variant_to_frame(self):
+        result = change_impact_impl("frame", "add_variant", MINIP_DIR)
+        assert len(result["auto_propagate"]) == 3
+        auto_files = [e["file"] for e in result["auto_propagate"]]
+        assert any("ping_frame.ivy" in f for f in auto_files)
+        assert any("ping_ser.ivy" in f for f in auto_files)
+        assert any("ping_deser.ivy" in f for f in auto_files)
+
+    def test_auto_propagate_categories(self):
+        result = change_impact_impl("ping_packet", "add_field", MINIP_DIR)
+        categories = {e["category"] for e in result["auto_propagate"]}
+        assert "type_definition" in categories
+        assert "serializer" in categories
+        assert "deserializer" in categories
+
+    def test_manual_review_has_categories(self):
+        result = change_impact_impl("ping_packet", "add_field", MINIP_DIR)
+        for entry in result["manual_review"]:
+            assert "category" in entry
+            assert entry["category"] in ("shim", "entity", "behavior", "test", "other")
+            assert "reason" in entry
+
+    def test_unknown_type_returns_error(self):
+        result = change_impact_impl("nonexistent", "add_field", MINIP_DIR)
+        assert "error" in result

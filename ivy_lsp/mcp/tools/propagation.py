@@ -278,6 +278,228 @@ def _find_variant_type(
     }
 
 
+def change_impact_impl(
+    type_name: str,
+    change_type: str,
+    protocol_dir: str,
+) -> Dict[str, Any]:
+    """Categorize protocol files by impact of a change to *type_name*.
+
+    Splits every ``.ivy`` file in *protocol_dir* into three buckets:
+
+    - **auto_propagate**: the type definition file and its serializer /
+      deserializer files (mechanical edits).
+    - **manual_review**: files that transitively depend on any
+      auto_propagate file via Ivy ``include`` chains.
+    - **unaffected**: all remaining protocol files.
+
+    Args:
+        type_name: Unqualified Ivy type name (e.g. ``"ping_packet"``).
+        change_type: Kind of change (``"add_field"``, ``"add_variant"``, etc.).
+        protocol_dir: Absolute path to the protocol directory.
+
+    Returns:
+        Dict with keys ``type_name``, ``change_type``, ``auto_propagate``,
+        ``manual_review``, and ``unaffected``.
+    """
+    from ivy_lsp.core.analysis.pattern_library import (
+        PatternKind,
+        analyze_protocol,
+        detect_all_patterns,
+    )
+
+    analysis = analyze_protocol(protocol_dir)
+    variant_info = find_variants_impl(type_name, protocol_dir)
+
+    type_def_file: Optional[str] = variant_info.get("file")
+    if type_def_file is None or "error" in variant_info:
+        return {
+            "type_name": type_name,
+            "change_type": change_type,
+            "error": f"type '{type_name}' not found in {protocol_dir}",
+        }
+
+    auto_entries: List[Dict[str, str]] = [
+        {
+            "file": type_def_file,
+            "category": "type_definition",
+            "edit": (
+                "add_field_to_struct"
+                if change_type == "add_field"
+                else "add_variant_case"
+            ),
+        }
+    ]
+
+    serdes = serdes_correlation_impl(type_name, protocol_dir)
+    if serdes["correlations"]:
+        for corr in serdes["correlations"]:
+            if corr.get("serializer"):
+                auto_entries.append(
+                    {
+                        "file": corr["serializer"]["file"],
+                        "category": "serializer",
+                        "edit": "add_state_and_set_case",
+                    }
+                )
+            if corr.get("deserializer"):
+                auto_entries.append(
+                    {
+                        "file": corr["deserializer"]["file"],
+                        "category": "deserializer",
+                        "edit": "add_state_and_get_case",
+                    }
+                )
+    elif variant_info.get("kind") == "variant":
+        ser_source = _find_serializer_source(type_name, analysis.detected, protocol_dir)
+        if ser_source is not None:
+            _add_ser_deser_from_containing_struct(
+                type_name, analysis.detected, protocol_dir, auto_entries
+            )
+
+    auto_stems = set()
+    for entry in auto_entries:
+        stem = os.path.splitext(os.path.basename(entry["file"]))[0]
+        auto_stems.add(stem)
+
+    file_includes: Dict[str, List[str]] = {}
+    all_ivy_files: List[str] = []
+    for dirpath, _, files in os.walk(protocol_dir):
+        for f in sorted(files):
+            if f.endswith(".ivy"):
+                full = os.path.join(dirpath, f)
+                all_ivy_files.append(full)
+                try:
+                    with open(full, encoding="utf-8", errors="replace") as fh:
+                        source = fh.read()
+                except OSError:
+                    continue
+                includes = []
+                for m in re.finditer(r"^\s*include\s+(\w+)", source, re.MULTILINE):
+                    includes.append(m.group(1))
+                stem = os.path.splitext(f)[0]
+                file_includes[stem] = includes
+
+    auto_rel_set = {e["file"] for e in auto_entries}
+
+    def _depends_on_auto(stem: str, visited: Optional[set] = None) -> bool:
+        if visited is None:
+            visited = set()
+        if stem in visited:
+            return False
+        visited.add(stem)
+        for inc in file_includes.get(stem, []):
+            if inc in auto_stems:
+                return True
+            if _depends_on_auto(inc, visited):
+                return True
+        return False
+
+    manual_review: List[Dict[str, str]] = []
+    unaffected: List[Dict[str, str]] = []
+
+    for full_path in all_ivy_files:
+        rel = os.path.relpath(full_path, protocol_dir)
+        if rel in auto_rel_set:
+            continue
+
+        stem = os.path.splitext(os.path.basename(full_path))[0]
+        if _depends_on_auto(stem):
+            try:
+                with open(full_path, encoding="utf-8", errors="replace") as fh:
+                    source = fh.read()
+            except OSError:
+                source = ""
+            patterns = detect_all_patterns(source, full_path)
+            category = _categorize_file(patterns, rel)
+            reason = f"transitively includes {type_name} via include chain"
+            manual_review.append({"file": rel, "category": category, "reason": reason})
+        else:
+            unaffected.append({"file": rel})
+
+    return {
+        "type_name": type_name,
+        "change_type": change_type,
+        "auto_propagate": auto_entries,
+        "manual_review": manual_review,
+        "unaffected": unaffected,
+    }
+
+
+def _add_ser_deser_from_containing_struct(
+    type_name: str,
+    detected: List[Any],
+    protocol_dir: str,
+    auto_entries: List[Dict[str, str]],
+) -> None:
+    """For variant types, find ser/deser via the parent struct's SERDES instance."""
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
+
+    containing_structs: List[str] = []
+    for pat in detected:
+        if (
+            pat.kind == PatternKind.VARIANTS
+            and pat.details.get("type") == "struct_object"
+        ):
+            for field in pat.details.get("fields", []):
+                if field.get("type", "").startswith(f"{type_name}."):
+                    containing_structs.append(pat.name)
+                    break
+
+    class_index: Dict[str, Any] = {}
+    for pat in detected:
+        if pat.kind == PatternKind.SERDES and pat.details.get("type") in (
+            "serializer",
+            "deserializer",
+        ):
+            class_index[pat.name] = pat
+
+    for pat in detected:
+        if pat.kind != PatternKind.SERDES or pat.details.get("type") != "instance":
+            continue
+        if pat.details.get("message_type") not in containing_structs:
+            continue
+
+        ser_name = pat.details.get("ser_name")
+        deser_name = pat.details.get("deser_name")
+
+        ser_pat = class_index.get(ser_name)
+        if ser_pat is not None:
+            auto_entries.append(
+                {
+                    "file": os.path.relpath(ser_pat.file, protocol_dir),
+                    "category": "serializer",
+                    "edit": "add_state_and_set_case",
+                }
+            )
+        deser_pat = class_index.get(deser_name)
+        if deser_pat is not None:
+            auto_entries.append(
+                {
+                    "file": os.path.relpath(deser_pat.file, protocol_dir),
+                    "category": "deserializer",
+                    "edit": "add_state_and_get_case",
+                }
+            )
+        break
+
+
+def _categorize_file(patterns: List[Any], rel_path: str) -> str:
+    """Determine a human-readable category from detected patterns."""
+    from ivy_lsp.core.analysis.pattern_library import PatternKind
+
+    kinds = {p.kind for p in patterns}
+    if PatternKind.SHIM in kinds:
+        return "shim"
+    if PatternKind.ENTITY in kinds:
+        return "entity"
+    if PatternKind.MONITORS in kinds:
+        return "behavior"
+    if "test" in rel_path:
+        return "test"
+    return "other"
+
+
 def serdes_correlation_impl(
     type_name: str,
     protocol_dir: str,
@@ -352,6 +574,49 @@ def serdes_correlation_impl(
     return {"type_name": type_name, "correlations": correlations}
 
 
+def _resolve_protocol_dir(ctx: Any, protocol: Optional[str]) -> str:
+    """Resolve the protocol directory from workspace root and optional protocol name."""
+    if protocol:
+        candidate = os.path.join(ctx.root, protocol)
+        if os.path.isdir(candidate):
+            return candidate
+        candidate = os.path.join(ctx.root, "protocol-testing", protocol)
+        if os.path.isdir(candidate):
+            return candidate
+    return ctx.root
+
+
 def register_propagation_tools(mcp: Any, ctx: Any) -> None:
     """Register propagation analysis MCP tools."""
-    pass  # Tools added in subsequent tasks
+    from ivy_lsp.mcp.tools import safe_tool
+
+    @mcp.tool()
+    @safe_tool(ctx=ctx)
+    async def ivy_find_variants(
+        type_name: str,
+        protocol: str | None = None,
+    ) -> dict:
+        """Enumerate the structure of an Ivy type -- struct fields or variant members with tags."""
+        protocol_dir = _resolve_protocol_dir(ctx, protocol)
+        return find_variants_impl(type_name, protocol_dir)
+
+    @mcp.tool()
+    @safe_tool(ctx=ctx)
+    async def ivy_serdes_correlation(
+        type_name: str,
+        protocol: str | None = None,
+    ) -> dict:
+        """Return the serializer/deserializer files correlated with an Ivy message type."""
+        protocol_dir = _resolve_protocol_dir(ctx, protocol)
+        return serdes_correlation_impl(type_name, protocol_dir)
+
+    @mcp.tool()
+    @safe_tool(ctx=ctx)
+    async def ivy_change_impact(
+        type_name: str,
+        change_type: str,
+        protocol: str | None = None,
+    ) -> dict:
+        """Categorize protocol files by impact of a type change (auto-propagate vs manual review)."""
+        protocol_dir = _resolve_protocol_dir(ctx, protocol)
+        return change_impact_impl(type_name, change_type, protocol_dir)
