@@ -16,7 +16,7 @@ from ivy_lsp.infra.observability import trace_tool
 from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
-from ivy_lsp.mcp.tools._helpers import validated_path_or_error
+from ivy_lsp.mcp.tools._helpers import resolve_scope, validated_path_or_error
 from ivy_lsp.mcp.tools.verification_cache import (
     CACHE_MAX_SIZE,
     CacheEntry,
@@ -79,15 +79,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             },
         )
 
-        # Resolve scope (if provided) for result annotation
-        _resolved_scope = None
-        if scope and getattr(ctx, "workspace_context", None) is not None:
-            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
-            if _resolved_scope is None:
-                logger.warning(
-                    "[ivy_verify] Unknown scope '%s'; proceeding without scoping",
-                    scope,
-                )
+        _resolved_scope = resolve_scope(ctx, scope, "ivy_verify")
 
         with trace_tool(
             "ivy_verify",
@@ -269,15 +261,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             },
         )
 
-        # Resolve scope (if provided) for result annotation
-        _resolved_scope = None
-        if scope and getattr(ctx, "workspace_context", None) is not None:
-            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
-            if _resolved_scope is None:
-                logger.warning(
-                    "[ivy_compile] Unknown scope '%s'; proceeding without scoping",
-                    scope,
-                )
+        _resolved_scope = resolve_scope(ctx, scope, "ivy_compile")
         with trace_tool(
             "ivy_compile",
             {"relative_path": relative_path, "target": target, "isolate": isolate},

@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from ivy_lsp.core.patterns import INCLUDE_RE
+
 logger = logging.getLogger(__name__)
 
 CACHE_MAX_SIZE = 100
@@ -49,7 +51,7 @@ def get_include_mtimes(abs_path: str, basename_cache_fn: Any) -> dict[str, float
     try:
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
-        for m in re.finditer(r"^\s*include\s+(\w+)", source, re.MULTILINE):
+        for m in INCLUDE_RE.finditer(source):
             inc_name = m.group(1)
             candidates = basename_cache_fn(inc_name)
             if candidates:

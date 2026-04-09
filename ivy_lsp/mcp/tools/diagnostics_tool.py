@@ -10,9 +10,10 @@ from typing import Any
 
 from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
 from ivy_lsp.core.patterns import BRACKET_TAG_RE as _BRACKET_TAG_RE
+from ivy_lsp.core.patterns import EXPORT_ACTION_RE, MONITOR_RE
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
-from ivy_lsp.mcp.tools._helpers import validated_path_or_error
+from ivy_lsp.mcp.tools._helpers import resolve_scope, validated_path_or_error
 
 logger = logging.getLogger(__name__)
 
@@ -75,18 +76,10 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
             },
         )
 
-        # Resolve scope for file filtering
-        _scope_files: frozenset[str] | None = None
-        _resolved_scope = None
-        if scope and getattr(ctx, "workspace_context", None) is not None:
-            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
-            if _resolved_scope is not None:
-                _scope_files = _resolved_scope.include_closure
-            else:
-                logger.warning(
-                    "[ivy_diagnostics] Unknown scope '%s'; proceeding without scoping",
-                    scope,
-                )
+        _resolved_scope = resolve_scope(ctx, scope, "ivy_diagnostics")
+        _scope_files: frozenset[str] | None = (
+            _resolved_scope.include_closure if _resolved_scope is not None else None
+        )
 
         _tc = ToolTraceContext(
             "ivy_diagnostics",
@@ -312,20 +305,8 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                         )
 
                 # Exported actions without monitors
-                exports = set(
-                    re.findall(
-                        r"^\s*export\s+action\s+([\w.]+)",
-                        source,
-                        re.MULTILINE,
-                    )
-                )
-                monitored = set(
-                    re.findall(
-                        r"^\s*(?:before|after|around)\s+([\w.]+)",
-                        source,
-                        re.MULTILINE,
-                    )
-                )
+                exports = set(EXPORT_ACTION_RE.findall(source))
+                monitored = set(MONITOR_RE.findall(source))
                 for exp_action in exports:
                     if exp_action not in monitored and exp_action != "_finalize":
                         action_defined = bool(

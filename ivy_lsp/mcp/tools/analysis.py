@@ -11,7 +11,7 @@ from typing import Any
 from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
-from ivy_lsp.mcp.tools._helpers import validated_path_or_error
+from ivy_lsp.mcp.tools._helpers import resolve_scope, validated_path_or_error
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +49,10 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             {"relative_path": relative_path, "scope": scope},
         )
 
-        # Resolve scope for graph filtering
-        _scope_files: frozenset[str] | None = None
-        _resolved_scope = None
-        if scope and getattr(ctx, "workspace_context", None) is not None:
-            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
-            if _resolved_scope is not None:
-                _scope_files = _resolved_scope.include_closure
-            else:
-                logger.warning(
-                    "[ivy_include_graph] Unknown scope '%s'; proceeding without scoping",
-                    scope,
-                )
+        _resolved_scope = resolve_scope(ctx, scope, "ivy_include_graph")
+        _scope_files: frozenset[str] | None = (
+            _resolved_scope.include_closure if _resolved_scope is not None else None
+        )
 
         _tc = ToolTraceContext(
             "ivy_include_graph", {"relative_path": relative_path, "scope": scope}
