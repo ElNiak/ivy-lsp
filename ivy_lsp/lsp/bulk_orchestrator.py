@@ -412,7 +412,24 @@ class BulkOrchestrationMixin(_BulkBase):
                         total_hash_dirty = 0
                         total_hash_clean = 0
 
-                        if ws_ctx_inc is not None:
+                        if ws_ctx_inc is None:
+                            # No workspace context — cannot determine
+                            # per-file staleness; fall through to full T1/T2.
+                            slog.info(
+                                "No workspace context for incremental analysis; "
+                                "falling back to full T1/T2",
+                                extra={
+                                    "event": LogEvent(
+                                        LogCategory.DIAGNOSTIC,
+                                        "incremental_no_ctx",
+                                    )
+                                },
+                            )
+                            with self._analysis_pipeline._state_lock:
+                                self._analysis_pipeline._tier1_files.clear()
+                                self._analysis_pipeline._tier2_files.clear()
+                            # fall through to run_bulk_t1_t2 below
+                        else:
                             for proto_idx in ws_ctx_inc.protocol_indexes.values():
                                 if proto_idx.staleness.status == "fresh":
                                     continue
@@ -446,7 +463,7 @@ class BulkOrchestrationMixin(_BulkBase):
                                 )
                                 all_dirty |= dirty
 
-                        if not all_dirty:
+                        if ws_ctx_inc is not None and not all_dirty:
                             slog.info(
                                 "All %d mtime-changed files are hash-clean; skipping T1/T2",
                                 total_mtime,
@@ -463,7 +480,12 @@ class BulkOrchestrationMixin(_BulkBase):
                             return
 
                         # Cascade expansion
-                        inc_graph = getattr(self, "_include_graph", None)
+                        indexer = getattr(self, "_indexer", None)
+                        inc_graph = (
+                            getattr(indexer, "_include_graph", None)
+                            if indexer is not None
+                            else None
+                        )
                         if inc_graph is not None:
                             expanded = expand_with_budget(
                                 all_dirty, inc_graph, len(all_files)
@@ -506,7 +528,8 @@ class BulkOrchestrationMixin(_BulkBase):
                             )
                             for filepath in expanded:
                                 self._semantic_model.remove_file(filepath)
-                                with self._analysis_pipeline._state_lock:
+                            with self._analysis_pipeline._state_lock:
+                                for filepath in expanded:
                                     self._analysis_pipeline._tier1_files.discard(
                                         filepath
                                     )
