@@ -1225,11 +1225,14 @@ class IncludeResolver:
         cross = 0
         for _basename, paths in self._collision_map.items():
             if self._file_to_layer:
-                layers_involved = {
-                    self._file_to_layer.get(p)
-                    or self._file_to_layer.get(os.path.realpath(p), "unknown")
-                    for p in paths
-                }
+                layers_involved = set()
+                for p in paths:
+                    layer = self._file_to_layer.get(p) or self._file_to_layer.get(
+                        os.path.realpath(p)
+                    )
+                    # Use per-path sentinel so unmapped files don't falsely
+                    # match each other as "same layer".
+                    layers_involved.add(layer if layer else f"_unmapped:{p}")
                 if len(layers_involved) <= 1:
                     intra += 1
                 else:
