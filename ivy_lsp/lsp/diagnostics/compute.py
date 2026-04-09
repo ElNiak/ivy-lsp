@@ -41,6 +41,8 @@ def check_structural_issues(
 ) -> List[lsp.Diagnostic]:
     """Check for structural problems without full parsing."""
     from ivy_lsp.core.structural_lint import (
+        check_commented_out_requires,
+        check_duplicate_tags,
         check_structural_issues_raw,
         check_unresolved_includes_raw,
     )
@@ -63,16 +65,21 @@ def check_structural_issues(
             check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
         )
 
+    raw.extend(check_duplicate_tags(source, filepath))
+    raw.extend(check_commented_out_requires(source, filepath))
+
+    _severity_map = {
+        "error": lsp.DiagnosticSeverity.Error,
+        "warning": lsp.DiagnosticSeverity.Warning,
+        "info": lsp.DiagnosticSeverity.Information,
+        "hint": lsp.DiagnosticSeverity.Hint,
+    }
     lines = source.split("\n")
     diags: List[lsp.Diagnostic] = []
     for entry in raw:
         lineno = max(0, entry["line"] - 1)  # convert 1-based to 0-based
         line_text = lines[lineno] if lineno < len(lines) else ""
-        severity = (
-            lsp.DiagnosticSeverity.Error
-            if entry["severity"] == "error"
-            else lsp.DiagnosticSeverity.Warning
-        )
+        severity = _severity_map.get(entry["severity"], lsp.DiagnosticSeverity.Warning)
         diags.append(
             lsp.Diagnostic(
                 range=lsp.Range(
