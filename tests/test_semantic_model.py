@@ -582,6 +582,37 @@ class TestNodesByNameIndex:
         assert len(m1.get_nodes_by_name("action_a")) == 1
 
 
+class TestSemanticModelFilesProperty:
+    def test_empty_model_returns_empty_set(self):
+        model = SemanticModel()
+        assert model.files == set()
+
+    def test_files_after_update_file(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
+        model.update_file("a.ivy", [s1], [], "tier1")
+        model.update_file("b.ivy", [s2], [], "tier1")
+        assert model.files == {"a.ivy", "b.ivy"}
+
+    def test_files_after_remove_file(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
+        model.update_file("a.ivy", [s1], [], "tier1")
+        model.update_file("b.ivy", [s2], [], "tier1")
+        model.remove_file("a.ivy")
+        assert model.files == {"b.ivy"}
+
+
 class TestVersionCounter:
     def _make_node(self, node_id, name, file=None, tier=None):
         from types import SimpleNamespace

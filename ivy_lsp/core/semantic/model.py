@@ -75,6 +75,12 @@ class SemanticModel:
         existing = self._nodes_by_name.get(name, [])
         self._nodes_by_name[name] = [n for n in existing if n.id != node_id] + [node]
 
+    @property
+    def files(self) -> Set[str]:
+        """All files with nodes in the model."""
+        with self._lock:
+            return set(self._nodes_by_file.keys())
+
     # -- Mutation -----------------------------------------------------------
 
     def add_node(self, node: Any) -> None:
