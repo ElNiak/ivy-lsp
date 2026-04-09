@@ -192,14 +192,23 @@ def register(server) -> None:
         try:
             server._last_active_uri = uri
 
-            # Wait for server initialization to complete before reading
-            # parser/indexer.  Without this gate, requests arriving during
-            # the ~3 s _setup_indexer window see parser=None, indexer=None
-            # and return a false "unavailable" status.
-            ready_event = getattr(server, "_ready_event", None)
-            if ready_event is not None and not ready_event.is_set():
+            # Wait for parser initialization before reading parser/indexer.
+            # _parser_ready_event fires after _create_parser (~1.6s),
+            # much earlier than _ready_event which waits for full indexing.
+            parser_ready = getattr(server, "_parser_ready_event", None)
+            if parser_ready is not None and not parser_ready.is_set():
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, ready_event.wait, 10.0)
+                timed_out = not await loop.run_in_executor(
+                    None, parser_ready.wait, 30.0
+                )
+                if timed_out:
+                    return [
+                        _status_document_symbol(
+                            "server still initializing",
+                            "Parser initialization exceeded 30s. "
+                            "Check ivy-lsp logs.",
+                        )
+                    ]
 
             doc = server.workspace.get_text_document(uri)
             source = doc.source or ""

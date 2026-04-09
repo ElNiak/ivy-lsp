@@ -69,3 +69,39 @@ class TestSetupIndexerSignaling:
         assert indexer_entries[0][
             1
         ], "_parser_ready_event should be set before _create_indexer"
+
+
+import asyncio
+
+from lsprotocol import types as lsp
+
+from ivy_lsp.lsp.document_symbols import (
+    _status_document_symbol,
+    compute_document_symbols,
+)
+
+
+class TestDocumentSymbolReadyGate:
+    """documentSymbol should wait on _parser_ready_event, not _ready_event."""
+
+    def test_compute_returns_symbols_with_parser_only(self):
+        """Parser alone (no indexer) should produce symbols."""
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+
+        parser = IvyParserWrapper()
+        source = "#lang ivy1.7\n\ntype cid\ntype pkt_num\n"
+        result = compute_document_symbols(parser, None, source, "test.ivy")
+        assert len(result) >= 2, f"Expected >=2 symbols, got {len(result)}"
+        names = [s.name for s in result]
+        assert "cid" in names
+        assert "pkt_num" in names
+
+    def test_status_symbol_on_timeout(self):
+        """When _parser_ready_event times out, a status symbol should be returned."""
+        sym = _status_document_symbol(
+            "server still initializing",
+            "Parser initialization exceeded 30s. Check ivy-lsp logs.",
+        )
+        assert isinstance(sym, lsp.DocumentSymbol)
+        assert "still initializing" in sym.name
+        assert sym.kind == lsp.SymbolKind.Namespace
