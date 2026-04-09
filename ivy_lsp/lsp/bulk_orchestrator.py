@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Optional, Set
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.parsing.symbols import IncludeGraph
-from ivy_lsp.core.workspace.context import FileChange, StalenessInfo
+from ivy_lsp.core.workspace.context import StalenessInfo
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
 from ivy_lsp.infra.utils.hashing import file_sha256
@@ -407,14 +407,10 @@ class BulkOrchestrationMixin(_BulkBase):
                     else:
                         # Incremental path: hash-validate + cascade expand
                         ws_ctx_inc = getattr(self, "_workspace_context", None)
-                        all_dirty: set[str] = set()
+                        all_dirty: Set[str] = set()
                         total_mtime = 0
-                        total_hash_dirty = 0
-                        total_hash_clean = 0
 
                         if ws_ctx_inc is None:
-                            # No workspace context — cannot determine
-                            # per-file staleness; fall through to full T1/T2.
                             slog.info(
                                 "No workspace context for incremental analysis; "
                                 "falling back to full T1/T2",
@@ -425,10 +421,7 @@ class BulkOrchestrationMixin(_BulkBase):
                                     )
                                 },
                             )
-                            with self._analysis_pipeline._state_lock:
-                                self._analysis_pipeline._tier1_files.clear()
-                                self._analysis_pipeline._tier2_files.clear()
-                            # fall through to run_bulk_t1_t2 below
+                            self._analysis_pipeline.reset_tracking()
                         else:
                             for proto_idx in ws_ctx_inc.protocol_indexes.values():
                                 if proto_idx.staleness.status == "fresh":
@@ -439,15 +432,14 @@ class BulkOrchestrationMixin(_BulkBase):
                                 )
                                 mtime_count = len(proto_idx.staleness.file_changes)
                                 total_mtime += mtime_count
-                                total_hash_dirty += len(dirty)
-                                total_hash_clean += mtime_count - len(dirty)
+                                hash_clean = mtime_count - len(dirty)
 
                                 slog.info(
                                     "Protocol %s: %d mtime-changed, %d hash-dirty, %d hash-clean",
                                     proto_idx.protocol,
                                     mtime_count,
                                     len(dirty),
-                                    mtime_count - len(dirty),
+                                    hash_clean,
                                     extra={
                                         "event": LogEvent(
                                             LogCategory.MILESTONE,
@@ -456,7 +448,7 @@ class BulkOrchestrationMixin(_BulkBase):
                                                 "protocol": proto_idx.protocol,
                                                 "mtime_changed": mtime_count,
                                                 "hash_dirty": len(dirty),
-                                                "hash_clean": mtime_count - len(dirty),
+                                                "hash_clean": hash_clean,
                                             },
                                         )
                                     },
@@ -504,9 +496,7 @@ class BulkOrchestrationMixin(_BulkBase):
                                     )
                                 },
                             )
-                            with self._analysis_pipeline._state_lock:
-                                self._analysis_pipeline._tier1_files.clear()
-                                self._analysis_pipeline._tier2_files.clear()
+                            self._analysis_pipeline.reset_tracking()
                         else:
                             slog.info(
                                 "Incremental: re-analyzing %d/%d files (%d from cache)",
@@ -528,14 +518,7 @@ class BulkOrchestrationMixin(_BulkBase):
                             )
                             for filepath in expanded:
                                 self._semantic_model.remove_file(filepath)
-                            with self._analysis_pipeline._state_lock:
-                                for filepath in expanded:
-                                    self._analysis_pipeline._tier1_files.discard(
-                                        filepath
-                                    )
-                                    self._analysis_pipeline._tier2_files.discard(
-                                        filepath
-                                    )
+                            self._analysis_pipeline.invalidate_files(expanded)
 
                 result = self._analysis_pipeline.run_bulk_t1_t2(
                     filepaths=all_files,

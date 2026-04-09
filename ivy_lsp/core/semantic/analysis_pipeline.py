@@ -14,7 +14,7 @@ import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
@@ -114,6 +114,24 @@ class AnalysisPipeline:
     def set_scope_provider(self, provider: "ScopedRequirementModel") -> None:
         """Set the ScopedRequirementModel for scope-aware bulk filtering."""
         self._scope_provider = provider
+
+    def mark_files_analyzed(self, filepaths: Set[str]) -> None:
+        """Mark files as already analyzed (e.g. from offline cache)."""
+        with self._state_lock:
+            self._tier1_files.update(filepaths)
+            self._tier2_files.update(filepaths)
+
+    def invalidate_files(self, filepaths: Set[str]) -> None:
+        """Remove files from tracking sets so they are re-analyzed."""
+        with self._state_lock:
+            self._tier1_files -= filepaths
+            self._tier2_files -= filepaths
+
+    def reset_tracking(self) -> None:
+        """Clear all tracking sets (full re-analysis fallback)."""
+        with self._state_lock:
+            self._tier1_files.clear()
+            self._tier2_files.clear()
 
     def _files_in_any_scope(self, filepaths: List[str]) -> List[str]:
         """Filter to files in at least one test scope's include_closure.

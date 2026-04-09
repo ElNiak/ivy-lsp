@@ -227,14 +227,10 @@ class IncludeGraph:
         """Files that directly include *f*."""
         return set(self._included_by.get(f, set()))
 
-    def get_transitive_includes(self, f: str) -> Set[str]:
-        """All files transitively included by *f*, with cycle safety.
-
-        Uses BFS with a visited set.  The starting file *f* is never
-        included in the result.
-        """
-        visited: Set[str] = {f}
-        queue: deque[str] = deque(self._includes.get(f, set()))
+    def _bfs_transitive(self, start: str, edge_map: Dict[str, Set[str]]) -> Set[str]:
+        """Cycle-safe BFS reachability from *start* through *edge_map*."""
+        visited: Set[str] = {start}
+        queue: deque[str] = deque(edge_map.get(start, set()))
         result: Set[str] = set()
 
         while queue:
@@ -243,33 +239,19 @@ class IncludeGraph:
                 continue
             visited.add(current)
             result.add(current)
-            for included in self._includes.get(current, set()):
-                if included not in visited:
-                    queue.append(included)
+            for neighbor in edge_map.get(current, set()):
+                if neighbor not in visited:
+                    queue.append(neighbor)
 
         return result
+
+    def get_transitive_includes(self, f: str) -> Set[str]:
+        """All files transitively included by *f*, with cycle safety."""
+        return self._bfs_transitive(f, self._includes)
 
     def get_transitive_included_by(self, f: str) -> Set[str]:
-        """All files that transitively include *f*, with cycle safety.
-
-        Uses BFS with a visited set.  The starting file *f* is never
-        included in the result.
-        """
-        visited: Set[str] = {f}
-        queue: deque[str] = deque(self._included_by.get(f, set()))
-        result: Set[str] = set()
-
-        while queue:
-            current = queue.popleft()
-            if current in visited:
-                continue
-            visited.add(current)
-            result.add(current)
-            for includer in self._included_by.get(current, set()):
-                if includer not in visited:
-                    queue.append(includer)
-
-        return result
+        """All files that transitively include *f*, with cycle safety."""
+        return self._bfs_transitive(f, self._included_by)
 
     # -- Serialization -----------------------------------------------------
 

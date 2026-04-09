@@ -605,9 +605,7 @@ class ServerSetupMixin(_SetupBase):
 
         if self._semantic_model_from_cache and self._analysis_pipeline is not None:
             cached_files = self._semantic_model.files
-            with self._analysis_pipeline._state_lock:
-                self._analysis_pipeline._tier1_files.update(cached_files)
-                self._analysis_pipeline._tier2_files.update(cached_files)
+            self._analysis_pipeline.mark_files_analyzed(cached_files)
             slog.info(
                 "Pre-populated T1/T2 tracking sets with %d cached files",
                 len(cached_files),

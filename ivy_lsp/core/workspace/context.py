@@ -47,7 +47,7 @@ class FileChange:
     """A single file's change record from staleness detection."""
 
     rel_path: str
-    reason: Literal["modified", "added", "removed"]
+    reason: Literal["modified", "removed"]
     cached_sha256: Optional[str]
 
 
@@ -348,8 +348,13 @@ class WorkspaceContext:
         changes: List[FileChange] = []
 
         for rel_path, meta in files_meta.items():
-            expected_mtime = meta.get("mtime") if isinstance(meta, dict) else None
-            cached_sha = meta.get("sha256") if isinstance(meta, dict) else None
+            if not isinstance(meta, dict):
+                changes.append(
+                    FileChange(rel_path=rel_path, reason="modified", cached_sha256=None)
+                )
+                continue
+            expected_mtime = meta.get("mtime")
+            cached_sha = meta.get("sha256")
 
             if expected_mtime is None:
                 changes.append(
