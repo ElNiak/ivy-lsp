@@ -276,6 +276,9 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                     else []
                 )
             },
+            "incremental_analysis": getattr(
+                ctx._lsp_server_ref, "_incremental_stats", None
+            ),
         }
         # Parsing tier availability (capped at 3s to avoid blocking ivy_capabilities)
         try:

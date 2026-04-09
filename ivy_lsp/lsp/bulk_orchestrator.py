@@ -81,6 +81,8 @@ else:
 class BulkOrchestrationMixin(_BulkBase):
     """Background analysis and compilation orchestration for IvyLanguageServer."""
 
+    _incremental_stats: Optional[dict] = None
+
     def _cleanup_staging(self) -> None:
         """Clean up the staging directory on shutdown."""
         if self._indexer:
@@ -456,6 +458,12 @@ class BulkOrchestrationMixin(_BulkBase):
                                 all_dirty |= dirty
 
                         if ws_ctx_inc is not None and not all_dirty:
+                            self._incremental_stats = {
+                                "incremental_t1t2": True,
+                                "outcome": "all_hash_clean",
+                                "files_reanalyzed": 0,
+                                "files_from_cache": len(all_files),
+                            }
                             slog.info(
                                 "All %d mtime-changed files are hash-clean; skipping T1/T2",
                                 total_mtime,
@@ -486,6 +494,12 @@ class BulkOrchestrationMixin(_BulkBase):
                             expanded = None
 
                         if expanded is None:
+                            self._incremental_stats = {
+                                "incremental_t1t2": False,
+                                "outcome": "fallback",
+                                "files_reanalyzed": len(all_files),
+                                "files_from_cache": 0,
+                            }
                             slog.info(
                                 "Cascade budget exceeded or no include graph; "
                                 "falling back to full T1/T2",
@@ -516,6 +530,13 @@ class BulkOrchestrationMixin(_BulkBase):
                                     )
                                 },
                             )
+                            self._incremental_stats = {
+                                "incremental_t1t2": True,
+                                "outcome": "incremental",
+                                "files_reanalyzed": len(expanded),
+                                "files_from_cache": len(all_files) - len(expanded),
+                                "cascade_expanded": len(expanded) - len(all_dirty),
+                            }
                             for filepath in expanded:
                                 self._semantic_model.remove_file(filepath)
                             self._analysis_pipeline.invalidate_files(expanded)
