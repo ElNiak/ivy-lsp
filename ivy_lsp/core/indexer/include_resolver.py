@@ -1216,12 +1216,32 @@ class IncludeResolver:
         """Return a summary of staging directory health.
 
         Returns:
-            Dict with keys: total_staged, collisions, symlink_failures,
+            Dict with keys: total_staged, collisions, intra_layer_collisions,
+            cross_layer_collisions, collision_basenames, symlink_failures,
             layers_active, layer_count, files_mapped_to_layers.
         """
+        # Classify collisions as intra-layer vs cross-layer
+        intra = 0
+        cross = 0
+        for _basename, paths in self._collision_map.items():
+            if self._file_to_layer:
+                layers_involved = {
+                    self._file_to_layer.get(p)
+                    or self._file_to_layer.get(os.path.realpath(p), "unknown")
+                    for p in paths
+                }
+                if len(layers_involved) <= 1:
+                    intra += 1
+                else:
+                    cross += 1
+            else:
+                intra += 1  # No layers → all collisions are "intra"
+
         result: Dict[str, Any] = {
             "total_staged": len(self._staged_files),
             "collisions": len(self._collision_map),
+            "intra_layer_collisions": intra,
+            "cross_layer_collisions": cross,
             "collision_basenames": sorted(self._collision_map.keys())[:20],
             "layers_active": bool(self._partition_staging),
             "layer_count": len(self._partition_staging),

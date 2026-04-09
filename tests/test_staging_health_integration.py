@@ -40,3 +40,33 @@ def test_ivy_capabilities_no_staging_health_when_no_resolver():
 
     ctx = ToolContext(root="/tmp", staging_dir=None, executor=None, base_path=None)
     assert ctx.include_resolver is None
+
+
+def test_staging_health_collision_breakdown():
+    """staging_health returns intra/cross-layer collision counts."""
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+
+    resolver = IncludeResolver("/tmp/fake")
+    # Simulate staged state with collisions
+    resolver._staged_files = {"a.ivy": "/tmp/a.ivy", "b.ivy": "/tmp/b.ivy"}
+    resolver._collision_map = {
+        "a.ivy": ["/tmp/layer1/a.ivy", "/tmp/layer2/a.ivy"],  # cross-layer
+        "b.ivy": ["/tmp/layer1/b.ivy", "/tmp/layer1/b2.ivy"],  # intra-layer
+    }
+    resolver._file_to_layer = {
+        "/tmp/layer1/a.ivy": "quic",
+        "/tmp/layer2/a.ivy": "apt",
+        "/tmp/layer1/b.ivy": "quic",
+        "/tmp/layer1/b2.ivy": "quic",
+    }
+    resolver._partition_staging = {
+        "quic": "/tmp/s/layer_quic",
+        "apt": "/tmp/s/layer_apt",
+    }
+    resolver._file_to_partition = dict(resolver._file_to_layer)
+    resolver._staging_dir = "/tmp/fake_staging"
+
+    health = resolver.staging_health()
+    assert health["collisions"] == 2  # total (backward compat)
+    assert health["intra_layer_collisions"] == 1  # b.ivy only
+    assert health["cross_layer_collisions"] == 1  # a.ivy only
