@@ -9,15 +9,63 @@ import os
 import threading
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Set
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.parsing.symbols import IncludeGraph
+from ivy_lsp.core.workspace.context import FileChange, StalenessInfo
 from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.infra.utils.hashing import file_sha256
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
+
+CASCADE_BUDGET_RATIO = 0.5
+
+
+def _validate_changes(staleness: StalenessInfo, protocol_dir: str) -> Set[str]:
+    """Hash-validate mtime-flagged files. Returns truly changed abs paths."""
+    dirty: Set[str] = set()
+    for fc in staleness.file_changes:
+        abs_path = os.path.join(protocol_dir, fc.rel_path)
+        if fc.reason == "removed":
+            dirty.add(abs_path)
+            continue
+        if fc.cached_sha256 is None:
+            dirty.add(abs_path)
+            continue
+        try:
+            current_sha = file_sha256(abs_path)
+        except OSError:
+            dirty.add(abs_path)
+            continue
+        if current_sha != fc.cached_sha256:
+            dirty.add(abs_path)
+    return dirty
+
+
+def _expand_dirty_set(dirty_files: Set[str], include_graph: IncludeGraph) -> Set[str]:
+    """Expand dirty files with all transitive reverse dependents."""
+    expanded = set(dirty_files)
+    for f in dirty_files:
+        expanded |= include_graph.get_transitive_included_by(f)
+    return expanded
+
+
+def expand_with_budget(
+    dirty_files: Set[str],
+    include_graph: IncludeGraph,
+    total_files: int,
+    budget_ratio: float = CASCADE_BUDGET_RATIO,
+) -> Optional[Set[str]]:
+    """Expand dirty set; return None if cascade exceeds budget."""
+    expanded = _expand_dirty_set(dirty_files, include_graph)
+    if total_files > 0 and len(expanded) / total_files > budget_ratio:
+        return None
+    return expanded
+
 
 if TYPE_CHECKING:
     from pygls.lsp.server import LanguageServer as _LS
