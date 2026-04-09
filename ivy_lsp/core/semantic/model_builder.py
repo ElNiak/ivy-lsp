@@ -39,6 +39,7 @@ def build_semantic_model(
     find_files_fn: Callable[[str], list[str]],
     include_resolver: Any | None = None,
     stdlib_modules: frozenset[str] | None = None,
+    precomputed_extractions: dict[str, "PrecomputedFileData"] | None = None,
 ) -> Optional[Any]:
     """Build a SemanticModel from workspace files.
 
@@ -89,18 +90,20 @@ def build_semantic_model(
         for req in reqs.values():
             model.add_node(req)
 
-    # Scan .ivy files for annotations, types, and symbols using
-    # tiered extraction: parser -> lexer -> regex cascade.
     from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
-    from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 
-    extractor = TieredExtractor(resolve_callback=include_resolver)
-    # Cache includes per file for INCLUDES edge wiring later
+    # Only create TieredExtractor if we need it (no precomputed data).
+    # Lazy-init: even when precomputed data is provided, a file may be
+    # missing from the dict (e.g., added after Phase B). The extractor
+    # is created on first miss to avoid silently skipping files.
+    extractor = None
+    if precomputed_extractions is None:
+        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
+
+        extractor = TieredExtractor(resolve_callback=include_resolver)
+
     file_includes: dict[str, list[str]] = {}
-    # Cache references per file for CALLS/USES/MONITORS edge wiring later
     file_references: dict[str, list] = {}
-    # Map basename (stem) -> abs_path for INCLUDES edge wiring (avoids
-    # a second find_files_fn call).
     basename_to_path: dict[str, str] = {}
     tier_counts: dict[int, int] = {1: 0, 2: 0, 3: 0}
     total_symbols = 0
@@ -124,17 +127,51 @@ def build_semantic_model(
         for ann in parse_file_rfc_annotations(source, abs_path):
             model.add_node(ann)
 
-        # Extract symbols via tiered cascade
-        result = extractor.extract(source, abs_path)
-        if result.tier_used > 0:
+        # --- Extraction: precomputed or live ---
+        pre = (
+            precomputed_extractions.get(abs_path)
+            if precomputed_extractions is not None
+            else None
+        )
+
+        if pre is not None:
+            # Deserialize symbols from Phase B dicts
+            from ivy_lsp.core.parsing.symbols import IvySymbol
+
+            symbols = [IvySymbol.from_dict(d) for d in pre.symbols]
+            tier_used = pre.tier_used
+            includes = pre.includes
+
+            # Extract references via cheap regex (not stored in Phase B)
+            from ivy_lsp.core.parsing.reference_extraction import (
+                extract_references_regex,
+            )
+
+            references = extract_references_regex(source, abs_path, symbols)
+        else:
+            # Fallback: file not in precomputed dict (or no precomputed data).
+            # Lazy-init extractor on first miss to avoid silently skipping files.
+            if extractor is None:
+                from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
+
+                extractor = TieredExtractor(resolve_callback=include_resolver)
+            result = extractor.extract(source, abs_path)
+            if result.tier_used == 0:
+                continue
+            symbols = result.symbols
+            tier_used = result.tier_used
+            includes = result.includes
+            references = result.references
+
+        if tier_used > 0:
             count = populate_model_from_symbols(
-                model, result.symbols, abs_path, tier_used=result.tier_used
+                model, symbols, abs_path, tier_used=tier_used
             )
             total_symbols += count
-            tier_counts[result.tier_used] = tier_counts.get(result.tier_used, 0) + 1
-            file_includes[abs_path] = result.includes
-            if result.references:
-                file_references[abs_path] = result.references
+            tier_counts[tier_used] = tier_counts.get(tier_used, 0) + 1
+            file_includes[abs_path] = includes
+            if references:
+                file_references[abs_path] = references
 
     build_elapsed = (time.monotonic() - build_start) * 1000
     logger.info(
