@@ -370,6 +370,9 @@ class IndexBuilder:
         ivy_files: List[str],
         requirements_map: Dict[str, list],
         scopes: Dict,
+        symbols_map: Dict[str, list],
+        includes_raw: Dict[str, List[str]],
+        manifest_files: Dict[str, dict],
     ) -> tuple:
         """Build the optional SemanticModel and ScopedRequirementModel.
 
@@ -377,15 +380,34 @@ class IndexBuilder:
         """
         semantic_model = None
         try:
-            from ivy_lsp.core.semantic.model_builder import build_semantic_model
+            from ivy_lsp.core.semantic.model_builder import (
+                PrecomputedFileData,
+                build_semantic_model,
+            )
 
             def _find_files(root: str) -> List[str]:
                 return [os.path.relpath(f, root) for f in ivy_files]
+
+            # Build precomputed dict from Phase B extraction results
+            tier_label_to_num = {"ast": 1, "lexer": 2, "regex": 3}
+            precomputed: Dict[str, PrecomputedFileData] = {}
+            for rel_path, syms in symbols_map.items():
+                abs_path = os.path.join(protocol_dir, rel_path)
+                tier_label = manifest_files.get(rel_path, {}).get(
+                    "parse_tier", "unknown"
+                )
+                tier_num = tier_label_to_num.get(tier_label, 3)
+                precomputed[abs_path] = PrecomputedFileData(
+                    symbols=syms,
+                    includes=includes_raw.get(rel_path, []),
+                    tier_used=tier_num,
+                )
 
             semantic_model = build_semantic_model(
                 root=protocol_dir,
                 find_files_fn=_find_files,
                 include_resolver=resolver.resolve,
+                precomputed_extractions=precomputed,
             )
         except Exception as exc:
             logger.debug("Semantic model build failed for %s: %s", protocol, exc)
@@ -659,6 +681,9 @@ class IndexBuilder:
             ivy_files,
             requirements_map,
             scopes,
+            symbols_map,
+            includes_raw,
+            manifest_files,
         )
 
         # -- 10. Write output to .ivy-index/ --------------------------------
