@@ -485,97 +485,38 @@ class IndexBuilder:
         resolver_config = resolver.to_config_dict()
 
         # -- Load existing index cache from .ivy-index/ --------------------
-        # We load cached artifacts so that files whose SHA-256 hasn't changed
-        # can skip re-parsing entirely (only SHA-256 computation is needed).
-        # When --force is set, skip the cache entirely to ensure a full rebuild.
-        index_dir_existing = os.path.join(protocol_dir, ".ivy-index")
-        cached_manifest: Any = None
-        cached_symbols: Any = None
-        cached_includes_raw: Any = None
-        cached_exports: Any = None
-        cached_requirements: Any = None
-        if not self.force:
-            cached_manifest = self._load_json(
-                os.path.join(index_dir_existing, "manifest.json")
-            )
-            cached_symbols = self._load_json(
-                os.path.join(index_dir_existing, "symbols.json")
-            )
-            cached_includes_raw = self._load_json(
-                os.path.join(index_dir_existing, "includes_raw.json")
-            )
-            cached_exports = self._load_json(
-                os.path.join(index_dir_existing, "exports.json")
-            )
-            cached_requirements = self._load_json(
-                os.path.join(index_dir_existing, "requirements.json")
-            )
-
-        # Build a sha256 lookup from the cached manifest: {rel_path -> sha256}
-        cached_sha256: Dict[str, str] = {}
-        if isinstance(cached_manifest, dict):
-            for rel_p, entry in cached_manifest.get("files", {}).items():
-                if isinstance(entry, dict) and entry.get("sha256"):
-                    cached_sha256[rel_p] = entry["sha256"]
-
-        cache_hits = 0
-        cache_misses = 0
-        files_to_extract: List[str] = []
-        # Map filepath -> pre-computed SHA so _extract_one_file doesn't recompute
-        sha_for_file: Dict[str, str] = {}
-
-        # Validate all cache dicts once upfront instead of per-file isinstance checks
-        caches_valid = all(
-            isinstance(c, dict)
-            for c in [
-                cached_symbols,
-                cached_includes_raw,
-                cached_exports,
-                cached_requirements,
-                cached_manifest,
-            ]
+        from ivy_lsp.lsp.index_cache import (
+            CachedIndex,
+            classify_files,
+            load_cached_index,
         )
 
-        # -- Phase A: split files into cache hits vs cache misses ----------
-        if self.force or not caches_valid:
-            # --force or no usable cache: extract everything, skip SHA upfront
-            # (_extract_one_file computes SHA from the raw bytes it reads).
-            files_to_extract = list(ivy_files)
-            cache_misses = len(files_to_extract)
-        else:
-            for filepath in ivy_files:
-                rel_path = os.path.relpath(filepath, protocol_dir)
-
-                try:
-                    current_sha = _file_sha256(filepath)
-                except OSError:
-                    current_sha = ""
-
-                cached_hit = (
-                    current_sha
-                    and current_sha == cached_sha256.get(rel_path)
-                    and rel_path in cached_symbols
-                    and rel_path in cached_includes_raw
-                    and rel_path in cached_exports
-                    and rel_path in cached_requirements
-                    and rel_path in cached_manifest.get("files", {})
-                )
-
-                if cached_hit:
-                    cache_hits += 1
-                    symbols_map[rel_path] = cached_symbols[rel_path]
-                    includes_raw[rel_path] = cached_includes_raw[rel_path]
-                    exports_map[rel_path] = cached_exports[rel_path]
-                    requirements_map[rel_path] = cached_requirements[rel_path]
-                    manifest_files[rel_path] = cached_manifest["files"][rel_path]
-                    cached_tier = cached_manifest["files"][rel_path].get(
-                        "parse_tier", TIER_UNKNOWN
-                    )
-                    tier_counts[cached_tier] = tier_counts.get(cached_tier, 0) + 1
-                else:
-                    cache_misses += 1
-                    files_to_extract.append(filepath)
-                    sha_for_file[filepath] = current_sha
+        index_dir_existing = os.path.join(protocol_dir, ".ivy-index")
+        cached = (
+            load_cached_index(index_dir_existing) if not self.force else CachedIndex()
+        )
+        cr = classify_files(
+            ivy_files=ivy_files,
+            protocol_dir=protocol_dir,
+            cached=cached,
+            force=self.force,
+            tier_labels={
+                TIER_AST: TIER_AST,
+                TIER_LEXER: TIER_LEXER,
+                TIER_REGEX: TIER_REGEX,
+                TIER_UNKNOWN: TIER_UNKNOWN,
+            },
+        )
+        symbols_map = dict(cr.symbols_map)
+        includes_raw = dict(cr.includes_raw)
+        exports_map = dict(cr.exports_map)
+        requirements_map = dict(cr.requirements_map)
+        manifest_files = dict(cr.manifest_files)
+        tier_counts = dict(cr.tier_counts)
+        files_to_extract = cr.files_to_extract
+        sha_for_file = cr.sha_for_file
+        cache_hits = cr.cache_hits
+        cache_misses = cr.cache_misses
 
         # -- Phase B: extract cache misses (parallel or sequential) --------
         parser_timeout = 5.0
@@ -722,8 +663,9 @@ class IndexBuilder:
         )
 
         # -- 10. Write output to .ivy-index/ --------------------------------
+        from ivy_lsp.lsp.index_writer import write_index_artifacts
+
         index_dir = os.path.join(protocol_dir, ".ivy-index")
-        os.makedirs(index_dir, exist_ok=True)
 
         # Build manifest
         default_tier = TIER_LEXER if self.fast else TIER_AST
@@ -736,37 +678,18 @@ class IndexBuilder:
             "files": manifest_files,
         }
 
-        self._write_json(os.path.join(index_dir, "manifest.json"), manifest)
-        self._write_json(os.path.join(index_dir, "symbols.json"), symbols_map)
-        self._write_json(
-            os.path.join(index_dir, "includes.json"), include_graph.to_edges()
+        write_index_artifacts(
+            index_dir=index_dir,
+            manifest=manifest,
+            symbols_map=symbols_map,
+            includes_map=include_graph.to_edges(),
+            includes_raw=includes_raw,
+            exports_map=exports_map,
+            requirements_map=requirements_map,
+            scopes=scopes,
+            semantic_model=semantic_model,
+            requirement_graph=requirement_graph,
         )
-        # includes_raw.json stores per-file raw include name lists for the
-        # incremental cache.  This is separate from includes.json which stores
-        # the resolved graph edges.
-        self._write_json(os.path.join(index_dir, "includes_raw.json"), includes_raw)
-        self._write_json(os.path.join(index_dir, "exports.json"), exports_map)
-        self._write_json(os.path.join(index_dir, "requirements.json"), requirements_map)
-
-        # Scopes
-        scopes_dir = os.path.join(index_dir, "scopes")
-        os.makedirs(scopes_dir, exist_ok=True)
-
-        meta_entries: List[dict] = []
-        for test_name, scope in sorted(scopes.items()):
-            scope_dict = scope.to_dict()
-            self._write_json(os.path.join(scopes_dir, f"{test_name}.json"), scope_dict)
-            meta_entries.append(scope_dict)
-
-        self._write_json(os.path.join(scopes_dir, "_meta.json"), meta_entries)
-
-        # Optional pickle artifacts
-        if semantic_model is not None:
-            self._write_pickle(index_dir, "semantic_model.pickle.gz", semantic_model)
-        if requirement_graph is not None:
-            self._write_pickle(
-                index_dir, "requirement_graph.pickle.gz", requirement_graph
-            )
 
         elapsed = (time.monotonic() - t0) * 1000
         logger.info(
@@ -1012,15 +935,6 @@ class IndexBuilder:
         }
 
     # -- Private helpers ----------------------------------------------------
-
-    @staticmethod
-    def _load_json(path: str) -> Any:
-        """Load JSON from *path*, returning ``None`` on any error."""
-        try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError, ValueError):
-            return None
 
     @staticmethod
     def _write_json(path: str, data: Any) -> None:

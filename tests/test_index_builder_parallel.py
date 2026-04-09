@@ -541,28 +541,20 @@ class TestIncrementalIndexing:
         """_load_json() returns None when the file does not exist."""
         import os
 
-        from ivy_lsp.core.workspace.detection import WorkspaceConfig
-
-        ws_root = str(tmp_path)
-        config = WorkspaceConfig(workspace_root=ws_root, detected_by="test")
-        builder = IndexBuilder(ws_root, config)
+        from ivy_lsp.lsp.index_cache import _load_json
 
         missing_path = os.path.join(str(tmp_path), "nonexistent.json")
-        result = builder._load_json(missing_path)
+        result = _load_json(missing_path)
         assert result is None
 
     def test_load_json_returns_none_on_corrupt_file(self, tmp_path):
         """_load_json() returns None when the file contains invalid JSON."""
-        from ivy_lsp.core.workspace.detection import WorkspaceConfig
+        from ivy_lsp.lsp.index_cache import _load_json
 
         corrupt_path = tmp_path / "corrupt.json"
         corrupt_path.write_text("{ this is not valid json !!!")
 
-        ws_root = str(tmp_path)
-        config = WorkspaceConfig(workspace_root=ws_root, detected_by="test")
-        builder = IndexBuilder(ws_root, config)
-
-        result = builder._load_json(str(corrupt_path))
+        result = _load_json(str(corrupt_path))
         assert result is None
 
 
