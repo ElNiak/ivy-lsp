@@ -403,7 +403,7 @@ Expected: Same pass/fail count as Task 1 baseline.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ivy_lsp/mcp/tools/verification.py ivy_lsp/mcp/tools/__init__.py tests/test_tools_verification.py
+git add ivy_lsp/mcp/tools/verification.py tests/test_tools_verification.py
 git commit -m "refactor: rewire verification.py to use verification_cache and diagnostics_tool"
 ```
 
@@ -723,7 +723,7 @@ Read `ivy_lsp/lsp/index_builder.py` lines 426-778 to see the complete method.
 Replace the cache-loading block (lines ~487-602) with:
 
 ```python
-from ivy_lsp.lsp.index_cache import load_cached_index, classify_files
+from ivy_lsp.lsp.index_cache import CachedIndex, load_cached_index, classify_files
 
 cached = load_cached_index(index_dir_existing) if not self.force else CachedIndex()
 cr = classify_files(
@@ -1110,22 +1110,31 @@ def populate_from_offline_index(
     workspace_context: Any,
     indexer: Any,
     analysis_pipeline: Any = None,
-) -> Tuple[Optional[Any], Optional[Any]]:
+) -> Optional[Any]:
     """Populate indexer from offline index artifacts.
 
-    Returns (semantic_model, requirement_graph) or (None, None) if no indexes.
+    Mutates *indexer* in place (symbol table, include graph, exports,
+    requirement graph). Returns the merged SemanticModel if one was
+    loaded, or None.
+
+    The requirement graph is set on ``indexer._requirement_graph``
+    (matching the original server_setup.py behavior), NOT returned
+    as a separate value.
     """
     protocol_indexes = getattr(workspace_context, "protocol_indexes", None)
     if not protocol_indexes:
-        return None, None
+        return None
 
     # Copy the body of _prepopulate_from_offline_index() (read from
     # server_setup.py in Step 1) and replace self.X references with
     # the function arguments (indexer, analysis_pipeline).
     # The method is ~150 LOC — paste it here verbatim with substitutions.
-    # Key substitutions: self._indexer → indexer,
-    # self._analysis_pipeline → analysis_pipeline,
-    # self._semantic_model = X → return X
+    # Key substitutions:
+    #   self._indexer          → indexer
+    #   self._analysis_pipeline → analysis_pipeline
+    #   self._semantic_model = X → collect into local var, return at end
+    #   self._indexer._requirement_graph = X → indexer._requirement_graph = X
+    # Return the merged SemanticModel (or None).
 ```
 
 Read the exact code from `server_setup.py` and adapt `self.X` references to function arguments.
@@ -1138,15 +1147,13 @@ Replace `_prepopulate_from_offline_index()` body with:
 def _prepopulate_from_offline_index(self, ws_ctx) -> None:
     from ivy_lsp.lsp.offline_index_loader import populate_from_offline_index
 
-    model, req_graph = populate_from_offline_index(
+    model = populate_from_offline_index(
         workspace_context=ws_ctx,
         indexer=self._indexer,
         analysis_pipeline=getattr(self, "_analysis_pipeline", None),
     )
     if model is not None:
         self._semantic_model = model
-    if req_graph is not None:
-        self._requirement_graph = req_graph
 ```
 
 - [ ] **Step 4: Verify import**
@@ -1322,7 +1329,9 @@ With:
 from ivy_lsp.core.patterns import INCLUDE_RE as _INCLUDE_RE
 ```
 
-Note: the old pattern lacked `re.MULTILINE`. The consolidated version includes it. This is a semantic improvement (multiline is correct for matching `include` at start of any line, not just start of string).
+Note two behavioral changes vs. the originals:
+- `navigation/definition.py`: old pattern lacked `re.MULTILINE`. The consolidated version adds it — correct for matching at start of any line.
+- `diagnostics/compute.py`: old pattern was `r"^include\s+(\w+)"` (no leading `\s*`), matching only column-zero includes. The consolidated version adds `\s*`, broadening to indented includes. This is acceptable because Ivy `include` is a top-level directive, but verify no tests rely on the column-zero-only behavior.
 
 - [ ] **Step 4: Update `mcp/tools/diagnostics_tool.py`**
 
