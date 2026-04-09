@@ -101,4 +101,23 @@ def compute_coverage_hints(
                 }
             )
 
+    # -----------------------------------------------------------------
+    # 3. Dead guards: require false as unreachability sentinel
+    # -----------------------------------------------------------------
+    for req in graph.requirements.values():
+        if req.file != filepath:
+            continue
+        if req.formula_text.strip() == "false":
+            hints.append(
+                {
+                    "line": req.line,
+                    "message": (
+                        "Dead guard: 'require false' marks this action as "
+                        "unreachable. Called only through variant specializations."
+                    ),
+                    "severity": "info",
+                    "code": "ivy.require.deadGuard",
+                }
+            )
+
     return hints

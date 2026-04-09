@@ -133,6 +133,65 @@ class TestComputeCoverageHints:
         assert not any("pkt_count" in m and "written" in m.lower() for m in messages)
 
 
+def test_dead_guard_detected():
+    graph = RequirementGraph()
+    r1 = RequirementNode(
+        id="/test/frame.ivy:10",
+        kind="require",
+        formula_text="false",
+        line=10,
+        col=0,
+        file="/test/frame.ivy",
+        monitor_action="frame.handle",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/frame.ivy", [r1])
+    graph.add_action(
+        ActionNode(
+            id="frame.handle",
+            name="handle",
+            qualified_name="frame.handle",
+            file="/test/frame.ivy",
+            line=8,
+        )
+    )
+    hints = compute_coverage_hints(graph, "/test/frame.ivy")
+    dead = [h for h in hints if h.get("code") == "ivy.require.deadGuard"]
+    assert len(dead) == 1
+    assert dead[0]["line"] == 10
+    assert (
+        "unreachable" in dead[0]["message"].lower()
+        or "dead guard" in dead[0]["message"].lower()
+    )
+
+
+def test_normal_require_not_flagged_as_dead():
+    graph = RequirementGraph()
+    r1 = RequirementNode(
+        id="/test/quic.ivy:5",
+        kind="require",
+        formula_text="pkt.seq_num > 0",
+        line=5,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1])
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=3,
+        )
+    )
+    hints = compute_coverage_hints(graph, "/test/quic.ivy")
+    dead = [h for h in hints if h.get("code") == "ivy.require.deadGuard"]
+    assert len(dead) == 0
+
+
 class TestCoverageHintDiagnosticTags:
     """M1: Coverage hint diagnostics should use DiagnosticTag.Unnecessary."""
 
