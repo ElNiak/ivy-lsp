@@ -266,8 +266,10 @@ def _build_panther_workspace(
 ) -> Optional[WorkspaceConfig]:
     """Build a WorkspaceConfig for a PANTHER panther_ivy root directory.
 
-    Dynamically discovers protocols via per-protocol ``.ivyworkspace`` markers.
-    Returns ``None`` when no markers are found.
+    Reads per-protocol ``.ivyworkspace`` markers and merges their
+    fine-grained layer definitions into a single config. Protocols whose
+    markers fail to parse, resolve to a different root, or have layer ID
+    collisions are skipped with a warning.
     """
     protocol_testing_dir = os.path.join(panther_ivy_root, "protocol-testing")
     discovered = _discover_protocols(protocol_testing_dir)
@@ -280,32 +282,94 @@ def _build_panther_workspace(
         )
         return None
 
-    include_paths = [f"protocol-testing/{p}" for p in discovered]
+    panther_ivy_real = os.path.realpath(panther_ivy_root)
+    merged_layers: list[WorkspaceLayer] = []
+    merged_include_paths: list[str] = []
+    merged_exclude_paths: set[str] = set()
+    merged_groups: dict[str, list[str]] = {}
+    standard_library: Optional[str] = None
+    seen_layer_ids: set[str] = set()
+    any_marker_merged = False
 
-    # Build one layer per protocol for a lightweight heuristic config.
-    layers = [
-        WorkspaceLayer(
-            id=p,
-            include_paths=[f"protocol-testing/{p}"],
-            priority=i + 1,
+    for protocol in discovered:
+        marker_path = os.path.join(
+            protocol_testing_dir, protocol, _IVYWORKSPACE_FILENAME
         )
-        for i, p in enumerate(discovered)
-    ]
+        data = _read_marker(marker_path)
+        if data is None:
+            logger.warning(
+                "Skipping protocol %s: failed to read .ivyworkspace", protocol
+            )
+            continue
+
+        config = _apply_marker(marker_path, data)
+        if config is None:
+            logger.warning("Skipping protocol %s: unsupported marker version", protocol)
+            continue
+
+        # Verify resolved root matches panther_ivy_root
+        resolved_root = os.path.realpath(config.workspace_root)
+        if resolved_root != panther_ivy_real:
+            logger.warning(
+                "Skipping protocol %s: resolved root %s != expected %s",
+                protocol,
+                resolved_root,
+                panther_ivy_real,
+            )
+            continue
+
+        # Check for layer ID collisions
+        new_ids = {l.id for l in config.workspace_layers}
+        collisions = new_ids & seen_layer_ids
+        if collisions:
+            logger.warning(
+                "Skipping protocol %s: layer ID collision with already-merged "
+                "layers: %s",
+                protocol,
+                sorted(collisions),
+            )
+            continue
+
+        # Merge this protocol's layers
+        seen_layer_ids.update(new_ids)
+        merged_layers.extend(config.workspace_layers)
+        merged_include_paths.extend(config.include_paths)
+        merged_exclude_paths.update(config.exclude_paths)
+        merged_groups.update(config.workspace_groups)
+
+        if standard_library is None and config.standard_library:
+            standard_library = config.standard_library
+        elif (
+            config.standard_library
+            and standard_library
+            and config.standard_library != standard_library
+        ):
+            logger.warning(
+                "Protocol %s declares standard_library=%s, "
+                "but %s was already selected; keeping first",
+                protocol,
+                config.standard_library,
+                standard_library,
+            )
+
+        any_marker_merged = True
+
+    if not any_marker_merged:
+        logger.debug(
+            "No valid v3 markers found under %s; no workspace detected",
+            protocol_testing_dir,
+        )
+        return None
 
     return WorkspaceConfig(
         workspace_root=panther_ivy_root,
-        workspace_layers=layers,
-        include_paths=include_paths,
-        exclude_paths=[
-            "submodules",
-            "test",
-            "doc",
-            "examples",
-            "notebooks",
-            "patches",
-        ],
-        detected_by="heuristic",
+        workspace_layers=merged_layers,
+        include_paths=merged_include_paths,
+        exclude_paths=sorted(merged_exclude_paths),
+        detected_by="heuristic+marker",
         project_type="panther",
+        standard_library=standard_library,
+        workspace_groups=merged_groups,
     )
 
 
