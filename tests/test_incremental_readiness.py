@@ -1,8 +1,15 @@
 """Tests for incremental readiness signaling."""
 
 import threading
+from unittest.mock import patch
 
 import pytest
+from lsprotocol import types as lsp
+
+from ivy_lsp.lsp.document_symbols import (
+    _status_document_symbol,
+    compute_document_symbols,
+)
 
 
 class TestParserReadyEvent:
@@ -14,12 +21,7 @@ class TestParserReadyEvent:
         server = IvyLanguageServer()
         assert hasattr(server, "_parser_ready_event")
         assert isinstance(server._parser_ready_event, threading.Event)
-        # Should not be set at construction time
         assert not server._parser_ready_event.is_set()
-
-
-import time
-from unittest.mock import MagicMock, patch
 
 
 class TestSetupIndexerSignaling:
@@ -30,7 +32,6 @@ class TestSetupIndexerSignaling:
         from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
-        # Track call order
         call_log = []
 
         original_create_parser = server._create_parser
@@ -55,8 +56,6 @@ class TestSetupIndexerSignaling:
             except Exception:
                 pass  # May fail without full env, that's fine
 
-        # If create_parser ran, _parser_ready_event should NOT be set during it
-        # but SHOULD be set by the time create_indexer starts
         parser_entries = [e for e in call_log if e[0] == "create_parser"]
         indexer_entries = [e for e in call_log if e[0] == "create_indexer_start"]
 
@@ -69,16 +68,6 @@ class TestSetupIndexerSignaling:
         assert indexer_entries[0][
             1
         ], "_parser_ready_event should be set before _create_indexer"
-
-
-import asyncio
-
-from lsprotocol import types as lsp
-
-from ivy_lsp.lsp.document_symbols import (
-    _status_document_symbol,
-    compute_document_symbols,
-)
 
 
 class TestDocumentSymbolReadyGate:

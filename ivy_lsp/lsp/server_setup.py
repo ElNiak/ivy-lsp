@@ -179,6 +179,7 @@ class ServerSetupMixin(_SetupBase):
         # the fast prepopulation path is used; otherwise live scan runs.
         self._index_loader = threading.Thread(
             target=self._load_offline_indexes_background,
+            name="ivy-offline-index",
             daemon=True,
         )
         self._index_loader.start()
@@ -535,7 +536,10 @@ class ServerSetupMixin(_SetupBase):
         total_symbols = 0
         total_edges = 0
 
-        for proto_name, proto_idx in ws_ctx.protocol_indexes.items():
+        # Snapshot: background thread may still be writing to protocol_indexes.
+        frozen_indexes = dict(ws_ctx.protocol_indexes)
+
+        for proto_name, proto_idx in frozen_indexes.items():
             # protocol_dir = workspace_root / protocol-testing / <proto>
             protocol_dir = os.path.dirname(proto_idx.index_dir)
 
@@ -599,7 +603,7 @@ class ServerSetupMixin(_SetupBase):
 
         # -- 5. Semantic model (optional pickle) ----------------------------
         loaded_model_protocols = 0
-        for proto_name, proto_idx in ws_ctx.protocol_indexes.items():
+        for proto_name, proto_idx in frozen_indexes.items():
             if proto_idx.semantic_model is not None:
                 if self._semantic_model is None:
                     from ivy_lsp.core.semantic.model import SemanticModel
