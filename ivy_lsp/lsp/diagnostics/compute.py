@@ -305,6 +305,7 @@ def compute_semantic_diagnostics(
                             ),
                             severity=lsp.DiagnosticSeverity.Warning,
                             source="ivy-lsp-semantic",
+                            code="ivy.rfc.orphanedTag",
                         )
                     )
 
@@ -322,6 +323,7 @@ def compute_semantic_diagnostics(
                     message="Assertion without RFC bracket tag annotation",
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-lsp-semantic",
+                    code="ivy.rfc.missingBracketTag",
                 )
             )
 

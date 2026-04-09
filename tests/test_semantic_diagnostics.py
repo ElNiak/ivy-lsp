@@ -96,6 +96,47 @@ class TestComputeSemanticDiagnostics:
         assert len(hint_diags) == 0
 
 
+def test_orphaned_rfc_tag_has_code():
+    model = SemanticModel()
+    ann = RfcAnnotation(
+        id="/tmp/test.ivy:5:0",
+        file="/tmp/test.ivy",
+        line=5,
+        tags=["rfc9000:99.99"],
+    )
+    model.add_node(ann)
+    req = RfcRequirement(
+        id="rfc9000:4.1",
+        rfc="RFC9000",
+        section="4.1",
+        text="senders MUST NOT...",
+        level="MUST",
+    )
+    model.add_node(req)
+    source = "#lang ivy1.7\n\n\n\n\nrequire x > 0;  # [rfc9000:99.99]\n"
+    diags = compute_semantic_diagnostics(model, "/tmp/test.ivy", source)
+    orphan_diags = [d for d in diags if "Orphaned RFC tag" in d.message]
+    assert len(orphan_diags) == 1
+    assert orphan_diags[0].code == "ivy.rfc.orphanedTag"
+
+
+def test_missing_bracket_tag_has_code():
+    model = SemanticModel()
+    req = RfcRequirement(
+        id="rfc9000:4.1",
+        rfc="RFC9000",
+        section="4.1",
+        text="senders MUST NOT...",
+        level="MUST",
+    )
+    model.add_node(req)
+    source = "#lang ivy1.7\nbefore foo {\n  require x > 0;\n}\n"
+    diags = compute_semantic_diagnostics(model, "/tmp/test.ivy", source)
+    hint_diags = [d for d in diags if "bracket tag" in d.message.lower()]
+    assert len(hint_diags) >= 1
+    assert hint_diags[0].code == "ivy.rfc.missingBracketTag"
+
+
 class TestComputeDiagnosticsIntegration:
     """Verify compute_diagnostics accepts semantic_model param."""
 
