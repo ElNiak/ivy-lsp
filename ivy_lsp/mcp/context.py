@@ -52,6 +52,40 @@ def _check_structural_issues(
     return diags
 
 
+class _IncludeResolverDescriptor:
+    """Descriptor that provides lazy resolution for include_resolver.
+
+    When accessed, checks (in order):
+    1. A directly assigned resolver (set via ``ctx.include_resolver = r``).
+    2. The live resolver from an LSP server reference (``ctx._lsp_server_ref``).
+    3. None.
+
+    This allows the sidecar's ToolContext to pick up the LSP indexer's
+    resolver even when the indexer initializes after the sidecar starts.
+    """
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self._attr = f"_{name}_value"
+
+    def __get__(self, obj: Any, objtype: type | None = None) -> Any:
+        if obj is None:
+            return self
+        direct = getattr(obj, self._attr, None)
+        if direct is not None:
+            return direct
+        server = getattr(obj, "_lsp_server_ref", None)
+        if server is not None:
+            indexer = getattr(server, "_indexer", None)
+            if indexer is not None:
+                return getattr(indexer, "resolver", None)
+        return None
+
+    def __set__(self, obj: Any, value: Any) -> None:
+        if isinstance(value, _IncludeResolverDescriptor):
+            value = None
+        setattr(obj, self._attr, value)
+
+
 @dataclass
 class ToolContext:
     """Shared context passed to every tool registration module.
@@ -76,7 +110,7 @@ class ToolContext:
     make_viz_server_proxy: Callable[..., Any] = field(default=lambda: None)
     get_basename_cache: Callable[..., dict[str, list[str]]] = field(default=lambda: {})
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
-    include_resolver: Any = None
+    include_resolver: Any = _IncludeResolverDescriptor()  # type: ignore[assignment]
     _basename_cache_invalidate: Callable[[], None] = field(default=lambda: None)
 
     # Dedicated thread pool for tool-originated blocking calls.
@@ -90,6 +124,11 @@ class ToolContext:
 
     # Workspace context (loaded from .ivy-index/, shared with LSP)
     workspace_context: Any = None
+
+    # LSP server reference for lazy resolver lookup (sidecar path only).
+    # When set, the include_resolver descriptor can read the live indexer's
+    # resolver even if the indexer wasn't ready when this context was created.
+    _lsp_server_ref: Any = field(default=None, init=False, repr=False)
 
     # Known Ivy standard library modules (fallback; overwritten at runtime
     # by discover_stdlib_modules() which scans ivy/include/1.7/)
