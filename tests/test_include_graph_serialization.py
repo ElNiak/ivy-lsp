@@ -70,3 +70,45 @@ class TestIncludeGraphSerialization:
             "shared.ivy",
             "types.ivy",
         }
+
+
+def test_get_transitive_included_by_empty():
+    """No reverse dependents for an unknown file."""
+    graph = IncludeGraph()
+    assert graph.get_transitive_included_by("unknown.ivy") == set()
+
+
+def test_get_transitive_included_by_single_hop():
+    """Direct includers are returned."""
+    graph = IncludeGraph()
+    graph.add_edge("conn.ivy", "types.ivy")
+    graph.add_edge("frame.ivy", "types.ivy")
+    result = graph.get_transitive_included_by("types.ivy")
+    assert result == {"conn.ivy", "frame.ivy"}
+
+
+def test_get_transitive_included_by_transitive():
+    """Transitive includers are returned: test includes conn includes types."""
+    graph = IncludeGraph()
+    graph.add_edge("conn.ivy", "types.ivy")
+    graph.add_edge("test.ivy", "conn.ivy")
+    result = graph.get_transitive_included_by("types.ivy")
+    assert result == {"conn.ivy", "test.ivy"}
+
+
+def test_get_transitive_included_by_cycle_safety():
+    """Cycles in the include graph don't cause infinite loops."""
+    graph = IncludeGraph()
+    graph.add_edge("a.ivy", "b.ivy")
+    graph.add_edge("b.ivy", "c.ivy")
+    graph.add_edge("c.ivy", "a.ivy")
+    result = graph.get_transitive_included_by("b.ivy")
+    assert result == {"a.ivy", "c.ivy"}
+
+
+def test_get_transitive_included_by_excludes_self():
+    """The starting file is not included in the result."""
+    graph = IncludeGraph()
+    graph.add_edge("conn.ivy", "types.ivy")
+    result = graph.get_transitive_included_by("types.ivy")
+    assert "types.ivy" not in result
