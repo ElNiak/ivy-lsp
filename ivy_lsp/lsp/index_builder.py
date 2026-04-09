@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 
 import ivy_lsp
 from ivy_lsp.core.workspace.detection import detect_ivy_workspace
+from ivy_lsp.infra.utils.hashing import file_sha256 as _file_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +54,6 @@ TIER_UNKNOWN = "unknown"
 COMPLETENESS_COMPLETE = "complete"
 COMPLETENESS_PARTIAL = "partial"
 COMPLETENESS_MISSING = "missing"
-
-
-def _file_sha256(filepath: str) -> str:
-    """Compute SHA-256 hex digest of a file."""
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _sha256_from_bytes(data: bytes) -> str:
