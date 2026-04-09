@@ -35,9 +35,12 @@ Create `tests/test_model_builder_precomputed.py`:
 ```python
 """Tests for precomputed extraction data in build_semantic_model."""
 
+import pytest
+
 from ivy_lsp.core.semantic.model_builder import PrecomputedFileData
 
 
+@pytest.mark.unit
 class TestPrecomputedFileData:
     def test_construction(self):
         pfd = PrecomputedFileData(
@@ -112,6 +115,7 @@ Add to `tests/test_model_builder_precomputed.py`:
 import os
 
 
+@pytest.mark.unit
 class TestBuildSemanticModelPrecomputed:
     """Verify precomputed path produces same model as full extraction."""
 
@@ -192,7 +196,11 @@ class TestBuildSemanticModelPrecomputed:
     def test_precomputed_produces_same_edges(self, tmp_path):
         from ivy_lsp.core.semantic.edges import SemanticEdgeType
         from ivy_lsp.core.semantic.model_builder import build_semantic_model
-        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
+        from ivy_lsp.core.semantic.nodes import (
+            RfcAnnotation,
+            SymbolNode,
+            TypeNode,
+        )
 
         root = self._make_ivy_files(tmp_path)
 
@@ -215,10 +223,10 @@ class TestBuildSemanticModelPrecomputed:
         assert model_full is not None
         assert model_pre is not None
 
-        # Collect all edges from both models
+        # Collect all edges from both models (including RfcAnnotation COVERS edges)
         def _collect_edges(model):
             edges = set()
-            for node_type in (SymbolNode, TypeNode):
+            for node_type in (SymbolNode, TypeNode, RfcAnnotation):
                 for n in model.get_nodes_by_type(node_type):
                     for edge_type, target_id in model.get_outgoing(n.id):
                         edges.add((n.id, edge_type, target_id))
@@ -267,12 +275,15 @@ def build_semantic_model(
 ) -> Optional[Any]:
 ```
 
-2. Replace the per-file extraction block (lines 82-122). The new logic:
+2. Replace the per-file extraction block (lines 79-122, from the `populate_model_from_symbols` import through the end of the extraction loop). The new logic:
 
 ```python
     from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
 
-    # Only create TieredExtractor if we need it (no precomputed data)
+    # Only create TieredExtractor if we need it (no precomputed data).
+    # Lazy-init: even when precomputed data is provided, a file may be
+    # missing from the dict (e.g., added after Phase B). The extractor
+    # is created on first miss to avoid silently skipping files.
     extractor = None
     if precomputed_extractions is None:
         from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
@@ -324,7 +335,12 @@ def build_semantic_model(
             )
 
             references = extract_references_regex(source, abs_path, symbols)
-        elif extractor is not None:
+        else:
+            # Fallback: file not in precomputed dict (or no precomputed data).
+            # Lazy-init extractor on first miss to avoid silently skipping files.
+            if extractor is None:
+                from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
+                extractor = TieredExtractor(resolve_callback=include_resolver)
             result = extractor.extract(source, abs_path)
             if result.tier_used == 0:
                 continue
@@ -332,8 +348,6 @@ def build_semantic_model(
             tier_used = result.tier_used
             includes = result.includes
             references = result.references
-        else:
-            continue
 
         if tier_used > 0:
             count = populate_model_from_symbols(
@@ -376,7 +390,7 @@ None preserves current behavior for MCP and other callers."
 ### Task 3: Wire `_build_models` in `index_builder.py` to pass Phase B data
 
 **Files:**
-- Modify: `ivy_lsp/lsp/index_builder.py:365-392` (`_build_models` method)
+- Modify: `ivy_lsp/lsp/index_builder.py:365-421` (`_build_models` method)
 - Modify: `ivy_lsp/lsp/index_builder.py:654-662` (`build_protocol` call site)
 
 - [ ] **Step 1: Expand `_build_models` signature**
@@ -486,7 +500,7 @@ build_semantic_model, eliminating the redundant TieredExtractor pass."
 ### Task 4: End-to-end integration test via `build_protocol`
 
 **Files:**
-- Create: `tests/test_model_builder_precomputed.py` (append to file from Task 2)
+- Modify: `tests/test_model_builder_precomputed.py` (append to file created in Task 1)
 
 - [ ] **Step 1: Write integration test**
 
@@ -501,6 +515,7 @@ from ivy_lsp.core.workspace.detection import WorkspaceConfig
 from ivy_lsp.lsp.index_builder import IndexBuilder
 
 
+@pytest.mark.unit
 class TestIndexBuilderPrecomputedIntegration:
     """Verify that build_protocol produces a valid semantic model
     using the precomputed extraction path."""
