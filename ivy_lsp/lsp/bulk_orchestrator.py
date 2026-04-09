@@ -405,15 +405,114 @@ class BulkOrchestrationMixin(_BulkBase):
                             progress_cb(len(all_files), len(all_files), None)
                         return
                     else:
-                        slog.info(
-                            "Cached model loaded but index is stale; running T1/T2",
-                            extra={
-                                "event": LogEvent(
-                                    LogCategory.DIAGNOSTIC,
-                                    "cached_t1t2_stale",
+                        # Incremental path: hash-validate + cascade expand
+                        ws_ctx_inc = getattr(self, "_workspace_context", None)
+                        all_dirty: set[str] = set()
+                        total_mtime = 0
+                        total_hash_dirty = 0
+                        total_hash_clean = 0
+
+                        if ws_ctx_inc is not None:
+                            for proto_idx in ws_ctx_inc.protocol_indexes.values():
+                                if proto_idx.staleness.status == "fresh":
+                                    continue
+                                protocol_dir = os.path.dirname(proto_idx.index_dir)
+                                dirty = _validate_changes(
+                                    proto_idx.staleness, protocol_dir
                                 )
-                            },
-                        )
+                                mtime_count = len(proto_idx.staleness.file_changes)
+                                total_mtime += mtime_count
+                                total_hash_dirty += len(dirty)
+                                total_hash_clean += mtime_count - len(dirty)
+
+                                slog.info(
+                                    "Protocol %s: %d mtime-changed, %d hash-dirty, %d hash-clean",
+                                    proto_idx.protocol,
+                                    mtime_count,
+                                    len(dirty),
+                                    mtime_count - len(dirty),
+                                    extra={
+                                        "event": LogEvent(
+                                            LogCategory.MILESTONE,
+                                            "staleness_detail",
+                                            {
+                                                "protocol": proto_idx.protocol,
+                                                "mtime_changed": mtime_count,
+                                                "hash_dirty": len(dirty),
+                                                "hash_clean": mtime_count - len(dirty),
+                                            },
+                                        )
+                                    },
+                                )
+                                all_dirty |= dirty
+
+                        if not all_dirty:
+                            slog.info(
+                                "All %d mtime-changed files are hash-clean; skipping T1/T2",
+                                total_mtime,
+                                extra={
+                                    "event": LogEvent(
+                                        LogCategory.MILESTONE,
+                                        "incremental_all_clean",
+                                    )
+                                },
+                            )
+                            self._send_model_ready_notification()
+                            if progress_cb:
+                                progress_cb(len(all_files), len(all_files), None)
+                            return
+
+                        # Cascade expansion
+                        inc_graph = getattr(self, "_include_graph", None)
+                        if inc_graph is not None:
+                            expanded = expand_with_budget(
+                                all_dirty, inc_graph, len(all_files)
+                            )
+                        else:
+                            expanded = None
+
+                        if expanded is None:
+                            slog.info(
+                                "Cascade budget exceeded or no include graph; "
+                                "falling back to full T1/T2",
+                                extra={
+                                    "event": LogEvent(
+                                        LogCategory.MILESTONE,
+                                        "incremental_fallback",
+                                    )
+                                },
+                            )
+                            with self._analysis_pipeline._state_lock:
+                                self._analysis_pipeline._tier1_files.clear()
+                                self._analysis_pipeline._tier2_files.clear()
+                        else:
+                            slog.info(
+                                "Incremental: re-analyzing %d/%d files (%d from cache)",
+                                len(expanded),
+                                len(all_files),
+                                len(all_files) - len(expanded),
+                                extra={
+                                    "event": LogEvent(
+                                        LogCategory.MILESTONE,
+                                        "incremental_t1t2",
+                                        {
+                                            "reanalyzed": len(expanded),
+                                            "total": len(all_files),
+                                            "from_cache": len(all_files)
+                                            - len(expanded),
+                                        },
+                                    )
+                                },
+                            )
+                            for filepath in expanded:
+                                self._semantic_model.remove_file(filepath)
+                                with self._analysis_pipeline._state_lock:
+                                    self._analysis_pipeline._tier1_files.discard(
+                                        filepath
+                                    )
+                                    self._analysis_pipeline._tier2_files.discard(
+                                        filepath
+                                    )
 
                 result = self._analysis_pipeline.run_bulk_t1_t2(
                     filepaths=all_files,
