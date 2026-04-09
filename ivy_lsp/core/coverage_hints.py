@@ -152,7 +152,7 @@ def compute_coverage_hints(
         if var_node.file != filepath:
             continue
         has_outgoing = len(graph.get_outgoing_edges(var_id)) > 0
-        has_incoming = len(graph._incoming.get(var_id, [])) > 0
+        has_incoming = len(graph.incoming.get(var_id, [])) > 0
         if not has_outgoing and not has_incoming:
             hints.append(
                 {

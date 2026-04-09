@@ -118,6 +118,7 @@ def test_placeholder_tag_flagged():
     issues = check_duplicate_tags(source, "/fake/tp.ivy")
     placeholders = [i for i in issues if "placeholder" in i.get("message", "").lower()]
     assert len(placeholders) == 1
+    assert placeholders[0]["code"] == "ivy.type.placeholderTag"
 
 
 def test_unique_tags_no_issue():

@@ -190,7 +190,7 @@ def check_duplicate_tags(
                         "severity": "info",
                         "message": f"Tag value '{tag_val}' is not numeric — placeholder?",
                         "source": "ivy-lint",
-                        "code": "ivy.type.duplicateTag",
+                        "code": "ivy.type.placeholderTag",
                     }
                 )
             else:

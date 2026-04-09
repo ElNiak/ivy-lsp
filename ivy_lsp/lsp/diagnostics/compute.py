@@ -357,7 +357,12 @@ def compute_semantic_diagnostics(
                         )
                     )
 
-        # D7: RFC tag duplicate detection (file-level)
+        # D7: RFC tag duplicate detection (file-level).
+        # The spec calls for per-monitor-action grouping to suppress
+        # cross-block duplicates, but that requires the RequirementGraph
+        # (not available here — only SemanticModel). This file-level
+        # version will flag cross-block duplicates as false positives
+        # on files like quic_packet.ivy that repeat tags across handlers.
         seen_tags: dict[int, int] = {}
         for ann in annotations:
             for tag in ann.tags:
