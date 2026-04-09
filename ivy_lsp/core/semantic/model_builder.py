@@ -12,9 +12,24 @@ from __future__ import annotations
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from ivy_lsp.infra.utils.name_utils import get_last_component
+
+
+@dataclass
+class PrecomputedFileData:
+    """Pre-computed extraction results for a single .ivy file.
+
+    Produced by the index builder's parallel extraction phase (Phase B)
+    and consumed by ``build_semantic_model`` to skip redundant re-extraction.
+    """
+
+    symbols: list[dict]
+    includes: list[str]
+    tier_used: int
+
 
 logger = logging.getLogger(__name__)
 
