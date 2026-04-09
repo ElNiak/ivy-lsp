@@ -164,11 +164,21 @@ class TestPantherHeuristic:
         pt.mkdir(parents=True)
 
         (pt / "quic").mkdir()
-        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps(
+                {
+                    "version": 3,
+                    "workspace_root_offset": "../..",
+                    "workspace_layers": [
+                        {"id": "quic", "include_paths": ["protocol-testing/quic"]}
+                    ],
+                }
+            )
+        )
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
         assert config.project_type == "panther"
-        assert config.detected_by == "heuristic"
+        assert config.detected_by == "heuristic+marker"
         assert any("protocol-testing" in p for p in config.include_paths)
 
     def test_inside_panther_ivy(self, tmp_workspace):
@@ -178,7 +188,9 @@ class TestPantherHeuristic:
         (tmp_workspace / "panther_ivy.py").write_text("# marker")
 
         (pt / "quic").mkdir()
-        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
         assert config.project_type == "panther"
@@ -293,9 +305,11 @@ class TestDetectIvyWorkspace:
         pt.mkdir(parents=True)
 
         (pt / "quic").mkdir()
-        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         config = detect_ivy_workspace(start_dir=str(isolated_tmp))
-        assert config.detected_by == "heuristic"
+        assert config.detected_by == "heuristic+marker"
         assert config.project_type == "panther"
 
 
@@ -352,7 +366,9 @@ class TestWorktreeWorkspaceDetection:
         pt.mkdir(parents=True)
 
         (pt / "quic").mkdir()
-        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
 
         # Worktree with empty panther_ivy (simulates uninitialized submodule)
         worktree = isolated_tmp / "worktree"
@@ -381,7 +397,9 @@ class TestHintWithHeuristic:
         (panther_ivy / "panther_ivy.py").write_text("# marker")
 
         (pt / "quic").mkdir()
-        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", str(panther_ivy))
         reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
@@ -699,17 +717,177 @@ class TestPantherHeuristicDynamicDiscovery:
         pt = panther_ivy / "protocol-testing"
         pt.mkdir(parents=True)
         (pt / "quic").mkdir()
-        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         (pt / "bgp").mkdir()
-        (pt / "bgp" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "bgp" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         (pt / "no_marker").mkdir()  # No marker — must be excluded
 
         config = _panther_heuristic(str(tmp_path))
         assert config is not None
         assert config.project_type == "panther"
-        assert any("protocol-testing/quic" in p for p in config.include_paths)
-        assert any("protocol-testing/bgp" in p for p in config.include_paths)
+        assert config.include_paths == []
         assert not any("no_marker" in p for p in config.include_paths)
+
+
+# ---------------------------------------------------------------------------
+# Task 4: marker-merge for _build_panther_workspace
+# ---------------------------------------------------------------------------
+
+
+class TestPantherHeuristicMarkerMerge:
+    def _make_panther_workspace(self, tmp_path):
+        """Helper: create a PANTHER workspace with quic and minip markers."""
+        panther_ivy = (
+            tmp_path / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        )
+        pt = panther_ivy / "protocol-testing"
+        quic_dir = pt / "quic"
+        (quic_dir / "quic_stack").mkdir(parents=True)
+        (quic_dir / "quic_utils").mkdir(parents=True)
+        (quic_dir / "quic_tests").mkdir(parents=True)
+        (quic_dir / "quic_stack" / "quic_connection.ivy").write_text("# quic conn")
+        (quic_dir / "quic_utils" / "byte_stream.ivy").write_text("# quic byte_stream")
+        quic_marker = {
+            "version": 3,
+            "standard_library": "ivy/include/1.7",
+            "protocol_id": "quic",
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {
+                    "id": "quic",
+                    "include_paths": [
+                        "protocol-testing/quic/quic_stack",
+                        "protocol-testing/quic/quic_utils",
+                    ],
+                    "priority": 1,
+                },
+                {
+                    "id": "quic_tests",
+                    "include_paths": ["protocol-testing/quic/quic_tests"],
+                    "priority": 2,
+                    "depends_on": ["quic"],
+                },
+            ],
+            "exclude_paths": ["doc", "test", "submodules"],
+        }
+        (quic_dir / ".ivyworkspace").write_text(json.dumps(quic_marker))
+
+        minip_dir = pt / "minip"
+        minip_dir.mkdir(parents=True)
+        (minip_dir / "ping_types.ivy").write_text("# minip types")
+        minip_marker = {
+            "version": 3,
+            "standard_library": "ivy/include/1.7",
+            "protocol_id": "minip",
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {
+                    "id": "minip",
+                    "include_paths": ["protocol-testing/minip"],
+                    "priority": 3,
+                },
+            ],
+            "exclude_paths": ["doc", "test", "submodules"],
+        }
+        (minip_dir / ".ivyworkspace").write_text(json.dumps(minip_marker))
+        return panther_ivy, pt
+
+    def test_merges_layers_from_all_markers(self, tmp_path):
+        """Heuristic merges layers from per-protocol markers, not coarse dirs."""
+        panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.detected_by == "heuristic+marker"
+        assert config.project_type == "panther"
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert layer_ids == {"quic", "quic_tests", "minip"}
+        quic_layer = next(l for l in config.workspace_layers if l.id == "quic")
+        assert "protocol-testing/quic/quic_stack" in quic_layer.include_paths
+        assert "protocol-testing/quic/quic_utils" in quic_layer.include_paths
+        assert "protocol-testing/quic" not in quic_layer.include_paths
+        quic_tests = next(l for l in config.workspace_layers if l.id == "quic_tests")
+        assert quic_tests.depends_on == ["quic"]
+
+    def test_standard_library_from_first_marker(self, tmp_path):
+        _panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.standard_library == "ivy/include/1.7"
+
+    def test_exclude_paths_union(self, tmp_path):
+        _panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert "doc" in config.exclude_paths
+        assert "test" in config.exclude_paths
+        assert "submodules" in config.exclude_paths
+
+    def test_include_paths_from_layers(self, tmp_path):
+        _panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert "protocol-testing/quic/quic_stack" in config.include_paths
+        assert "protocol-testing/quic/quic_utils" in config.include_paths
+        assert "protocol-testing/quic/quic_tests" in config.include_paths
+        assert "protocol-testing/minip" in config.include_paths
+
+    def test_skips_non_v3_marker(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        bgp_dir = pt / "bgp"
+        bgp_dir.mkdir(parents=True)
+        (bgp_dir / ".ivyworkspace").write_text('{"version": 1}')
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert "bgp" not in layer_ids
+
+    def test_skips_conflicting_workspace_root(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        bad_dir = pt / "bad"
+        bad_dir.mkdir(parents=True)
+        bad_marker = {
+            "version": 3,
+            "workspace_root_offset": "../../..",
+            "workspace_layers": [{"id": "bad", "include_paths": ["something"]}],
+        }
+        (bad_dir / ".ivyworkspace").write_text(json.dumps(bad_marker))
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert "bad" not in layer_ids
+
+    def test_layer_id_collision_raises(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        dup_dir = pt / "dup"
+        dup_dir.mkdir(parents=True)
+        dup_marker = {
+            "version": 3,
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {"id": "quic", "include_paths": ["protocol-testing/dup"]}
+            ],
+        }
+        (dup_dir / ".ivyworkspace").write_text(json.dumps(dup_marker))
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = [l.id for l in config.workspace_layers]
+        assert layer_ids.count("quic") == 1
+
+    def test_empty_v3_marker_harmless(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        empty_dir = pt / "empty"
+        empty_dir.mkdir(parents=True)
+        (empty_dir / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert layer_ids == {"quic", "quic_tests", "minip"}
 
 
 # ---------------------------------------------------------------------------
