@@ -59,6 +59,10 @@ def build_semantic_model(
     stdlib_modules:
         Known Ivy standard library module names.  When ``None``, defaults
         to the standard set (order, collections, ip, etc.).
+    precomputed_extractions:
+        Pre-computed extraction results keyed by absolute file path.
+        When provided, skips ``TieredExtractor`` and uses deserialized
+        symbols instead.  ``None`` falls back to live extraction.
 
     Returns:
         SemanticModel or ``None`` when required dependencies are missing
@@ -90,7 +94,9 @@ def build_semantic_model(
         for req in reqs.values():
             model.add_node(req)
 
+    from ivy_lsp.core.parsing.reference_extraction import extract_references_regex
     from ivy_lsp.core.parsing.symbol_to_model import populate_model_from_symbols
+    from ivy_lsp.core.parsing.symbols import IvySymbol
 
     # Only create TieredExtractor if we need it (no precomputed data).
     # Lazy-init: even when precomputed data is provided, a file may be
@@ -136,17 +142,11 @@ def build_semantic_model(
 
         if pre is not None:
             # Deserialize symbols from Phase B dicts
-            from ivy_lsp.core.parsing.symbols import IvySymbol
-
             symbols = [IvySymbol.from_dict(d) for d in pre.symbols]
             tier_used = pre.tier_used
             includes = pre.includes
 
             # Extract references via cheap regex (not stored in Phase B)
-            from ivy_lsp.core.parsing.reference_extraction import (
-                extract_references_regex,
-            )
-
             references = extract_references_regex(source, abs_path, symbols)
         else:
             # Fallback: file not in precomputed dict (or no precomputed data).

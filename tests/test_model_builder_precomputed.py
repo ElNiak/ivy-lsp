@@ -167,3 +167,65 @@ class TestBuildSemanticModelPrecomputed:
         )
         # Should still produce a model (backward compat)
         assert model is not None
+
+    def test_tier_used_zero_skipped(self, tmp_path):
+        """A precomputed entry with tier_used=0 should produce no model nodes."""
+        from ivy_lsp.core.semantic.model_builder import (
+            PrecomputedFileData,
+            build_semantic_model,
+        )
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
+
+        root = self._make_ivy_files(tmp_path)
+
+        def find_files(r):
+            return [f for f in os.listdir(r) if f.endswith(".ivy")]
+
+        # Build precomputed dict with tier_used=0 for all files
+        precomputed = {}
+        for fname in os.listdir(root):
+            if not fname.endswith(".ivy"):
+                continue
+            abs_path = os.path.join(root, fname)
+            precomputed[abs_path] = PrecomputedFileData(
+                symbols=[], includes=[], tier_used=0
+            )
+
+        model = build_semantic_model(
+            root=root,
+            find_files_fn=find_files,
+            precomputed_extractions=precomputed,
+        )
+
+        assert model is not None
+        # No symbols should be added since tier_used=0
+        assert len(model.get_nodes_by_type(SymbolNode)) == 0
+        assert len(model.get_nodes_by_type(TypeNode)) == 0
+
+    def test_partial_precomputed_uses_fallback(self, tmp_path):
+        """Files missing from precomputed dict should be extracted via fallback."""
+        from ivy_lsp.core.semantic.model_builder import build_semantic_model
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
+
+        root = self._make_ivy_files(tmp_path)
+
+        def find_files(r):
+            return [f for f in os.listdir(r) if f.endswith(".ivy")]
+
+        # Only precompute one file, leave the other for fallback
+        precomputed = self._extract_files(root)
+        first_key = next(iter(precomputed))
+        del precomputed[first_key]
+
+        model = build_semantic_model(
+            root=root,
+            find_files_fn=find_files,
+            precomputed_extractions=precomputed,
+        )
+
+        assert model is not None
+        # Should still have nodes from both files (one precomputed, one fallback)
+        all_nodes = model.get_nodes_by_type(SymbolNode) + model.get_nodes_by_type(
+            TypeNode
+        )
+        assert len(all_nodes) >= 2
