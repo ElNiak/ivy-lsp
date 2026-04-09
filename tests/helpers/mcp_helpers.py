@@ -10,7 +10,7 @@ def get_mcp_app(workspace_root: str | None = None):
 
     Uses start_mcp(_return_app=True) from ivy_lsp.mcp.server.
     """
-    from ivy_lsp.mcp.server import start_mcp
+    from ivy_lsp.mcp.startup import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(workspace_root=root, _return_app=True)

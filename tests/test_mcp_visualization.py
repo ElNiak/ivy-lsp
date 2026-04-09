@@ -117,7 +117,7 @@ def _build_graph_with_rfc_gaps() -> ScopedRequirementModel:
 
 def _get_mcp_app(requirement_graph=None):
     """Create a FastMCP app with visualization tools registered, without running."""
-    from ivy_lsp.mcp.server import start_mcp
+    from ivy_lsp.mcp.startup import start_mcp
 
     return start_mcp(
         workspace_root="/tmp/test-workspace",

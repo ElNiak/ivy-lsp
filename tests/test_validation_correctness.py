@@ -52,7 +52,7 @@ def mcp_app():
     import os
 
     from ivy_lsp.core.workspace.detection import detect_ivy_workspace
-    from ivy_lsp.mcp.server import start_mcp
+    from ivy_lsp.mcp.startup import start_mcp
 
     # Use protocol-testing/ as workspace root so relative paths like
     # "quic/quic_stack/quic_types.ivy" resolve directly.

@@ -201,7 +201,7 @@ def _build_large_graph(n_actions=10):
 
 
 def _get_mcp_app(requirement_graph=None, workspace_root=None):
-    from ivy_lsp.mcp.server import start_mcp
+    from ivy_lsp.mcp.startup import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(

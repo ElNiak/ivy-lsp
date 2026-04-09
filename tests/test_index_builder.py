@@ -10,7 +10,8 @@ import pytest
 from _ivy_samples import SAMPLE_IVY_MAIN, SAMPLE_IVY_TYPES
 
 from ivy_lsp.core.workspace.detection import WorkspaceConfig
-from ivy_lsp.lsp.index_builder import IndexBuilder, _file_sha256, cli_index
+from ivy_lsp.infra.utils.hashing import file_sha256 as _file_sha256
+from ivy_lsp.lsp.index_builder import IndexBuilder, cli_index
 
 # ---------------------------------------------------------------------------
 # Fixture: force Tier 3 (regex) when ivy module unavailable

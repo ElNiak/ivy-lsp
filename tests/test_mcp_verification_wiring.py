@@ -9,7 +9,7 @@ import pytest
 async def test_start_mcp_accepts_staging_dir(tmp_path):
     """start_mcp accepts staging_dir parameter without error."""
     with patch("ivy_lsp.mcp.server.shared_ivy_check", new_callable=AsyncMock):
-        from ivy_lsp.mcp.server import start_mcp
+        from ivy_lsp.mcp.startup import start_mcp
 
         app = start_mcp(
             workspace_root=str(tmp_path),

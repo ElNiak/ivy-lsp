@@ -20,11 +20,10 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
-from ivy_lsp.infra.config import get_config
-
 # Re-export so that tests patching ``ivy_lsp.mcp.server.shared_ivy_check``
 # continue to work after tool handlers moved to ``ivy_lsp.mcp.tools.*``.
+from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check  # noqa: F401
+from ivy_lsp.infra.config import get_config
 from ivy_lsp.infra.observability.session import workspace_hash
 from ivy_lsp.infra.utils.basename_cache import BasenameCache
 from ivy_lsp.infra.utils.lazy_builder import LazyAsyncBuilder
@@ -593,11 +592,3 @@ def create_mcp_app(ctx: ToolContext) -> Any:
 
     register_all_tools(mcp, ctx)
     return mcp
-
-
-def __getattr__(name: str) -> object:
-    if name == "start_mcp":
-        from ivy_lsp.mcp.startup import start_mcp  # noqa: PLC0415
-
-        return start_mcp
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

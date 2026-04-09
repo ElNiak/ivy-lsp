@@ -34,7 +34,6 @@ from typing import Any, Dict, List, Optional
 
 import ivy_lsp
 from ivy_lsp.core.workspace.detection import detect_ivy_workspace
-from ivy_lsp.infra.utils.hashing import file_sha256 as _file_sha256
 
 logger = logging.getLogger(__name__)
 
