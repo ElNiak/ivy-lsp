@@ -57,10 +57,13 @@ class ServerSetupMixin(_SetupBase):
 
         Thin orchestrator that delegates to focused helpers:
         1. _configure_activity_logging --- env-based log level
-        2. _create_resolver --- workspace detection + include resolver + staging
-        3. _create_parser --- z3 detection + parser creation
-        4. _create_indexer --- indexer construction + workspace scan
-        5. _setup_analysis_pipeline --- semantic model + adapters + pipeline
+        2. WorkspaceContext.detect_only --- fast workspace config (no indexes)
+        3. _create_resolver --- include resolver + staging
+        4. _create_parser --- z3 detection + parser creation
+        5. ★ _parser_ready_event.set() --- documentSymbol unblocked
+        6. Background thread: load_indexes() --- offline index (best-effort)
+        7. _create_indexer --- indexer construction + workspace scan
+        8. _setup_analysis_pipeline --- semantic model + adapters + pipeline
         """
         with timed_phase(
             logger,
@@ -77,34 +80,14 @@ class ServerSetupMixin(_SetupBase):
         else:
             ws_root = os.getcwd()
 
-        # Load offline index context (graceful fallback to empty context)
+        # Detect workspace config (fast — no offline index loading)
         try:
             from ivy_lsp.core.workspace.context import WorkspaceContext
 
-            self._workspace_context = WorkspaceContext.load(ws_root)
-            if self._workspace_context.has_index():
-                protocols = self._workspace_context.list_protocols()
-                slog.info(
-                    "Loaded offline index for %d protocol(s): %s",
-                    len(protocols),
-                    ", ".join(protocols),
-                    extra={
-                        "event": LogEvent(
-                            LogCategory.MILESTONE,
-                            "offline_index",
-                            {"protocols": protocols},
-                        )
-                    },
-                )
-            else:
-                slog.info(
-                    "No offline index found at %s; will use live indexing",
-                    ws_root,
-                    extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "offline_index")},
-                )
+            self._workspace_context = WorkspaceContext.detect_only(ws_root)
         except Exception:
             logger.warning(
-                "WorkspaceContext loading failed; proceeding without offline index",
+                "WorkspaceContext detection failed; proceeding with fallback",
                 exc_info=True,
             )
             from ivy_lsp.core.workspace.context import WorkspaceContext
@@ -186,6 +169,20 @@ class ServerSetupMixin(_SetupBase):
         except Exception:
             logger.debug("Tier probe failed", exc_info=True)
 
+        # Signal parser readiness — documentSymbol can start serving symbols.
+        self._parser_ready_event.set()
+
+        # Kick off offline index loading in a background thread.
+        # If it finishes before _create_indexer checks has_index(),
+        # the fast prepopulation path is used; otherwise live scan runs.
+        import threading
+
+        _index_loader = threading.Thread(
+            target=self._load_offline_indexes_background,
+            daemon=True,
+        )
+        _index_loader.start()
+
         with timed_phase(
             logger,
             category=LogCategory.MILESTONE,
@@ -205,6 +202,38 @@ class ServerSetupMixin(_SetupBase):
             channel="lsp",
         ):
             self._setup_analysis_pipeline()
+
+    def _load_offline_indexes_background(self) -> None:
+        """Load offline protocol indexes in a background thread."""
+        try:
+            ws_ctx = getattr(self, "_workspace_context", None)
+            if ws_ctx is None:
+                return
+            ws_ctx.load_indexes()
+            if ws_ctx.has_index():
+                protocols = ws_ctx.list_protocols()
+                slog.info(
+                    "Loaded offline index for %d protocol(s): %s",
+                    len(protocols),
+                    ", ".join(protocols),
+                    extra={
+                        "event": LogEvent(
+                            LogCategory.MILESTONE,
+                            "offline_index",
+                            {"protocols": protocols},
+                        )
+                    },
+                )
+            else:
+                slog.info(
+                    "No offline index found; using live indexing",
+                    extra={"event": LogEvent(LogCategory.DIAGNOSTIC, "offline_index")},
+                )
+        except Exception:
+            logger.warning(
+                "Background offline index loading failed",
+                exc_info=True,
+            )
 
     def _configure_activity_logging(self) -> None:
         """Configure ivy_lsp log level from IVY_LSP_ACTIVITY_LEVEL env var."""
