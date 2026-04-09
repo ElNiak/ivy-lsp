@@ -120,4 +120,25 @@ def compute_coverage_hints(
                 }
             )
 
+    # -----------------------------------------------------------------
+    # 4. Unused state variables: no reads or writes in the graph
+    # -----------------------------------------------------------------
+    for var_id, var_node in graph.state_vars.items():
+        if var_node.file != filepath:
+            continue
+        has_outgoing = len(graph.get_outgoing_edges(var_id)) > 0
+        has_incoming = len(graph._incoming.get(var_id, [])) > 0
+        if not has_outgoing and not has_incoming:
+            hints.append(
+                {
+                    "line": var_node.line,
+                    "message": (
+                        f"State variable '{var_node.name}' has no reads or "
+                        "writes in the requirement graph."
+                    ),
+                    "severity": "hint",
+                    "code": "ivy.state.unusedStateVar",
+                }
+            )
+
     return hints

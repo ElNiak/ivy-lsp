@@ -192,6 +192,61 @@ def test_normal_require_not_flagged_as_dead():
     assert len(dead) == 0
 
 
+def test_unused_state_var_detected():
+    graph = RequirementGraph()
+    r1 = RequirementNode(
+        id="/test/quic.ivy:30",
+        kind="require",
+        formula_text="pkt_count(C) > 0",
+        line=30,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+    )
+    # add_file_requirements calls remove_file first, so state vars must be
+    # added after this call to survive.
+    graph.add_file_requirements("/test/quic.ivy", [r1])
+    graph.add_state_var(
+        StateVarNode(
+            id="orphaned_var",
+            name="orphaned_var",
+            qualified_name="quic.orphaned_var",
+            file="/test/quic.ivy",
+            line=20,
+            is_relation=True,
+        )
+    )
+    # Add a used var for contrast
+    graph.add_state_var(
+        StateVarNode(
+            id="pkt_count",
+            name="pkt_count",
+            qualified_name="quic.pkt_count",
+            file="/test/quic.ivy",
+            line=22,
+            is_relation=True,
+        )
+    )
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=28,
+        )
+    )
+    known_vars = {"orphaned_var", "pkt_count"}
+    graph.wire_state_var_edges(known_vars)
+
+    hints = compute_coverage_hints(graph, "/test/quic.ivy")
+    unused = [h for h in hints if h.get("code") == "ivy.state.unusedStateVar"]
+    assert len(unused) == 1
+    assert unused[0]["line"] == 20
+    assert "orphaned_var" in unused[0]["message"]
+
+
 class TestCoverageHintDiagnosticTags:
     """M1: Coverage hint diagnostics should use DiagnosticTag.Unnecessary."""
 

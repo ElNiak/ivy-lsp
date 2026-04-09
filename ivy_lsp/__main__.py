@@ -120,6 +120,23 @@ def _setup_log_rotation() -> str:
     return log_path
 
 
+def _overwrite_pid_file() -> None:
+    """Overwrite the PID file with the current Python process PID.
+
+    The bash launcher (start-ivy-server.sh) writes the uvx wrapper PID.
+    After exec, uvx spawns the Python ivy_lsp process as a child, so the
+    tracked PID goes stale when uvx exits. This overwrites with the real PID.
+    """
+    pid_path = os.environ.get("IVY_PID_FILE")
+    if not pid_path:
+        return
+    try:
+        with open(pid_path, "w") as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        pass
+
+
 def main():
     """Start the Ivy Language Server in LSP, MCP, or unified mode."""
     startup_t0 = time.perf_counter()
@@ -252,6 +269,10 @@ def _main_impl(startup_t0: float) -> None:
         sys.exit(128 + signum)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Overwrite PID file with real Python PID (bash script wrote the uvx
+    # wrapper PID which becomes stale when uvx exits after spawning us).
+    _overwrite_pid_file()
 
     # Clean up PID file on exit. The bash trap in start-ivy-server.sh is
     # destroyed by exec, so we register cleanup in the Python process.
