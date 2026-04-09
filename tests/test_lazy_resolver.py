@@ -1,9 +1,6 @@
 """Test that ToolContext.include_resolver lazily resolves from the LSP server."""
 
-from dataclasses import dataclass, field
 from unittest.mock import MagicMock
-
-import pytest
 
 
 def test_include_resolver_direct_assignment():

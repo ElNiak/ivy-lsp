@@ -133,8 +133,8 @@ def _overwrite_pid_file() -> None:
     try:
         with open(pid_path, "w") as f:
             f.write(str(os.getpid()))
-    except OSError:
-        pass
+    except OSError as exc:
+        logging.getLogger(__name__).debug("PID file overwrite failed: %s", exc)
 
 
 def main():

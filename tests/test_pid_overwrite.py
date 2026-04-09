@@ -1,7 +1,6 @@
 """Test that the ivy_lsp process overwrites the PID file with its own PID."""
 
 import os
-import tempfile
 
 
 def test_pid_overwrite_writes_current_pid(tmp_path, monkeypatch):
