@@ -36,14 +36,14 @@ from tests.helpers.mcp_helpers import extract_text, get_mcp_app
 class TestIsolateStatusPattern:
     def test_isolate_status_regex_matches(self):
         """The isolate status regex matches expected output lines."""
-        from ivy_lsp.mcp.tools.verification import _ISOLATE_STATUS_RE
+        from ivy_lsp.mcp.tools.verification_cache import ISOLATE_STATUS_RE
 
         output = (
             "  isolate quic_server_test_stream: PASS\n"
             "  isolate quic_server_test_handshake: FAIL\n"
             "  isolate quic_ok_test: OK\n"
         )
-        matches = list(_ISOLATE_STATUS_RE.finditer(output))
+        matches = list(ISOLATE_STATUS_RE.finditer(output))
         assert len(matches) == 3
         assert matches[0].group(1) == "quic_server_test_stream"
         assert matches[0].group(2) == "PASS"
@@ -53,10 +53,10 @@ class TestIsolateStatusPattern:
 
 class TestCacheMaxSize:
     def test_cache_max_size_constant_exists(self):
-        """The _CACHE_MAX_SIZE constant should be defined at module level."""
-        from ivy_lsp.mcp.tools.verification import _CACHE_MAX_SIZE
+        """The CACHE_MAX_SIZE constant should be defined at module level."""
+        from ivy_lsp.mcp.tools.verification_cache import CACHE_MAX_SIZE
 
-        assert _CACHE_MAX_SIZE == 100
+        assert CACHE_MAX_SIZE == 100
 
 
 # ---------------------------------------------------------------------------

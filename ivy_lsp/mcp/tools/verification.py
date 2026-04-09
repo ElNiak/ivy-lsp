@@ -1,11 +1,10 @@
-"""Verification tools: ivy_verify, ivy_compile, ivy_model_info, ivy_diagnostics."""
+"""Verification tools: ivy_verify, ivy_compile, ivy_model_info."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import re
 import shutil
 import time
 from typing import Any
@@ -13,124 +12,29 @@ from typing import Any
 from ivy_lsp.core.verification import run_ivy_check as shared_ivy_check
 from ivy_lsp.core.verification import run_ivy_compile as shared_ivy_compile
 from ivy_lsp.core.verification import run_ivy_show as shared_ivy_show
-from ivy_lsp.infra.observability import ToolTraceContext, trace_tool
+from ivy_lsp.infra.observability import trace_tool
 from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
 from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 from ivy_lsp.mcp.tools._helpers import validated_path_or_error
+from ivy_lsp.mcp.tools.verification_cache import (
+    CACHE_MAX_SIZE,
+    CacheEntry,
+    cache_is_fresh,
+    cache_per_isolate_results,
+    create_cache,
+    evict_oldest,
+    get_cache_summary,
+    get_file_mtime,
+    get_include_mtimes,
+)
 
 logger = logging.getLogger(__name__)
-
-# Maximum number of entries in the verification cache (LRU eviction)
-_CACHE_MAX_SIZE = 100
-
-# These patterns intentionally use regex — they perform semantic diagnostic
-# checks and tool output parsing, not symbol extraction.  See
-# ivy_lsp.core.parsing.tiered_extractor for the symbol extraction cascade.
-_ASSERTION_RE = re.compile(
-    r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
-)
-_BRACKET_TAG_RE = re.compile(r"#\s*\[")
-
-_ISOLATE_STATUS_RE = re.compile(
-    r"^\s*isolate\s+([\w.]+)\s*:\s*(PASS|FAIL|OK)\s*$", re.MULTILINE
-)
 
 
 def register_verification_tools(mcp: Any, ctx: Any) -> None:
     """Register verification-related MCP tools."""
-    from dataclasses import dataclass as _dataclass
-
-    @_dataclass
-    class _CacheEntry:
-        result: dict
-        file_mtime: float
-        include_mtimes: dict[str, float]  # transitive includes -> mtime
-
-    # Per-isolate verification cache: (abs_path, isolate|None) -> _CacheEntry
-    # Moved into closure scope so each MCP server instance has its own cache.
-    _verify_cache: dict[tuple[str, str | None], _CacheEntry] = {}
-    _verify_cache_lock = asyncio.Lock()
-    _verify_in_flight: set[tuple[str, str | None]] = set()
-
-    def _get_file_mtime(abs_path: str) -> float:
-        """Get file mtime, returning 0.0 if file doesn't exist."""
-        try:
-            return os.path.getmtime(abs_path)
-        except OSError:
-            return 0.0
-
-    def _get_include_mtimes(abs_path: str) -> dict[str, float]:
-        """Get mtimes for the file's transitive include closure."""
-        mtimes: dict[str, float] = {}
-        try:
-            with open(abs_path, encoding="utf-8", errors="replace") as f:
-                source = f.read()
-            # Use a simple regex to find includes (lightweight, no full parse)
-            for m in re.finditer(r"^\s*include\s+(\w+)", source, re.MULTILINE):
-                inc_name = m.group(1)
-                # Try to resolve via basename cache
-                cache = ctx.get_basename_cache()
-                candidates = cache.get(inc_name, [])
-                if candidates:
-                    inc_path = os.path.join(ctx.root, candidates[0])
-                    mtimes[inc_path] = _get_file_mtime(inc_path)
-        except OSError:
-            pass
-        return mtimes
-
-    def _cache_is_fresh(entry: _CacheEntry, abs_path: str) -> bool:
-        """Check if cached result is still fresh (no files changed)."""
-        # Check main file
-        if _get_file_mtime(abs_path) != entry.file_mtime:
-            return False
-        # Check includes
-        for inc_path, cached_mtime in entry.include_mtimes.items():
-            if _get_file_mtime(inc_path) != cached_mtime:
-                return False
-        return True
-
-    def _evict_oldest_if_needed() -> None:
-        """Evict oldest cache entries when cache exceeds _CACHE_MAX_SIZE."""
-        while len(_verify_cache) > _CACHE_MAX_SIZE:
-            oldest_key = next(iter(_verify_cache))
-            _verify_cache.pop(oldest_key)
-
-    def _cache_per_isolate_results(
-        abs_path: str,
-        raw_output: str,
-        full_result: dict[str, Any],
-    ) -> None:
-        """Extract per-isolate status from full verification output and cache each."""
-        for m in _ISOLATE_STATUS_RE.finditer(raw_output):
-            iso_name = m.group(1)
-            status = m.group(2)
-            iso_key = (abs_path, iso_name)
-            if iso_key not in _verify_cache:
-                iso_success = status in ("PASS", "OK")
-                iso_diags = [
-                    d
-                    for d in full_result.get("diagnostics", [])
-                    if iso_name in d.get("message", "") or iso_name in d.get("file", "")
-                ]
-                _verify_cache[iso_key] = _CacheEntry(
-                    result={
-                        "success": iso_success,
-                        "diagnostics": iso_diags,
-                        "diagnostic_count": len(iso_diags),
-                        "error_summary": (
-                            full_result.get("error_summary", "")
-                            if not iso_success
-                            else ""
-                        ),
-                        "duration_seconds": full_result.get("duration_seconds", 0),
-                        "cached": False,
-                        "isolate": iso_name,
-                    },
-                    file_mtime=_get_file_mtime(abs_path),
-                    include_mtimes=_get_include_mtimes(abs_path),
-                )
-                _evict_oldest_if_needed()
+    _verify_cache, _verify_cache_lock, _verify_in_flight = create_cache()
 
     @mcp.tool()
     @safe_tool(ctx=ctx)
@@ -216,7 +120,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             async with _verify_cache_lock:
                 if use_cache and cache_key in _verify_cache:
                     entry = _verify_cache[cache_key]
-                    if _cache_is_fresh(entry, abs_path):
+                    if cache_is_fresh(entry, abs_path):
                         cached_result = dict(entry.result)
                         cached_result["cached"] = True
                         _tt[0] = cached_result
@@ -238,7 +142,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     async with _verify_cache_lock:
                         if cache_key in _verify_cache:
                             entry = _verify_cache[cache_key]
-                            if _cache_is_fresh(entry, abs_path):
+                            if cache_is_fresh(entry, abs_path):
                                 cached_result = dict(entry.result)
                                 cached_result["cached"] = True
                                 _tt[0] = cached_result
@@ -279,16 +183,21 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
 
                 # Phase 3: Write to cache under lock
                 async with _verify_cache_lock:
-                    _verify_cache[cache_key] = _CacheEntry(
+                    _verify_cache[cache_key] = CacheEntry(
                         result=dict(result),
-                        file_mtime=_get_file_mtime(abs_path),
-                        include_mtimes=_get_include_mtimes(abs_path),
+                        file_mtime=get_file_mtime(abs_path),
+                        include_mtimes=get_include_mtimes(
+                            abs_path,
+                            lambda name: ctx.get_basename_cache().get(name, []),
+                        ),
                     )
-                    _evict_oldest_if_needed()
+                    evict_oldest(_verify_cache)
 
                     if isolate is None:
                         raw_output = result.get("raw_output", "")
-                        _cache_per_isolate_results(abs_path, raw_output, result)
+                        cache_per_isolate_results(
+                            _verify_cache, abs_path, raw_output, result
+                        )
 
                     _verify_in_flight.discard(cache_key)
             except Exception:
@@ -549,12 +458,18 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 except Exception:
                     pass
 
+            # When no isolate is specified, disable cone-of-influence
+            # to match ivyc behavior.  ivy_show (unlike ivy_check) does
+            # not iterate over isolates itself, so it fails with
+            # "no isolate specified on command line" when the compiled
+            # module contains isolates and coi is enabled.
             result = await shared_ivy_show(
                 filepath=effective_path,
                 workspace_root=ctx.root,
                 isolate=isolate,
                 staging_dir=ctx.staging_dir,
                 resolver=ctx.include_resolver,
+                coi=bool(isolate),
             )
 
             # If redirected, note the original file in the result
@@ -562,461 +477,13 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 result["redirected_from"] = relative_path
                 result["redirected_to"] = os.path.relpath(effective_path, ctx.root)
 
-            # If the error mentions isolates, detect available isolates
-            if not result.get("success", True):
-                err_msg = result.get("error_summary", "") or result.get(
-                    "raw_output", ""
-                )
-                if "isolate" in err_msg.lower() or "no isolate" in err_msg.lower():
-                    try:
-                        with open(
-                            effective_path, encoding="utf-8", errors="replace"
-                        ) as f:
-                            source = f.read()
-                        isolates = re.findall(
-                            r"^\s*isolate\s+([\w.]+)\s*", source, re.MULTILINE
-                        )
-                        if isolates:
-                            result["available_isolates"] = isolates
-                            result["hint"] = (
-                                f"This file has {len(isolates)} isolate(s). "
-                                f"Specify one with isolate='{isolates[0]}'"
-                            )
-                    except OSError:
-                        pass
-
             _tt[0] = result
             return _tt[0]
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_diagnostics(
-        relative_path: str,
-        mode: str = "full",
-        layers: list[str] | None = None,
-        min_severity: str | None = None,
-        scope: str = "",
-    ) -> dict:
-        """Diagnostic analysis of an Ivy file or workspace.
+    from ivy_lsp.mcp.tools.diagnostics_tool import register_diagnostic_tools
 
-        Supports three modes:
-        - "structural": Fast structural lint only (milliseconds, no subprocess).
-          Checks missing #lang header, unmatched braces, unresolved includes.
-          Replaces the former ivy_lint tool.
-        - "full": All 5 diagnostic layers (structural, lexer, semantic,
-          coverage, pattern). More thorough but may take longer on first
-          call (lazy model/graph building). Default.
-        - "collisions": Workspace-level include-name collision report.
-          Classifies basename collisions by layer relationship: intra-layer
-          (error), cross-layer-in-scope (warning), cross-boundary (info).
-          Does not require a file path (relative_path is ignored).
+    def _cache_summary() -> dict:
+        return get_cache_summary(_verify_cache)
 
-        Args:
-            relative_path: Relative path to the .ivy file to diagnose.
-                Ignored when mode="collisions".
-            mode: Diagnostic mode — "structural" for fast lint (replaces
-                ivy_lint), "full" for all layers (default), "collisions"
-                for workspace-level collision analysis.
-            layers: Optional list of layers to run (full mode only).
-                Valid values: structural, lexer, semantic, coverage, pattern.
-                Defaults to all layers.
-            min_severity: Minimum severity to include: error, warning, info, hint.
-            scope: Optional test scope name.  When set, diagnostics are
-                filtered to files within the scope's include closure.
-                Empty string (default) = no scoping.
-        """
-        logger.debug(
-            "[ivy_diagnostics] workspace=%s, args=%r",
-            ctx.root,
-            {
-                "relative_path": relative_path,
-                "mode": mode,
-                "layers": layers,
-                "min_severity": min_severity,
-                "scope": scope,
-            },
-        )
-
-        # Resolve scope for file filtering
-        _scope_files: frozenset[str] | None = None
-        _resolved_scope = None
-        if scope and getattr(ctx, "workspace_context", None) is not None:
-            _resolved_scope = ctx.workspace_context.get_test_scope(scope)
-            if _resolved_scope is not None:
-                _scope_files = _resolved_scope.include_closure
-            else:
-                logger.warning(
-                    "[ivy_diagnostics] Unknown scope '%s'; proceeding without scoping",
-                    scope,
-                )
-
-        _tc = ToolTraceContext(
-            "ivy_diagnostics",
-            {
-                "relative_path": relative_path,
-                "mode": mode,
-                "layers": layers,
-                "min_severity": min_severity,
-                "scope": scope,
-            },
-        )
-        if mode not in ("structural", "full", "collisions"):
-            return _tc.finish(
-                error_response(
-                    f"Unknown mode '{mode}'. Valid modes: ['structural', 'full', 'collisions']"
-                )
-            )
-
-        # collisions mode: workspace-level, does not need a file path
-        if mode == "collisions":
-            from ivy_lsp.mcp.tools.analysis import _handle_collisions_mode
-
-            collision_result = await _handle_collisions_mode(ctx)
-            return _tc.finish(collision_result)
-
-        abs_path, err = validated_path_or_error(ctx, relative_path)
-        if err:
-            return _tc.finish(err)
-        assert abs_path is not None
-        if not os.path.isfile(abs_path):
-            return _tc.finish(error_response(f"File not found: {relative_path}"))
-
-        # Skip file if it falls outside the requested scope
-        if _scope_files is not None and abs_path not in _scope_files:
-            return _tc.finish(
-                {
-                    "success": True,
-                    "file": relative_path,
-                    "mode": mode,
-                    "diagnostics": [],
-                    "diagnostic_count": 0,
-                    "error_count": 0,
-                    "warning_count": 0,
-                    "scope": scope,
-                    "scope_filtered": True,
-                    "note": f"File not in scope '{scope}' include closure; skipped.",
-                }
-            )
-
-        with open(abs_path, encoding="utf-8", errors="replace") as f:
-            source = f.read()
-
-        # Fast path: structural-only mode (replaces former ivy_lint tool)
-        if mode == "structural":
-            resolve_cb = ctx.make_resolve_callback()
-            diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)
-            _struct_result: dict[str, Any] = {
-                "success": True,
-                "file": relative_path,
-                "mode": "structural",
-                "diagnostics": diagnostics,
-                "diagnostic_count": len(diagnostics),
-                "error_count": sum(1 for d in diagnostics if d["severity"] == "error"),
-                "warning_count": sum(
-                    1 for d in diagnostics if d["severity"] == "warning"
-                ),
-            }
-            inject_scope_metadata(_struct_result, scope, _resolved_scope)
-            return _tc.finish(_struct_result)
-
-        # Full mode: all 5 diagnostic layers
-        all_diags: list[dict[str, Any]] = []
-        layer_errors: list[dict[str, str]] = []
-
-        # 1. Structural checks
-        if layers is None or "structural" in layers:
-            resolve_cb = ctx.make_resolve_callback()
-            all_diags.extend(ctx.check_structural_issues(source, abs_path, resolve_cb))
-
-        # 2. Lexer errors via fallback scanner (no Z3 needed)
-        if layers is None or "lexer" in layers:
-            try:
-                from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
-
-                loop = asyncio.get_running_loop()
-                _symbols, error_info = await loop.run_in_executor(
-                    ctx.tool_executor,
-                    lambda: fallback_scan(source, abs_path),
-                )
-                if error_info is not None:
-                    all_diags.append(
-                        {
-                            "line": error_info.get("line", 1),
-                            "severity": "error",
-                            "message": f"Lexer error: {error_info.get('message', 'unknown')}",
-                            "source": "ivy-lsp-lexer",
-                        }
-                    )
-            except Exception as exc:
-                logger.warning("Fallback scan failed for %s: %s", relative_path, exc)
-                layer_errors.append({"layer": "lexer", "error": str(exc)})
-
-        # 3. Semantic diagnostics (orphaned RFC tags, untagged assertions)
-        if layers is None or "semantic" in layers:
-            try:
-                # Check model status — avoid blocking on first-time build
-                _model_status = ctx.get_model_status()
-                if _model_status.get("state") == "ready":
-                    model = await ctx.get_model()  # instant — already built
-                elif hasattr(ctx, "get_model_or_none") and callable(
-                    ctx.get_model_or_none
-                ):
-                    _result = ctx.get_model_or_none(timeout=5.0)
-                    if asyncio.iscoroutine(_result):
-                        model = await _result
-                    else:
-                        model = _result
-                else:
-                    model = None
-                if model is None and _model_status.get("state") != "ready":
-                    layer_errors.append(
-                        {
-                            "layer": "semantic",
-                            "error": (
-                                f"Model {_model_status.get('state', 'unavailable')} "
-                                "(building in background; retry in 30s for full results)"
-                            ),
-                        }
-                    )
-                if model is not None:
-                    from ivy_lsp.core.semantic.nodes import (
-                        RfcAnnotation,
-                        RfcRequirement,
-                    )
-                    from ivy_lsp.core.semantic.rfc_annotations import is_tag_covered
-
-                    rfc_reqs = model.get_nodes_by_type(RfcRequirement)  # type: ignore[union-attr]
-                    annotations = [
-                        n
-                        for n in model.get_nodes_by_type(RfcAnnotation)  # type: ignore[union-attr]
-                        if n.file == abs_path
-                    ]
-                    if rfc_reqs:
-                        req_ids = {r.id for r in rfc_reqs}
-                        for ann in annotations:
-                            for tag in ann.tags:
-                                if not is_tag_covered(tag, req_ids):
-                                    all_diags.append(
-                                        {
-                                            "line": ann.line + 1,
-                                            "severity": "warning",
-                                            "message": (
-                                                f"Orphaned RFC tag: [{tag}] does not "
-                                                "match any loaded requirement manifest"
-                                            ),
-                                            "source": "ivy-lsp-semantic",
-                                        }
-                                    )
-
-                    # Missing tags on assertions
-                    lines = source.split("\n")
-                    for m in _ASSERTION_RE.finditer(source):
-                        line_no = source[: m.start()].count("\n")
-                        line_text = lines[line_no] if line_no < len(lines) else ""
-                        if not _BRACKET_TAG_RE.search(line_text):
-                            all_diags.append(
-                                {
-                                    "line": line_no + 1,
-                                    "severity": "hint",
-                                    "message": "Assertion without RFC bracket tag annotation",
-                                    "source": "ivy-lsp-semantic",
-                                }
-                            )
-            except Exception as exc:
-                logger.warning(
-                    "Semantic diagnostics failed for %s: %s", relative_path, exc
-                )
-                layer_errors.append({"layer": "semantic", "error": str(exc)})
-
-        # 4. Coverage hints
-        if layers is None or "coverage" in layers:
-            try:
-                graph = await ctx.get_req_graph()
-                if graph is not None:
-                    from ivy_lsp.core.coverage_hints import compute_coverage_hints
-
-                    for hint in compute_coverage_hints(graph, abs_path):
-                        all_diags.append(
-                            {
-                                "line": hint.get("line", 0),
-                                "severity": hint.get("severity", "hint"),
-                                "message": hint["message"],
-                                "source": "ivy-lsp-coverage",
-                                "code": hint.get("code"),
-                            }
-                        )
-            except Exception as exc:
-                logger.warning("Coverage hints failed for %s: %s", relative_path, exc)
-                layer_errors.append({"layer": "coverage", "error": str(exc)})
-
-        # 5. Pattern diagnostics (regex-based)
-        if layers is None or "pattern" in layers:
-            try:
-                basename = os.path.basename(abs_path)
-
-                # Missing _finalize in test files
-                if "test" in basename.lower() and "_finalize" not in source:
-                    has_export = bool(
-                        re.search(r"^\s*export\s+action", source, re.MULTILINE)
-                    )
-                    if has_export:
-                        all_diags.append(
-                            {
-                                "line": 1,
-                                "severity": "warning",
-                                "message": (
-                                    "Test file has exports but no _finalize action. "
-                                    "Consider adding 'export action _finalize' for "
-                                    "end-of-test assertions."
-                                ),
-                                "source": "ivy-pattern",
-                            }
-                        )
-
-                # Exported actions without monitors
-                exports = set(
-                    re.findall(
-                        r"^\s*export\s+action\s+([\w.]+)",
-                        source,
-                        re.MULTILINE,
-                    )
-                )
-                monitored = set(
-                    re.findall(
-                        r"^\s*(?:before|after|around)\s+([\w.]+)",
-                        source,
-                        re.MULTILINE,
-                    )
-                )
-                for exp_action in exports:
-                    if exp_action not in monitored and exp_action != "_finalize":
-                        action_defined = bool(
-                            re.search(
-                                rf"^\s*action\s+{re.escape(exp_action)}\s*",
-                                source,
-                                re.MULTILINE,
-                            )
-                        )
-                        if action_defined:
-                            match = re.search(
-                                rf"^\s*export\s+action\s+{re.escape(exp_action)}",
-                                source,
-                                re.MULTILINE,
-                            )
-                            line_num = (
-                                source[: match.start()].count("\n") + 1 if match else 1
-                            )
-                            all_diags.append(
-                                {
-                                    "line": line_num,
-                                    "severity": "hint",
-                                    "message": (
-                                        f"Exported action '{exp_action}' has no "
-                                        "before/after monitor in this file."
-                                    ),
-                                    "source": "ivy-pattern",
-                                }
-                            )
-            except Exception as exc:
-                logger.warning(
-                    "Pattern diagnostics failed for %s: %s", relative_path, exc
-                )
-                layer_errors.append({"layer": "pattern", "error": str(exc)})
-
-        # P1: Ensure each diagnostic has the file field for multi-file processing
-        for d in all_diags:
-            if "file" not in d:
-                d["file"] = relative_path
-
-        # Apply severity filter
-        if min_severity:
-            _sev_order = {"error": 4, "warning": 3, "info": 2, "hint": 1}
-            min_rank = _sev_order.get(min_severity, 0)
-            all_diags = [
-                d
-                for d in all_diags
-                if _sev_order.get(d.get("severity", "hint"), 0) >= min_rank
-            ]
-
-        # Build source-breakdown summary
-        by_source: dict[str, int] = {}
-        for d in all_diags:
-            src = d.get("source", "unknown")
-            by_source[src] = by_source.get(src, 0) + 1
-
-        _diag_result: dict[str, Any] = {
-            "success": True,
-            "file": relative_path,
-            "diagnostics": all_diags,
-            "diagnostic_count": len(all_diags),
-            "by_source": by_source,
-            "error_count": sum(1 for d in all_diags if d.get("severity") == "error"),
-            "warning_count": sum(
-                1 for d in all_diags if d.get("severity") == "warning"
-            ),
-            "hint_count": sum(1 for d in all_diags if d.get("severity") == "hint"),
-            "info_count": sum(1 for d in all_diags if d.get("severity") == "info"),
-            "layer_errors": layer_errors,
-            "partial": bool(layer_errors),
-        }
-        inject_scope_metadata(_diag_result, scope, _resolved_scope)
-
-        return _tc.finish(_diag_result)
-
-    # -- Verification dashboard ------------------------------------------------
-
-    def _get_cache_summary() -> dict[str, Any]:
-        """Return verification cache summary. Closure-scoped accessor."""
-        verified: list[str] = []
-        failed: list[str] = []
-        seen: set[str] = set()
-        for key, entry in _verify_cache.items():
-            path = key[0] if isinstance(key, tuple) else str(key)
-            if path in seen:
-                continue
-            seen.add(path)
-            if entry.result.get("success"):
-                verified.append(path)
-            else:
-                failed.append(path)
-        return {
-            "verified_files": verified,
-            "failed_files": failed,
-            "cache_size": len(_verify_cache),
-            "cache_max": _CACHE_MAX_SIZE,
-        }
-
-    # Expose cache summary via ctx for monitoring/dashboard use
-    ctx.get_verify_cache_summary = _get_cache_summary
-
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_verification_dashboard() -> dict:
-        """Workspace-level verification status: files verified, failed, pending.
-
-        Returns verification cache state showing which files have been
-        verified, which failed, and which are pending.
-        """
-        logger.debug("[ivy_verification_dashboard] workspace=%s", ctx.root)
-        _tc = ToolTraceContext("ivy_verification_dashboard", {})
-        ivy_files = ctx.find_ivy_files(ctx.root)
-        cache = _get_cache_summary()
-        verified_set = set(cache["verified_files"])
-        failed_set = set(cache["failed_files"])
-        pending = [
-            f for f in ivy_files if f not in verified_set and f not in failed_set
-        ]
-
-        return _tc.finish(
-            {
-                "success": True,
-                "total_files": len(ivy_files),
-                "verified": len(verified_set),
-                "failed": len(failed_set),
-                "pending": len(pending),
-                "cache_size": cache["cache_size"],
-                "cache_max": cache["cache_max"],
-                "verified_files": sorted(verified_set),
-                "failed_files": sorted(failed_set),
-            }
-        )
+    ctx.get_verify_cache_summary = _cache_summary
+    register_diagnostic_tools(mcp, ctx, _cache_summary)
