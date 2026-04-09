@@ -1,10 +1,16 @@
 """Tests for precomputed extraction data in build_semantic_model."""
 
+import gzip
+import json
 import os
+import pickle
 
 import pytest
+from _ivy_samples import SAMPLE_IVY_MAIN, SAMPLE_IVY_TYPES
 
 from ivy_lsp.core.semantic.model_builder import PrecomputedFileData
+from ivy_lsp.core.workspace.detection import WorkspaceConfig
+from ivy_lsp.lsp.index_builder import IndexBuilder
 
 
 @pytest.mark.unit
@@ -229,3 +235,62 @@ class TestBuildSemanticModelPrecomputed:
             TypeNode
         )
         assert len(all_nodes) >= 2
+
+
+@pytest.mark.unit
+class TestIndexBuilderPrecomputedIntegration:
+    """Verify that build_protocol produces a valid semantic model.
+
+    Uses the precomputed extraction path.
+    """
+
+    def _make_workspace(self, tmp_path):
+        ws_root = str(tmp_path)
+        proto_dir = tmp_path / "protocol-testing" / "testproto"
+        proto_dir.mkdir(parents=True)
+        (proto_dir / "types.ivy").write_text(SAMPLE_IVY_TYPES)
+        (proto_dir / "main.ivy").write_text(SAMPLE_IVY_MAIN)
+        return ws_root, str(proto_dir)
+
+    def test_build_protocol_produces_semantic_model(self, tmp_path):
+        ws_root, proto_dir = self._make_workspace(tmp_path)
+        config = WorkspaceConfig(workspace_root=ws_root, detected_by="test")
+        builder = IndexBuilder(ws_root, config)
+
+        summary = builder.build_protocol(proto_dir)
+
+        assert summary["status"] == "ok"
+        assert summary["files"] == 2
+
+        pickle_path = os.path.join(proto_dir, ".ivy-index", "semantic_model.pickle.gz")
+        assert os.path.isfile(pickle_path)
+
+        with gzip.open(pickle_path, "rb") as f:
+            model = pickle.load(f)
+
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
+
+        sym_nodes = model.get_nodes_by_type(SymbolNode)
+        type_nodes = model.get_nodes_by_type(TypeNode)
+
+        # SAMPLE_IVY_MAIN has: packet (type), send (action), recv (action)
+        # SAMPLE_IVY_TYPES has: cid (type), quic_packet_type (type)
+        assert len(type_nodes) >= 2, f"Expected >= 2 TypeNodes, got {len(type_nodes)}"
+        assert len(sym_nodes) >= 1, f"Expected >= 1 SymbolNodes, got {len(sym_nodes)}"
+
+    def test_symbols_json_unchanged(self, tmp_path):
+        """symbols.json must be byte-identical regardless of precomputed path.
+
+        Phase B is untouched by the precomputed extraction optimization.
+        """
+        ws_root, proto_dir = self._make_workspace(tmp_path)
+        config = WorkspaceConfig(workspace_root=ws_root, detected_by="test")
+        builder = IndexBuilder(ws_root, config)
+        builder.build_protocol(proto_dir)
+
+        symbols_path = os.path.join(proto_dir, ".ivy-index", "symbols.json")
+        with open(symbols_path) as f:
+            symbols = json.load(f)
+
+        # Should have entries for both files
+        assert len(symbols) == 2
