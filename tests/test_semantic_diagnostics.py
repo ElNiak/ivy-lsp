@@ -3,7 +3,7 @@
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.semantic.model import SemanticModel
-from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
 from ivy_lsp.lsp.diagnostics.compute import compute_semantic_diagnostics
 
 
@@ -217,6 +217,66 @@ def test_rfc_tag_duplicate_detected():
     dupes = [d for d in diags if d.code == "ivy.rfc.tagDuplicate"]
     assert len(dupes) >= 1
     assert "[4]" in dupes[0].message
+
+
+def test_shadow_declaration_detected():
+    model = SemanticModel()
+    sym1 = SymbolNode(
+        id="zero_rtt_allowed_base",
+        name="zero_rtt_allowed",
+        qualified_name="quic.zero_rtt_allowed",
+        kind="relation",
+        file="/test/quic_shim.ivy",
+        line=42,
+    )
+    model.add_node(sym1)
+    sym2 = SymbolNode(
+        id="zero_rtt_allowed_mim",
+        name="zero_rtt_allowed",
+        qualified_name="quic.zero_rtt_allowed",
+        kind="relation",
+        file="/test/quic_shim_mim.ivy",
+        line=15,
+    )
+    model.add_node(sym2)
+
+    source = "#lang ivy1.7\ninclude quic_shim\nrelation zero_rtt_allowed\n"
+    diags = compute_semantic_diagnostics(
+        model,
+        "/test/quic_shim_mim.ivy",
+        source,
+    )
+    shadow = [d for d in diags if d.code == "ivy.include.shadowDeclaration"]
+    assert len(shadow) >= 1
+    assert "zero_rtt_allowed" in shadow[0].message
+    assert "quic_shim.ivy" in shadow[0].message
+
+
+def test_no_shadow_when_different_kind():
+    model = SemanticModel()
+    sym1 = SymbolNode(
+        id="foo_action",
+        name="foo",
+        qualified_name="quic.foo",
+        kind="action",
+        file="/test/base.ivy",
+        line=10,
+    )
+    model.add_node(sym1)
+    sym2 = SymbolNode(
+        id="foo_relation",
+        name="foo",
+        qualified_name="quic.foo",
+        kind="relation",
+        file="/test/ext.ivy",
+        line=5,
+    )
+    model.add_node(sym2)
+
+    source = "#lang ivy1.7\nrelation foo\n"
+    diags = compute_semantic_diagnostics(model, "/test/ext.ivy", source)
+    shadow = [d for d in diags if d.code == "ivy.include.shadowDeclaration"]
+    assert len(shadow) == 0
 
 
 class TestComputeDiagnosticsIntegration:

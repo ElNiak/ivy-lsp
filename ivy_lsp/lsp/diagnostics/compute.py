@@ -387,6 +387,41 @@ def compute_semantic_diagnostics(
                 else:
                     seen_tags[val] = ann.line
 
+    # D8: Shadow declaration detection
+    from ivy_lsp.core.semantic.nodes import SymbolNode
+
+    if hasattr(model, "_nodes_by_name"):
+        for name, nodes in model._nodes_by_name.items():
+            sym_nodes = [n for n in nodes if isinstance(n, SymbolNode)]
+            local_nodes = [n for n in sym_nodes if n.file == abs_path]
+            other_nodes = [n for n in sym_nodes if n.file != abs_path]
+            if local_nodes and other_nodes:
+                for local in local_nodes:
+                    for other in other_nodes:
+                        if local.kind == other.kind:
+                            local_line = local.line
+                            line_len = (
+                                len(lines[local_line]) if local_line < len(lines) else 0
+                            )
+                            other_basename = other.file.rsplit("/", 1)[-1]
+                            diags.append(
+                                lsp.Diagnostic(
+                                    range=lsp.Range(
+                                        start=lsp.Position(local_line, 0),
+                                        end=lsp.Position(local_line, line_len),
+                                    ),
+                                    message=(
+                                        f"'{name}' shadows a declaration in"
+                                        f" '{other_basename}'"
+                                        f" (line {other.line + 1})."
+                                    ),
+                                    severity=lsp.DiagnosticSeverity.Hint,
+                                    source="ivy-lsp-semantic",
+                                    code="ivy.include.shadowDeclaration",
+                                )
+                            )
+                            break  # one shadow warning per local symbol
+
     # Missing tags on assertions (Hint)
     for m in _ASSERTION_RE.finditer(source):
         line_no = source[: m.start()].count("\n")
