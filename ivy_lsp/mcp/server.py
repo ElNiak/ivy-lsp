@@ -15,7 +15,6 @@ import asyncio
 import concurrent.futures
 import logging
 import os
-import sys
 import threading
 from dataclasses import dataclass
 from typing import Any

@@ -936,12 +936,6 @@ class IndexBuilder:
     # -- Private helpers ----------------------------------------------------
 
     @staticmethod
-    def _write_json(path: str, data: Any) -> None:
-        """Write data as indented JSON."""
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
-
-    @staticmethod
     def _write_pickle(index_dir: str, filename: str, obj: Any) -> None:
         """Write a gzipped pickle with file locking."""
         from ivy_lsp.infra.utils.serialization import write_locked_pickle
