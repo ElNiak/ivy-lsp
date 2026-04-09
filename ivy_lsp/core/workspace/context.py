@@ -122,28 +122,34 @@ class WorkspaceContext:
     # -- Factory methods ----------------------------------------------------
 
     @classmethod
-    def load(cls, start_dir: str) -> WorkspaceContext:
-        """Detect workspace and load all protocol indexes.
+    def detect_only(cls, start_dir: str) -> "WorkspaceContext":
+        """Detect workspace config without loading offline indexes.
+
+        Returns a WorkspaceContext with empty protocol_indexes. Call
+        :meth:`load_indexes` separately to populate them (can be done
+        in a background thread).
 
         Args:
             start_dir: Directory to start workspace detection from.
 
         Returns:
-            A fully populated WorkspaceContext (possibly with empty indexes
-            if no ``.ivy-index/`` directories are found).
+            A WorkspaceContext with workspace metadata but no protocol indexes.
         """
         ws_config = detect_ivy_workspace(start_dir)
-        project_type = ws_config.project_type or "fallback"
-
-        ctx = cls(
+        return cls(
             workspace_root=ws_config.workspace_root,
-            project_type=project_type,
+            project_type=ws_config.project_type or "fallback",
             workspace_config=ws_config,
         )
 
-        # Glob for .ivy-index/manifest.json under protocol-testing/*/
+    def load_indexes(self) -> None:
+        """Load offline protocol indexes from .ivy-index directories.
+
+        Populates ``self.protocol_indexes`` in place. Safe to call from
+        a background thread — only writes to ``protocol_indexes`` dict.
+        """
         pattern = os.path.join(
-            ws_config.workspace_root,
+            self.workspace_root,
             "protocol-testing",
             "*",
             ".ivy-index",
@@ -156,9 +162,9 @@ class WorkspaceContext:
             protocol_dir = os.path.dirname(index_dir)
             protocol = os.path.basename(protocol_dir)
 
-            idx = cls._load_protocol_index(protocol, index_dir)
+            idx = self._load_protocol_index(protocol, index_dir)
             if idx is not None:
-                ctx.protocol_indexes[protocol] = idx
+                self.protocol_indexes[protocol] = idx
                 logger.info(
                     "Loaded index for protocol %s (%s, %d symbols files)",
                     protocol,
@@ -166,12 +172,25 @@ class WorkspaceContext:
                     len(idx.symbols),
                 )
 
-        if not ctx.protocol_indexes:
+        if not self.protocol_indexes:
             logger.debug(
                 "No .ivy-index directories found under %s",
-                ws_config.workspace_root,
+                self.workspace_root,
             )
 
+    @classmethod
+    def load(cls, start_dir: str) -> "WorkspaceContext":
+        """Detect workspace and load all protocol indexes.
+
+        Args:
+            start_dir: Directory to start workspace detection from.
+
+        Returns:
+            A fully populated WorkspaceContext (possibly with empty indexes
+            if no ``.ivy-index/`` directories are found).
+        """
+        ctx = cls.detect_only(start_dir)
+        ctx.load_indexes()
         return ctx
 
     @classmethod
