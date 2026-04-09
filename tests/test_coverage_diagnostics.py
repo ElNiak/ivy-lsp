@@ -283,3 +283,66 @@ class TestCoverageHintDiagnosticTags:
         for d in coverage_diags:
             assert d.tags is not None, "Coverage hint should have tags"
             assert lsp.DiagnosticTag.Unnecessary in d.tags
+
+
+def test_orphaned_hook_detected():
+    graph = RequirementGraph()
+    r1 = RequirementNode(
+        id="/test/shim.ivy:15",
+        kind="require",
+        formula_text="pkt.type = initial",
+        line=15,
+        col=0,
+        file="/test/shim.ivy",
+        monitor_action="send_ack_elicting_packet",  # typo
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/shim.ivy", [r1])
+    # Add a real action with correct spelling
+    graph.add_action(
+        ActionNode(
+            id="send_ack_eliciting_packet",
+            name="send_ack_eliciting_packet",
+            qualified_name="quic.send_ack_eliciting_packet",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+    # populate_actions_from_symbols backfills the typo'd action
+    graph.populate_actions_from_symbols([])
+
+    hints = compute_coverage_hints(graph, "/test/shim.ivy")
+    orphaned = [h for h in hints if h.get("code") == "ivy.monitor.orphanedHook"]
+    assert len(orphaned) == 1
+    assert "send_ack_elicting_packet" in orphaned[0]["message"]
+
+
+def test_valid_monitor_not_flagged():
+    graph = RequirementGraph()
+    # Requirements first — add_file_requirements calls remove_file internally
+    r1 = RequirementNode(
+        id="/test/quic.ivy:20",
+        kind="require",
+        formula_text="pkt.seq > 0",
+        line=20,
+        col=0,
+        file="/test/quic.ivy",
+        monitor_action="send_pkt",
+        mixin_kind="before",
+    )
+    graph.add_file_requirements("/test/quic.ivy", [r1])
+    # Action added after requirements so remove_file doesn't wipe it
+    graph.add_action(
+        ActionNode(
+            id="send_pkt",
+            name="send_pkt",
+            qualified_name="quic.send_pkt",
+            file="/test/quic.ivy",
+            line=10,
+        )
+    )
+    graph.populate_actions_from_symbols([])
+
+    hints = compute_coverage_hints(graph, "/test/quic.ivy")
+    orphaned = [h for h in hints if h.get("code") == "ivy.monitor.orphanedHook"]
+    assert len(orphaned) == 0
