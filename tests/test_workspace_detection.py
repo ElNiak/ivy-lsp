@@ -131,6 +131,24 @@ class TestWalkDownForMarker:
         config = _walk_down_for_marker(str(tmp_workspace))
         assert config is None
 
+    def test_skips_sub_workspace_marker(self, tmp_path):
+        """Walk-down skips markers whose resolved root differs from start_dir."""
+        parent = tmp_path / "walk_root"
+        project = parent / "project"
+        sub = project / "protocol-testing" / "quic"
+        sub.mkdir(parents=True)
+        marker = {
+            "version": 3,
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {"id": "quic", "include_paths": ["protocol-testing/quic"]}
+            ],
+        }
+        (sub / ".ivyworkspace").write_text(json.dumps(marker))
+        parent.mkdir(parents=True, exist_ok=True)
+        config = _walk_down_for_marker(str(parent))
+        assert config is None
+
 
 class TestPantherHeuristic:
     def test_panther_structure_detected(self, tmp_workspace):

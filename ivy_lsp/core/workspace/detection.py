@@ -170,6 +170,22 @@ def _walk_down_for_marker(
             if data is not None:
                 config = _apply_marker(candidate, data)
                 if config is not None:
+                    # Guard: skip sub-workspace markers whose resolved root
+                    # differs from start_dir.  A marker with
+                    # workspace_root_offset is embedded in a larger project; it
+                    # is only valid as a top-level config when its resolved root
+                    # equals start_dir exactly.
+                    if config.workspace_root_offset is not None:
+                        resolved = os.path.realpath(config.workspace_root)
+                        if resolved != os.path.realpath(start):
+                            logger.debug(
+                                "Skipping sub-workspace marker at %s "
+                                "(resolved root %s != start %s)",
+                                candidate,
+                                resolved,
+                                start,
+                            )
+                            continue
                     return config
     return None
 
