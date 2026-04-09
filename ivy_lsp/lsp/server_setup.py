@@ -790,7 +790,7 @@ class ServerSetupMixin(_SetupBase):
 
             def _resolve_test_file(filepath: str):
                 """Resolve a module file to its enclosing test file for T3."""
-                from ivy_lsp.lsp.commands import _find_enclosing_test
+                from ivy_lsp.lsp.commands_helpers import _find_enclosing_test
 
                 return _find_enclosing_test(self, filepath)
 

@@ -349,7 +349,7 @@ def register(server) -> None:
             try:
                 import os
 
-                from ivy_lsp.lsp.commands import (
+                from ivy_lsp.lsp.commands_helpers import (
                     _find_enclosing_test,
                     _resolve_via_staging,
                 )

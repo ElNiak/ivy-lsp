@@ -20,7 +20,7 @@ from typing import Any, Dict
 
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.infra.utils import uri_to_path
-from ivy_lsp.lsp.commands import (
+from ivy_lsp.lsp.commands_helpers import (
     _extract_param,
     _refresh_open_diagnostics_async,
     _ServerProxy,
