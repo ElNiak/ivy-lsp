@@ -170,11 +170,7 @@ def _walk_down_for_marker(
             if data is not None:
                 config = _apply_marker(candidate, data)
                 if config is not None:
-                    # Guard: skip sub-workspace markers whose resolved root
-                    # differs from start_dir.  A marker with
-                    # workspace_root_offset is embedded in a larger project; it
-                    # is only valid as a top-level config when its resolved root
-                    # equals start_dir exactly.
+                    # Skip sub-workspace markers embedded in a larger project.
                     if config.workspace_root_offset is not None:
                         resolved = os.path.realpath(config.workspace_root)
                         if resolved != os.path.realpath(start):
@@ -319,7 +315,7 @@ def _build_panther_workspace(
             continue
 
         # Check for layer ID collisions
-        new_ids = {l.id for l in config.workspace_layers}
+        new_ids = {layer.id for layer in config.workspace_layers}
         collisions = new_ids & seen_layer_ids
         if collisions:
             logger.warning(
@@ -339,11 +335,7 @@ def _build_panther_workspace(
 
         if standard_library is None and config.standard_library:
             standard_library = config.standard_library
-        elif (
-            config.standard_library
-            and standard_library
-            and config.standard_library != standard_library
-        ):
+        elif config.standard_library and config.standard_library != standard_library:
             logger.warning(
                 "Protocol %s declares standard_library=%s, "
                 "but %s was already selected; keeping first",
