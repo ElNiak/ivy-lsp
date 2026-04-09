@@ -249,6 +249,7 @@ class ToolContext:
         # Wire up callables backed by the LSP server's live state
         ctx.find_ivy_files = _find_files
         ctx.include_resolver = resolver
+        ctx._lsp_server_ref = server
         ctx.workspace_context = getattr(server, "_workspace_context", None)
 
         async def _get_model():

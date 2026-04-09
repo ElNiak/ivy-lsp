@@ -90,3 +90,39 @@ def test_include_resolver_lazy_picks_up_late_indexer():
     mock_server._indexer = mock_indexer
 
     assert ctx.include_resolver is late_resolver
+
+
+def test_from_lsp_server_stores_server_ref():
+    """from_lsp_server should store the server as _lsp_server_ref."""
+    from ivy_lsp.mcp.context import ToolContext
+
+    mock_server = MagicMock()
+    mock_server._indexer = None
+    mock_server._semantic_model = None
+    mock_server._initializing = False
+
+    ctx = ToolContext.from_lsp_server(mock_server)
+    assert ctx._lsp_server_ref is mock_server
+
+
+def test_from_lsp_server_lazy_resolver_with_late_indexer():
+    """from_lsp_server context should pick up resolver from a late-initializing indexer."""
+    from ivy_lsp.mcp.context import ToolContext
+
+    mock_server = MagicMock()
+    mock_server._indexer = None
+    mock_server._semantic_model = None
+    mock_server._initializing = False
+
+    ctx = ToolContext.from_lsp_server(mock_server)
+
+    assert ctx.include_resolver is None
+
+    late_resolver = MagicMock(name="late_resolver")
+    late_resolver._staging_dir = "/tmp/staging"
+    late_resolver._exclude_paths = []
+    mock_indexer = MagicMock()
+    mock_indexer.resolver = late_resolver
+    mock_server._indexer = mock_indexer
+
+    assert ctx.include_resolver is late_resolver
