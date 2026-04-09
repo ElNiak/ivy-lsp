@@ -43,12 +43,22 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class FileChange:
+    """A single file's change record from staleness detection."""
+
+    rel_path: str
+    reason: Literal["modified", "added", "removed"]
+    cached_sha256: Optional[str]
+
+
+@dataclass
 class StalenessInfo:
     """Staleness assessment for a single protocol index."""
 
     status: Literal["fresh", "stale_minor", "stale_major"]
     changed_files: int
     total_files: int
+    file_changes: List[FileChange] = field(default_factory=list)
 
 
 @dataclass
@@ -327,37 +337,48 @@ class WorkspaceContext:
     def _check_staleness(cls, manifest: dict, protocol_dir: str) -> StalenessInfo:
         """Compare manifest file mtimes against actual file mtimes.
 
-        The manifest is expected to have a ``"files"`` key mapping file
-        paths to dicts with ``"mtime"`` values.
-
         Returns:
-            A :class:`StalenessInfo` with status fresh/stale_minor/stale_major.
+            A :class:`StalenessInfo` with status and per-file change details.
         """
         files_meta = manifest.get("files", {})
         if not files_meta:
             return StalenessInfo(status="stale_major", changed_files=0, total_files=0)
 
         total = len(files_meta)
-        changed = 0
+        changes: List[FileChange] = []
 
         for rel_path, meta in files_meta.items():
             expected_mtime = meta.get("mtime") if isinstance(meta, dict) else None
+            cached_sha = meta.get("sha256") if isinstance(meta, dict) else None
+
             if expected_mtime is None:
-                changed += 1
+                changes.append(
+                    FileChange(
+                        rel_path=rel_path, reason="modified", cached_sha256=cached_sha
+                    )
+                )
                 continue
 
             abs_path = os.path.join(protocol_dir, rel_path)
             try:
                 actual_mtime = os.path.getmtime(abs_path)
             except OSError:
-                # File deleted or inaccessible
-                changed += 1
+                changes.append(
+                    FileChange(
+                        rel_path=rel_path, reason="removed", cached_sha256=cached_sha
+                    )
+                )
                 continue
 
             # Allow 1-second tolerance for filesystem mtime granularity
             if abs(actual_mtime - expected_mtime) > 1.0:
-                changed += 1
+                changes.append(
+                    FileChange(
+                        rel_path=rel_path, reason="modified", cached_sha256=cached_sha
+                    )
+                )
 
+        changed = len(changes)
         if changed == 0:
             status: Literal["fresh", "stale_minor", "stale_major"] = "fresh"
         elif total > 0 and (changed / total) < 0.10:
@@ -365,7 +386,12 @@ class WorkspaceContext:
         else:
             status = "stale_major"
 
-        return StalenessInfo(status=status, changed_files=changed, total_files=total)
+        return StalenessInfo(
+            status=status,
+            changed_files=changed,
+            total_files=total,
+            file_changes=changes,
+        )
 
     # -- Query methods ------------------------------------------------------
 

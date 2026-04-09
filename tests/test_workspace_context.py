@@ -11,6 +11,7 @@ import time
 import pytest
 
 from ivy_lsp.core.workspace.context import (
+    FileChange,
     ProtocolIndex,
     StalenessInfo,
     WorkspaceContext,
@@ -854,3 +855,67 @@ class TestDataclasses:
         assert idx.semantic_model is None
         assert idx.requirement_graph is None
         assert idx.staleness.status == "stale_major"
+
+
+# ---------------------------------------------------------------------------
+# Test: Per-file FileChange tracking in _check_staleness
+# ---------------------------------------------------------------------------
+
+
+class TestFileChangeStaleness:
+    """Tests for per-file change tracking in _check_staleness."""
+
+    def test_fresh_index_has_empty_file_changes(self, tmp_path):
+        """When all mtimes match, file_changes is empty."""
+        f = tmp_path / "a.ivy"
+        f.write_text("#lang ivy1.7\ntype t")
+        manifest = {
+            "files": {
+                "a.ivy": {"mtime": f.stat().st_mtime, "sha256": "abc123"},
+            }
+        }
+        info = WorkspaceContext._check_staleness(manifest, str(tmp_path))
+        assert info.status == "fresh"
+        assert info.file_changes == []
+
+    def test_modified_file_appears_in_file_changes(self, tmp_path):
+        """A file with changed mtime appears with reason='modified'."""
+        f = tmp_path / "a.ivy"
+        f.write_text("#lang ivy1.7\ntype t")
+        manifest = {
+            "files": {
+                "a.ivy": {"mtime": 0.0, "sha256": "abc123"},
+            }
+        }
+        info = WorkspaceContext._check_staleness(manifest, str(tmp_path))
+        assert info.changed_files == 1
+        assert len(info.file_changes) == 1
+        assert info.file_changes[0].rel_path == "a.ivy"
+        assert info.file_changes[0].reason == "modified"
+        assert info.file_changes[0].cached_sha256 == "abc123"
+
+    def test_removed_file_appears_in_file_changes(self, tmp_path):
+        """A file in manifest but missing on disk has reason='removed'."""
+        manifest = {
+            "files": {
+                "gone.ivy": {"mtime": 100.0, "sha256": "def456"},
+            }
+        }
+        info = WorkspaceContext._check_staleness(manifest, str(tmp_path))
+        assert info.changed_files == 1
+        assert len(info.file_changes) == 1
+        assert info.file_changes[0].rel_path == "gone.ivy"
+        assert info.file_changes[0].reason == "removed"
+        assert info.file_changes[0].cached_sha256 == "def456"
+
+    def test_missing_sha256_in_manifest_returns_none(self, tmp_path):
+        """When manifest entry lacks sha256, cached_sha256 is None."""
+        f = tmp_path / "a.ivy"
+        f.write_text("#lang ivy1.7")
+        manifest = {
+            "files": {
+                "a.ivy": {"mtime": 0.0},
+            }
+        }
+        info = WorkspaceContext._check_staleness(manifest, str(tmp_path))
+        assert info.file_changes[0].cached_sha256 is None
