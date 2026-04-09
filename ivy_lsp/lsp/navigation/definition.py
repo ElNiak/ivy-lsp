@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Union
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.patterns import INCLUDE_RE as _INCLUDE_RE
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.name_utils import get_last_component
 from ivy_lsp.infra.utils.position_utils import make_range, word_at_position
@@ -18,9 +19,6 @@ from ivy_lsp.infra.utils.symbol_resolver import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-_INCLUDE_RE = re.compile(r"^\s*include\s+(\w+)")
 _DECL_RE = re.compile(
     r"^\s*(?:action|relation|function|individual|type|module|object|isolate)\s+(\w+)"
 )

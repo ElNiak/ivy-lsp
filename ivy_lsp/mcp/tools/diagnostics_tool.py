@@ -8,16 +8,13 @@ import os
 import re
 from typing import Any
 
+from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
+from ivy_lsp.core.patterns import BRACKET_TAG_RE as _BRACKET_TAG_RE
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 from ivy_lsp.mcp.tools._helpers import validated_path_or_error
 
 logger = logging.getLogger(__name__)
-
-_ASSERTION_RE = re.compile(
-    r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
-)
-_BRACKET_TAG_RE = re.compile(r"#\s*\[")
 
 
 def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:

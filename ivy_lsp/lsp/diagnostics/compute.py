@@ -16,21 +16,19 @@ from typing import Any, Dict, List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
+from ivy_lsp.core.patterns import BRACKET_TAG_RE as _TAG_RE
+from ivy_lsp.core.patterns import INCLUDE_RE as _INCLUDE_RE
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
 
 # Pre-compiled regex patterns for hot-path performance (Phase 2.1)
-_INCLUDE_RE = re.compile(r"^include\s+(\w+)", re.MULTILINE)
 _ACTION_RE = re.compile(r"^\s*action\s+([\w.]+)", re.MULTILINE)
 _STATE_VAR_RE = re.compile(
     r"^\s*(?:relation|function|individual|var)\s+([\w.]+)", re.MULTILINE
 )
-_ASSERTION_RE = re.compile(
-    r"^\s*(require|ensure|assume|assert)\s+.+;\s*$", re.MULTILINE
-)
-_TAG_RE = re.compile(r"#\s*\[")
 _EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
 
 _SEVERITY_MAP = {

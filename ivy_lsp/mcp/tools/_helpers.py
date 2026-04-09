@@ -153,3 +153,43 @@ async def apply_scope_filter(
             return [a for a in items if getattr(a, file_attr).startswith(prefix)]
         return [a for a in items if getattr(a, file_attr) == abs_path]
     return items
+
+
+def resolve_scope(ctx: Any, scope: str, tool_name: str) -> Any | None:
+    """Resolve scope and log warning if unknown.
+
+    Returns the resolved scope object, or None.
+    Replaces 7+ repeated scope resolution blocks across tool modules.
+    """
+    if not scope or getattr(ctx, "workspace_context", None) is None:
+        return None
+    resolved = ctx.workspace_context.get_test_scope(scope)
+    if resolved is None:
+        logger.warning(
+            "[%s] Unknown scope '%s'; proceeding without scoping",
+            tool_name,
+            scope,
+        )
+    return resolved
+
+
+def build_diagnostic_result(
+    success: bool,
+    diagnostics: list[dict],
+    **extra: Any,
+) -> dict:
+    """Build a standard diagnostic result dict with computed counts.
+
+    Automatically computes diagnostic_count, error_count, warning_count,
+    hint_count, and info_count from the diagnostics list.
+    """
+    return {
+        "success": success,
+        "diagnostics": diagnostics,
+        "diagnostic_count": len(diagnostics),
+        "error_count": sum(1 for d in diagnostics if d.get("severity") == "error"),
+        "warning_count": sum(1 for d in diagnostics if d.get("severity") == "warning"),
+        "hint_count": sum(1 for d in diagnostics if d.get("severity") == "hint"),
+        "info_count": sum(1 for d in diagnostics if d.get("severity") == "info"),
+        **extra,
+    }
