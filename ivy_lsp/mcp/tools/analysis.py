@@ -264,6 +264,18 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 for name, meta in get_tool_metadata().items()
             },
             "mcp_tool_count": len(get_tool_metadata()),
+            "workspace_index_loaded": ctx.workspace_context is not None,
+            "staleness_detail": {
+                proto_idx.protocol: {
+                    "status": proto_idx.staleness.status,
+                    "mtime_changed": proto_idx.staleness.changed_files,
+                }
+                for proto_idx in (
+                    ctx.workspace_context.protocol_indexes.values()
+                    if ctx.workspace_context is not None
+                    else []
+                )
+            },
         }
         # Parsing tier availability (capped at 3s to avoid blocking ivy_capabilities)
         try:
@@ -412,6 +424,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             "server": {
                 "workspace": ctx.root,
                 "staging_dir": ctx.staging_dir,
+                "workspace_index_loaded": ctx.workspace_context is not None,
             },
             "model_status": ctx.get_model_status(),
         }
