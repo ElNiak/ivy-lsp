@@ -316,6 +316,77 @@ def compute_semantic_diagnostics(
                         )
                     )
 
+        # D6: RFC tag gap detection
+        file_tags: list[int] = []
+        tag_to_line: dict[int, int] = {}
+        for ann in annotations:
+            for tag in ann.tags:
+                parts = tag.split(":")
+                numeric = parts[-1] if parts else tag
+                try:
+                    val = int(numeric)
+                    file_tags.append(val)
+                    tag_to_line.setdefault(val, ann.line)
+                except ValueError:
+                    pass
+
+        if len(set(file_tags)) >= 5:
+            tag_set = sorted(set(file_tags))
+            tag_range = tag_set[-1] - tag_set[0] + 1
+            gap_count = tag_range - len(tag_set)
+            gap_ratio = gap_count / tag_range if tag_range > 0 else 1.0
+            if gap_ratio < 0.3:
+                full_range = set(range(tag_set[0], tag_set[-1] + 1))
+                missing = sorted(full_range - set(tag_set))
+                for m in missing:
+                    nearest_line = 0
+                    for t in tag_set:
+                        if abs(t - m) <= 1 and t in tag_to_line:
+                            nearest_line = tag_to_line[t]
+                            break
+                    diags.append(
+                        lsp.Diagnostic(
+                            range=lsp.Range(
+                                start=lsp.Position(nearest_line, 0),
+                                end=lsp.Position(nearest_line, 0),
+                            ),
+                            message=f"RFC tag gap: [{m}] is missing.",
+                            severity=lsp.DiagnosticSeverity.Information,
+                            source="ivy-lsp-semantic",
+                            code="ivy.rfc.tagGap",
+                        )
+                    )
+
+        # D7: RFC tag duplicate detection (file-level)
+        seen_tags: dict[int, int] = {}
+        for ann in annotations:
+            for tag in ann.tags:
+                parts = tag.split(":")
+                numeric = parts[-1] if parts else tag
+                try:
+                    val = int(numeric)
+                except ValueError:
+                    continue
+                if val in seen_tags:
+                    line_len = len(lines[ann.line]) if ann.line < len(lines) else 0
+                    diags.append(
+                        lsp.Diagnostic(
+                            range=lsp.Range(
+                                start=lsp.Position(ann.line, 0),
+                                end=lsp.Position(ann.line, line_len),
+                            ),
+                            message=(
+                                f"Duplicate RFC tag [{val}] — also at"
+                                f" line {seen_tags[val] + 1}."
+                            ),
+                            severity=lsp.DiagnosticSeverity.Warning,
+                            source="ivy-lsp-semantic",
+                            code="ivy.rfc.tagDuplicate",
+                        )
+                    )
+                else:
+                    seen_tags[val] = ann.line
+
     # Missing tags on assertions (Hint)
     for m in _ASSERTION_RE.finditer(source):
         line_no = source[: m.start()].count("\n")

@@ -137,6 +137,88 @@ def test_missing_bracket_tag_has_code():
     assert hint_diags[0].code == "ivy.rfc.missingBracketTag"
 
 
+def test_rfc_tag_gap_detected():
+    model = SemanticModel()
+    for tag_num in [1, 2, 4, 5, 6, 7]:  # gap at 3, 7 tags total
+        ann = RfcAnnotation(
+            id=f"/tmp/test.ivy:{tag_num}:0",
+            file="/tmp/test.ivy",
+            line=tag_num,
+            tags=[str(tag_num)],
+        )
+        model.add_node(ann)
+    # Need at least one RfcRequirement for the rfc_reqs guard to pass
+    req = RfcRequirement(
+        id="rfc9000:4.1",
+        rfc="RFC9000",
+        section="4.1",
+        text="...",
+        level="MUST",
+    )
+    model.add_node(req)
+    source = "#lang ivy1.7\n" + "require x > 0;\n" * 8
+    diags = compute_semantic_diagnostics(model, "/tmp/test.ivy", source)
+    gaps = [d for d in diags if d.code == "ivy.rfc.tagGap"]
+    assert len(gaps) == 1
+    assert "[3]" in gaps[0].message
+
+
+def test_rfc_tag_gap_not_flagged_when_sparse():
+    model = SemanticModel()
+    # Tags [4], [17], [23] — sparse, not sequential
+    for tag_num in [4, 17, 23]:
+        ann = RfcAnnotation(
+            id=f"/tmp/test.ivy:{tag_num}:0",
+            file="/tmp/test.ivy",
+            line=tag_num,
+            tags=[str(tag_num)],
+        )
+        model.add_node(ann)
+    req = RfcRequirement(
+        id="rfc9000:4.1",
+        rfc="RFC9000",
+        section="4.1",
+        text="...",
+        level="MUST",
+    )
+    model.add_node(req)
+    source = "#lang ivy1.7\n" + "require x > 0;\n" * 24
+    diags = compute_semantic_diagnostics(model, "/tmp/test.ivy", source)
+    gaps = [d for d in diags if d.code == "ivy.rfc.tagGap"]
+    assert len(gaps) == 0
+
+
+def test_rfc_tag_duplicate_detected():
+    model = SemanticModel()
+    ann1 = RfcAnnotation(
+        id="/tmp/test.ivy:5:0",
+        file="/tmp/test.ivy",
+        line=5,
+        tags=["4"],
+    )
+    ann2 = RfcAnnotation(
+        id="/tmp/test.ivy:10:0",
+        file="/tmp/test.ivy",
+        line=10,
+        tags=["4"],
+    )
+    model.add_node(ann1)
+    model.add_node(ann2)
+    req = RfcRequirement(
+        id="rfc9000:4.1",
+        rfc="RFC9000",
+        section="4.1",
+        text="...",
+        level="MUST",
+    )
+    model.add_node(req)
+    source = "#lang ivy1.7\n" + "require x > 0;\n" * 11
+    diags = compute_semantic_diagnostics(model, "/tmp/test.ivy", source)
+    dupes = [d for d in diags if d.code == "ivy.rfc.tagDuplicate"]
+    assert len(dupes) >= 1
+    assert "[4]" in dupes[0].message
+
+
 class TestComputeDiagnosticsIntegration:
     """Verify compute_diagnostics accepts semantic_model param."""
 
