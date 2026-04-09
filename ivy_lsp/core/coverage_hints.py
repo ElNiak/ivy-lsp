@@ -102,11 +102,13 @@ def compute_coverage_hints(
             )
 
     # -----------------------------------------------------------------
-    # 3. Dead guards: require false as unreachability sentinel
+    # 3. Per-requirement checks: dead guards + orphaned monitor hooks
     # -----------------------------------------------------------------
     for req in graph.requirements.values():
         if req.file != filepath:
             continue
+
+        # Dead guard: require false as unreachability sentinel
         if req.formula_text.strip() == "false":
             hints.append(
                 {
@@ -120,30 +122,27 @@ def compute_coverage_hints(
                 }
             )
 
-    # -----------------------------------------------------------------
-    # 4. Orphaned monitor hooks: monitors targeting backfill-only actions
-    # -----------------------------------------------------------------
-    for req in graph.requirements.values():
-        if req.file != filepath:
-            continue
-        if not req.monitor_action:
-            continue
-        action = graph.actions.get(req.monitor_action)
-        if action is None:
-            continue
-        # Backfill-only actions inherit the monitor's file/line, not a real declaration site.
-        if action.file == req.file and action.line == req.line:
-            hints.append(
-                {
-                    "line": req.line,
-                    "message": (
-                        f"Monitor targets action '{req.monitor_action}' "
-                        "which has no definition in the include closure."
-                    ),
-                    "severity": "warning",
-                    "code": "ivy.monitor.orphanedHook",
-                }
-            )
+        # Orphaned hook: monitor targets a backfill-only action
+        if req.monitor_action:
+            action = graph.actions.get(req.monitor_action)
+            # Backfill-only actions inherit the monitor's file/line,
+            # not a real declaration site.
+            if (
+                action is not None
+                and action.file == req.file
+                and action.line == req.line
+            ):
+                hints.append(
+                    {
+                        "line": req.line,
+                        "message": (
+                            f"Monitor targets action '{req.monitor_action}' "
+                            "which has no definition in the include closure."
+                        ),
+                        "severity": "warning",
+                        "code": "ivy.monitor.orphanedHook",
+                    }
+                )
 
     # -----------------------------------------------------------------
     # 5. Unused state variables: no reads or writes in the graph

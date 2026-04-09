@@ -33,6 +33,13 @@ _ASSERTION_RE = re.compile(
 _TAG_RE = re.compile(r"#\s*\[")
 _EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
 
+_SEVERITY_MAP = {
+    "error": lsp.DiagnosticSeverity.Error,
+    "warning": lsp.DiagnosticSeverity.Warning,
+    "info": lsp.DiagnosticSeverity.Information,
+    "hint": lsp.DiagnosticSeverity.Hint,
+}
+
 
 def check_structural_issues(
     source: str,
@@ -68,18 +75,12 @@ def check_structural_issues(
     raw.extend(check_duplicate_tags(source, filepath))
     raw.extend(check_commented_out_requires(source, filepath))
 
-    _severity_map = {
-        "error": lsp.DiagnosticSeverity.Error,
-        "warning": lsp.DiagnosticSeverity.Warning,
-        "info": lsp.DiagnosticSeverity.Information,
-        "hint": lsp.DiagnosticSeverity.Hint,
-    }
     lines = source.split("\n")
     diags: List[lsp.Diagnostic] = []
     for entry in raw:
         lineno = max(0, entry["line"] - 1)  # convert 1-based to 0-based
         line_text = lines[lineno] if lineno < len(lines) else ""
-        severity = _severity_map.get(entry["severity"], lsp.DiagnosticSeverity.Warning)
+        severity = _SEVERITY_MAP.get(entry["severity"], lsp.DiagnosticSeverity.Warning)
         diags.append(
             lsp.Diagnostic(
                 range=lsp.Range(
@@ -316,20 +317,48 @@ def compute_semantic_diagnostics(
                         )
                     )
 
-        # D6: RFC tag gap detection
+        # D6 + D7: Parse numeric tags once for both gap and duplicate detection.
+        # D7 note: the spec calls for per-monitor-action grouping to suppress
+        # cross-block duplicates, but that requires the RequirementGraph
+        # (not available here — only SemanticModel). This file-level
+        # version will flag cross-block duplicates as false positives
+        # on files like quic_packet.ivy that repeat tags across handlers.
         file_tags: list[int] = []
         tag_to_line: dict[int, int] = {}
+        seen_tags: dict[int, int] = {}
         for ann in annotations:
             for tag in ann.tags:
                 parts = tag.split(":")
                 numeric = parts[-1] if parts else tag
                 try:
                     val = int(numeric)
-                    file_tags.append(val)
-                    tag_to_line.setdefault(val, ann.line)
                 except ValueError:
-                    pass
+                    continue
+                file_tags.append(val)
+                tag_to_line.setdefault(val, ann.line)
 
+                # D7: flag duplicate tags within the file
+                if val in seen_tags:
+                    line_len = len(lines[ann.line]) if ann.line < len(lines) else 0
+                    diags.append(
+                        lsp.Diagnostic(
+                            range=lsp.Range(
+                                start=lsp.Position(ann.line, 0),
+                                end=lsp.Position(ann.line, line_len),
+                            ),
+                            message=(
+                                f"Duplicate RFC tag [{val}] — also at"
+                                f" line {seen_tags[val] + 1}."
+                            ),
+                            severity=lsp.DiagnosticSeverity.Warning,
+                            source="ivy-lsp-semantic",
+                            code="ivy.rfc.tagDuplicate",
+                        )
+                    )
+                else:
+                    seen_tags[val] = ann.line
+
+        # D6: tag gap detection (needs the fully collected file_tags)
         if len(set(file_tags)) >= 5:
             tag_set = sorted(set(file_tags))
             tag_range = tag_set[-1] - tag_set[0] + 1
@@ -356,41 +385,6 @@ def compute_semantic_diagnostics(
                             code="ivy.rfc.tagGap",
                         )
                     )
-
-        # D7: RFC tag duplicate detection (file-level).
-        # The spec calls for per-monitor-action grouping to suppress
-        # cross-block duplicates, but that requires the RequirementGraph
-        # (not available here — only SemanticModel). This file-level
-        # version will flag cross-block duplicates as false positives
-        # on files like quic_packet.ivy that repeat tags across handlers.
-        seen_tags: dict[int, int] = {}
-        for ann in annotations:
-            for tag in ann.tags:
-                parts = tag.split(":")
-                numeric = parts[-1] if parts else tag
-                try:
-                    val = int(numeric)
-                except ValueError:
-                    continue
-                if val in seen_tags:
-                    line_len = len(lines[ann.line]) if ann.line < len(lines) else 0
-                    diags.append(
-                        lsp.Diagnostic(
-                            range=lsp.Range(
-                                start=lsp.Position(ann.line, 0),
-                                end=lsp.Position(ann.line, line_len),
-                            ),
-                            message=(
-                                f"Duplicate RFC tag [{val}] — also at"
-                                f" line {seen_tags[val] + 1}."
-                            ),
-                            severity=lsp.DiagnosticSeverity.Warning,
-                            source="ivy-lsp-semantic",
-                            code="ivy.rfc.tagDuplicate",
-                        )
-                    )
-                else:
-                    seen_tags[val] = ann.line
 
     # D8: Shadow declaration detection
     from ivy_lsp.core.semantic.nodes import SymbolNode
