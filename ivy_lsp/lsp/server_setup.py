@@ -7,6 +7,7 @@ Methods on this mixin operate on ``self`` attributes from
 import logging
 import os
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING, Optional, Tuple
 
@@ -60,7 +61,8 @@ class ServerSetupMixin(_SetupBase):
         2. WorkspaceContext.detect_only --- fast workspace config (no indexes)
         3. _create_resolver --- include resolver + staging
         4. _create_parser --- z3 detection + parser creation
-        5. ★ _parser_ready_event.set() --- documentSymbol unblocked
+        5. ★ _parser_ready_event.set() --- documentSymbol unblocked (on happy path;
+           on_initialized's finally block is the fallback for error paths)
         6. Background thread: load_indexes() --- offline index (best-effort)
         7. _create_indexer --- indexer construction + workspace scan
         8. _setup_analysis_pipeline --- semantic model + adapters + pipeline
@@ -175,13 +177,11 @@ class ServerSetupMixin(_SetupBase):
         # Kick off offline index loading in a background thread.
         # If it finishes before _create_indexer checks has_index(),
         # the fast prepopulation path is used; otherwise live scan runs.
-        import threading
-
-        _index_loader = threading.Thread(
+        self._index_loader = threading.Thread(
             target=self._load_offline_indexes_background,
             daemon=True,
         )
-        _index_loader.start()
+        self._index_loader.start()
 
         with timed_phase(
             logger,
