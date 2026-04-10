@@ -263,6 +263,20 @@ def compute_requirement_diagnostics(
     return diags
 
 
+def _protocol_from_path(filepath: str) -> str | None:
+    """Extract protocol name from a file path.
+
+    Looks for 'protocol-testing/{protocol}/' in the path.
+    Returns None if the path doesn't match this layout.
+    """
+    marker = "protocol-testing/"
+    idx = filepath.find(marker)
+    if idx < 0:
+        return None
+    rest = filepath[idx + len(marker) :]
+    return rest.split("/")[0] if "/" in rest else None
+
+
 def compute_semantic_diagnostics(
     model: Any,
     filepath: str,
@@ -391,7 +405,12 @@ def compute_semantic_diagnostics(
         for name, nodes in model._nodes_by_name.items():
             sym_nodes = [n for n in nodes if isinstance(n, SymbolNode)]
             local_nodes = [n for n in sym_nodes if n.file == abs_path]
-            other_nodes = [n for n in sym_nodes if n.file != abs_path]
+            local_proto = _protocol_from_path(abs_path)
+            other_nodes = [
+                n
+                for n in sym_nodes
+                if n.file != abs_path and _protocol_from_path(n.file) == local_proto
+            ]
             if local_nodes and other_nodes:
                 for local in local_nodes:
                     for other in other_nodes:
@@ -423,7 +442,8 @@ def compute_semantic_diagnostics(
     for m in _ASSERTION_RE.finditer(source):
         line_no = source[: m.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
-        if not _TAG_RE.search(line_text):
+        next_line = lines[line_no + 1] if line_no + 1 < len(lines) else ""
+        if not _TAG_RE.search(line_text) and not _TAG_RE.search(next_line):
             diags.append(
                 lsp.Diagnostic(
                     range=lsp.Range(
