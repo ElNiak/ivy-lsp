@@ -534,6 +534,21 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             except Exception:
                 logger.debug("WorkspaceContext reload failed", exc_info=True)
 
+        # Refresh staging directory so ivy_verify/ivy_compile pick up
+        # renamed or newly added .ivy files without a server restart.
+        resolver = ctx.include_resolver
+        if resolver is not None:
+            try:
+                resolver.cleanup_staging()
+                new_staging = resolver.create_staging_directory()
+                if hasattr(resolver, "build_layered_staging") and getattr(
+                    resolver, "_workspace_layers", None
+                ):
+                    resolver.build_layered_staging()
+                logger.info("Refreshed staging directory: %s", new_staging)
+            except Exception:
+                logger.debug("Staging refresh failed", exc_info=True)
+
         return _tc.finish({"summaries": summaries})
 
 

@@ -699,6 +699,23 @@ class IncludeResolver:
             len(result.collision_map),
         )
         assert self._staging_dir is not None
+
+        # Symlink stdlib files so ivy_check finds them in the staging CWD.
+        # Project files take priority (skip if symlink already exists).
+        std_dir = self._get_std_include_dir()
+        if std_dir and os.path.isdir(std_dir):
+            stdlib_count = 0
+            for fn in os.listdir(std_dir):
+                if fn.endswith(".ivy"):
+                    link_path = os.path.join(self._staging_dir, fn)
+                    if not os.path.exists(link_path):
+                        try:
+                            os.symlink(os.path.join(std_dir, fn), link_path)
+                            stdlib_count += 1
+                        except OSError as exc:
+                            logger.debug("Could not symlink stdlib %s: %s", fn, exc)
+            logger.info("Staged %d stdlib files from %s", stdlib_count, std_dir)
+
         return self._staging_dir
 
     def cleanup_staging(self) -> None:
