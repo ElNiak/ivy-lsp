@@ -125,3 +125,61 @@ class TestIncludeResolutionFallback:
         diags = check_structural_issues(source, filepath, indexer=indexer)
         unresolved = [d for d in diags if "Unresolved include" in d.message]
         assert len(unresolved) == 0
+
+
+@pytest.mark.unit
+class TestCollisionCountFiltering:
+    """Bug 2: Collision count must only count within active layers."""
+
+    def _make_ctx(self, resolver):
+        from ivy_lsp.mcp.context import ToolContext
+
+        ctx = ToolContext.__new__(ToolContext)
+        ctx.workspace_root = "/ws"
+        ctx.workspace_config = MagicMock()
+        ctx.workspace_config.workspace_layers = []
+        ctx.include_resolver = resolver
+
+        ws = MagicMock()
+        ws.active_group = "test-group"
+        ws.active_layers = list(resolver._active_layers)
+        ws.set_by = "test"
+        ctx.active_workspace = ws
+
+        return ctx
+
+    def test_cross_protocol_collisions_excluded(self):
+        """Collisions between files in different protocols should not be counted."""
+        resolver = MagicMock()
+        resolver._file_to_layer = {
+            "/ws/protocol-testing/bgp/bgp_stack/types.ivy": "bgp",
+            "/ws/protocol-testing/quic/quic_stack/types.ivy": "quic",
+        }
+        resolver._active_layers = {"bgp"}
+        resolver._collision_map = {
+            "types.ivy": [
+                "/ws/protocol-testing/bgp/bgp_stack/types.ivy",
+                "/ws/protocol-testing/quic/quic_stack/types.ivy",
+            ]
+        }
+
+        result = self._make_ctx(resolver).build_context_metadata()
+        assert result["collisions_in_scope"] == 0
+
+    def test_same_protocol_collisions_counted(self):
+        """Collisions between files in the same protocol should be counted."""
+        resolver = MagicMock()
+        resolver._file_to_layer = {
+            "/ws/protocol-testing/quic/quic_stack/types.ivy": "quic",
+            "/ws/protocol-testing/quic/quic_utils/types.ivy": "quic",
+        }
+        resolver._active_layers = {"quic"}
+        resolver._collision_map = {
+            "types.ivy": [
+                "/ws/protocol-testing/quic/quic_stack/types.ivy",
+                "/ws/protocol-testing/quic/quic_utils/types.ivy",
+            ]
+        }
+
+        result = self._make_ctx(resolver).build_context_metadata()
+        assert result["collisions_in_scope"] == 1

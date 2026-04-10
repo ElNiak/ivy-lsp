@@ -229,7 +229,8 @@ class ToolContext:
                         if sum(
                             1
                             for v in variants
-                            if ftl.get(os.path.realpath(v)) in active
+                            if ftl.get(v) in active
+                            or ftl.get(os.path.realpath(v)) in active
                         )
                         > 1
                     )
