@@ -8,10 +8,13 @@ and subprocess execution. They are called by:
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
+import shutil
 from typing import Any
 
+from ivy_lsp.core.environment import detect_z3_dir
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.infra.utils.async_subprocess import run_ivy_subprocess
 from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
@@ -132,6 +135,46 @@ async def run_ivy_check(
     return response
 
 
+def _find_workspace_root(filepath: str) -> str | None:
+    """Walk up from filepath looking for .ivyworkspace marker."""
+    current = os.path.dirname(os.path.abspath(filepath))
+    for _ in range(10):
+        if os.path.isfile(os.path.join(current, ".ivyworkspace")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def _get_ivy_include_dir() -> str | None:
+    """Find the Ivy include/1.7 directory from the installed package."""
+    try:
+        import ivy as _ivy
+
+        return os.path.join(os.path.dirname(_ivy.__file__), "include", "1.7")
+    except ImportError:
+        return None
+
+
+def _stage_workspace_files(workspace_root: str, include_dir: str) -> list[str]:
+    """Copy all .ivy files from workspace subdirectories into include_dir.
+
+    Returns list of absolute paths of staged files (for cleanup).
+    """
+    staged: list[str] = []
+    for ivy_file in glob.glob(
+        os.path.join(workspace_root, "**", "*.ivy"), recursive=True
+    ):
+        if "_tests" in ivy_file or "_test" in os.path.basename(ivy_file):
+            continue
+        dest = os.path.join(include_dir, os.path.basename(ivy_file))
+        shutil.copy2(ivy_file, dest)
+        staged.append(dest)
+    return staged
+
+
 async def run_ivy_compile(
     filepath: str,
     workspace_root: str,
@@ -153,12 +196,34 @@ async def run_ivy_compile(
         resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
         cwd = os.path.dirname(resolved)
         os.makedirs(os.path.join(cwd, "build"), exist_ok=True)
+
+        # Stage workspace files into Ivy's include dir for target=test
+        staged_files: list[str] = []
+        if target == "test":
+            ws_root = _find_workspace_root(filepath)
+            include_dir = _get_ivy_include_dir()
+            if ws_root and include_dir and os.path.isdir(include_dir):
+                staged_files = _stage_workspace_files(ws_root, include_dir)
+
+        # Build Z3DIR-aware environment
+        env = None
+        z3_dir = detect_z3_dir()
+        if z3_dir:
+            env = {**os.environ, "Z3DIR": z3_dir}
+
         cmd = ["ivyc", f"target={target}"]
         if isolate:
             cmd.append(f"isolate={isolate}")
         cmd.append(os.path.basename(resolved))
 
-        result = await run_ivy_subprocess(cmd, timeout=timeout, cwd=cwd)
+        try:
+            result = await run_ivy_subprocess(cmd, timeout=timeout, cwd=cwd, env=env)
+        finally:
+            for f in staged_files:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
         raw_output = "\n".join(result.output_lines).strip()
         diagnostics = parse_ivy_output(raw_output)
 
