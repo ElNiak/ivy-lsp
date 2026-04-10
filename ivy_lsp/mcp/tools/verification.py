@@ -18,7 +18,6 @@ from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_p
 from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
 from ivy_lsp.mcp.tools._helpers import resolve_scope, validated_path_or_error
 from ivy_lsp.mcp.tools.verification_cache import (
-    CACHE_MAX_SIZE,
     CacheEntry,
     cache_is_fresh,
     cache_per_isolate_results,
@@ -44,6 +43,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         use_cache: bool = False,
         compact: bool = True,
         scope: str = "",
+        timeout: float = 120.0,
     ) -> dict:
         """Run ivy_check on an Ivy file to verify formal properties.
 
@@ -61,6 +61,8 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
             scope: Optional test scope name.  When set and the workspace
                 context has a matching scope, the scope name is included in
                 the result summary.  Empty string (default) = no scoping.
+            timeout: Maximum seconds to wait for ivy_check (default 120).
+                Complex models with many isolates may need longer timeouts.
         """
         if not shutil.which("ivy_check"):
             return error_response(
@@ -154,6 +156,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                     isolate=isolate,
                     staging_dir=ctx.staging_dir,
                     resolver=ctx.include_resolver,
+                    timeout=timeout,
                 )
 
                 if not result.get("success", True):

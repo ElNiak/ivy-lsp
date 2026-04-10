@@ -103,7 +103,8 @@ async def run_ivy_check(
         raw_output = "\n".join(result.output_lines)
         diagnostics = parse_ivy_output(raw_output)
 
-    response = {
+    timed_out = "Timed out" in result.message
+    response: dict[str, Any] = {
         "success": result.success
         and not any(d["severity"] == "error" for d in diagnostics),
         "diagnostics": diagnostics,
@@ -112,6 +113,9 @@ async def run_ivy_check(
         "raw_output": raw_output.strip(),
         "duration_seconds": round(result.duration, 2),
     }
+    if timed_out:
+        response["timed_out"] = True
+        response["error_summary"] = result.message
     log_phase(
         log,
         category=LogCategory.DIAGNOSTIC,
