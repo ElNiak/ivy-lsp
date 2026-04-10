@@ -217,6 +217,56 @@ def check_duplicate_tags(
     return diags
 
 
+_DECL_PARAM_RE = re.compile(
+    r"^\s*(relation|function)\s+([\w.]+)\s*\(([^)]+)\)", re.MULTILINE
+)
+
+
+def check_lowercase_params(
+    source: str,
+    filepath: str,
+) -> List[Dict[str, Any]]:
+    """Check for lowercase-initial parameters in relation/function declarations.
+
+    In Ivy, uppercase-initial names are logical variables (universally
+    quantified). Lowercase-initial names are treated as constant references
+    and will cause 'unknown symbol' errors at compile time.
+
+    Only checks ``relation`` and ``function`` declarations. ``action``
+    parameters are concrete and legitimately use lowercase names.
+    """
+    diags: List[Dict[str, Any]] = []
+
+    for match in _DECL_PARAM_RE.finditer(source):
+        kind = match.group(1)
+        params_str = match.group(3)
+        line_no = source[: match.start()].count("\n") + 1
+
+        for param in params_str.split(","):
+            param = param.strip()
+            if not param:
+                continue
+            name = param.split(":")[0].strip()
+            if not name:
+                continue
+            if name[0].islower():
+                diags.append(
+                    {
+                        "line": line_no,
+                        "severity": "error",
+                        "message": (
+                            f"Parameter '{name}' in {kind} declaration must"
+                            f" start with uppercase (Ivy treats lowercase"
+                            f" as constant references)"
+                        ),
+                        "source": "ivy-lint",
+                        "code": "ivy.declaration.lowercaseParam",
+                    }
+                )
+
+    return diags
+
+
 _REQUIREMENT_KEYWORDS = frozenset({"require", "ensure", "assume", "assert"})
 _SUPPRESS_KEYWORDS = frozenset({"todo", "fixme", "disabled", "skip", "intentional"})
 

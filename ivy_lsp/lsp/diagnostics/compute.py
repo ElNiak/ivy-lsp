@@ -48,6 +48,7 @@ def check_structural_issues(
     from ivy_lsp.core.structural_lint import (
         check_commented_out_requires,
         check_duplicate_tags,
+        check_lowercase_params,
         check_structural_issues_raw,
         check_unresolved_includes_raw,
     )
@@ -79,6 +80,7 @@ def check_structural_issues(
 
     raw.extend(check_duplicate_tags(source, filepath))
     raw.extend(check_commented_out_requires(source, filepath))
+    raw.extend(check_lowercase_params(source, filepath))
 
     lines = source.split("\n")
     diags: List[lsp.Diagnostic] = []

@@ -179,6 +179,23 @@ _reg(
     )
 )
 
+# -- ivy.declaration.* -----------------------------------------------------
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.declaration.lowercaseParam",
+        title="Lowercase parameter in {kind} declaration: '{name}'",
+        explanation=(
+            "Ivy treats lowercase-initial names as constant references, not "
+            "type variables. In relation and function declarations, parameters "
+            "must start with an uppercase letter to be treated as universally "
+            "quantified logical variables."
+        ),
+        default_severity=lsp.DiagnosticSeverity.Error,
+        source="ivy-lint",
+    )
+)
+
 # -- ivy.action.* ----------------------------------------------------------
 
 _reg(

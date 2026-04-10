@@ -179,3 +179,49 @@ def test_intentional_comment_suppressed():
     issues = check_commented_out_requires(source, "/fake/test.ivy")
     commented = [i for i in issues if i.get("code") == "ivy.require.commentedOut"]
     assert all(c["severity"] in ("hint", "info") for c in commented)
+
+
+# --- D5: Lowercase parameter tests ---
+
+from ivy_lsp.core.structural_lint import check_lowercase_params
+
+
+def test_lowercase_relation_param_flagged():
+    source = "#lang ivy1.7\n\nrelation connected(src:cid, dst:cid)\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    assert len(issues) == 2
+    assert issues[0]["severity"] == "error"
+    assert "src" in issues[0]["message"]
+    assert "dst" in issues[1]["message"]
+
+
+def test_uppercase_relation_param_accepted():
+    source = "#lang ivy1.7\n\nrelation connected(Src:cid, Dst:cid)\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    assert len(issues) == 0
+
+
+def test_lowercase_function_param_flagged():
+    source = "#lang ivy1.7\n\nfunction count(x:nat) : nat\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    assert len(issues) == 1
+    assert "x" in issues[0]["message"]
+
+
+def test_action_lowercase_param_not_flagged():
+    source = "#lang ivy1.7\n\naction send(src:cid, dst:cid)\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    assert len(issues) == 0
+
+
+def test_relation_no_params_not_flagged():
+    source = "#lang ivy1.7\n\nrelation connected\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    assert len(issues) == 0
+
+
+def test_mixed_case_params():
+    source = "#lang ivy1.7\n\nrelation link(X:node, y:node)\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    assert len(issues) == 1
+    assert "y" in issues[0]["message"]
