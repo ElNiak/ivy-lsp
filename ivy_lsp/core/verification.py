@@ -93,14 +93,13 @@ async def run_ivy_check(
         payload={"filepath": filepath, "isolate": isolate},
     ):
         resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
+        cwd = os.path.dirname(resolved)
         cmd = ["ivy_check"]
         if isolate:
             cmd.append(f"isolate={isolate}")
-        cmd.append(resolved)
+        cmd.append(os.path.basename(resolved))
 
-        result = await run_ivy_subprocess(
-            cmd, timeout=timeout, cwd=os.path.dirname(resolved)
-        )
+        result = await run_ivy_subprocess(cmd, timeout=timeout, cwd=cwd)
         raw_output = "\n".join(result.output_lines)
         diagnostics = parse_ivy_output(raw_output)
 
@@ -148,14 +147,14 @@ async def run_ivy_compile(
         payload={"filepath": filepath, "target": target, "isolate": isolate},
     ):
         resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
+        cwd = os.path.dirname(resolved)
+        os.makedirs(os.path.join(cwd, "build"), exist_ok=True)
         cmd = ["ivyc", f"target={target}"]
         if isolate:
             cmd.append(f"isolate={isolate}")
-        cmd.append(resolved)
+        cmd.append(os.path.basename(resolved))
 
-        result = await run_ivy_subprocess(
-            cmd, timeout=timeout, cwd=os.path.dirname(resolved)
-        )
+        result = await run_ivy_subprocess(cmd, timeout=timeout, cwd=cwd)
         raw_output = "\n".join(result.output_lines).strip()
         diagnostics = parse_ivy_output(raw_output)
 
@@ -193,6 +192,7 @@ async def run_ivy_show(
     staging_dir: str | None = None,
     timeout: float = 30.0,
     resolver: Any | None = None,
+    coi: bool = True,
 ) -> dict[str, Any]:
     """Run ivy_show and return model info with structured diagnostics."""
     with timed_phase(
@@ -201,18 +201,21 @@ async def run_ivy_show(
         phase="verification",
         name="ivy_show",
         channel="tool",
-        payload={"filepath": filepath, "isolate": isolate},
+        payload={"filepath": filepath, "isolate": isolate, "coi": coi},
     ):
         resolved = resolve_staging_path(filepath, staging_dir, resolver=resolver)
+        cwd = os.path.dirname(resolved)
         cmd = ["ivy_show"]
+        if not coi:
+            cmd.append("coi=false")
         if isolate:
             cmd.append(f"isolate={isolate}")
-        cmd.append(resolved)
+        cmd.append(os.path.basename(resolved))
 
         result = await run_ivy_subprocess(
             cmd,
             timeout=timeout,
-            cwd=os.path.dirname(resolved),
+            cwd=cwd,
             use_semaphore=False,
         )
         raw_output = "\n".join(result.output_lines).strip()
