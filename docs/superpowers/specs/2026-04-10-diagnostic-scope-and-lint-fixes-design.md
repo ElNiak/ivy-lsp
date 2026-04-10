@@ -16,12 +16,12 @@
 
 ## Bug 2: Collision Count Not Layer-Filtered
 
-**Root cause:** The workspace context metadata reports global collision counts from `resolver._collision_map`, which covers all files across all protocols in `protocol-testing/`. For a quic workspace with 11 layer paths, this inflates the count to 189 (includes cross-protocol duplicates that are never visible to the active workspace).
+**Root cause:** The MCP context builder reports global collision counts from `resolver._collision_map`, which covers all files across all protocols in `protocol-testing/`. For a quic workspace with 11 layer paths, this inflates the count to 189 (includes cross-protocol duplicates that are never visible to the active workspace).
 
 **Fix:** Filter the collision map to only count collisions where at least two colliding files fall within the active workspace's `include_paths` or `workspace_layers`. The filtering happens in the context builder where the collision count is computed, not in the resolver itself.
 
 **Files:**
-- `ivy_lsp/core/workspace/context.py:182-198` — filter `_collision_map` entries by active layer paths
+- `ivy_lsp/mcp/context.py:222-239` — filter `_collision_map` entries by active layer paths
 
 **Correctness:** This is a display/metadata change. No resolution logic is affected.
 
@@ -100,7 +100,7 @@ Also register in `diagnostics/codes.py` with `DiagnosticSeverity.Error`.
 | File | Bugs | Change |
 |------|------|--------|
 | `ivy_lsp/lsp/diagnostics/compute.py` | 1, 3 | Fallback resolver wrapper; protocol-scoped shadow filter |
-| `ivy_lsp/core/workspace/context.py` | 2 | Filter collision count to active layers |
+| `ivy_lsp/mcp/context.py` | 2 | Filter collision count to active layers |
 | `ivy_lsp/core/structural_lint.py` | 4 | Add `check_lowercase_params` |
 | `ivy_lsp/core/diagnostics/codes.py` | 4 | Register `ivy.declaration.lowercaseParam` |
 
