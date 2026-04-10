@@ -728,6 +728,7 @@ def inject_scope_metadata(
 
 
 from ivy_lsp.mcp.tools.analysis import register_analysis_tools
+from ivy_lsp.mcp.tools.iut_testing import register_iut_testing_tools
 from ivy_lsp.mcp.tools.patterns import register_pattern_tools
 from ivy_lsp.mcp.tools.propagation import register_propagation_tools
 from ivy_lsp.mcp.tools.quality import register_quality_tools
@@ -750,6 +751,7 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_quality_tools(mcp, ctx)
     register_workspace_tools(mcp, ctx)
     register_propagation_tools(mcp, ctx)
+    register_iut_testing_tools(mcp, ctx)
 
 
 __all__ = [
