@@ -247,7 +247,7 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                 context has a matching scope, the scope name is included in
                 the result summary.  Empty string (default) = no scoping.
         """
-        if not shutil.which("ivyc") and not ctx.docker_image:
+        if not shutil.which("ivyc") and ctx.executor is None:
             return error_response(
                 "ivyc CLI not found on PATH and no Docker image configured. "
                 "This tool requires the Ivy compiler, typically available "
