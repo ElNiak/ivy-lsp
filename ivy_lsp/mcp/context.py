@@ -52,6 +52,47 @@ def _check_structural_issues(
     return diags
 
 
+class _StagingDirDescriptor:
+    """Descriptor that reads staging_dir live from the include resolver.
+
+    When accessed, checks (in order):
+    1. The live ``_staging_dir`` from the include resolver (via
+       ``include_resolver`` descriptor or ``_lsp_server_ref``).
+    2. A directly assigned snapshot (set via ``ctx.staging_dir = val``).
+    3. None.
+
+    This ensures the sidecar picks up rebuilt staging directories after
+    workspace switches or ``ivy_index`` runs.
+    """
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self._attr = f"_{name}_snapshot"
+
+    def __get__(self, obj: Any, objtype: type | None = None) -> Any:
+        if obj is None:
+            return self
+        resolver = None
+        direct_resolver = getattr(obj, "_include_resolver_value", None)
+        if direct_resolver is not None:
+            resolver = direct_resolver
+        else:
+            server = getattr(obj, "_lsp_server_ref", None)
+            if server is not None:
+                indexer = getattr(server, "_indexer", None)
+                if indexer is not None:
+                    resolver = getattr(indexer, "resolver", None)
+        if resolver is not None:
+            live = getattr(resolver, "_staging_dir", None)
+            if live is not None:
+                return live
+        return getattr(obj, self._attr, None)
+
+    def __set__(self, obj: Any, value: Any) -> None:
+        if isinstance(value, _StagingDirDescriptor):
+            value = None
+        setattr(obj, self._attr, value)
+
+
 class _IncludeResolverDescriptor:
     """Descriptor that provides lazy resolution for include_resolver.
 
@@ -95,9 +136,9 @@ class ToolContext:
     """
 
     root: str
-    staging_dir: str | None
     executor: Any
-    base_path: str | None
+    base_path: str | None = None
+    staging_dir: str | None = _StagingDirDescriptor()  # type: ignore[assignment]
 
     # Callable helpers — assigned after construction inside start_mcp()
     find_ivy_files: Callable[..., list[str]] = field(default=lambda: [])
@@ -250,7 +291,20 @@ class ToolContext:
         ctx.find_ivy_files = _find_files
         ctx.include_resolver = resolver
         ctx._lsp_server_ref = server
-        ctx.workspace_context = getattr(server, "_workspace_context", None)
+        # Load workspace context from offline .ivy-index/ artifacts.
+        # The standalone MCP path loads this via a background prewarm
+        # thread (server.py:_prewarm_fn), but the sidecar runs inside the
+        # LSP process and must load it directly.  WorkspaceContext.load()
+        # reads manifest JSON from disk — fast enough for synchronous use.
+        _ws_ctx = getattr(server, "_workspace_context", None)
+        if _ws_ctx is None and ws_root:
+            try:
+                from ivy_lsp.core.workspace.context import WorkspaceContext
+
+                _ws_ctx = WorkspaceContext.load(ws_root)
+            except Exception:
+                pass
+        ctx.workspace_context = _ws_ctx
 
         async def _get_model():
             return server._semantic_model
