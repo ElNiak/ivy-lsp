@@ -80,3 +80,48 @@ class TestShadowDiagnosticScoping:
         diags = compute_semantic_diagnostics(model, filepath, source)
         shadow_diags = [d for d in diags if d.code == "ivy.include.shadowDeclaration"]
         assert len(shadow_diags) == 1
+
+
+from unittest.mock import MagicMock
+
+
+@pytest.mark.unit
+class TestIncludeResolutionFallback:
+    """Bug 1: Partitioned resolver must fall back to full resolver."""
+
+    def test_fallback_when_partitioned_returns_none(self):
+        """If resolve_partitioned returns None, fallback to resolve."""
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
+
+        source = "#lang ivy1.7\n\ninclude quic_types\n"
+        filepath = "/ws/protocol-testing/quic/quic_stack/test.ivy"
+
+        indexer = MagicMock()
+        resolver = MagicMock()
+        resolver.resolve_partitioned.return_value = None
+        resolver.resolve.return_value = (
+            "/ws/protocol-testing/quic/quic_stack/quic_types.ivy"
+        )
+        resolver._partition_staging = {"some_partition": ["file"]}
+        indexer.resolver = resolver
+
+        diags = check_structural_issues(source, filepath, indexer=indexer)
+        unresolved = [d for d in diags if "Unresolved include" in d.message]
+        assert len(unresolved) == 0
+
+    def test_no_fallback_when_partitioned_resolves(self):
+        """If resolve_partitioned succeeds, don't call fallback."""
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
+
+        source = "#lang ivy1.7\n\ninclude quic_types\n"
+        filepath = "/ws/protocol-testing/quic/quic_stack/test.ivy"
+
+        indexer = MagicMock()
+        resolver = MagicMock()
+        resolver.resolve_partitioned.return_value = "/ws/quic_types.ivy"
+        resolver._partition_staging = {"some_partition": ["file"]}
+        indexer.resolver = resolver
+
+        diags = check_structural_issues(source, filepath, indexer=indexer)
+        unresolved = [d for d in diags if "Unresolved include" in d.message]
+        assert len(unresolved) == 0

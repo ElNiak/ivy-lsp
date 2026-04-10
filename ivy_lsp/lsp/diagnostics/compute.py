@@ -59,10 +59,17 @@ def check_structural_issues(
     resolve_cb = None
     if indexer:
         resolver = indexer.resolver
-        # Check for real IncludeResolver with active partition staging.
         partition_staging = getattr(resolver, "_partition_staging", None)
         if isinstance(partition_staging, dict) and partition_staging:
-            resolve_cb = resolver.resolve_partitioned
+            _partitioned = resolver.resolve_partitioned
+            _full = resolver.resolve
+
+            def resolve_cb(name, from_file):
+                result = _partitioned(name, from_file)
+                if result is None:
+                    result = _full(name, from_file)
+                return result
+
         else:
             resolve_cb = resolver.resolve
     if resolve_cb is not None:
