@@ -169,14 +169,28 @@ async def _cancel_safe_wait_for(coro, timeout):
     cancellation happens on a child task — not on the transport-bound calling
     task.  This prevents ``CancelledError`` from disrupting the HTTP/SSE
     connection that delivers the timeout response to the client.
+
+    A done-callback is registered before cancellation to consume orphaned
+    results from ``run_in_executor`` tasks that complete after the timeout.
+    Without this, the completed task's result can flow back into the MCP SDK's
+    request handler and trigger a second ``message.respond()`` call, crashing
+    the server with ``AssertionError: Request already responded to``.
     """
     task = asyncio.ensure_future(coro)
     done, _ = await asyncio.wait({task}, timeout=timeout)
     if task in done:
         return task.result()
+
+    def _discard_result(t):
+        try:
+            t.result()
+        except Exception:
+            pass
+
+    task.add_done_callback(_discard_result)
     task.cancel()
     try:
-        await task
+        await asyncio.shield(task)
     except (asyncio.CancelledError, Exception):
         pass
     raise asyncio.TimeoutError()
