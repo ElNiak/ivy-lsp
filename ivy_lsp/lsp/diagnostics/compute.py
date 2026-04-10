@@ -277,6 +277,11 @@ def _protocol_from_path(filepath: str) -> str | None:
 
     Looks for 'protocol-testing/{protocol}/' in the path.
     Returns None if the path doesn't match this layout.
+
+    Limitation: for APT-layout paths like
+    ``protocol-testing/apt/apt_protocols/quic/...``, this returns
+    ``"apt"`` rather than the actual protocol. This means shadow
+    diagnostics between APT sub-protocols are not suppressed.
     """
     marker = "protocol-testing/"
     idx = filepath.find(marker)
@@ -451,8 +456,7 @@ def compute_semantic_diagnostics(
     for m in _ASSERTION_RE.finditer(source):
         line_no = source[: m.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
-        next_line = lines[line_no + 1] if line_no + 1 < len(lines) else ""
-        if not _TAG_RE.search(line_text) and not _TAG_RE.search(next_line):
+        if not _TAG_RE.search(line_text):
             diags.append(
                 lsp.Diagnostic(
                     range=lsp.Range(
