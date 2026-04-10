@@ -70,6 +70,157 @@ def check_structural_issues_raw(
             }
         )
 
+    # 3. Parameter name style — flag multi-char lowercase param names
+    _DECL_RE = re.compile(r"^(?:relation|function)\s+\w+\(([^)]+)\)", re.MULTILINE)
+    for m in _DECL_RE.finditer(source):
+        decl_line = source[: m.start()].count("\n")
+        line_text = lines[decl_line].lstrip()
+        if line_text.startswith("#"):
+            continue
+        params_str = m.group(1)
+        for param in params_str.split(","):
+            param = param.strip()
+            if ":" not in param:
+                continue
+            name = param.split(":")[0].strip()
+            if len(name) > 1 and name[0].islower():
+                diags.append(
+                    {
+                        "line": decl_line + 1,
+                        "severity": "warning",
+                        "message": (
+                            f"Parameter name '{name}' is a multi-character lowercase "
+                            f"identifier — may collide with Ivy symbols. "
+                            f"Prefer single uppercase letters (e.g., S, D, C)."
+                        ),
+                        "source": "ivy-lint",
+                        "code": "param-name-style",
+                    }
+                )
+
+    # 4. Missing after init — heuristic for uninitialized mutable state
+    _MUTABLE_RE = re.compile(r"^(?:relation|function)\s+(\w+)", re.MULTILINE)
+    mutable_names: set[str] = set()
+    mutable_lines: dict[str, int] = {}
+    for m in _MUTABLE_RE.finditer(source):
+        line_no = source[: m.start()].count("\n")
+        line_text = lines[line_no].lstrip()
+        if line_text.startswith("#"):
+            continue
+        name = m.group(1)
+        mutable_names.add(name)
+        mutable_lines[name] = line_no + 1
+
+    initialized: set[str] = set()
+    in_init = False
+    init_depth = 0
+    for i, line_text in enumerate(lines):
+        stripped = line_text.strip()
+        if "after init" in stripped:
+            in_init = True
+            init_depth = 0
+        if in_init:
+            for ch in stripped:
+                if ch == "{":
+                    init_depth += 1
+                elif ch == "}":
+                    init_depth -= 1
+                    if init_depth <= 0:
+                        in_init = False
+            assign_match = re.match(r"(\w+)(?:\(.*?\))?\s*:=", stripped)
+            if assign_match:
+                initialized.add(assign_match.group(1))
+
+    for name in mutable_names - initialized:
+        diags.append(
+            {
+                "line": mutable_lines[name],
+                "severity": "warning",
+                "message": (
+                    f"'{name}' is never initialized in an 'after init' block "
+                    f"— it will start with arbitrary values."
+                ),
+                "source": "ivy-lint",
+                "code": "missing-init",
+            }
+        )
+
+    # 5. Empty after init blocks
+    _INIT_BLOCK_RE = re.compile(r"after\s+init\s*\{([^}]*)\}", re.MULTILINE | re.DOTALL)
+    for m in _INIT_BLOCK_RE.finditer(source):
+        body = m.group(1).strip()
+        if not body:
+            line_no = source[: m.start()].count("\n") + 1
+            diags.append(
+                {
+                    "line": line_no,
+                    "severity": "warning",
+                    "message": "Empty 'after init' block — no state is initialized.",
+                    "source": "ivy-lint",
+                    "code": "empty-init",
+                }
+            )
+
+    # 6. Duplicate top-level declarations (same file)
+    _TOP_DECL_RE = re.compile(
+        r"^(relation|function|type|individual)\s+(\w+)", re.MULTILINE
+    )
+    seen_decls: dict[str, int] = {}
+    for m in _TOP_DECL_RE.finditer(source):
+        line_no = source[: m.start()].count("\n")
+        line_text = lines[line_no].lstrip()
+        if line_text.startswith("#"):
+            continue
+        name = m.group(2)
+        if name in seen_decls:
+            diags.append(
+                {
+                    "line": line_no + 1,
+                    "severity": "error",
+                    "message": (
+                        f"Duplicate declaration of '{name}' "
+                        f"(first declared at line {seen_decls[name]})."
+                    ),
+                    "source": "ivy-lint",
+                    "code": "duplicate-decl",
+                }
+            )
+        else:
+            seen_decls[name] = line_no + 1
+
+    # 7. Action without require (unguarded state modification)
+    _ACTION_RE = re.compile(r"^(\s*)action\s+\w+[^=]*=\s*\{", re.MULTILINE)
+    for m in _ACTION_RE.finditer(source):
+        action_start = m.end()
+        action_line = source[: m.start()].count("\n")
+        line_text = lines[action_line].lstrip()
+        if line_text.startswith("#"):
+            continue
+        depth = 1
+        pos = action_start
+        while pos < len(source) and depth > 0:
+            if source[pos] == "{":
+                depth += 1
+            elif source[pos] == "}":
+                depth -= 1
+            pos += 1
+        action_body = source[action_start : pos - 1] if pos > action_start else ""
+        has_require = "require " in action_body or "require(" in action_body
+        has_assignment = ":=" in action_body
+        if has_assignment and not has_require:
+            diags.append(
+                {
+                    "line": action_line + 1,
+                    "severity": "hint",
+                    "message": (
+                        "Action modifies state but has no 'require' precondition "
+                        "— consider adding guards."
+                    ),
+                    "source": "ivy-lint",
+                    "code": "unguarded-action",
+                }
+            )
+
     return diags
 
 

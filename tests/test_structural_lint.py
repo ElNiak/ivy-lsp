@@ -225,3 +225,112 @@ def test_mixed_case_params():
     issues = check_lowercase_params(source, "/fake/test.ivy")
     assert len(issues) == 1
     assert "y" in issues[0]["message"]
+
+
+# --- Task 7: param-name-style ---
+
+
+def test_param_name_collision_lowercase_multi_char():
+    source = "#lang ivy1.7\nrelation update_processed(src:bgp_id, dst:bgp_id)\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "param-name-style" in codes
+
+
+def test_param_name_single_letter_ok():
+    source = "#lang ivy1.7\nrelation conn_seen(C:cid)\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "param-name-style" not in codes
+
+
+def test_param_name_function_declaration():
+    source = "#lang ivy1.7\nfunction getsock(addr:ip.addr) : net.socket\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "param-name-style" in codes
+
+
+def test_param_name_in_comment_ignored():
+    source = "#lang ivy1.7\n# relation foo(src:bar)\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "param-name-style" not in codes
+
+
+# --- Task 8: missing-init ---
+
+
+def test_missing_after_init_relation():
+    source = "#lang ivy1.7\nrelation conn_seen(C:cid)\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "missing-init" in codes
+
+
+def test_relation_with_after_init_ok():
+    source = "#lang ivy1.7\nrelation conn_seen(C:cid)\nafter init {\n    conn_seen(C) := false;\n}\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "missing-init" not in codes
+
+
+def test_missing_after_init_function():
+    source = "#lang ivy1.7\nfunction last_pkt(C:cid) : nat\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "missing-init" in codes
+
+
+def test_type_declaration_no_init_needed():
+    source = "#lang ivy1.7\ntype packet_id\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "missing-init" not in codes
+
+
+# --- Task 9: empty-init, duplicate-decl, unguarded-action ---
+
+
+def test_empty_after_init_block():
+    source = "#lang ivy1.7\nrelation foo(C:cid)\nafter init {\n}\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "empty-init" in codes
+
+
+def test_nonempty_after_init_ok():
+    source = (
+        "#lang ivy1.7\nrelation foo(C:cid)\nafter init {\n    foo(C) := false;\n}\n"
+    )
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "empty-init" not in codes
+
+
+def test_duplicate_declaration_same_file():
+    source = "#lang ivy1.7\nrelation foo(C:cid)\nrelation foo(C:cid)\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "duplicate-decl" in codes
+
+
+def test_no_duplicate_different_names():
+    source = "#lang ivy1.7\nrelation foo(C:cid)\nrelation bar(C:cid)\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "duplicate-decl" not in codes
+
+
+def test_unguarded_action():
+    source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "unguarded-action" in codes
+
+
+def test_guarded_action_ok():
+    source = "#lang ivy1.7\naction send(S:cid) = {\n    require connected(S);\n    sent(S) := true;\n}\n"
+    issues = check_structural_issues_raw(source, "/fake/test.ivy")
+    codes = [i.get("code") for i in issues]
+    assert "unguarded-action" not in codes
