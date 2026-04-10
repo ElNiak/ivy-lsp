@@ -149,7 +149,7 @@ _reg(
         code="ivy.module.unresolvedInclude",
         title="Unresolved include: '{module}'",
         explanation="The included module could not be found in the workspace.",
-        default_severity=lsp.DiagnosticSeverity.Warning,
+        default_severity=lsp.DiagnosticSeverity.Error,
         source="ivy-lint",
         has_quick_fix=True,
     )

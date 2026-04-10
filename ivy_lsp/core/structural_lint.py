@@ -152,7 +152,7 @@ def check_unresolved_includes_raw(
                 diags.append(
                     {
                         "line": line_no,
-                        "severity": "warning",
+                        "severity": "error",
                         "message": f"Unresolved include: {inc_name}",
                         "source": "ivy-lint",
                         "code": "unresolved-include",
