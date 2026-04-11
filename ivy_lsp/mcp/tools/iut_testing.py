@@ -212,3 +212,10 @@ def _refine_verdict(subprocess_verdict: str, summary: dict) -> str:
     if status == "timeout":
         return "timeout"
     return subprocess_verdict
+
+
+def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
+    """Register IUT testing tools on the MCP server.
+
+    Placeholder — will be populated in a follow-up commit.
+    """
