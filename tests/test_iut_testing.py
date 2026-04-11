@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -241,3 +243,83 @@ class TestRefineVerdict:
 
     def test_empty_summary_keeps_subprocess(self):
         assert _refine_verdict("error", {}) == "error"
+
+
+class MockToolContext:
+    """Minimal mock for the MCP ToolContext."""
+
+    def __init__(self, root: str):
+        self.root = root
+
+
+class TestIutTestTool:
+    """Tests for the registered ivy_iut_test MCP tool."""
+
+    def _make_tool(self, root: str):
+        """Create the tool function by calling register_iut_testing_tools."""
+        from ivy_lsp.mcp.tools.iut_testing import register_iut_testing_tools
+
+        mock_mcp = MagicMock()
+        captured_fn = None
+
+        def capture_tool():
+            def decorator(fn):
+                nonlocal captured_fn
+                captured_fn = fn
+                return fn
+
+            return decorator
+
+        mock_mcp.tool = capture_tool
+        ctx = MockToolContext(root)
+        register_iut_testing_tools(mock_mcp, ctx)
+        return captured_fn
+
+    def test_panther_not_found(self, tmp_path):
+        tool = self._make_tool(str(tmp_path))
+        with patch("shutil.which", return_value=None):
+            result = asyncio.run(tool(protocol="bgp", test_name="t", iut_name="i"))
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_validation_failure(self, tmp_path):
+        tool = self._make_tool(str(tmp_path))
+        with patch("shutil.which", return_value="/usr/bin/panther"):
+            result = asyncio.run(
+                tool(protocol="nonexistent", test_name="t", iut_name="i")
+            )
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_timeout_verdict(self, tmp_path):
+        proto = tmp_path / "panther" / "plugins" / "protocols" / "client_server" / "bgp"
+        proto.mkdir(parents=True)
+        iut = tmp_path / "panther" / "plugins" / "services" / "iut" / "bgp" / "frr_bgp"
+        iut.mkdir(parents=True)
+
+        tool = self._make_tool(str(tmp_path))
+
+        async def mock_communicate():
+            await asyncio.sleep(10)
+            return b"", b""
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = mock_communicate
+        mock_proc.kill = MagicMock()
+
+        with patch("shutil.which", return_value="/usr/bin/panther"):
+            with patch(
+                "asyncio.create_subprocess_exec",
+                return_value=mock_proc,
+            ):
+                result = asyncio.run(
+                    tool(
+                        protocol="bgp",
+                        test_name="test",
+                        iut_name="frr_bgp",
+                        timeout=1,
+                    )
+                )
+
+        assert result["verdict"] == "timeout"
+        assert result["error"] is not None
