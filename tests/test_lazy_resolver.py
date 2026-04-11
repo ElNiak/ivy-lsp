@@ -123,3 +123,113 @@ def test_from_lsp_server_lazy_resolver_with_late_indexer():
     mock_server._indexer = mock_indexer
 
     assert ctx.include_resolver is late_resolver
+
+
+def test_from_lsp_server_resolve_callback_picks_up_late_indexer(tmp_path):
+    """Resolve callback should find files even when indexer initializes after sidecar start."""
+    from ivy_lsp.mcp.context import ToolContext
+
+    # Use a name that won't collide with stdlib (discover_stdlib_modules
+    # scans the workspace, so common names like "file" may appear there).
+    inc_name = "zz_test_util_unique"
+    ivy_file = f"{inc_name}.ivy"
+
+    # Create a real .ivy file in a nested directory
+    bgp_dir = tmp_path / "protocol-testing" / "bgp" / "bgp_utils"
+    bgp_dir.mkdir(parents=True)
+    (bgp_dir / ivy_file).write_text("#lang ivy1.7\n")
+
+    # Simulate server with no indexer at construction time
+    mock_server = MagicMock()
+    mock_server._indexer = None
+    mock_server._semantic_model = None
+    mock_server._initializing = False
+    mock_server._workspace_context = None
+
+    ctx = ToolContext.from_lsp_server(mock_server)
+
+    # Before indexer: resolve callback should return None (no files known)
+    resolve_cb = ctx.make_resolve_callback()
+    assert resolve_cb(inc_name, str(tmp_path / "test.ivy")) is None
+
+    # Simulate late indexer initialization with a resolver that knows the file
+    mock_resolver = MagicMock()
+    mock_resolver._staging_dir = None
+    mock_resolver._exclude_paths = []
+    mock_resolver._active_layers = None
+    mock_resolver.find_all_ivy_files.return_value = [str(bgp_dir / ivy_file)]
+
+    mock_indexer = MagicMock()
+    mock_indexer.resolver = mock_resolver
+    mock_indexer._workspace_root = str(tmp_path)
+    mock_indexer.requirement_graph = None
+    mock_server._indexer = mock_indexer
+
+    # After indexer: resolve callback should find the file
+    resolve_cb_after = ctx.make_resolve_callback()
+    result = resolve_cb_after(inc_name, str(tmp_path / "test.ivy"))
+    assert result is not None
+    assert ivy_file in result
+
+
+def test_from_lsp_server_structural_diagnostics_no_false_unresolved(tmp_path):
+    """Structural diagnostics resolve includes after late indexer init.
+
+    Verifies that no false 'unresolved-include' diagnostics are produced
+    once the indexer becomes ready.
+    """
+    from ivy_lsp.mcp.context import ToolContext, _check_structural_issues
+
+    # Use a unique name that won't be in stdlib
+    inc_name = "zz_diag_test_util"
+    ivy_file = f"{inc_name}.ivy"
+
+    # Set up workspace with two files: test includes utils
+    utils_dir = tmp_path / "protocol-testing" / "bgp" / "bgp_utils"
+    utils_dir.mkdir(parents=True)
+    (utils_dir / ivy_file).write_text("#lang ivy1.7\n# utility\n")
+
+    test_dir = tmp_path / "protocol-testing" / "bgp" / "bgp_tests"
+    test_dir.mkdir(parents=True)
+    test_file = test_dir / "test.ivy"
+    test_file.write_text(f"#lang ivy1.7\ninclude order\ninclude {inc_name}\n")
+
+    # Server starts with no indexer
+    mock_server = MagicMock()
+    mock_server._indexer = None
+    mock_server._semantic_model = None
+    mock_server._initializing = False
+    mock_server._workspace_context = None
+
+    ctx = ToolContext.from_lsp_server(mock_server)
+
+    # Before indexer ready: expect unresolved for our custom include
+    resolve_cb = ctx.make_resolve_callback()
+    diags = _check_structural_issues(test_file.read_text(), str(test_file), resolve_cb)
+    unresolved = [d for d in diags if d.get("code") == "unresolved-include"]
+    assert len(unresolved) >= 1
+
+    # Simulate indexer becoming ready
+    mock_resolver = MagicMock()
+    mock_resolver._staging_dir = None
+    mock_resolver._exclude_paths = []
+    mock_resolver._active_layers = None
+    mock_resolver.find_all_ivy_files.return_value = [
+        str(utils_dir / ivy_file),
+        str(test_file),
+    ]
+    mock_indexer = MagicMock()
+    mock_indexer.resolver = mock_resolver
+    mock_indexer._workspace_root = str(tmp_path)
+    mock_indexer.requirement_graph = None
+    mock_server._indexer = mock_indexer
+
+    # After indexer ready: custom include should resolve
+    resolve_cb_after = ctx.make_resolve_callback()
+    diags_after = _check_structural_issues(
+        test_file.read_text(), str(test_file), resolve_cb_after
+    )
+    unresolved_after = [d for d in diags_after if d.get("code") == "unresolved-include"]
+    assert (
+        len(unresolved_after) == 0
+    ), f"Expected no unresolved includes after indexer ready, got: {unresolved_after}"

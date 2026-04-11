@@ -255,34 +255,62 @@ class ToolContext:
         from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
         from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_raw
 
-        indexer = server._indexer
-        resolver = indexer.resolver if indexer is not None else None
-        ws_root = indexer._workspace_root if indexer is not None else ""
+        # --- Lazy indexer access ---
+        # The sidecar may start before the indexer is ready. Instead of
+        # snapshotting server._indexer at construction time, we read it
+        # lazily on each call.  A generation counter tracks when the
+        # indexer changes so the basename cache can be rebuilt.
+        _last_indexer_id: list[int | None] = [id(server._indexer)]
 
-        staging_dir = None
-        if resolver is not None and hasattr(resolver, "_staging_dir"):
-            staging_dir = resolver._staging_dir
+        def _get_live_indexer():
+            return getattr(server, "_indexer", None)
 
-        # Build file finder that delegates to the resolver
-        _exclude = DEFAULT_EXCLUDE_DIRS
-        if resolver is not None and hasattr(resolver, "_exclude_paths"):
-            _exclude = _exclude | frozenset(resolver._exclude_paths)
+        def _get_live_resolver():
+            idx = _get_live_indexer()
+            return idx.resolver if idx is not None else None
+
+        def _get_live_ws_root() -> str:
+            idx = _get_live_indexer()
+            if idx is not None:
+                return getattr(idx, "_workspace_root", "") or ""
+            return ""
+
+        def _get_live_exclude():
+            r = _get_live_resolver()
+            base = DEFAULT_EXCLUDE_DIRS
+            if r is not None and hasattr(r, "_exclude_paths"):
+                base = base | frozenset(r._exclude_paths)
+            return base
 
         def _find_files(search_root: str) -> list[str]:
-            if resolver is not None:
-                has_active_ws = bool(getattr(resolver, "_active_layers", None))
-                return resolver.find_all_ivy_files(filter_active=has_active_ws)
-            return _find_ivy_raw(search_root, _exclude)
+            r = _get_live_resolver()
+            if r is not None:
+                has_active_ws = bool(getattr(r, "_active_layers", None))
+                return r.find_all_ivy_files(filter_active=has_active_ws)
+            root = _get_live_ws_root() or search_root
+            return _find_ivy_raw(root, _get_live_exclude()) if root else []
 
-        # Basename cache
-        _basename_cache_obj = BasenameCache(_find_files, ws_root)
-        _get_basename_cache = _basename_cache_obj.get
+        # Basename cache — rebuilt when the indexer identity changes.
+        _basename_cache_obj = BasenameCache(_find_files, "")
+
+        def _get_basename_cache() -> dict[str, list[str]]:
+            current_id = id(_get_live_indexer())
+            if current_id != _last_indexer_id[0]:
+                _last_indexer_id[0] = current_id
+                _basename_cache_obj._root = _get_live_ws_root()
+                _basename_cache_obj.invalidate()
+            return _basename_cache_obj.get()
+
+        # Initial workspace root — may be empty if indexer not ready yet
+        ws_root = _get_live_ws_root()
 
         discovered_stdlib = discover_stdlib_modules()
 
+        # staging_dir=None: the _StagingDirDescriptor reads live from
+        # include_resolver, which reads from _lsp_server_ref.
         ctx = cls(
             root=ws_root,
-            staging_dir=staging_dir,
+            staging_dir=None,
             executor=None,
             base_path=None,
             stdlib_modules=discovered_stdlib,
@@ -290,7 +318,6 @@ class ToolContext:
 
         # Wire up callables backed by the LSP server's live state
         ctx.find_ivy_files = _find_files
-        ctx.include_resolver = resolver
         ctx._lsp_server_ref = server
         # Load workspace context from offline .ivy-index/ artifacts.
         # The standalone MCP path loads this via a background prewarm
@@ -311,8 +338,9 @@ class ToolContext:
             return server._semantic_model
 
         async def _get_req_graph():
-            if indexer is not None:
-                return indexer.requirement_graph
+            idx = _get_live_indexer()
+            if idx is not None:
+                return idx.requirement_graph
             return None
 
         def _get_model_status() -> dict:
@@ -320,9 +348,6 @@ class ToolContext:
                 return {"state": "ready"}
             if server._initializing:
                 return {"state": "building"}
-            # _setup_analysis_pipeline completed (pipeline exists) but
-            # _semantic_model is still None — treat as ready with empty
-            # model rather than "not_built", which blocks all tools.
             if getattr(server, "_analysis_pipeline", None) is not None:
                 return {"state": "ready"}
             return {"state": "not_built"}
