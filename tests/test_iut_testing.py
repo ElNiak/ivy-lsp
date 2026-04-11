@@ -256,7 +256,11 @@ class TestIutTestTool:
     """Tests for the registered ivy_iut_test MCP tool."""
 
     def _make_tool(self, root: str):
-        """Create the tool function by calling register_iut_testing_tools."""
+        """Create the tool function by calling register_iut_testing_tools.
+
+        Patches safe_tool to be a no-op so we test the tool logic directly
+        without needing the full MCP infrastructure (sidecar, config, etc.).
+        """
         from ivy_lsp.mcp.tools.iut_testing import register_iut_testing_tools
 
         mock_mcp = MagicMock()
@@ -272,7 +276,18 @@ class TestIutTestTool:
 
         mock_mcp.tool = capture_tool
         ctx = MockToolContext(root)
-        register_iut_testing_tools(mock_mcp, ctx)
+
+        def noop_safe_tool(**_kwargs):
+            def passthrough(fn):
+                return fn
+
+            return passthrough
+
+        with patch(
+            "ivy_lsp.mcp.tools.iut_testing.safe_tool", noop_safe_tool, create=True
+        ):
+            with patch("ivy_lsp.mcp.tools.safe_tool", noop_safe_tool):
+                register_iut_testing_tools(mock_mcp, ctx)
         return captured_fn
 
     def test_panther_not_found(self, tmp_path):

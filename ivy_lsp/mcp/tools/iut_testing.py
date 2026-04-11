@@ -121,6 +121,8 @@ def _build_experiment_config(
 
 def _prepare_user_config(config_path: str, test_name: str, timeout: int) -> dict:
     """Load a user-provided config and override test_name and timeout."""
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
@@ -222,8 +224,10 @@ def _refine_verdict(subprocess_verdict: str, summary: dict) -> str:
 
 def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
     """Register IUT testing tools on the MCP server."""
+    from ivy_lsp.mcp.tools import safe_tool
 
     @mcp.tool()
+    @safe_tool(ctx=ctx)
     async def ivy_iut_test(
         protocol: str,
         test_name: str,
