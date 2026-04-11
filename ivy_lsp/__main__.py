@@ -7,6 +7,7 @@ Supports three modes:
 """
 
 import atexit
+import hashlib
 import logging
 import os
 import signal
@@ -118,6 +119,22 @@ def _setup_log_rotation() -> str:
     )
     logging.getLogger().addHandler(handler)
     return log_path
+
+
+def _find_session_heartbeat() -> str | None:
+    """Locate this session's heartbeat file, if one was registered.
+
+    The bash launcher writes heartbeat files at
+    ``/tmp/ivy-lsp-sessions/{ws_hash}/{session_tag}.heartbeat``.
+    We reconstruct the path from the same environment variables.
+    """
+    ws_root = os.environ.get("IVY_WORKSPACE_ROOT", "")
+    session_tag = os.environ.get("IVY_SESSION_ID", "")
+    if not ws_root or not session_tag:
+        return None
+    ws_hash = hashlib.sha256(ws_root.encode()).hexdigest()[:12]
+    path = f"/tmp/ivy-lsp-sessions/{ws_hash}/{session_tag}.heartbeat"
+    return path if os.path.exists(path) else None
 
 
 def _overwrite_pid_file() -> str | None:
@@ -277,7 +294,7 @@ def _main_impl(startup_t0: float) -> None:
     # wrapper PID which becomes stale when uvx exits after spawning us).
     _pid_file = _overwrite_pid_file()
 
-    # Clean up PID file on exit.
+    # Clean up PID file and session heartbeat on exit.
     if _pid_file:
 
         def _cleanup_pid(path: str = _pid_file) -> None:
@@ -289,6 +306,22 @@ def _main_impl(startup_t0: float) -> None:
                 logging.getLogger(__name__).debug("PID file cleanup failed: %s", exc)
 
         atexit.register(_cleanup_pid)
+
+    # Remove session heartbeat file so other tooling knows this session
+    # is no longer active.  The heartbeat is written by start-ivy-server.sh
+    # at /tmp/ivy-lsp-sessions/{ws_hash}/{session_tag}.heartbeat.
+    _heartbeat = _find_session_heartbeat()
+    if _heartbeat:
+
+        def _cleanup_heartbeat(path: str = _heartbeat) -> None:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logging.getLogger(__name__).debug("Heartbeat cleanup failed: %s", exc)
+
+        atexit.register(_cleanup_heartbeat)
 
     # Parent-process watchdog: detect when Claude Code (our parent) dies.
     # On macOS/Linux, an orphaned process is reparented to PID 1 (launchd/init).
