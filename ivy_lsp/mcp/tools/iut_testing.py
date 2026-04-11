@@ -221,7 +221,128 @@ def _refine_verdict(subprocess_verdict: str, summary: dict) -> str:
 
 
 def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
-    """Register IUT testing tools on the MCP server.
+    """Register IUT testing tools on the MCP server."""
 
-    Placeholder — will be populated in a follow-up commit.
-    """
+    @mcp.tool()
+    async def ivy_iut_test(
+        protocol: str,
+        test_name: str,
+        iut_name: str,
+        version: str = "",
+        timeout: int = 120,
+        extra_params: dict | None = None,
+        config_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an Ivy test against an IUT via PANTHER's experiment pipeline.
+
+        Generates a temporary experiment config and invokes `panther run`.
+
+        Args:
+            protocol: Protocol name (e.g., "bgp", "quic").
+            test_name: Ivy test file name without .ivy extension.
+            iut_name: Registered IUT plugin name (e.g., "frr_bgp").
+            version: Protocol version (default: protocol's default version).
+            timeout: Total timeout in seconds (default: 120).
+            extra_params: Override version_config values.
+            config_path: Path to existing experiment config YAML. Overrides
+                         generated config when provided.
+        """
+        if not shutil.which("panther"):
+            return {
+                "success": False,
+                "error": "panther CLI not found on PATH. Install PANTHER first.",
+            }
+
+        run_id = str(uuid.uuid4())[:8]
+        using_user_config = config_path is not None
+
+        if not using_user_config:
+            validation_error = _validate_inputs(protocol, test_name, iut_name, ctx.root)
+            if validation_error:
+                return {"success": False, "error": validation_error}
+
+        tmp_dir = os.path.join(tempfile.gettempdir(), f"ivy-iut-{run_id}")
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        try:
+            if using_user_config:
+                config = _prepare_user_config(config_path, test_name, timeout)
+            else:
+                version = version or ""
+                config = _build_experiment_config(
+                    protocol=protocol,
+                    test_name=test_name,
+                    iut_name=iut_name,
+                    version=version,
+                    timeout=timeout,
+                    run_id=run_id,
+                    extra_params=extra_params,
+                )
+
+            final_config_path = os.path.join(tmp_dir, "config.yaml")
+            with open(final_config_path, "w") as f:
+                yaml.dump(config, f, default_flow_style=False)
+        except Exception as exc:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return {"success": False, "error": f"Config error: {exc}"}
+
+        wall_start = time.time()
+        t0 = time.monotonic()
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "panther",
+                "run",
+                "--config",
+                final_config_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=ctx.root,
+            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+            duration = time.monotonic() - t0
+            stdout = stdout_bytes.decode(errors="replace")
+            stderr = stderr_bytes.decode(errors="replace")
+            verdict = "pass" if proc.returncode == 0 else "fail"
+
+        except asyncio.TimeoutError:
+            duration = time.monotonic() - t0
+            if proc is not None:
+                proc.kill()
+            stdout = ""
+            stderr = "Timeout exceeded"
+            verdict = "timeout"
+        except Exception as exc:
+            duration = time.monotonic() - t0
+            stdout = ""
+            stderr = str(exc)
+            verdict = "error"
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        if not using_user_config:
+            output_dir = _find_output_dir_deterministic(ctx.root, run_id)
+        else:
+            output_dir = _find_output_dir_by_timestamp(ctx.root, wall_start)
+
+        summary = _load_experiment_summary(output_dir)
+        iut_logs = _collect_iut_logs(output_dir)
+
+        if summary:
+            verdict = _refine_verdict(verdict, summary)
+
+        return {
+            "verdict": verdict,
+            "test_name": test_name,
+            "iut_name": iut_name,
+            "protocol": protocol,
+            "test_stdout": stdout[-5000:],
+            "test_stderr": stderr[-2000:],
+            "iut_logs": iut_logs[-3000:] if iut_logs else "",
+            "duration_seconds": round(duration, 2),
+            "output_dir": output_dir or "",
+            "experiment_summary": summary,
+            "error": stderr if verdict in ("error", "timeout") else None,
+        }

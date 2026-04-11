@@ -50,6 +50,7 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "ivy_find_variants": 30.0,
     "ivy_serdes_correlation": 30.0,
     "ivy_change_impact": 60.0,
+    "ivy_iut_test": 180.0,
 }
 
 _DEFAULT_TIMEOUT: float = 60.0
@@ -120,6 +121,11 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
         "cost": "medium",
         "category": "propagation",
         "needs_model": True,
+    },
+    "ivy_iut_test": {
+        "cost": "high",
+        "category": "testing",
+        "needs_model": False,
     },
 }
 
