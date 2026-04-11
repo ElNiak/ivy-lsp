@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -213,6 +210,13 @@ class TestCollectIutLogs:
 
     def test_none_dir(self):
         assert _collect_iut_logs(None) == ""
+
+    def test_no_truncation_at_helper_level(self, tmp_path):
+        test_dir = tmp_path / "0_Test_"
+        test_dir.mkdir()
+        (test_dir / "test.log").write_text("x" * 5000)
+        result = _collect_iut_logs(str(tmp_path))
+        assert len(result) > 3000
 
 
 class TestRefineVerdict:

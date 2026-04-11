@@ -146,7 +146,13 @@ def _find_output_dir_deterministic(root: str, run_id: str) -> str | None:
 
 
 def _find_output_dir_by_timestamp(root: str, start_time: float) -> str | None:
-    """Find the newest output directory created after start_time."""
+    """Find the newest output directory created after start_time.
+
+    Args:
+        root: Project root directory.
+        start_time: Wall-clock timestamp from time.time(), compared against
+            filesystem st_mtime. Do NOT pass time.monotonic().
+    """
     outputs_base = os.path.join(root, "outputs")
     if not os.path.isdir(outputs_base):
         return None
