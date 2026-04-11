@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -68,7 +69,7 @@ def _build_experiment_config(
     extra_params: dict | None = None,
 ) -> dict:
     """Build a PANTHER experiment config dict with deterministic output dir."""
-    config = dict(_CONFIG_TEMPLATE)
+    config = copy.deepcopy(_CONFIG_TEMPLATE)
     config["paths"] = {
         "output_dir": f"outputs/ivy-iut-{run_id}",
         "plugin_dir": "panther/plugins",
@@ -159,16 +160,19 @@ def _find_output_dir_by_timestamp(root: str, start_time: float) -> str | None:
     if not os.path.isdir(outputs_base):
         return None
 
-    candidates = []
+    candidates: list[tuple[Path, float]] = []
     for entry in Path(outputs_base).iterdir():
-        if entry.is_dir() and entry.stat().st_mtime >= start_time:
-            candidates.append(entry)
+        if not entry.is_dir():
+            continue
+        mtime = entry.stat().st_mtime
+        if mtime >= start_time:
+            candidates.append((entry, mtime))
 
     if not candidates:
         return None
 
-    newest = max(candidates, key=lambda d: d.stat().st_mtime)
-    return str(newest)
+    newest = max(candidates, key=lambda pair: pair[1])
+    return str(newest[0])
 
 
 def _load_experiment_summary(output_dir: str | None) -> dict | None:
@@ -315,6 +319,7 @@ def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
             duration = time.monotonic() - t0
             if proc is not None:
                 proc.kill()
+                await proc.wait()
             stdout = ""
             stderr = "Timeout exceeded"
             verdict = "timeout"
