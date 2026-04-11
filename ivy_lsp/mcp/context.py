@@ -348,6 +348,9 @@ class ToolContext:
                 return {"state": "ready"}
             if server._initializing:
                 return {"state": "building"}
+            # _setup_analysis_pipeline completed (pipeline exists) but
+            # _semantic_model is still None — treat as ready with empty
+            # model rather than "not_built", which blocks all tools.
             if getattr(server, "_analysis_pipeline", None) is not None:
                 return {"state": "ready"}
             return {"state": "not_built"}
@@ -381,7 +384,7 @@ class ToolContext:
             graph = await _get_req_graph()
             return _ServerProxy(
                 indexer=_IndexerProxy(requirement_graph=graph),
-                workspace_root=ws_root,
+                workspace_root=_get_live_ws_root() or ctx.root,
             )
 
         ctx.make_viz_server_proxy = _make_viz_server_proxy
