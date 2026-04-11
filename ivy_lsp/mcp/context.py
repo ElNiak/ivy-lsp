@@ -255,12 +255,10 @@ class ToolContext:
         from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
         from ivy_lsp.infra.utils.ivy_output import find_ivy_files as _find_ivy_raw
 
-        # --- Lazy indexer access ---
-        # The sidecar may start before the indexer is ready. Instead of
-        # snapshotting server._indexer at construction time, we read it
-        # lazily on each call.  A generation counter tracks when the
-        # indexer changes so the basename cache can be rebuilt.
+        # Sidecar starts ~28s before the indexer is ready, so we must
+        # read server._indexer lazily rather than snapshotting at init.
         _last_indexer_id: list[int | None] = [id(server._indexer)]
+        _last_resolver_id: list[int | None] = [None]
 
         def _get_live_indexer():
             return getattr(server, "_indexer", None)
@@ -290,13 +288,14 @@ class ToolContext:
             root = _get_live_ws_root() or search_root
             return _find_ivy_raw(root, _get_live_exclude()) if root else []
 
-        # Basename cache — rebuilt when the indexer identity changes.
         _basename_cache_obj = BasenameCache(_find_files, "")
 
         def _get_basename_cache() -> dict[str, list[str]]:
-            current_id = id(_get_live_indexer())
-            if current_id != _last_indexer_id[0]:
-                _last_indexer_id[0] = current_id
+            idx_id = id(_get_live_indexer())
+            res_id = id(_get_live_resolver())
+            if idx_id != _last_indexer_id[0] or res_id != _last_resolver_id[0]:
+                _last_indexer_id[0] = idx_id
+                _last_resolver_id[0] = res_id
                 _basename_cache_obj._root = _get_live_ws_root()
                 _basename_cache_obj.invalidate()
             return _basename_cache_obj.get()
