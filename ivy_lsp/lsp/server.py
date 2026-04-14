@@ -483,3 +483,6 @@ class IvyLanguageServer(BulkOrchestrationMixin, ServerSetupMixin, LanguageServer
                 self._compiler_manager.shutdown()
             self._stop_mcp_sidecar()
             self._cleanup_staging()
+            from ivy_lsp.infra.utils.async_subprocess import kill_all_registered
+
+            kill_all_registered()

@@ -7,11 +7,10 @@ handlers, and push/pull plumbing remain in ``diagnostics.py``.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from lsprotocol import types as lsp
 
@@ -671,48 +670,53 @@ async def run_deep_diagnostics(
     filepath: str,
     ivy_check_cmd: str = "ivy_check",
     cwd: Optional[str] = None,
+    timeout: float = 30.0,
 ) -> List[lsp.Diagnostic]:
-    """Run ivy_check as subprocess and convert output to diagnostics."""
+    """Run ivy_check as subprocess and convert output to diagnostics.
+
+    Routes through ``run_ivy_subprocess`` for semaphore enforcement,
+    PID tracking, and process-group kill on timeout.
+    """
+    from ivy_lsp.infra.utils.async_subprocess import run_ivy_subprocess
+
     try:
-        proc = await asyncio.create_subprocess_exec(
-            ivy_check_cmd,
-            filepath,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await run_ivy_subprocess(
+            [ivy_check_cmd, filepath],
+            timeout=timeout,
             cwd=cwd,
+            use_semaphore=True,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-    except FileNotFoundError:
-        slog.info(
-            "%s not found on PATH",
-            ivy_check_cmd,
-            extra={
-                "event": LogEvent(
-                    LogCategory.DIAGNOSTIC,
-                    "diagnostics",
-                    {"tool": ivy_check_cmd},
-                )
-            },
-        )
-        return []
-    except asyncio.TimeoutError:
-        slog.warning(
-            "Deep diagnostics timed out for %s",
-            filepath,
-            extra={
-                "event": LogEvent(
-                    LogCategory.DIAGNOSTIC,
-                    "diagnostics",
-                    {"filepath": filepath},
-                )
-            },
-        )
-        return []
     except Exception:
         logger.warning("Deep diagnostics failed for %s", filepath, exc_info=True)
         return []
 
-    output = stderr.decode("utf-8", errors="replace") + stdout.decode(
-        "utf-8", errors="replace"
-    )
+    if not result.success:
+        if "not found on PATH" in result.message:
+            slog.info(
+                "%s not found on PATH",
+                ivy_check_cmd,
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "diagnostics",
+                        {"tool": ivy_check_cmd},
+                    )
+                },
+            )
+            return []
+        if "Timed out" in result.message:
+            slog.warning(
+                "Deep diagnostics timed out for %s",
+                filepath,
+                extra={
+                    "event": LogEvent(
+                        LogCategory.DIAGNOSTIC,
+                        "diagnostics",
+                        {"filepath": filepath},
+                    )
+                },
+            )
+            return []
+
+    output = "\n".join(result.output_lines)
     return parse_ivy_check_output(output)

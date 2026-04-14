@@ -123,30 +123,35 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         # Stale — remove from cache
                         del _verify_cache[cache_key]
 
-                # When use_cache=False, skip in-flight dedup — always
-                # run a fresh verification so the bypass is respected.
-                if use_cache and cache_key in _verify_in_flight:
+                # In-flight dedup: ALWAYS check, regardless of use_cache.
+                # Prevents spawning duplicate ivy_check for the same
+                # (file, isolate) pair.  use_cache=False callers still
+                # get a fresh run — just sequentially, not concurrently.
+                if cache_key in _verify_in_flight:
                     need_wait = True
                 else:
                     _verify_in_flight.add(cache_key)
                     need_wait = False
 
-            # If another coroutine owns this key, poll for its result
+            # If another coroutine owns this key, wait for it to finish
             if need_wait:
                 for _ in range(600):  # up to ~60s
                     await asyncio.sleep(0.1)
                     async with _verify_cache_lock:
-                        if cache_key in _verify_cache:
-                            entry = _verify_cache[cache_key]
-                            if cache_is_fresh(entry, abs_path):
-                                cached_result = dict(entry.result)
-                                cached_result["cached"] = True
-                                _tt[0] = cached_result
-                                return _tt[0]
                         if cache_key not in _verify_in_flight:
+                            # Previous run finished.  If caching, try its result.
+                            if use_cache and cache_key in _verify_cache:
+                                entry = _verify_cache[cache_key]
+                                if cache_is_fresh(entry, abs_path):
+                                    cached_result = dict(entry.result)
+                                    cached_result["cached"] = True
+                                    _tt[0] = cached_result
+                                    return _tt[0]
+                            # use_cache=False or cache miss — claim slot for fresh run
                             _verify_in_flight.add(cache_key)
                             break
                 else:
+                    # Timeout waiting — proceed with own run
                     async with _verify_cache_lock:
                         _verify_in_flight.add(cache_key)
 

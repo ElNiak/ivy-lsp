@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -27,6 +30,69 @@ logger = logging.getLogger(__name__)
 _semaphore_lock = threading.Lock()
 _semaphores: Dict[int, asyncio.Semaphore] = {}
 _semaphore_limit: Optional[int] = None
+
+# --- Global PID registry for subprocess lifecycle tracking ---
+_pid_registry: Dict[int, str] = {}  # pid -> command description
+_pid_lock = threading.Lock()
+
+
+def register_pid(pid: int, description: str) -> None:
+    """Track a spawned subprocess PID."""
+    with _pid_lock:
+        _pid_registry[pid] = description
+
+
+def unregister_pid(pid: int) -> None:
+    """Remove a subprocess PID from tracking."""
+    with _pid_lock:
+        _pid_registry.pop(pid, None)
+
+
+def get_active_pids() -> Dict[int, str]:
+    """Return a snapshot of all tracked subprocess PIDs."""
+    with _pid_lock:
+        return dict(_pid_registry)
+
+
+def kill_all_registered() -> int:
+    """Kill all tracked subprocesses via process-group SIGKILL.
+
+    Safe to call from signal handlers (no logging, no async).
+    Returns the number of processes successfully signalled.
+    """
+    with _pid_lock:
+        pids = list(_pid_registry.keys())
+    killed = 0
+    for pid in pids:
+        try:
+            if sys.platform != "win32":
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            else:
+                os.kill(pid, signal.SIGKILL)
+            killed += 1
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    with _pid_lock:
+        for pid in pids:
+            _pid_registry.pop(pid, None)
+    return killed
+
+
+def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill a process and its entire process group."""
+    pid = proc.pid
+    if pid is None:
+        return
+    if sys.platform != "win32":
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
 
 
 @dataclass(frozen=True)
@@ -113,6 +179,7 @@ async def run_ivy_subprocess(
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
                     env=env,
+                    start_new_session=(sys.platform != "win32"),
                 )
             except FileNotFoundError:
                 return SubprocessResult(
@@ -121,22 +188,26 @@ async def run_ivy_subprocess(
                     duration=time.monotonic() - start,
                 )
 
+        register_pid(proc.pid, " ".join(str(c) for c in cmd))
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
-            proc.kill()
+            _kill_process_tree(proc)
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
             except asyncio.TimeoutError:
                 logger.warning(
-                    "Process %s did not exit after kill; may be orphaned",
+                    "Process %s (pid=%s) did not exit after kill; may be orphaned",
                     cmd[0],
+                    proc.pid,
                 )
             return SubprocessResult(
                 success=False,
                 message=f"Timed out after {timeout}s",
                 duration=time.monotonic() - start,
             )
+        finally:
+            unregister_pid(proc.pid)
 
         stdout_text = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace")

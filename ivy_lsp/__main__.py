@@ -290,6 +290,9 @@ def _main_impl(startup_t0: float) -> None:
         logging.shutdown() which can itself deadlock if a daemon thread
         holds a logging lock when the signal arrives.
         """
+        from ivy_lsp.infra.utils.async_subprocess import kill_all_registered
+
+        kill_all_registered()
         for path in _sigterm_cleanup_paths:
             try:
                 os.unlink(path)
