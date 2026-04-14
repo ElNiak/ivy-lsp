@@ -71,6 +71,18 @@ def test_unguarded_action_names_variables():
     assert h["severity"] == "hint"
 
 
+def test_duplicate_writes_deduplicated():
+    """Same var written twice in one action appears only once in message."""
+    g = _make_graph_with_unguarded_action()
+    # Add a second write of 'sent_pkt' at a different line in the same action
+    g.add_edge(f"{FILEPATH}:14:write:sent_pkt", EdgeType.WRITES, "sent_pkt")
+    hints = compute_coverage_hints(g, FILEPATH)
+    action_hints = [h for h in hints if h["code"] == "ivy.action.unguardedWrite"]
+    assert len(action_hints) == 1
+    # 'sent_pkt' should appear exactly once in the message
+    assert action_hints[0]["message"].count("'sent_pkt'") == 1
+
+
 def test_guarded_action_no_diagnostic():
     """Action whose written vars are all guarded produces no diagnostic."""
     g = _make_graph_with_guarded_action()

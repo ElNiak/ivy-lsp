@@ -140,13 +140,15 @@ def compute_coverage_hints(
                 file_actions[i + 1].line if i + 1 < len(file_actions) else float("inf")
             )
 
+            seen: set[str] = set()
             unguarded_vars: list[str] = []
             for write_line, var_id in file_writes:
                 if write_line < range_start:
                     continue
                 if write_line >= range_end:
                     break
-                if var_id not in guarded_vars:
+                if var_id not in guarded_vars and var_id not in seen:
+                    seen.add(var_id)
                     unguarded_vars.append(var_id)
 
             if unguarded_vars:
