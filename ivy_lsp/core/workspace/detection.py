@@ -371,6 +371,9 @@ def _panther_heuristic(start_dir: str) -> Optional[WorkspaceConfig]:
     Protocols are discovered dynamically via per-protocol ``.ivyworkspace``
     markers under ``protocol-testing/`` using :func:`_discover_protocols`.
     Returns ``None`` when no markers are found.
+
+    Algorithm mirrors ``hook_utils.get_workspace_root()`` in the
+    panther-ivy-plugin hooks — keep in sync when modifying.
     """
     current = os.path.abspath(start_dir)
     for _ in range(10):
