@@ -279,14 +279,35 @@ def _main_impl(startup_t0: float) -> None:
             level=logging.INFO,
         )
 
+    # Paths populated after discovery; the SIGTERM handler closes over this list.
+    _sigterm_cleanup_paths: list[str] = []
+
+    def _sigterm_cleanup_and_exit(exit_code: int) -> None:
+        """Clean up PID/heartbeat files and terminate immediately.
+
+        Uses os._exit() to avoid the threading deadlock that occurs when
+        SystemExit is raised during interpreter finalization. Avoids
+        logging.shutdown() which can itself deadlock if a daemon thread
+        holds a logging lock when the signal arrives.
+        """
+        for path in _sigterm_cleanup_paths:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        os._exit(exit_code)
+
     def _sigterm_handler(signum, frame):
-        log.warning(
-            "[SIGTERM] Server received signal %d (PID=%d). Shutting down.",
-            signum,
-            os.getpid(),
-        )
-        logging.shutdown()
-        sys.exit(128 + signum)
+        # Write directly to stderr — logging calls can deadlock here.
+        try:
+            sys.stderr.write(
+                f"[SIGTERM] Server received signal {signum} "
+                f"(PID={os.getpid()}). Shutting down.\n"
+            )
+            sys.stderr.flush()
+        except OSError:
+            pass
+        _sigterm_cleanup_and_exit(128 + signum)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
@@ -296,6 +317,7 @@ def _main_impl(startup_t0: float) -> None:
 
     # Clean up PID file and session heartbeat on exit.
     if _pid_file:
+        _sigterm_cleanup_paths.append(_pid_file)
 
         def _cleanup_pid(path: str = _pid_file) -> None:
             try:
@@ -312,6 +334,7 @@ def _main_impl(startup_t0: float) -> None:
     # at /tmp/ivy-lsp-sessions/{ws_hash}/{session_tag}.heartbeat.
     _heartbeat = _find_session_heartbeat()
     if _heartbeat:
+        _sigterm_cleanup_paths.append(_heartbeat)
 
         def _cleanup_heartbeat(path: str = _heartbeat) -> None:
             try:
@@ -335,14 +358,19 @@ def _main_impl(startup_t0: float) -> None:
             time.sleep(5)
             current_ppid = os.getppid()
             if current_ppid != _parent_pid:
-                log.warning(
-                    "[ORPHAN] Parent PID changed %d -> %d (parent died). "
-                    "Shutting down.",
-                    _parent_pid,
-                    current_ppid,
-                )
-                os.kill(os.getpid(), signal.SIGTERM)
-                return
+                # Call _sigterm_cleanup_and_exit directly instead of
+                # os.kill(SIGTERM) — signal handlers run on the main thread,
+                # so if it's blocked in a C extension without GIL release,
+                # the signal is delayed indefinitely.
+                try:
+                    sys.stderr.write(
+                        f"[ORPHAN] Parent PID changed {_parent_pid} -> "
+                        f"{current_ppid} (parent died). Shutting down.\n"
+                    )
+                    sys.stderr.flush()
+                except OSError:
+                    pass
+                _sigterm_cleanup_and_exit(143)  # 128 + SIGTERM(15)
 
     _watchdog = threading.Thread(target=_parent_watchdog, daemon=True)
     _watchdog.start()
