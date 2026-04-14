@@ -104,7 +104,7 @@ async def get_model_if_ready(ctx: Any) -> Any | None:
     return await ctx.get_model()
 
 
-def load_requirements_from_manifests(root: str) -> list:
+def load_requirements_from_manifests(root: str, protocol: str | None = None) -> list:
     """Load requirements from all manifest files in a workspace root."""
     from ivy_lsp.core.semantic.rfc_annotations import (
         find_manifests,
@@ -112,7 +112,7 @@ def load_requirements_from_manifests(root: str) -> list:
     )
 
     reqs: list = []
-    for path in find_manifests(root):
+    for path in find_manifests(root, protocol=protocol):
         reqs.extend(load_requirement_manifest(path).values())
     return reqs
 

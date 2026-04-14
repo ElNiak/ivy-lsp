@@ -118,6 +118,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     async def _ivy_requirement_coverage(
         relative_path: str | None = None,
         test_file: str | None = None,
+        protocol: str | None = None,
     ) -> dict:
         """RFC requirement coverage statistics by level and layer."""
         model, err = await get_model_or_error(ctx)
@@ -232,7 +233,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         from ivy_lsp.core.semantic.rfc_annotations import find_manifests
 
         workspace_root = ctx.root
-        manifests = find_manifests(workspace_root)
+        manifests = find_manifests(workspace_root, protocol=protocol)
         if manifests:
             result["manifests"] = [
                 os.path.relpath(m, workspace_root) if workspace_root else m
@@ -526,14 +527,41 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             return _tc.finish(result_dict)
         elif mode == "gaps":
             result_dict = await _ivy_coverage_gaps(test_file, protocol)
+            if max_items > 0:
+                for key, trunc_key, total_key in (
+                    (
+                        "uncoveredRfcRequirements",
+                        "uncovered_requirements_truncated",
+                        "uncovered_requirements_total",
+                    ),
+                    (
+                        "unguardedStateVars",
+                        "unguarded_vars_truncated",
+                        "unguarded_vars_total",
+                    ),
+                ):
+                    items = result_dict.get(key, [])
+                    if len(items) > max_items:
+                        result_dict[key] = items[:max_items]
+                        result_dict[trunc_key] = True
+                        result_dict[total_key] = len(items)
             inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
         elif mode == "diff":
             result_dict = await _ivy_coverage_diff(relative_path)
+            if max_items > 0:
+                for key in ("new_gaps", "recovered"):
+                    items = result_dict.get(key, [])
+                    if len(items) > max_items:
+                        result_dict[key] = items[:max_items]
+                        result_dict[f"{key}_truncated"] = True
+                        result_dict[f"{key}_total"] = len(items)
             inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
         else:  # default: stats
-            result_dict = await _ivy_requirement_coverage(relative_path, test_file)
+            result_dict = await _ivy_requirement_coverage(
+                relative_path, test_file, protocol=protocol
+            )
             if compact:
                 result_dict.pop("_uncovered_ids_full", None)
                 result_dict.pop("_covered_ids", None)

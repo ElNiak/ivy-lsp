@@ -246,20 +246,39 @@ class McpServerState:
 
     # --- File finding ---
 
-    def find_ivy_files(self, search_root: str) -> list[str]:
+    def find_ivy_files(
+        self, search_root: str, extra_paths: list[str] | None = None
+    ) -> list[str]:
         """Find .ivy files respecting workspace include/exclude paths.
 
         When include_paths is set, walks only those subdirectories instead
         of scanning the entire workspace tree and post-filtering.
+
+        Args:
+            search_root: Root directory to search from.
+            extra_paths: Additional relative paths to include in the scan
+                regardless of workspace include_paths settings.
         """
-        if self._include_paths:
-            results: list[str] = []
-            for ip in self._include_paths:
-                sub = os.path.join(search_root, ip)
-                if os.path.isdir(sub):
-                    for rel in _find_ivy_files_raw(sub, self._effective_exclude_dirs):
-                        results.append(os.path.join(ip, rel))
-            return sorted(set(results))
+        if self._include_paths or extra_paths:
+            all_paths = list(self._include_paths) if self._include_paths else []
+            if extra_paths:
+                all_paths.extend(p for p in extra_paths if p not in all_paths)
+            if all_paths:
+                results: list[str] = []
+                for ip in all_paths:
+                    sub = os.path.join(search_root, ip)
+                    if os.path.isdir(sub):
+                        for rel in _find_ivy_files_raw(
+                            sub, self._effective_exclude_dirs
+                        ):
+                            results.append(os.path.join(ip, rel))
+                if not results and self._include_paths:
+                    logger.warning(
+                        "include_paths %s yielded no .ivy files under %s",
+                        self._include_paths,
+                        search_root,
+                    )
+                return sorted(set(results))
         return _find_ivy_files_raw(search_root, self._effective_exclude_dirs)
 
     def find_ivy_files_cached(self, search_root: str) -> list[str]:

@@ -395,18 +395,23 @@ def normalize_tag_with_diagnostics(tag: str, manifest_keys: set[str]) -> TagReso
     return TagResolution(matched_ids=matched, warnings=warnings)
 
 
-def find_manifests(workspace_root: str) -> List[str]:
+def find_manifests(workspace_root: str, protocol: str | None = None) -> List[str]:
     """Glob for ``*_requirements.yaml`` under ``protocol-testing/`` or the root itself.
 
-    Handles two call-site patterns:
-    - ``workspace_root`` is the workspace (contains ``protocol-testing/``)
-    - ``workspace_root`` is already a protocol directory inside
-      ``protocol-testing/`` (e.g. from IndexBuilder per-protocol builds)
+    Args:
+        workspace_root: Workspace root or a protocol directory inside
+            ``protocol-testing/`` (e.g. from IndexBuilder per-protocol builds).
+        protocol: When set, restrict search to ``protocol-testing/{protocol}/``
+            so manifests from other protocols are excluded.
     """
     results: List[str] = []
     pt_dir = os.path.join(workspace_root, "protocol-testing")
     if os.path.isdir(pt_dir):
-        search_root = pt_dir
+        if protocol:
+            proto_dir = os.path.join(pt_dir, protocol)
+            search_root = proto_dir if os.path.isdir(proto_dir) else pt_dir
+        else:
+            search_root = pt_dir
     else:
         # Fallback: root is already inside protocol-testing/ (IndexBuilder)
         search_root = workspace_root

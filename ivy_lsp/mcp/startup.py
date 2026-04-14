@@ -195,6 +195,28 @@ def start_mcp(
     if ws_config is not None and hasattr(ws_config, "workspace_groups"):
         ctx.workspace_groups = ws_config.workspace_groups or {}
 
+    # Fallback: auto-discover workspace groups from protocol-testing/ subdirs
+    if not ctx.workspace_groups:
+        pt_dir = os.path.join(root, "protocol-testing")
+        if os.path.isdir(pt_dir):
+            for entry in sorted(os.listdir(pt_dir)):
+                entry_path = os.path.join(pt_dir, entry)
+                if not os.path.isdir(entry_path) or entry.startswith("."):
+                    continue
+                layers = [
+                    d
+                    for d in sorted(os.listdir(entry_path))
+                    if os.path.isdir(os.path.join(entry_path, d))
+                    and not d.startswith(".")
+                ]
+                if layers:
+                    ctx.workspace_groups[entry] = layers
+            if ctx.workspace_groups:
+                logger.info(
+                    "Auto-discovered workspace groups: %s",
+                    sorted(ctx.workspace_groups),
+                )
+
     # WorkspaceContext loading is deferred to the prewarm background thread
     # to avoid blocking the MCP stdio handshake (which has a 30s timeout).
     # All workspace_context consumers already guard with `is not None` checks.
