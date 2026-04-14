@@ -134,3 +134,43 @@ def test_multiple_actions_line_bucketing():
     assert "'var_a'" in alpha_hint[0]["message"]
     assert len(beta_hint) == 1
     assert "'var_b'" in beta_hint[0]["message"]
+
+
+# -- Deduplication tests (structural vs graph-based) -----------------------
+
+from unittest.mock import MagicMock
+
+from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
+
+
+def test_structural_unguarded_action_suppressed_with_graph():
+    """When graph is available, structural 'unguarded-action' is filtered out."""
+    source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
+    indexer = MagicMock()
+    indexer.requirement_graph = RequirementGraph()
+    indexer.resolver = MagicMock()
+    indexer.resolver.resolve = MagicMock(return_value=None)
+    indexer.resolver._partition_staging = {}
+
+    diags = compute_diagnostics(
+        parser=None,
+        source=source,
+        filepath="/fake/test.ivy",
+        indexer=indexer,
+    )
+    codes = [d.code for d in diags if d.code is not None]
+    assert "unguarded-action" not in codes
+
+
+def test_structural_unguarded_action_present_without_graph():
+    """Without graph, structural 'unguarded-action' fires as fallback."""
+    source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
+
+    diags = compute_diagnostics(
+        parser=None,
+        source=source,
+        filepath="/fake/test.ivy",
+        indexer=None,
+    )
+    codes = [d.code for d in diags if d.code is not None]
+    assert "unguarded-action" in codes

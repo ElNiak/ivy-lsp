@@ -491,6 +491,16 @@ def compute_diagnostics(
 
     diags = check_structural_issues(source, filepath, indexer)
 
+    # Suppress generic structural 'unguarded-action' when the requirement
+    # graph is available (graph-based coverage hints provide specific
+    # variable-naming diagnostics instead).
+    if indexer is not None and getattr(indexer, "requirement_graph", None) is not None:
+        diags = [
+            d
+            for d in diags
+            if not (hasattr(d, "code") and d.code == "unguarded-action")
+        ]
+
     if parser is None and parse_result is None:
         return diags
 
