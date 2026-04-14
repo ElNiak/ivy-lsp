@@ -45,6 +45,20 @@ def _format_ivy_verify(data: dict) -> str:
         parts.append(_section("Error Summary"))
         parts.append(err_summary)
 
+    check_results = data.get("check_results")
+    if check_results and check_results.get("failed", 0) > 0:
+        parts.append("")
+        parts.append(
+            _section(
+                f"Failed Checks ({check_results['failed']}/{check_results['total']})"
+            )
+        )
+        for group in check_results.get("failed_checks", []):
+            ctx_label = group.get("action_context") or "(top-level)"
+            parts.append(f"**{group['isolate']}** / {ctx_label}:")
+            for chk in group["checks"]:
+                parts.append(f"- `{chk['file']}:{chk['line']}` ({chk['type']})")
+
     cex_trace = data.get("counterexample_trace")
     if cex_trace:
         parts.append("")
