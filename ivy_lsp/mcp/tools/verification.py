@@ -123,7 +123,9 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
                         # Stale — remove from cache
                         del _verify_cache[cache_key]
 
-                if cache_key in _verify_in_flight:
+                # When use_cache=False, skip in-flight dedup — always
+                # run a fresh verification so the bypass is respected.
+                if use_cache and cache_key in _verify_in_flight:
                     need_wait = True
                 else:
                     _verify_in_flight.add(cache_key)

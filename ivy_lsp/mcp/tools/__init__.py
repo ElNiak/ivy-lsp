@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TOOL_TIMEOUTS: dict[str, float] = {
-    "ivy_verify": 180.0,
+    "ivy_verify": 600.0,
     "ivy_compile": 360.0,
     "ivy_model_info": 60.0,
     "ivy_diagnostics": 120.0,
@@ -428,7 +428,13 @@ def safe_tool(_fn=None, *, ctx=None):
         @functools.wraps(fn)
         async def _wrapper(*args, **kwargs):
             tool_name = fn.__name__
-            timeout = _get_effective_timeout(tool_name)
+            base_timeout = _get_effective_timeout(tool_name)
+            # Extend decorator timeout when user supplies a higher timeout param
+            user_timeout = kwargs.get("timeout")
+            if user_timeout is not None and isinstance(user_timeout, (int, float)):
+                timeout = max(base_timeout, float(user_timeout) + 30.0)
+            else:
+                timeout = base_timeout
 
             # --- Sidecar delegation ---
             sidecar_result = await _try_sidecar_delegation(tool_name, kwargs)
