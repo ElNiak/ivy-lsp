@@ -8,6 +8,7 @@ Generates Hint-severity diagnostics for missing coverage:
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,74 @@ def compute_coverage_hints(
                     "template": f"require {var_node.name}(...) ",
                 }
             )
+
+    # -----------------------------------------------------------------
+    # 2b. Action-centric unguarded writes (names specific vars per action)
+    # -----------------------------------------------------------------
+    actions_by_file: Dict[str, List[Any]] = defaultdict(list)
+    for action_node in graph.actions.values():
+        actions_by_file[action_node.file].append(action_node)
+    for file_actions in actions_by_file.values():
+        file_actions.sort(key=lambda a: a.line)
+
+    writes_by_file: Dict[str, List[tuple]] = defaultdict(list)
+    for src, etype, dst in graph.edges:
+        if etype != EdgeType.WRITES:
+            continue
+        marker = ":write:"
+        marker_idx = src.find(marker)
+        if marker_idx < 0:
+            continue
+        prefix = src[:marker_idx]
+        last_colon = prefix.rfind(":")
+        if last_colon <= 0:
+            continue
+        write_file = prefix[:last_colon]
+        try:
+            write_line = int(prefix[last_colon + 1 :])
+        except ValueError:
+            continue
+        writes_by_file[write_file].append((write_line, dst))
+
+    if filepath in actions_by_file:
+        file_actions = actions_by_file[filepath]
+        file_writes = sorted(writes_by_file.get(filepath, []), key=lambda w: w[0])
+
+        for i, action_node in enumerate(file_actions):
+            range_start = action_node.line
+            range_end = (
+                file_actions[i + 1].line if i + 1 < len(file_actions) else float("inf")
+            )
+
+            unguarded_vars: list[str] = []
+            for write_line, var_id in file_writes:
+                if write_line < range_start:
+                    continue
+                if write_line >= range_end:
+                    break
+                if var_id not in guarded_vars:
+                    unguarded_vars.append(var_id)
+
+            if unguarded_vars:
+                var_names = [
+                    graph.state_vars[v].name
+                    for v in unguarded_vars
+                    if v in graph.state_vars
+                ]
+                if var_names:
+                    var_list = ", ".join(f"'{v}'" for v in var_names)
+                    hints.append(
+                        {
+                            "line": action_node.line,
+                            "message": (
+                                f"Action '{action_node.name}' writes {var_list} "
+                                f"without a 'require' precondition"
+                            ),
+                            "severity": "hint",
+                            "code": "ivy.action.unguardedWrite",
+                            "template": f"require {var_names[0]}(...) ",
+                        }
+                    )
 
     # -----------------------------------------------------------------
     # 3. Per-requirement checks: dead guards + orphaned monitor hooks
