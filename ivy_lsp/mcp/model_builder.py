@@ -77,13 +77,11 @@ def build_mcp_model(
                 merged.merge_from(idx.semantic_model)
                 used_protos.append(proto)
 
-            if used_protos and merged.node_count() > 0:
+            if used_protos and merged.node_count() > 0 and not skipped_protos:
                 logger.info(
-                    "Loaded semantic model from offline index: "
-                    "%d nodes from %s (skipped: %s)",
+                    "Loaded semantic model from offline index: " "%d nodes from %s",
                     merged.node_count(),
                     ", ".join(used_protos),
-                    ", ".join(skipped_protos) or "none",
                 )
                 return merged
             elif skipped_protos:

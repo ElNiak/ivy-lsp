@@ -534,6 +534,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             except Exception:
                 logger.debug("WorkspaceContext reload failed", exc_info=True)
 
+        # Invalidate semantic model and requirement graph caches so
+        # ivy_coverage and other tools pick up the rebuilt index.
+        ctx.invalidate_caches()
+        logger.info("Invalidated model caches after index rebuild")
+
         # Refresh staging directory so ivy_verify/ivy_compile pick up
         # renamed or newly added .ivy files without a server restart.
         resolver = ctx.include_resolver

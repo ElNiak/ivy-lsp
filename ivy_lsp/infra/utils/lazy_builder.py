@@ -208,3 +208,11 @@ class LazyAsyncBuilder(Generic[T]):
                 "retry_in_seconds": round(remaining),
             }
         return {"state": "not_built"}
+
+    def invalidate(self) -> None:
+        """Clear the cached value so the next get() triggers a fresh build."""
+        self._value = None
+        self._building = False
+        self._last_failure = 0.0
+        self._last_error = None
+        self._permanent_failed = False

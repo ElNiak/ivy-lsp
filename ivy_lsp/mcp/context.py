@@ -153,6 +153,7 @@ class ToolContext:
     make_resolve_callback: Callable[..., Any] = field(default=lambda: None)
     include_resolver: Any = _IncludeResolverDescriptor()  # type: ignore[assignment]
     _basename_cache_invalidate: Callable[[], None] = field(default=lambda: None)
+    invalidate_caches: Callable[[], None] = field(default=lambda: None)
 
     # Dedicated thread pool for tool-originated blocking calls.
     # Isolates tool execution from the default pool used by model/graph builders,

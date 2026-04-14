@@ -350,6 +350,18 @@ class McpServerState:
         """Return the model if ready, or wait briefly if building. Never blocks long."""
         return await self._model_builder.get_or_wait(timeout)
 
+    def invalidate_caches(self) -> None:
+        """Reset all cached models and file lists.
+
+        Called after ivy_index rebuilds to force fresh model construction
+        from the updated .ivy-index/ on the next tool access.
+        """
+        self._model_builder.invalidate()
+        self._graph_builder.invalidate()
+        self._cached_ivy_files = None
+        if self._basename_cache_obj is not None:
+            self._basename_cache_obj.invalidate()
+
     def _write_model_to_index(self, model):
         write_model_to_index(
             root=self.root,
@@ -586,6 +598,7 @@ class McpServerState:
         ctx.make_resolve_callback = self.make_resolve_callback
         ctx.include_resolver = self._resolver
         ctx.tool_executor = self._tool_executor
+        ctx.invalidate_caches = self.invalidate_caches
 
         return ctx
 
