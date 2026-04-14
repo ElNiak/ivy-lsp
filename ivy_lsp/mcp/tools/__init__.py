@@ -47,6 +47,7 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "ivy_health_check": 10.0,
     "ivy_index": 300.0,
     "ivy_workspace": 10.0,
+    "ivy_workflow_state": 10.0,
     "ivy_find_variants": 30.0,
     "ivy_serdes_correlation": 30.0,
     "ivy_change_impact": 60.0,
@@ -107,6 +108,7 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
     "ivy_health_check": {"cost": "low", "category": "analysis", "needs_model": False},
     "ivy_index": {"cost": "high", "category": "analysis", "needs_model": False},
     "ivy_workspace": {"cost": "low", "category": "workspace", "needs_model": False},
+    "ivy_workflow_state": {"cost": "low", "category": "workflow", "needs_model": False},
     "ivy_find_variants": {
         "cost": "low",
         "category": "propagation",
@@ -747,6 +749,7 @@ from ivy_lsp.mcp.tools.quality import register_quality_tools
 from ivy_lsp.mcp.tools.traceability import register_traceability_tools
 from ivy_lsp.mcp.tools.verification import register_verification_tools
 from ivy_lsp.mcp.tools.visualization import register_visualization_tools
+from ivy_lsp.mcp.tools.workflow_state import register_workflow_state_tools
 from ivy_lsp.mcp.tools.workspace import register_workspace_tools
 
 if TYPE_CHECKING:
@@ -764,6 +767,7 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_workspace_tools(mcp, ctx)
     register_propagation_tools(mcp, ctx)
     register_iut_testing_tools(mcp, ctx)
+    register_workflow_state_tools(mcp, ctx)
 
 
 __all__ = [
