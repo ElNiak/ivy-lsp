@@ -1,5 +1,7 @@
 """Tests for coverage_hints.compute_coverage_hints -- action-centric unguarded writes."""
 
+from unittest.mock import MagicMock
+
 from ivy_lsp.core.analysis.requirement_graph import (
     ActionNode,
     EdgeType,
@@ -8,6 +10,7 @@ from ivy_lsp.core.analysis.requirement_graph import (
     StateVarNode,
 )
 from ivy_lsp.core.coverage_hints import compute_coverage_hints
+from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
 FILEPATH = "/fake/test.ivy"
 
@@ -149,10 +152,6 @@ def test_multiple_actions_line_bucketing():
 
 
 # -- Deduplication tests (structural vs graph-based) -----------------------
-
-from unittest.mock import MagicMock
-
-from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
 
 def test_structural_unguarded_action_suppressed_with_graph():

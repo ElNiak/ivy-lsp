@@ -491,9 +491,7 @@ def compute_diagnostics(
 
     diags = check_structural_issues(source, filepath, indexer)
 
-    # Suppress generic structural 'unguarded-action' when the requirement
-    # graph is available (graph-based coverage hints provide specific
-    # variable-naming diagnostics instead).
+    # Graph-based coverage hints supersede the generic structural lint.
     if indexer is not None and getattr(indexer, "requirement_graph", None) is not None:
         diags = [
             d

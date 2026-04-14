@@ -8,7 +8,6 @@ Generates Hint-severity diagnostics for missing coverage:
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -105,15 +104,15 @@ def compute_coverage_hints(
     # -----------------------------------------------------------------
     # 2b. Action-centric unguarded writes (names specific vars per action)
     # -----------------------------------------------------------------
-    actions_by_file: Dict[str, List[Any]] = defaultdict(list)
-    for action_node in graph.actions.values():
-        actions_by_file[action_node.file].append(action_node)
-    for file_actions in actions_by_file.values():
-        file_actions.sort(key=lambda a: a.line)
+    file_actions = sorted(
+        (a for a in graph.actions.values() if a.file == filepath),
+        key=lambda a: a.line,
+    )
 
-    writes_by_file: Dict[str, List[tuple]] = defaultdict(list)
+    file_writes: list[tuple] = []
+    prefix_match = filepath + ":"
     for src, etype, dst in graph.edges:
-        if etype != EdgeType.WRITES:
+        if etype != EdgeType.WRITES or not src.startswith(prefix_match):
             continue
         marker = ":write:"
         marker_idx = src.find(marker)
@@ -123,16 +122,14 @@ def compute_coverage_hints(
         last_colon = prefix.rfind(":")
         if last_colon <= 0:
             continue
-        write_file = prefix[:last_colon]
         try:
             write_line = int(prefix[last_colon + 1 :])
         except ValueError:
             continue
-        writes_by_file[write_file].append((write_line, dst))
+        file_writes.append((write_line, dst))
+    file_writes.sort(key=lambda w: w[0])
 
-    if filepath in actions_by_file:
-        file_actions = actions_by_file[filepath]
-        file_writes = sorted(writes_by_file.get(filepath, []), key=lambda w: w[0])
+    if file_actions:
 
         for i, action_node in enumerate(file_actions):
             range_start = action_node.line
