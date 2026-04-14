@@ -439,3 +439,107 @@ def test_resolve_staging_path_no_resolver_unchanged(tmp_path):
 
     result = resolve_staging_path(str(src), staging_dir=str(flat), resolver=None)
     assert result == str(flat / "model.ivy")
+
+
+# --- check_results integration tests ---
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_check_returns_check_results():
+    """ivy_check returns structured check_results from PASS/FAIL output."""
+    mock_result = SubprocessResult(
+        success=True,
+        message="OK",
+        output_lines=[
+            "Isolate foo.iso:",
+            "",
+            "    The following properties are to be checked:",
+            "        order.ivy: line 4: foo.spec.prop ... PASS",
+            "",
+            "Isolate this:",
+            "",
+            "    The following program assertions are treated as guarantees:",
+            "        in action bar when called from baz:",
+            "            model.ivy: line 10: guarantee ... FAIL",
+            "",
+            "error: failed checks: 1",
+        ],
+        duration=5.0,
+        returncode=1,
+    )
+    with patch(
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_check(
+            filepath="/tmp/model.ivy",
+            workspace_root="/tmp",
+        )
+        assert "check_results" in result
+        cr = result["check_results"]
+        assert cr["total"] == 2
+        assert cr["passed"] == 1
+        assert cr["failed"] == 1
+        assert len(cr["failed_checks"]) == 1
+        assert cr["failed_checks"][0]["isolate"] == "this"
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_check_success_false_when_checks_fail():
+    """Success is False when checks fail, even if subprocess exits 0."""
+    mock_result = SubprocessResult(
+        success=True,
+        message="OK",
+        output_lines=[
+            "Isolate this:",
+            "",
+            "    The following program assertions are treated as guarantees:",
+            "        in action foo when called from bar:",
+            "            model.ivy: line 5: guarantee ... FAIL",
+            "",
+            "error: failed checks: 1",
+        ],
+        duration=1.0,
+        returncode=0,
+    )
+    with patch(
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_check(
+            filepath="/tmp/model.ivy",
+            workspace_root="/tmp",
+        )
+        assert result["success"] is False
+        assert result["check_results"]["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_ivy_check_error_summary_uses_check_results():
+    """error_summary reflects check failures, not just raw last line."""
+    mock_result = SubprocessResult(
+        success=True,
+        message="OK",
+        output_lines=[
+            "Isolate this:",
+            "",
+            "    The following program assertions are treated as guarantees:",
+            "        in action foo when called from bar:",
+            "            model.ivy: line 5: guarantee ... FAIL",
+            "            model.ivy: line 6: guarantee ... PASS",
+            "",
+            "error: failed checks: 1",
+        ],
+        duration=1.0,
+        returncode=0,
+    )
+    with patch(
+        "ivy_lsp.core.verification.run_ivy_subprocess", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = mock_result
+        result = await run_ivy_check(
+            filepath="/tmp/model.ivy",
+            workspace_root="/tmp",
+        )
+        assert "1/2 checks failed" in result["error_summary"]
+        assert "guarantee" in result["error_summary"]

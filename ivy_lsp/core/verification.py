@@ -17,7 +17,11 @@ from typing import Any
 from ivy_lsp.core.environment import detect_z3_dir
 from ivy_lsp.infra.observability import LogCategory, log_phase, timed_phase
 from ivy_lsp.infra.utils.async_subprocess import run_ivy_subprocess
-from ivy_lsp.infra.utils.ivy_output import extract_error_summary, parse_ivy_output
+from ivy_lsp.infra.utils.ivy_output import (
+    extract_error_summary,
+    parse_check_results,
+    parse_ivy_output,
+)
 
 log = logging.getLogger(__name__)
 
@@ -105,14 +109,17 @@ async def run_ivy_check(
         result = await run_ivy_subprocess(cmd, timeout=timeout, cwd=cwd)
         raw_output = "\n".join(result.output_lines)
         diagnostics = parse_ivy_output(raw_output)
+        check_results = parse_check_results(raw_output)
 
     timed_out = "Timed out" in result.message
     response: dict[str, Any] = {
         "success": result.success
-        and not any(d["severity"] == "error" for d in diagnostics),
+        and not any(d["severity"] == "error" for d in diagnostics)
+        and check_results["failed"] == 0,
         "diagnostics": diagnostics,
         "diagnostic_count": len(diagnostics),
-        "error_summary": extract_error_summary(raw_output, diagnostics),
+        "error_summary": extract_error_summary(raw_output, diagnostics, check_results),
+        "check_results": check_results,
         "raw_output": raw_output.strip(),
         "duration_seconds": round(result.duration, 2),
     }
