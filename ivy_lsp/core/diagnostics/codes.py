@@ -236,6 +236,20 @@ _reg(
     )
 )
 
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.action.unguardedWrite",
+        title="Unguarded state writes in action '{action}'",
+        explanation=(
+            "Action writes state variables not guarded by any requirement. "
+            "Add require/ensure clauses to constrain writes."
+        ),
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-semantic",
+        has_quick_fix=True,
+    )
+)
+
 # -- ivy.invariant.* -------------------------------------------------------
 
 _reg(
