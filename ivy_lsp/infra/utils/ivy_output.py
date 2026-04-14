@@ -39,6 +39,17 @@ _PYTHON_EXCEPTION_LINE = re.compile(
     r"^(\w+(?:\.\w+)*(?:Error|Exception|Warning|Exit))\s*:\s*(.*)"
 )
 
+# ivy_check structured output: isolate headers, section types, action contexts, check results
+_ISOLATE_HEADER = re.compile(r"^Isolate\s+(.+?)\s*:$")
+_ACTION_CONTEXT = re.compile(r"^in action\s+(.+?)\s+when called from\s+(.+?)\s*:$")
+_CHECK_RESULT = re.compile(
+    r"^([\w./-]+\.ivy):\s*line\s+(\d+):\s*(.+?)\s+\.\.\.\s*(PASS|FAIL)$"
+)
+_SECTION_TYPES: Dict[str, str] = {
+    "The following properties are to be checked:": "property",
+    "The following program assertions are treated as guarantees:": "guarantee",
+}
+
 # Unified exclusion set — superset of mcp_server.py and include_resolver.py
 DEFAULT_EXCLUDE_DIRS = frozenset(
     {
@@ -163,26 +174,198 @@ def parse_ivy_output(output: str) -> List[Dict[str, Any]]:
     return results
 
 
+def parse_check_results(output: str) -> Dict[str, Any]:
+    """Parse ivy_check PASS/FAIL verification results into structured data.
+
+    Scans output line by line, tracking the current isolate, section type
+    (property/guarantee), and action context. Emits a check entry for each
+    line ending in ``... PASS`` or ``... FAIL``. Skips ``[assumed]`` lines.
+
+    Args:
+        output: Raw ivy_check stdout.
+
+    Returns:
+        Dict with keys: total, passed, failed, isolate_summary, failed_checks.
+    """
+    current_isolate: str | None = None
+    current_type: str | None = None
+    current_action: str | None = None
+
+    isolate_data: Dict[str, Dict[str, Any]] = {}
+    fail_groups: Dict[tuple[str, str | None], List[Dict[str, Any]]] = {}
+
+    total = 0
+    passed = 0
+    failed = 0
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # Isolate header resets section and action context
+        m = _ISOLATE_HEADER.match(line)
+        if m:
+            current_isolate = m.group(1)
+            current_type = None
+            current_action = None
+            if current_isolate not in isolate_data:
+                isolate_data[current_isolate] = {
+                    "passed": 0,
+                    "failed": 0,
+                    "by_type": {},
+                }
+            continue
+
+        # Tracked section header (properties / guarantees)
+        matched_section = False
+        for header, check_type in _SECTION_TYPES.items():
+            if line == header:
+                current_type = check_type
+                current_action = None
+                matched_section = True
+                break
+        if matched_section:
+            continue
+
+        # Non-tracked section header (implementations, monitors, etc.)
+        if line.startswith("The following"):
+            current_type = None
+            current_action = None
+            continue
+
+        # Action context within a section
+        m = _ACTION_CONTEXT.match(line)
+        if m:
+            current_action = f"{m.group(1)} when called from {m.group(2)}"
+            continue
+
+        # PASS/FAIL check result (only inside a tracked section)
+        if current_isolate is not None and current_type is not None:
+            m = _CHECK_RESULT.match(line)
+            if m:
+                result_str = m.group(4)
+                total += 1
+
+                iso = isolate_data[current_isolate]
+                if current_type not in iso["by_type"]:
+                    iso["by_type"][current_type] = {"passed": 0, "failed": 0}
+
+                if result_str == "PASS":
+                    passed += 1
+                    iso["passed"] += 1
+                    iso["by_type"][current_type]["passed"] += 1
+                else:
+                    failed += 1
+                    iso["failed"] += 1
+                    iso["by_type"][current_type]["failed"] += 1
+
+                    key = (current_isolate, current_action)
+                    if key not in fail_groups:
+                        fail_groups[key] = []
+                    fail_groups[key].append(
+                        {
+                            "file": m.group(1),
+                            "line": int(m.group(2)),
+                            "type": current_type,
+                            "result": "FAIL",
+                        }
+                    )
+
+    isolate_summary = [{"name": name, **data} for name, data in isolate_data.items()]
+    failed_checks = [
+        {
+            "isolate": iso,
+            "action_context": action,
+            "checks": checks,
+        }
+        for (iso, action), checks in fail_groups.items()
+    ]
+
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "isolate_summary": isolate_summary,
+        "failed_checks": failed_checks,
+    }
+
+
 def extract_error_summary(
     raw_output: str,
     diagnostics: List[Dict[str, Any]] | None = None,
+    check_results: Dict[str, Any] | None = None,
 ) -> str:
     """Extract a human-readable one-liner error summary.
 
     Priority:
-    1. First error diagnostic formatted as ``file:line: message``
-    2. First non-error diagnostic (e.g. warning) if no errors exist
-    3. Last non-empty line of raw output (fallback when no diagnostics)
-    4. Empty string if no output at all
+    1. Check result failures (structured verification outcome)
+    2. First error diagnostic formatted as ``file:line: message``
+    3. First non-error diagnostic (e.g. warning) if no errors exist
+    4. All checks passed (positive confirmation when checks ran)
+    5. Last non-empty line of raw output (fallback when no diagnostics)
+    6. Empty string if no output at all
     """
+    # Priority 1: check failures
+    if check_results and check_results.get("failed", 0) > 0:
+        total = check_results["total"]
+        failed_count = check_results["failed"]
+
+        failed_isolates = [
+            iso for iso in check_results["isolate_summary"] if iso["failed"] > 0
+        ]
+
+        # Collect failure counts per check type
+        type_counts: Dict[str, int] = {}
+        for iso in failed_isolates:
+            for ctype, counts in iso["by_type"].items():
+                if counts["failed"] > 0:
+                    type_counts[ctype] = type_counts.get(ctype, 0) + counts["failed"]
+
+        # Format type description
+        if len(type_counts) == 1:
+            ctype = next(iter(type_counts))
+            plural = "properties" if ctype == "property" else f"{ctype}s"
+            type_desc = f"all {plural}"
+        else:
+            parts = [
+                f"{count} {'properties' if ctype == 'property' else ctype + 's'}"
+                for ctype, count in sorted(type_counts.items())
+            ]
+            type_desc = ", ".join(parts)
+
+        # Format isolate description
+        if len(failed_isolates) == 1:
+            iso_desc = f"in Isolate {failed_isolates[0]['name']}"
+        else:
+            iso_parts = [
+                f"{iso['name']}: {iso['failed']}"
+                for iso in sorted(failed_isolates, key=lambda x: -x["failed"])
+            ]
+            iso_desc = (
+                f"across {len(failed_isolates)} isolates " f"({', '.join(iso_parts)})"
+            )
+
+        return f"{failed_count}/{total} checks failed ({type_desc}) {iso_desc}"
+
+    # Priority 2-3: error/warning diagnostics
     if diagnostics:
         errors = [d for d in diagnostics if d.get("severity") == "error"]
         if errors:
             d = errors[0]
             return f"{d['file']}:{d['line']}: {d['message']}"
-        # No errors but have warnings — use first warning
         d = diagnostics[0]
         return f"{d['file']}:{d['line']}: {d['message']}"
+
+    # Priority 4: all checks passed
+    if (
+        check_results
+        and check_results.get("total", 0) > 0
+        and check_results.get("failed", 0) == 0
+    ):
+        total = check_results["total"]
+        n_isolates = len(check_results["isolate_summary"])
+        return f"{total}/{total} checks passed across {n_isolates} isolates"
 
     # Try to extract Python exception from traceback
     if "Traceback (most recent call last):" in raw_output:
