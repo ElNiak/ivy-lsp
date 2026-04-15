@@ -72,6 +72,39 @@ def _ensure_state_dir(protocol_dir: str) -> str:
     return path
 
 
+def _read_active_state(state_path: str) -> dict | None:
+    """Read and parse the active-workflow YAML file."""
+    filepath = os.path.join(state_path, _ACTIVE_WORKFLOW_FILE)
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath) as f:
+            data = yaml.safe_load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, yaml.YAMLError):
+        return None
+
+
+def _read_journal(state_path: str) -> list[dict]:
+    """Read the journal YAML file, returning an empty list on missing/corrupt."""
+    filepath = os.path.join(state_path, _JOURNAL_FILE)
+    if not os.path.exists(filepath):
+        return []
+    try:
+        with open(filepath) as f:
+            loaded = yaml.safe_load(f)
+        return loaded if isinstance(loaded, list) else []
+    except (OSError, yaml.YAMLError):
+        return []
+
+
+def _write_journal(state_path: str, entries: list[dict]) -> None:
+    """Write the journal YAML file."""
+    filepath = os.path.join(state_path, _JOURNAL_FILE)
+    with open(filepath, "w") as f:
+        yaml.safe_dump(entries, f, default_flow_style=False)
+
+
 def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
     """Register workflow state management MCP tools."""
 
@@ -160,17 +193,8 @@ def _handle_set(
 
     state_path = _ensure_state_dir(protocol_dir)
 
-    # Read previous phase for transition tracking
-    previous_phase = None
-    active_path = os.path.join(state_path, _ACTIVE_WORKFLOW_FILE)
-    if os.path.exists(active_path):
-        try:
-            with open(active_path) as f:
-                prev = yaml.safe_load(f)
-            if isinstance(prev, dict):
-                previous_phase = prev.get("phase")
-        except (OSError, yaml.YAMLError):
-            pass
+    prev_state = _read_active_state(state_path)
+    previous_phase = prev_state.get("phase") if prev_state else None
 
     data: dict[str, Any] = {
         "workflow": workflow,
@@ -185,18 +209,8 @@ def _handle_set(
     with open(filepath, "w") as f:
         yaml.safe_dump(data, f)
 
-    # Append phase_transition journal event when phase changes
     if previous_phase and previous_phase != phase:
-        journal_path = os.path.join(state_path, _JOURNAL_FILE)
-        entries: list[dict] = []
-        if os.path.exists(journal_path):
-            try:
-                with open(journal_path) as f:
-                    loaded = yaml.safe_load(f)
-                    if isinstance(loaded, list):
-                        entries = loaded
-            except (OSError, yaml.YAMLError):
-                pass
+        entries = _read_journal(state_path)
         entries.append(
             {
                 "ts": datetime.now(timezone.utc).isoformat(),
@@ -206,8 +220,7 @@ def _handle_set(
                 "payload": {"from": previous_phase, "to": phase},
             }
         )
-        with open(journal_path, "w") as f:
-            yaml.safe_dump(entries, f, default_flow_style=False)
+        _write_journal(state_path, entries)
 
     logger.info("Workflow state set: %s/%s in %s", workflow, phase, protocol_dir)
     return {"success": True, "action": "set", "protocol_dir": protocol_dir, **data}
@@ -380,30 +393,11 @@ def _handle_append_journal(
 
     state_path = _ensure_state_dir(protocol_dir)
 
-    workflow = None
-    phase = None
-    active_path = os.path.join(state_path, _ACTIVE_WORKFLOW_FILE)
-    if os.path.exists(active_path):
-        try:
-            with open(active_path) as f:
-                active_data = yaml.safe_load(f)
-            if isinstance(active_data, dict):
-                workflow = active_data.get("workflow")
-                phase = active_data.get("phase")
-        except (OSError, yaml.YAMLError):
-            pass
+    active = _read_active_state(state_path)
+    workflow = active.get("workflow") if active else None
+    phase = active.get("phase") if active else None
 
-    journal_path = os.path.join(state_path, _JOURNAL_FILE)
-    entries: list[dict] = []
-    if os.path.exists(journal_path):
-        try:
-            with open(journal_path) as f:
-                loaded = yaml.safe_load(f)
-                if isinstance(loaded, list):
-                    entries = loaded
-        except (OSError, yaml.YAMLError):
-            pass
-
+    entries = _read_journal(state_path)
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "type": event_type,
@@ -412,9 +406,7 @@ def _handle_append_journal(
         "payload": payload,
     }
     entries.append(entry)
-
-    with open(journal_path, "w") as f:
-        yaml.safe_dump(entries, f, default_flow_style=False)
+    _write_journal(state_path, entries)
 
     if len(entries) > 200:
         _rotate_journal(state_path, entries)
@@ -452,9 +444,7 @@ def _rotate_journal(state_path: str, entries: list[dict]) -> None:
     with open(archive_path, "w") as f:
         yaml.safe_dump(existing + archive_entries, f, default_flow_style=False)
 
-    journal_path = os.path.join(state_path, _JOURNAL_FILE)
-    with open(journal_path, "w") as f:
-        yaml.safe_dump(keep_entries, f, default_flow_style=False)
+    _write_journal(state_path, keep_entries)
 
 
 def _handle_get_journal(
@@ -471,24 +461,7 @@ def _handle_get_journal(
             "message": "No protocol directory resolved.",
         }
 
-    journal_path = os.path.join(_state_dir(protocol_dir), _JOURNAL_FILE)
-    if not os.path.exists(journal_path):
-        return {
-            "success": True,
-            "action": "get_journal",
-            "entries": [],
-            "count": 0,
-            "protocol_dir": protocol_dir,
-        }
-
-    try:
-        with open(journal_path) as f:
-            entries = yaml.safe_load(f)
-            if not isinstance(entries, list):
-                entries = []
-    except (OSError, yaml.YAMLError):
-        entries = []
-
+    entries = _read_journal(_state_dir(protocol_dir))
     result_entries = entries[-last_n:] if last_n < len(entries) else entries
     return {
         "success": True,
