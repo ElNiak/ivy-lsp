@@ -159,6 +159,19 @@ def _handle_set(
         )
 
     state_path = _ensure_state_dir(protocol_dir)
+
+    # Read previous phase for transition tracking
+    previous_phase = None
+    active_path = os.path.join(state_path, _ACTIVE_WORKFLOW_FILE)
+    if os.path.exists(active_path):
+        try:
+            with open(active_path) as f:
+                prev = yaml.safe_load(f)
+            if isinstance(prev, dict):
+                previous_phase = prev.get("phase")
+        except (OSError, yaml.YAMLError):
+            pass
+
     data: dict[str, Any] = {
         "workflow": workflow,
         "phase": phase,
@@ -171,6 +184,30 @@ def _handle_set(
     filepath = os.path.join(state_path, _ACTIVE_WORKFLOW_FILE)
     with open(filepath, "w") as f:
         yaml.safe_dump(data, f)
+
+    # Append phase_transition journal event when phase changes
+    if previous_phase and previous_phase != phase:
+        journal_path = os.path.join(state_path, _JOURNAL_FILE)
+        entries: list[dict] = []
+        if os.path.exists(journal_path):
+            try:
+                with open(journal_path) as f:
+                    loaded = yaml.safe_load(f)
+                    if isinstance(loaded, list):
+                        entries = loaded
+            except (OSError, yaml.YAMLError):
+                pass
+        entries.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "type": "phase_transition",
+                "workflow": workflow,
+                "phase": phase,
+                "payload": {"from": previous_phase, "to": phase},
+            }
+        )
+        with open(journal_path, "w") as f:
+            yaml.safe_dump(entries, f, default_flow_style=False)
 
     logger.info("Workflow state set: %s/%s in %s", workflow, phase, protocol_dir)
     return {"success": True, "action": "set", "protocol_dir": protocol_dir, **data}
@@ -326,9 +363,13 @@ def _handle_append_journal(
         try:
             payload = json.loads(payload_json)
         except (json.JSONDecodeError, TypeError) as exc:
-            return error_response(f"Invalid JSON in 'state' parameter: {exc}")
+            return error_response(
+                f"Invalid JSON in 'state' parameter (event payload): {exc}"
+            )
         if not isinstance(payload, dict):
-            return error_response("'state' must be a JSON object.")
+            return error_response(
+                "'state' parameter (event payload) must be a JSON object."
+            )
 
     protocol_dir = _resolve_protocol_dir(ctx, protocol)
     if protocol_dir is None:
