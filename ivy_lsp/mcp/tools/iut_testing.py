@@ -226,6 +226,24 @@ def _refine_verdict(subprocess_verdict: str, summary: dict) -> str:
     return subprocess_verdict
 
 
+def _resolve_panther_bin(workspace_root: str) -> str | None:
+    """Walk up from *workspace_root* looking for ``.venv/bin/panther``.
+
+    Returns the absolute path to the binary, or ``None`` if not found
+    within 8 ancestor directories.
+    """
+    candidate = os.path.realpath(workspace_root)
+    for _ in range(8):
+        panther_bin = os.path.join(candidate, ".venv", "bin", "panther")
+        if os.path.isfile(panther_bin) and os.access(panther_bin, os.X_OK):
+            return panther_bin
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+    return None
+
+
 def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
     """Register IUT testing tools on the MCP server."""
     from ivy_lsp.mcp.tools import safe_tool
@@ -255,10 +273,15 @@ def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
             config_path: Path to existing experiment config YAML. Overrides
                          generated config when provided.
         """
-        if not shutil.which("panther"):
+        panther_bin = _resolve_panther_bin(ctx.root) or shutil.which("panther")
+        if not panther_bin:
             return {
                 "success": False,
-                "error": "panther CLI not found on PATH. Install PANTHER first.",
+                "error": (
+                    "panther CLI not found. Looked for .venv/bin/panther "
+                    "in ancestor directories of "
+                    f"{ctx.root} and on PATH."
+                ),
             }
 
         run_id = str(uuid.uuid4())[:8]
@@ -299,7 +322,7 @@ def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                "panther",
+                panther_bin,
                 "run",
                 "--config",
                 final_config_path,
