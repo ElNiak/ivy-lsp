@@ -6,8 +6,6 @@ import os
 import tempfile
 import time
 
-import pytest
-
 from ivy_lsp.core.rfc.cache import RfcCache
 
 

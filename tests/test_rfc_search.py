@@ -1,7 +1,6 @@
 # tests/test_rfc_search.py
 """Tests for IETF Datatracker search client."""
 
-import json
 from unittest.mock import patch
 
 import pytest
@@ -57,12 +56,12 @@ class TestDataTrackerClient:
         with patch(
             "ivy_lsp.core.rfc.search._fetch_json", return_value=MOCK_RESPONSE
         ) as mock_fetch:
-            results1 = await self.client.search("BGP", limit=5)
-            results2 = await self.client.search("BGP", limit=5)
+            await self.client.search("BGP", limit=5)
+            results = await self.client.search("BGP", limit=5)
 
         # Second call should hit cache, so only one HTTP call
         assert mock_fetch.call_count == 1
-        assert len(results2) == 2
+        assert len(results) == 2
 
     @pytest.mark.asyncio
     async def test_search_http_error(self):
