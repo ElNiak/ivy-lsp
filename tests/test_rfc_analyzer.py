@@ -3,7 +3,6 @@
 
 from ivy_lsp.core.rfc.analyzer import RfcAnalyzer
 from ivy_lsp.core.rfc.parser import RfcSection
-from ivy_lsp.core.rfc.types import CrossReference, NormativeStatement
 
 RFC_SECTION_TEXT = """\
    A BGP speaker MUST NOT allow a TCP connection to be configured for a
