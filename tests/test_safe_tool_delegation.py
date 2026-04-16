@@ -8,7 +8,11 @@ from mcp.types import CallToolResult, TextContent
 
 from ivy_lsp.mcp import client as sidecar_client
 from ivy_lsp.mcp.client import _list_tools_cache, call_sidecar_once
-from ivy_lsp.mcp.tools import _cancel_safe_wait_for, _error_result
+from ivy_lsp.mcp.tools import (
+    _cancel_safe_wait_for,
+    _error_result,
+    _try_sidecar_delegation,
+)
 
 # ---------------------------------------------------------------------------
 # call_sidecar_once tests
@@ -114,6 +118,48 @@ async def test_list_tools_cache_hit():
             # Second call — list_tools should be skipped (cached)
             await call_sidecar_once(19847, "ivy_test", {}, 5.0)
             assert mock_session.list_tools.call_count == 1  # Still 1
+
+
+@pytest.mark.asyncio
+async def test_local_only_skips_sidecar_delegation():
+    """Tools marked local_only bypass sidecar delegation even when a port exists."""
+    old_port = sidecar_client.get_sidecar_port()
+    try:
+        sidecar_client.set_sidecar_port(19847)
+
+        with patch(
+            "ivy_lsp.mcp.tools.call_sidecar_once",
+            new_callable=AsyncMock,
+        ) as mock_call:
+            result = await _try_sidecar_delegation(
+                "ivy_workflow_state", {"action": "get"}
+            )
+
+        assert result is None
+        mock_call.assert_not_called()
+    finally:
+        sidecar_client.set_sidecar_port(old_port)
+
+
+@pytest.mark.asyncio
+async def test_non_local_only_delegates_to_sidecar():
+    """Tools without local_only still attempt sidecar delegation."""
+    old_port = sidecar_client.get_sidecar_port()
+    try:
+        sidecar_client.set_sidecar_port(19847)
+        mock_result = MagicMock(spec=CallToolResult)
+
+        with patch(
+            "ivy_lsp.mcp.tools.call_sidecar_once",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ) as mock_call:
+            result = await _try_sidecar_delegation("ivy_verify", {"test_file": "t.ivy"})
+
+        assert result is mock_result
+        mock_call.assert_called_once()
+    finally:
+        sidecar_client.set_sidecar_port(old_port)
 
 
 def test_list_tools_cache_cleared_on_port_change():

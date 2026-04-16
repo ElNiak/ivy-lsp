@@ -58,6 +58,7 @@ _DEFAULT_TIMEOUT: float = 60.0
 
 # ---------------------------------------------------------------------------
 # Per-tool metadata (cost, category, model dependency)
+# `local_only`: skip sidecar delegation — tool runs faster locally than via HTTP round-trip.
 # ---------------------------------------------------------------------------
 
 _TOOL_METADATA: dict[str, dict[str, Any]] = {
@@ -70,7 +71,12 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
         "category": "analysis",
         "needs_model": False,
     },
-    "ivy_capabilities": {"cost": "low", "category": "analysis", "needs_model": False},
+    "ivy_capabilities": {
+        "cost": "low",
+        "category": "analysis",
+        "needs_model": False,
+        "local_only": True,
+    },
     "ivy_coverage": {"cost": "high", "category": "traceability", "needs_model": True},
     "ivy_extract_requirements": {
         "cost": "low",
@@ -105,10 +111,25 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
         "category": "verification",
         "needs_model": False,
     },
-    "ivy_health_check": {"cost": "low", "category": "analysis", "needs_model": False},
+    "ivy_health_check": {
+        "cost": "low",
+        "category": "analysis",
+        "needs_model": False,
+        "local_only": True,
+    },
     "ivy_index": {"cost": "high", "category": "analysis", "needs_model": False},
-    "ivy_workspace": {"cost": "low", "category": "workspace", "needs_model": False},
-    "ivy_workflow_state": {"cost": "low", "category": "workflow", "needs_model": False},
+    "ivy_workspace": {
+        "cost": "low",
+        "category": "workspace",
+        "needs_model": False,
+        "local_only": True,
+    },
+    "ivy_workflow_state": {
+        "cost": "low",
+        "category": "workflow",
+        "needs_model": False,
+        "local_only": True,
+    },
     "ivy_find_variants": {
         "cost": "low",
         "category": "propagation",
@@ -359,6 +380,10 @@ async def _try_sidecar_delegation(tool_name: str, kwargs: dict) -> Any | None:
     Returns the sidecar result on success, or ``None`` to fall through
     to local execution.
     """
+    meta = _TOOL_METADATA.get(tool_name, {})
+    if meta.get("local_only"):
+        logger.debug("[TOOL-ROUTE] %s -> local (local_only)", tool_name)
+        return None
     port = get_sidecar_port()
     if port is None:
         logger.debug("[TOOL-ROUTE] %s -> local (no sidecar)", tool_name)
