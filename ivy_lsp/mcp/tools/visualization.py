@@ -1,9 +1,10 @@
-"""Visualization tools: ivy_visualize, ivy_model_summary.
+"""Visualization tools: ivy_visualize.
 
 Consolidated from the original six tools:
 - ivy_action_dependency_graph, ivy_state_machine_view, ivy_layered_overview
-  -> ivy_visualize
-- ivy_model_summary + ivy_action_requirements -> ivy_model_summary
+  -> ivy_visualize (views: dependencies, state_machine, layers)
+- ivy_model_summary + ivy_action_requirements
+  -> ivy_visualize (views: summary, requirements)
 - ivy_coverage_gaps -> moved to traceability.py (ivy_coverage mode="gaps")
 """
 
@@ -154,52 +155,70 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             result["truncated"] = True
         return result
 
+    async def _model_summary_impl(
+        detail: str,
+        test_file: str | None,
+        protocol: str | None,
+        sort_by: str | None,
+        limit: int | None,
+        action_name: str | None,
+        file_path: str | None,
+        offset: int,
+        max_items: int,
+    ) -> dict:
+        """Dispatch helper for summary/requirements views."""
+        effective_limit = (
+            limit if limit is not None else (max_items if max_items > 0 else None)
+        )
+        if detail == "requirements":
+            return await _ivy_action_requirements(
+                action_name, file_path, test_file, protocol, offset, effective_limit
+            )
+        else:  # summary
+            return await _ivy_model_summary_logic(
+                test_file, protocol, sort_by, effective_limit
+            )
+
     @mcp.tool()
     @safe_tool(ctx=ctx)
     async def ivy_visualize(
-        view: Literal["dependencies", "state_machine", "layers"] = "dependencies",
+        view: Literal[
+            "dependencies", "state_machine", "layers", "summary", "requirements"
+        ] = "dependencies",
         test_file: str | None = None,
         protocol: str | None = None,
         include_state_vars: bool = False,
         state_var_filter: str | None = None,
         group_by: str = "file",
         max_items: int = 50,
+        sort_by: str | None = None,
+        action_name: str | None = None,
+        file_path: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> dict:
-        """Unified model visualization tool.
+        """Visualizes Ivy model structure: dependency graphs, state machines, layers, and action summaries.
 
-        Combines dependency graph, state machine view, and layered overview
-        into a single tool with view-based dispatch.
+        Views:
+        - dependencies: file/module dependency graph → {nodes: [{id, file, type}], edges: [{source, target}]}
+        - state_machine: state transitions per protocol object → {states[], transitions: [{from, to, action, guard?}]}
+        - layers: layered architecture overview → {layers: [{name, files[], role}]}
+        - summary: per-action requirement counts and state variable usage → {actions: [{name, requirement_count, state_vars[]}]}
+        - requirements: requirements organized by action boundaries → {actions: [{name, before[], after[], monitors[]}]}
 
-        Args:
-            view: Visualization view.
-                - "dependencies": Action dependency graph showing shared-state
-                  relationships. Actions are nodes; edges represent shared
-                  state variables (default).
-                - "state_machine": State-machine view where state variables
-                  are state nodes, actions are transitions (via READS/WRITES),
-                  and guards are require/assume clauses.
-                - "layers": Layered overview of the Ivy model organized by
-                  file or module.
-            test_file: Optional test file to scope the analysis to
-                (relative path). Used by all views.
-            protocol: Protocol name to scope results. Used by all views.
-            include_state_vars: When True, include state variable nodes and
-                their reads/writes edges in the graph. Used by
-                view="dependencies".
-            state_var_filter: Optional state variable name to restrict the
-                view to. Used by view="state_machine".
-            group_by: Grouping strategy: "file" (default) or "module".
-                Used by view="layers".
-            max_items: Maximum number of items to return in the response
-                (default: 50). When the result is truncated, the response
-                includes ``"truncated": true`` and ``"total": N``.
-                Set to 0 for unlimited.
+        Run ivy_index first. For RFC coverage stats (not per-action), use ivy_coverage mode=stats instead.
         """
         _tc = ToolTraceContext(
             "ivy_visualize",
             {"view": view, "test_file": test_file, "protocol": protocol},
         )
-        _valid_views = {"dependencies", "state_machine", "layers"}
+        _valid_views = {
+            "dependencies",
+            "state_machine",
+            "layers",
+            "summary",
+            "requirements",
+        }
         if view not in _valid_views:
             return _tc.finish(
                 error_response(
@@ -217,83 +236,22 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             result = await _ivy_layered_overview(test_file, group_by, protocol)
             result = _apply_max_items(result, "layers", max_items)
             return _tc.finish(result)
+        elif view in ("summary", "requirements"):
+            result = await _model_summary_impl(
+                detail=view,
+                test_file=test_file,
+                protocol=protocol,
+                sort_by=sort_by,
+                limit=limit,
+                action_name=action_name,
+                file_path=file_path,
+                offset=offset,
+                max_items=max_items,
+            )
+            return _tc.finish(result)
         else:  # default: dependencies
             result = await _ivy_action_dependency_graph(
                 test_file, include_state_vars, protocol
             )
             result = _apply_max_items(result, "nodes", max_items)
             return _tc.finish(result)
-
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_model_summary(
-        detail: Literal["summary", "requirements"] = "summary",
-        test_file: str | None = None,
-        protocol: str | None = None,
-        sort_by: str | None = None,
-        limit: int | None = None,
-        action_name: str | None = None,
-        file_path: str | None = None,
-        offset: int = 0,
-        max_items: int = 50,
-    ) -> dict:
-        """Unified model summary and action requirements tool.
-
-        Combines per-action summary statistics with detailed action
-        requirement inspection.
-
-        Args:
-            detail: Detail level.
-                - "summary": Per-action requirement counts, state variable
-                  usage, and RFC coverage (default). Returns one row per
-                  action.
-                - "requirements": Requirements organized by action boundaries
-                  (before/after monitors) with their temporal position,
-                  kind, and state variables they read or write.
-            test_file: Optional test file to scope the analysis to
-                (relative path). Used by both detail levels.
-            protocol: Protocol name (e.g., "quic") to scope results.
-                Used by both detail levels.
-            sort_by: Sort rows by field (e.g., "requirement_count", "name").
-                Used by detail="summary".
-            limit: Maximum number of rows/actions to return. Used by both
-                detail levels. Takes priority over max_items when set.
-            action_name: Specific action to query. Used by
-                detail="requirements". If omitted, returns all actions.
-            file_path: Scope to actions defined in this file (relative path).
-                Used by detail="requirements".
-            offset: Number of actions to skip (default: 0). Used by
-                detail="requirements".
-            max_items: Maximum number of items to return when limit is not
-                set (default: 50). Set to 0 for unlimited. When the result
-                is truncated, the response includes ``"truncated": true``
-                and ``"total": N``.
-        """
-        # Use limit if explicitly set, otherwise fall back to max_items
-        effective_limit = (
-            limit if limit is not None else (max_items if max_items > 0 else None)
-        )
-
-        _tc = ToolTraceContext(
-            "ivy_model_summary",
-            {"detail": detail, "test_file": test_file, "protocol": protocol},
-        )
-        _valid_details = {"summary", "requirements"}
-        if detail not in _valid_details:
-            return _tc.finish(
-                error_response(
-                    f"Unknown detail '{detail}'. Valid details: {sorted(_valid_details)}"
-                )
-            )
-        if detail == "requirements":
-            return _tc.finish(
-                await _ivy_action_requirements(
-                    action_name, file_path, test_file, protocol, offset, effective_limit
-                )
-            )
-        else:  # default: summary
-            return _tc.finish(
-                await _ivy_model_summary_logic(
-                    test_file, protocol, sort_by, effective_limit
-                )
-            )

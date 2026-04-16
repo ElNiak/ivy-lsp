@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, Literal
 
 from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
 from ivy_lsp.core.patterns import BRACKET_TAG_RE as _BRACKET_TAG_RE
@@ -30,39 +30,23 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
     @mcp.tool()
     @safe_tool(ctx=ctx)
     async def ivy_diagnostics(
-        relative_path: str,
-        mode: str = "full",
+        relative_path: str = "",
+        mode: Literal["structural", "full", "collisions", "dashboard"] = "full",
         layers: list[str] | None = None,
         min_severity: str | None = None,
         scope: str = "",
     ) -> dict:
-        """Diagnostic analysis of an Ivy file or workspace.
+        """Diagnostic analysis of Ivy files, workspace collisions, and verification cache status.
 
-        Supports three modes:
-        - "structural": Fast structural lint only (milliseconds, no subprocess).
-          Checks missing #lang header, unmatched braces, unresolved includes.
-          Replaces the former ivy_lint tool.
-        - "full": All 5 diagnostic layers (structural, lexer, semantic,
-          coverage, pattern). More thorough but may take longer on first
-          call (lazy model/graph building). Default.
-        - "collisions": Workspace-level include-name collision report.
-          Classifies basename collisions by layer relationship: intra-layer
-          (error), cross-layer-in-scope (warning), cross-boundary (info).
-          Does not require a file path (relative_path is ignored).
+        Modes:
+        - structural: fast structural lint (ms, no subprocess) → {diagnostics: [{file, line, severity, message}], counts{}}
+        - full: all 5 diagnostic layers → {diagnostics[], counts{}, layers_run[]}
+        - collisions: workspace-level include-name collision report → {collisions: [{name, files[]}]}
+        - dashboard: verification cache status → {total_files, verified, failed, pending, verified_files[], failed_files[]}
 
-        Args:
-            relative_path: Relative path to the .ivy file to diagnose.
-                Ignored when mode="collisions".
-            mode: Diagnostic mode — "structural" for fast lint (replaces
-                ivy_lint), "full" for all layers (default), "collisions"
-                for workspace-level collision analysis.
-            layers: Optional list of layers to run (full mode only).
-                Valid values: structural, lexer, semantic, coverage, pattern.
-                Defaults to all layers.
-            min_severity: Minimum severity to include: error, warning, info, hint.
-            scope: Optional test scope name.  When set, diagnostics are
-                filtered to files within the scope's include closure.
-                Empty string (default) = no scoping.
+        For fast feedback during editing, use structural. For pre-commit checks, use full. Use dashboard to see overall verification progress.
+
+        IMPORTANT: full mode requires the semantic model (ivy_index first). structural mode works without it.
         """
         logger.debug(
             "[ivy_diagnostics] workspace=%s, args=%r",
@@ -91,11 +75,17 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                 "scope": scope,
             },
         )
-        if mode not in ("structural", "full", "collisions"):
+        if mode not in ("structural", "full", "collisions", "dashboard"):
             return _tc.finish(
                 error_response(
-                    f"Unknown mode '{mode}'. Valid modes: ['structural', 'full', 'collisions']"
+                    f"Unknown mode '{mode}'. Valid modes: ['structural', 'full', 'collisions', 'dashboard']"
                 )
+            )
+
+        # dashboard mode: workspace-level verification cache status
+        if mode == "dashboard":
+            return _tc.finish(
+                await _verification_dashboard_impl(ctx, get_cache_summary_fn)
             )
 
         # collisions mode: workspace-level, does not need a file path
@@ -382,16 +372,8 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
 
         return _tc.finish(_diag_result)
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_verification_dashboard() -> dict:
-        """Workspace-level verification status: files verified, failed, pending.
-
-        Returns verification cache state showing which files have been
-        verified, which failed, and which are pending.
-        """
-        logger.debug("[ivy_verification_dashboard] workspace=%s", ctx.root)
-        _tc = ToolTraceContext("ivy_verification_dashboard", {})
+    async def _verification_dashboard_impl(ctx, get_cache_summary_fn) -> dict:
+        """Build verification dashboard result dict."""
         ivy_files = ctx.find_ivy_files(ctx.root)
         cache = get_cache_summary_fn()
         verified_set = set(cache["verified_files"])
@@ -399,17 +381,14 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
         pending = [
             f for f in ivy_files if f not in verified_set and f not in failed_set
         ]
-
-        return _tc.finish(
-            {
-                "success": True,
-                "total_files": len(ivy_files),
-                "verified": len(verified_set),
-                "failed": len(failed_set),
-                "pending": len(pending),
-                "cache_size": cache["cache_size"],
-                "cache_max": cache["cache_max"],
-                "verified_files": sorted(verified_set),
-                "failed_files": sorted(failed_set),
-            }
-        )
+        return {
+            "success": True,
+            "total_files": len(ivy_files),
+            "verified": len(verified_set),
+            "failed": len(failed_set),
+            "pending": len(pending),
+            "cache_size": cache["cache_size"],
+            "cache_max": cache["cache_max"],
+            "verified_files": sorted(verified_set),
+            "failed_files": sorted(failed_set),
+        }

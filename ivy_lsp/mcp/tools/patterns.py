@@ -1,15 +1,10 @@
-"""Pattern tools: ivy_patterns, ivy_pattern_scaffold.
-
-Consolidated from the original three tools:
-- ivy_pattern_analysis + ivy_scaffold_check -> ivy_patterns
-- ivy_pattern_scaffold (kept as-is, it's a generator not an analyzer)
-"""
+"""Pattern tools: ivy_patterns (unified pattern analysis, checking, and scaffolding)."""
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
 from ivy_lsp.mcp.tools import error_response, safe_tool
@@ -169,6 +164,33 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         }
 
     # ------------------------------------------------------------------
+    # Private impl for scaffold mode
+    # ------------------------------------------------------------------
+
+    async def _pattern_scaffold_impl(
+        protocol: str,
+        pattern: str,
+        wire_format: str,
+        role_type: str,
+        variant_names: list[str] | None,
+        roles: list[str] | None,
+        _ctx: Any = ctx,
+    ) -> dict:
+        from ivy_lsp.core.analysis.patterns import handle_pattern_scaffold
+
+        params: dict[str, Any] = {
+            "protocol": protocol,
+            "pattern": pattern,
+            "wire_format": wire_format,
+            "role_type": role_type,
+        }
+        if variant_names:
+            params["variant_names"] = variant_names
+        if roles:
+            params["roles"] = roles
+        return handle_pattern_scaffold(_ctx.root, params)
+
+    # ------------------------------------------------------------------
     # Public MCP tools
     # ------------------------------------------------------------------
 
@@ -176,33 +198,42 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
     @safe_tool(ctx=ctx)
     async def ivy_patterns(
         protocol: str,
-        mode: str = "analyze",
+        mode: Literal[
+            "analyze", "validate", "compare", "check", "scaffold"
+        ] = "analyze",
         pattern: str | None = None,
         reference_protocol: str | None = None,
+        wire_format: str = "binary",
+        role_type: str = "asymmetric",
+        variant_names: list[str] | None = None,
+        roles: list[str] | None = None,
     ) -> dict:
-        """Unified pattern analysis and scaffold completeness checking tool.
+        """Detects, validates, compares, and scaffolds Ivy protocol patterns.
 
-        Combines pattern detection/validation with layer completeness
-        checking into a single tool with mode-based dispatch.
+        Modes:
+        - analyze: detect recurring patterns (serdes, variants, monitors, shims) -> {patterns: [{name, files[], instances}]}
+        - validate: check cross-references between patterns -> {valid: bool, issues[]}
+        - compare: diff two protocols (requires reference_protocol) -> {shared[], only_source[], only_reference[]}
+        - check: completeness against 14-layer decomposition -> {present[], missing[], score: float 0-100}
+        - scaffold: generate Ivy source from a pattern template -> {source: str, pattern, protocol}
+
+        Use check first to identify missing layers, then scaffold to generate stubs.
 
         Args:
             protocol: Protocol name (e.g., "quic", "bgp", "minip").
-            mode: Analysis mode.
-                - "analyze": Detect recurring patterns (serdes, variants,
-                  monitors, shims, modules, entities) and validate
-                  cross-references between them (default). Supports
-                  sub-modes via the pattern parameter.
-                - "validate": Check cross-references between patterns.
-                  Same as "analyze" with mode="validate" passed through.
-                - "compare": Diff two protocols. Requires
-                  reference_protocol.
-                - "check": Check which layers/patterns are present or
-                  missing against the canonical 14-layer decomposition.
-                  Returns a completeness score with suggestions.
-            pattern: Optional specific pattern to analyze (e.g., "serdes",
-                "variants"). Used by mode="analyze" and mode="validate".
+            mode: Analysis mode (default: "analyze").
+            pattern: Specific pattern to analyze or scaffold (e.g., "serdes",
+                "variants"). Required for mode="scaffold".
             reference_protocol: Protocol to compare against. Required for
                 mode="compare".
+            wire_format: Wire format for scaffold serdes: "binary" (default)
+                or "json". For shim pattern, use "udp" or "tcp".
+            role_type: Role type for scaffold entity: "asymmetric" (default)
+                or "symmetric".
+            variant_names: Optional list of variant/message type names
+                (scaffold mode).
+            roles: Optional list of role names, e.g., ["client", "server"]
+                (scaffold mode).
         """
         logger.debug(
             "[ivy_patterns] workspace=%s, args=%r",
@@ -217,71 +248,30 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         _tc = ToolTraceContext(
             "ivy_patterns", {"protocol": protocol, "mode": mode, "pattern": pattern}
         )
-        if mode == "check":
-            return _tc.finish(await _ivy_scaffold_check(protocol))
-        else:
-            _VALID_MODES = {"analyze", "detect", "validate", "compare", "check"}
-            if mode not in _VALID_MODES:
+        if mode == "scaffold":
+            if not pattern:
                 return _tc.finish(
                     error_response(
-                        f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"
+                        "scaffold mode requires 'pattern' parameter "
+                        "(e.g., 'serdes', 'variants', 'shim')"
                     )
                 )
-            effective_mode = "detect" if mode == "analyze" else mode
             return _tc.finish(
-                await _ivy_pattern_analysis(
-                    protocol, effective_mode, pattern, reference_protocol
+                await _pattern_scaffold_impl(
+                    protocol, pattern, wire_format, role_type, variant_names, roles
                 )
             )
+        if mode == "check":
+            return _tc.finish(await _ivy_scaffold_check(protocol))
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_pattern_scaffold(
-        protocol: str,
-        pattern: str,
-        wire_format: str = "binary",
-        role_type: str = "asymmetric",
-        variant_names: list[str] | None = None,
-        roles: list[str] | None = None,
-    ) -> dict:
-        """Generate Ivy source from a pattern template.
-
-        Loads a pattern template, performs placeholder substitution with the
-        given protocol name and options, and returns the generated source code.
-
-        Args:
-            protocol: Protocol name for placeholder substitution.
-            pattern: Pattern to scaffold: "serdes", "variants", "monitors",
-                "shim", "module", or "entity".
-            wire_format: Wire format for serdes: "binary" (default) or "json".
-                For shim pattern, use "udp" or "tcp".
-            role_type: Role type for entity: "asymmetric" (default) or "symmetric".
-            variant_names: Optional list of variant/message type names.
-            roles: Optional list of role names (e.g., ["client", "server"]).
-        """
-        logger.debug(
-            "[ivy_pattern_scaffold] workspace=%s, args=%r",
-            ctx.root,
-            {
-                "protocol": protocol,
-                "pattern": pattern,
-                "wire_format": wire_format,
-                "role_type": role_type,
-            },
+        _VALID_MODES = {"analyze", "detect", "validate", "compare", "check", "scaffold"}
+        if mode not in _VALID_MODES:
+            return _tc.finish(
+                error_response(f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}")
+            )
+        effective_mode = "detect" if mode == "analyze" else mode
+        return _tc.finish(
+            await _ivy_pattern_analysis(
+                protocol, effective_mode, pattern, reference_protocol
+            )
         )
-        _tc = ToolTraceContext(
-            "ivy_pattern_scaffold", {"protocol": protocol, "pattern": pattern}
-        )
-        from ivy_lsp.core.analysis.patterns import handle_pattern_scaffold
-
-        params: dict[str, Any] = {
-            "protocol": protocol,
-            "pattern": pattern,
-            "wire_format": wire_format,
-            "role_type": role_type,
-        }
-        if variant_names:
-            params["variant_names"] = variant_names
-        if roles:
-            params["roles"] = roles
-        return _tc.finish(handle_pattern_scaffold(ctx.root, params))

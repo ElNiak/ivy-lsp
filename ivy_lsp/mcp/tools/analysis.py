@@ -1,4 +1,4 @@
-"""Analysis tools: ivy_include_graph, ivy_capabilities, ivy_scope."""
+"""Analysis tools: ivy_status, ivy_analysis, ivy_index."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import shutil
-from typing import Any
+from typing import Any, Literal
 
 from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.infra.observability import ToolTraceContext
@@ -21,28 +21,13 @@ _extractor = TieredExtractor()
 def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     """Register analysis-related MCP tools."""
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_include_graph(
-        relative_path: str | None = None,
-        detail: str = "summary",
-        limit: int = 30,
-        scope: str = "",
+    async def _include_graph_impl(
+        relative_path: str | None,
+        detail: str,
+        limit: int,
+        scope: str,
+        ctx: Any,
     ) -> dict:
-        """Return the include dependency graph for Ivy files.
-
-        If a file is given, returns its includes and files that include it.
-        If omitted, returns a workspace-level summary.
-
-        Args:
-            relative_path: Optional .ivy file to focus on.
-            detail: "summary" (default) returns file counts and top
-                entry points; "full" returns every file with its includes.
-            limit: Max files to return in summary mode (default 30).
-            scope: Optional test scope name.  When set, the graph is
-                filtered to only include edges within the scope's include
-                closure.  Empty string (default) = no scoping.
-        """
         logger.debug(
             "[ivy_include_graph] workspace=%s, args=%r",
             ctx.root,
@@ -61,7 +46,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         def _build_graph():
             graph: dict[str, list[str]] = {}
             skipped_count = 0
-            # Use shared basename cache (list-based, no collisions)
             cache = ctx.get_basename_cache()
 
             for rel_path in ctx.find_ivy_files(ctx.root):
@@ -93,7 +77,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 return None
             if len(candidates) == 1:
                 return candidates[0]
-            # Prefer the file sharing the longest common path prefix
             from_dir = os.path.dirname(from_file)
             best = candidates[0]
             best_len = 0
@@ -116,14 +99,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             ctx.tool_executor, _build_graph
         )
 
-        # Filter graph to scope's include closure when set.
-        # include_closure contains absolute paths; graph keys are relative.
         if _scope_files is not None:
             scope_rel_files = {os.path.relpath(f, ctx.root) for f in _scope_files}
             graph = {fp: incs for fp, incs in graph.items() if fp in scope_rel_files}
 
         if relative_path is not None:
-            # C5: Try key variants (with/without protocol-testing/ prefix)
             includes = graph.get(relative_path)
             resolved_key = relative_path
             if includes is None:
@@ -145,7 +125,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             for inc in includes:
                 rp = _resolve_closest(inc, resolved_key, basename_cache)
                 entry: dict[str, Any] = {"module": inc, "resolved_path": rp}
-                # Flag ambiguous resolution
                 candidates = basename_cache.get(inc, [])
                 if len(candidates) > 1:
                     entry["candidates"] = candidates
@@ -156,7 +135,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 target_basename = target_basename[:-4]
             included_by = [fp for fp, incs in graph.items() if target_basename in incs]
 
-            # Transitive includes (using proximity-based resolution)
             transitive: set[str] = set()
             stack = list(includes)
             while stack:
@@ -177,7 +155,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             inject_scope_metadata(_file_result, scope, _resolved_scope)
             return _tc.finish(_file_result)
         else:
-            # Compute entry points (files not included by any other file)
             all_included = set()
             for incs in graph.values():
                 all_included.update(incs)
@@ -188,10 +165,8 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             )
 
             if detail == "full":
-                # Full graph — may be very large
                 files_data = {fp: {"includes": incs} for fp, incs in graph.items()}
                 if limit > 0 and len(files_data) > limit:
-                    # Truncate
                     truncated_keys = sorted(files_data.keys())[:limit]
                     files_data = {k: files_data[k] for k in truncated_keys}
                     _trunc_result: dict[str, Any] = {
@@ -209,8 +184,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 inject_scope_metadata(_full_result, scope, _resolved_scope)
                 return _tc.finish(_full_result)
             else:
-                # Summary mode (default) — compact overview
-                # Top files by include count (most-included)
                 include_counts: dict[str, int] = {}
                 for incs in graph.values():
                     for inc in incs:
@@ -233,10 +206,75 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 inject_scope_metadata(_summary_result, scope, _resolved_scope)
                 return _tc.finish(_summary_result)
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_capabilities() -> dict:
-        """Report which Ivy CLI tools are available on PATH, MCP tools, staging health, and parsing tier."""
+    async def _scope_impl(relative_path: str, ctx: Any) -> dict:
+        logger.debug(
+            "[ivy_scope] workspace=%s, args=%r",
+            ctx.root,
+            {"relative_path": relative_path},
+        )
+        _tc = ToolTraceContext("ivy_scope", {"relative_path": relative_path})
+        abs_path, err = validated_path_or_error(ctx, relative_path)
+        if err:
+            return _tc.finish(err)
+        assert abs_path is not None
+        if not os.path.isfile(abs_path):
+            return _tc.finish(error_response(f"File not found: {relative_path}"))
+
+        result: dict[str, Any] = {
+            "file": relative_path,
+            "abs_path": abs_path,
+        }
+
+        req_graph = ctx.get_req_graph()
+        if req_graph is not None and hasattr(req_graph, "get_tests_for_file"):
+            tests = sorted(req_graph.get_tests_for_file(abs_path))
+            result["endpoint_mirrors"] = [os.path.relpath(t, ctx.root) for t in tests]
+            result["endpoint_mirror_count"] = len(tests)
+
+            if tests:
+                scope = req_graph.get_test_scope(tests[0])
+                if scope is not None:
+                    result["tester_role"] = scope.tester_role
+                    result["include_closure_size"] = len(scope.include_closure)
+                    result["include_closure"] = sorted(
+                        os.path.relpath(f, ctx.root) for f in scope.include_closure
+                    )
+                    result["exported_actions"] = sorted(scope.exported_actions)
+                    result["imported_actions"] = sorted(scope.imported_actions)
+
+            if len(tests) > 1:
+                roles = {}
+                for t in tests:
+                    sc = req_graph.get_test_scope(t)
+                    if sc:
+                        roles[os.path.relpath(t, ctx.root)] = sc.tester_role
+                result["mirror_roles"] = roles
+        else:
+            result["endpoint_mirrors"] = []
+            result["endpoint_mirror_count"] = 0
+
+        if ctx.staging_dir:
+            resolve_cb = ctx.make_resolve_callback()
+            if hasattr(resolve_cb, "__self__") and hasattr(
+                resolve_cb.__self__, "get_partition_for_file"
+            ):
+                resolver = resolve_cb.__self__
+                partition = resolver.get_partition_for_file(abs_path)
+                result["partition"] = partition
+                if resolver.collision_map:
+                    basename = os.path.basename(abs_path)
+                    if basename in resolver.collision_map:
+                        result["collision_report"] = {
+                            "basename": basename,
+                            "variants": [
+                                os.path.relpath(p, ctx.root)
+                                for p in resolver.collision_map[basename]
+                            ],
+                        }
+
+        return _tc.finish(result)
+
+    async def _capabilities_impl(ctx: Any) -> dict:
         from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
         from ivy_lsp.mcp.tools import get_tool_metadata
 
@@ -272,7 +310,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
                 ctx._lsp_server_ref, "_incremental_stats", None
             ),
         }
-        # Parsing tier availability (capped at 3s to avoid blocking ivy_capabilities)
         try:
             loop = asyncio.get_running_loop()
             result["parsing_tiers"] = await asyncio.wait_for(
@@ -289,12 +326,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             try:
                 result["staging_health"] = ctx.include_resolver.staging_health()
             except Exception:
-                pass  # staging health is optional
+                pass
         if "staging_health" not in result and ctx.workspace_context is not None:
             ws_cfg = getattr(ctx.workspace_context, "workspace_config", None)
             layers = getattr(ws_cfg, "workspace_layers", None) if ws_cfg else None
             if layers is None:
-                # Try ProtocolIndex-level layer info from manifest
                 layers = []
                 for _proto, idx in ctx.workspace_context.protocol_indexes.items():
                     manifest = getattr(idx, "manifest", {})
@@ -311,105 +347,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             }
         return _tc.finish(result)
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_scope(relative_path: str) -> dict:
-        """Return endpoint mirror scope info for an Ivy file.
-
-        Reports (all dynamically computed from the include graph):
-        - Endpoint mirror test(s) for the given file
-        - Tester role (client/server/mim)
-        - Scope partition (if partitioned staging is active)
-        - Full include closure
-        - Collision report (basenames with cross-partition conflicts)
-
-        Args:
-            relative_path: Relative path to the .ivy file.
-        """
-        logger.debug(
-            "[ivy_scope] workspace=%s, args=%r",
-            ctx.root,
-            {"relative_path": relative_path},
-        )
-        _tc = ToolTraceContext("ivy_scope", {"relative_path": relative_path})
-        abs_path, err = validated_path_or_error(ctx, relative_path)
-        if err:
-            return _tc.finish(err)
-        assert abs_path is not None
-        if not os.path.isfile(abs_path):
-            return _tc.finish(error_response(f"File not found: {relative_path}"))
-
-        result: dict[str, Any] = {
-            "file": relative_path,
-            "abs_path": abs_path,
-        }
-
-        # Try to get scope info from the requirement graph
-        req_graph = ctx.get_req_graph()
-        if req_graph is not None and hasattr(req_graph, "get_tests_for_file"):
-            tests = sorted(req_graph.get_tests_for_file(abs_path))
-            result["endpoint_mirrors"] = [os.path.relpath(t, ctx.root) for t in tests]
-            result["endpoint_mirror_count"] = len(tests)
-
-            # Get scope details from the first mirror
-            if tests:
-                scope = req_graph.get_test_scope(tests[0])
-                if scope is not None:
-                    result["tester_role"] = scope.tester_role
-                    result["include_closure_size"] = len(scope.include_closure)
-                    result["include_closure"] = sorted(
-                        os.path.relpath(f, ctx.root) for f in scope.include_closure
-                    )
-                    result["exported_actions"] = sorted(scope.exported_actions)
-                    result["imported_actions"] = sorted(scope.imported_actions)
-
-            # Multiple mirrors — show all roles
-            if len(tests) > 1:
-                roles = {}
-                for t in tests:
-                    sc = req_graph.get_test_scope(t)
-                    if sc:
-                        roles[os.path.relpath(t, ctx.root)] = sc.tester_role
-                result["mirror_roles"] = roles
-        else:
-            result["endpoint_mirrors"] = []
-            result["endpoint_mirror_count"] = 0
-
-        # Partition info
-        if ctx.staging_dir:
-            resolve_cb = ctx.make_resolve_callback()
-            # Check if the resolver has partition info
-            if hasattr(resolve_cb, "__self__") and hasattr(
-                resolve_cb.__self__, "get_partition_for_file"
-            ):
-                resolver = resolve_cb.__self__
-                partition = resolver.get_partition_for_file(abs_path)
-                result["partition"] = partition
-                if resolver.collision_map:
-                    # Report collisions relevant to this file
-                    basename = os.path.basename(abs_path)
-                    if basename in resolver.collision_map:
-                        result["collision_report"] = {
-                            "basename": basename,
-                            "variants": [
-                                os.path.relpath(p, ctx.root)
-                                for p in resolver.collision_map[basename]
-                            ],
-                        }
-
-        return _tc.finish(result)
-
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_health_check() -> dict:
-        """Server health check: uptime, cache status, tool metrics, model status.
-
-        Returns server health information including:
-        - Server uptime and memory usage
-        - Verification cache status (entries, hit rate)
-        - Model build status
-        - Tool call metrics (count, avg duration, error count per tool)
-        """
+    async def _health_check_impl(ctx: Any) -> dict:
         from ivy_lsp.mcp.tools import get_tool_metrics
 
         _tc = ToolTraceContext("ivy_health_check", {})
@@ -424,14 +362,12 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             "model_status": ctx.get_model_status(),
         }
 
-        # Verification cache summary
         if hasattr(ctx, "get_verify_cache_summary"):
             try:
                 health["verification_cache"] = ctx.get_verify_cache_summary()
             except Exception as exc:
                 health["verification_cache"] = {"error": str(exc)}
 
-        # Tool metrics
         metrics = get_tool_metrics()
         tool_stats = {}
         for tool_name, m in metrics.items():
@@ -446,14 +382,12 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             }
         health["tool_metrics"] = tool_stats
 
-        # Capabilities
         health["capabilities"] = {
             "ivy_check": shutil.which("ivy_check") is not None,
             "ivyc": shutil.which("ivyc") is not None,
             "ivy_show": shutil.which("ivy_show") is not None,
         }
 
-        # File counts
         try:
             ivy_files = ctx.find_ivy_files(ctx.root)
             health["workspace_files"] = len(ivy_files)
@@ -461,6 +395,53 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             health["workspace_files"] = -1
 
         return _tc.finish(health)
+
+    @mcp.tool()
+    @safe_tool(ctx=ctx)
+    async def ivy_status(
+        mode: Literal["capabilities", "health"] = "capabilities",
+    ) -> dict:
+        """Reports server state: available CLI tools, MCP tool metadata, and runtime health.
+
+        Modes:
+        - capabilities: CLI tool availability, parsing tier, staging health
+        - health: uptime, memory, cache status, tool call metrics
+
+        Use capabilities to check prerequisites before ivy_verify or ivy_compile.
+        """
+        if mode == "capabilities":
+            return await _capabilities_impl(ctx)
+        elif mode == "health":
+            return await _health_check_impl(ctx)
+        else:
+            return error_response(f"Unknown mode '{mode}'. Valid: capabilities, health")
+
+    @mcp.tool()
+    @safe_tool(ctx=ctx)
+    async def ivy_analysis(
+        mode: Literal["includes", "scope"] = "includes",
+        relative_path: str | None = None,
+        detail: str = "summary",
+        limit: int = 30,
+        scope: str = "",
+    ) -> dict:
+        """Analyzes file relationships: include dependencies and endpoint mirror scoping.
+
+        Modes:
+        - includes: include dependency graph for Ivy files
+        - scope: endpoint mirror scope info
+
+        Run ivy_index first for accurate include resolution. For workspace-level
+        collisions, use ivy_diagnostics mode=collisions.
+        """
+        if mode == "includes":
+            return await _include_graph_impl(relative_path, detail, limit, scope, ctx)
+        elif mode == "scope":
+            if not relative_path:
+                return error_response("mode='scope' requires 'relative_path'.")
+            return await _scope_impl(relative_path, ctx)
+        else:
+            return error_response(f"Unknown mode '{mode}'. Valid: includes, scope")
 
     @mcp.tool()
     @safe_tool(ctx=ctx)

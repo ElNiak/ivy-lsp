@@ -139,8 +139,9 @@ async def _sidecar_monitor(
 _MCP_INSTRUCTIONS = (
     "Ivy Language Server MCP tools for formal verification. "
     "Tools: ivy_verify (check), ivy_compile (ivyc), ivy_model_info (show), "
-    "ivy_diagnostics (mode: structural|full), ivy_include_graph, "
-    "ivy_capabilities; "
+    "ivy_diagnostics (mode: structural|full), "
+    "ivy_status (mode: capabilities|health), "
+    "ivy_analysis (mode: includes|scope); "
     "ivy_coverage (mode: matrix|stats|gaps|diff), "
     "ivy_extract_requirements (output: structured|manifest); "
     "ivy_visualize (view: dependencies|state_machine|layers), "

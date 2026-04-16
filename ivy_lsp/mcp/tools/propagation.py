@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -568,35 +568,32 @@ def _resolve_protocol_dir(ctx: Any, protocol: Optional[str]) -> str:
 
 def register_propagation_tools(mcp: Any, ctx: Any) -> None:
     """Register propagation analysis MCP tools."""
-    from ivy_lsp.mcp.tools import safe_tool
+    from ivy_lsp.mcp.tools import error_response, safe_tool
 
     @mcp.tool()
     @safe_tool(ctx=ctx)
-    async def ivy_find_variants(
+    async def ivy_propagation(
         type_name: str,
+        mode: Literal["variants", "serdes", "impact"] = "variants",
+        change_type: str = "",
         protocol: str | None = None,
     ) -> dict:
-        """Enumerate the structure of an Ivy type -- struct fields or variant members with tags."""
-        protocol_dir = _resolve_protocol_dir(ctx, protocol)
-        return find_variants_impl(type_name, protocol_dir)
+        """Analyzes Ivy type structure and propagation impact across protocol files.
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_serdes_correlation(
-        type_name: str,
-        protocol: str | None = None,
-    ) -> dict:
-        """Return the serializer/deserializer files correlated with an Ivy message type."""
-        protocol_dir = _resolve_protocol_dir(ctx, protocol)
-        return serdes_correlation_impl(type_name, protocol_dir)
+        Modes:
+        - variants: enumerate struct fields or variant members with tags → {type_name, kind, fields: [{name, type, tag?}]}
+        - serdes: find serializer/deserializer files for a message type → {type_name, correlations: [{file, role: ser|deser, functions[]}]}
+        - impact: categorize files by impact of a type change → {type_name, change_type, auto_propagate[], manual_review[]}
 
-    @mcp.tool()
-    @safe_tool(ctx=ctx)
-    async def ivy_change_impact(
-        type_name: str,
-        change_type: str,
-        protocol: str | None = None,
-    ) -> dict:
-        """Categorize protocol files by impact of a type change (auto-propagate vs manual review)."""
+        Use variants to understand type shape, then serdes or impact for change planning.
+        """
         protocol_dir = _resolve_protocol_dir(ctx, protocol)
-        return change_impact_impl(type_name, change_type, protocol_dir)
+        if mode == "variants":
+            return find_variants_impl(type_name, protocol_dir)
+        if mode == "serdes":
+            return serdes_correlation_impl(type_name, protocol_dir)
+        if mode == "impact":
+            if not change_type:
+                return error_response("change_type is required for impact mode")
+            return change_impact_impl(type_name, change_type, protocol_dir)
+        return error_response(f"unknown mode: {mode}")

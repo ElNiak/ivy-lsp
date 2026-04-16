@@ -86,6 +86,8 @@ _FORMATTERS: dict[str, Callable[[dict], str]] = {
     "ivy_model_info": _format_ivy_model_info,
     "ivy_diagnostics": _format_ivy_diagnostics,
     "ivy_verification_dashboard": _format_ivy_verification_dashboard,
+    "ivy_status": _format_ivy_capabilities,
+    "ivy_analysis": _format_ivy_include_graph,
     "ivy_include_graph": _format_ivy_include_graph,
     "ivy_capabilities": _format_ivy_capabilities,
     "ivy_scope": _format_ivy_scope,
