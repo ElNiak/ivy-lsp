@@ -125,7 +125,7 @@ def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
         caller: str | None = None,
         invocation_depth: int = 0,
-        state: str | None = None,
+        state: str | dict | None = None,
         event_type: str | None = None,
         last_n: int = 20,
     ) -> dict:
@@ -320,19 +320,23 @@ def _handle_get_build(ctx: Any, protocol: str | None) -> dict:
     }
 
 
-def _handle_set_build(ctx: Any, protocol: str | None, state_json: str | None) -> dict:
+def _handle_set_build(
+    ctx: Any, protocol: str | None, state_json: str | dict | None
+) -> dict:
     if not state_json:
         return error_response(
             "action='set_build' requires 'state' parameter (JSON string)."
         )
 
-    try:
-        state_dict = json.loads(state_json)
-    except (json.JSONDecodeError, TypeError) as exc:
-        return error_response(f"Invalid JSON in 'state' parameter: {exc}")
-
-    if not isinstance(state_dict, dict):
-        return error_response("'state' must be a JSON object.")
+    if isinstance(state_json, dict):
+        state_dict = state_json
+    else:
+        try:
+            state_dict = json.loads(state_json)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return error_response(f"Invalid JSON in 'state' parameter: {exc}")
+        if not isinstance(state_dict, dict):
+            return error_response("'state' must be a JSON object.")
 
     protocol_dir = _resolve_protocol_dir(ctx, protocol)
     if protocol_dir is None:
@@ -359,7 +363,7 @@ def _handle_append_journal(
     ctx: Any,
     protocol: str | None,
     event_type: str | None,
-    payload_json: str | None,
+    payload_json: str | dict | None,
 ) -> dict:
     if not event_type:
         return error_response(
@@ -373,16 +377,19 @@ def _handle_append_journal(
 
     payload: dict = {}
     if payload_json:
-        try:
-            payload = json.loads(payload_json)
-        except (json.JSONDecodeError, TypeError) as exc:
-            return error_response(
-                f"Invalid JSON in 'state' parameter (event payload): {exc}"
-            )
-        if not isinstance(payload, dict):
-            return error_response(
-                "'state' parameter (event payload) must be a JSON object."
-            )
+        if isinstance(payload_json, dict):
+            payload = payload_json
+        else:
+            try:
+                payload = json.loads(payload_json)
+            except (json.JSONDecodeError, TypeError) as exc:
+                return error_response(
+                    f"Invalid JSON in 'state' parameter (event payload): {exc}"
+                )
+            if not isinstance(payload, dict):
+                return error_response(
+                    "'state' parameter (event payload) must be a JSON object."
+                )
 
     protocol_dir = _resolve_protocol_dir(ctx, protocol)
     if protocol_dir is None:

@@ -128,12 +128,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
         from ivy_lsp.core.semantic.rfc_annotations import normalize_tag_with_diagnostics
 
-        requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
-        # Fallback: if semantic model has no requirements, load from manifests
-        if not requirements:
-            requirements.extend(load_requirements_from_manifests(ctx.root))
+        # When protocol is specified, load requirements only from that
+        # protocol's manifests to avoid cross-protocol contamination.
+        # Otherwise, fall back to the semantic model's requirements.
+        if protocol:
+            requirements = load_requirements_from_manifests(ctx.root, protocol=protocol)
+        else:
+            requirements = model.get_nodes_by_type(RfcRequirement)
+            if not requirements:
+                requirements.extend(load_requirements_from_manifests(ctx.root))
 
         filtered = await apply_scope_filter(
             annotations,
@@ -261,22 +266,28 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         # C4 fix: override RFC uncovered requirements using the same
         # logic as _ivy_requirement_coverage() so stats and gaps agree.
-        stats = await _ivy_requirement_coverage(relative_path=None, test_file=test_file)
+        stats = await _ivy_requirement_coverage(
+            relative_path=None, test_file=test_file, protocol=protocol
+        )
         model = None
         try:
             uncovered_ids = set(stats.get("_uncovered_ids_full", []))
             model = await get_model_if_ready(ctx)
 
-            # Build req_map from the semantic model first
+            # Build req_map: prefer protocol-filtered manifests when protocol
+            # is specified, otherwise use the semantic model's requirements.
             req_map: dict[str, Any] = {}
-            if model is not None:
+            if protocol:
+                for r in load_requirements_from_manifests(ctx.root, protocol=protocol):
+                    req_map[r.id] = r
+            elif model is not None:
                 from ivy_lsp.core.semantic.nodes import RfcRequirement
 
                 requirements = model.get_nodes_by_type(RfcRequirement)
                 req_map = {r.id: r for r in requirements}
 
-            # Fallback: when the semantic model has no RfcRequirement nodes
-            # (e.g. test mode with no .ivy files), use the requirement graph
+            # Fallback: when neither manifests nor model produced entries,
+            # use the requirement graph
             if not req_map:
                 graph = await ctx.get_req_graph()
                 if graph is not None:
@@ -311,24 +322,17 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         except KeyError:
             pass  # Fall back to visualization handler result
 
-        # Apply protocol filter to uncovered requirements
+        # Apply protocol filter to unguarded state vars (file-path based).
+        # RFC requirements are already protocol-scoped via the stats overlay
+        # above (which uses manifest-filtered requirements when protocol is set).
         protocol_filter = params.get("protocolFilter", "")
         if protocol_filter:
-            result["uncoveredRfcRequirements"] = [
-                r
-                for r in result.get("uncoveredRfcRequirements", [])
-                if protocol_filter in r.get("id", "")
-                or protocol_filter in r.get("rfc", "").lower()
-            ]
             result["unguardedStateVars"] = [
                 v
                 for v in result.get("unguardedStateVars", [])
                 if not v.get("file") or protocol_filter in v.get("file", "")
             ]
             if "summary" in result:
-                result["summary"]["uncoveredRfcCount"] = len(
-                    result.get("uncoveredRfcRequirements", [])
-                )
                 result["summary"]["unguardedCount"] = len(
                     result.get("unguardedStateVars", [])
                 )
