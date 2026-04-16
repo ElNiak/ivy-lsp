@@ -147,7 +147,10 @@ _MCP_INSTRUCTIONS = (
     "ivy_model_summary (detail: summary|requirements); "
     "ivy_patterns (mode: analyze|validate|compare|check), "
     "ivy_pattern_scaffold; "
-    "ivy_quality (mode: suggestions|gate)."
+    "ivy_quality (mode: suggestions|gate); "
+    "ivy_rfc_get (format: full|metadata|sections), "
+    "ivy_rfc_search (keyword search via IETF Datatracker), "
+    "ivy_rfc_section (section text + normative MUST/SHOULD/MAY analysis)."
 )
 
 

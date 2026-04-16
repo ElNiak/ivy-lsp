@@ -392,6 +392,23 @@ class ToolContext:
 
         ctx.make_viz_server_proxy = _make_viz_server_proxy
 
+        # Wire up RFC service (same pattern as build_tool_context in server.py)
+        from ivy_lsp.core.rfc.service import RfcService
+        from ivy_lsp.infra.config import get_config
+
+        cfg = get_config()
+        import os
+
+        cache_dir = cfg.rfc_cache_dir
+        if cache_dir is None and ws_root:
+            cache_dir = os.path.join(ws_root, ".ivy-cache", "rfc")
+        ctx.rfc_service = RfcService(
+            cache_dir=cache_dir,
+            cache_ttl=cfg.rfc_cache_ttl,
+            local_dir=cfg.rfc_local_dir,
+            offline=cfg.rfc_offline,
+        )
+
         return ctx
 
     def validate_path(self, relative_path: str) -> str:
