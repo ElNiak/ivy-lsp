@@ -157,7 +157,7 @@ class RfcService:
         """Clear all in-memory and search caches."""
         self._cache.clear()
         self._parsed_cache.clear()
-        self._search_client._search_cache.clear()
+        self._search_client.clear()
 
     async def _get_or_parse(self, rfc_id: str, original_source: str) -> RfcDocument:
         """Return a cached RfcDocument, or fetch + parse + cache it."""

@@ -48,6 +48,10 @@ class DataTrackerClient:
         """Initialize with an empty result cache."""
         self._search_cache: dict[str, tuple[List[RfcSearchResult], float]] = {}
 
+    def clear(self) -> None:
+        """Clear the search result cache."""
+        self._search_cache.clear()
+
     async def search(self, query: str, limit: int = 10) -> List[RfcSearchResult]:
         """Search for RFCs matching *query*.
 
