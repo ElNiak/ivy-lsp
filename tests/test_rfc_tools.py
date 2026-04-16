@@ -95,11 +95,12 @@ class TestIvyRfcSearchTool:
 
 
 class TestToolMetadataRegistration:
-    def test_rfc_tools_in_metadata(self):
+    def test_rfc_tool_in_metadata(self):
         from ivy_lsp.mcp.tools import get_tool_metadata
 
-        for tool_name in ["ivy_rfc_get", "ivy_rfc_search", "ivy_rfc_section"]:
-            meta = get_tool_metadata(tool_name)
-            assert meta is not None, f"{tool_name} not registered"
-            assert meta["category"] == "rfc"
-            assert meta["needs_model"] is False
+        meta = get_tool_metadata("ivy_rfc")
+        assert meta, "ivy_rfc not registered"
+        assert meta["category"] == "rfc"
+        assert meta["needs_model"] is False
+        assert meta["rendering"] == "raw"
+        assert meta["tier"] == "fast"
