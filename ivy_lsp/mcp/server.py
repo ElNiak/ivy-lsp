@@ -600,6 +600,21 @@ class McpServerState:
         ctx.tool_executor = self._tool_executor
         ctx.invalidate_caches = self.invalidate_caches
 
+        # Wire up RFC service
+        from ivy_lsp.core.rfc.service import RfcService
+        from ivy_lsp.infra.config import get_config
+
+        cfg = get_config()
+        cache_dir = cfg.rfc_cache_dir
+        if cache_dir is None and self.root:
+            cache_dir = os.path.join(self.root, ".ivy-cache", "rfc")
+        ctx.rfc_service = RfcService(
+            cache_dir=cache_dir,
+            cache_ttl=cfg.rfc_cache_ttl,
+            local_dir=cfg.rfc_local_dir,
+            offline=cfg.rfc_offline,
+        )
+
         return ctx
 
 

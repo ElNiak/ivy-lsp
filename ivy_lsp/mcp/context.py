@@ -160,6 +160,9 @@ class ToolContext:
     # preventing thread pool starvation during heavy background compilation.
     tool_executor: concurrent.futures.ThreadPoolExecutor | None = None
 
+    # RFC service (set by McpServerState.build_tool_context)
+    rfc_service: Any = None
+
     # Active workspace management
     active_workspace: Any = None  # Optional[ActiveWorkspace]
     workspace_groups: dict = field(default_factory=dict)  # From .ivyworkspace

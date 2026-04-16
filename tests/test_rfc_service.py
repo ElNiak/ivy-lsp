@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import pytest
 
-from ivy_lsp.core.rfc.parser import RfcSection
 from ivy_lsp.core.rfc.service import RfcService
 from ivy_lsp.core.rfc.types import RfcDocument
 

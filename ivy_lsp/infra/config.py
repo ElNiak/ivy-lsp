@@ -128,6 +128,12 @@ class ServerConfig:
     # Per-subsystem log level overrides (e.g. {"parsing": "DEBUG", "mcp": "WARNING"})
     subsystem_levels: dict[str, str] = field(default_factory=dict)
 
+    # RFC service
+    rfc_cache_dir: str | None = None
+    rfc_cache_ttl: int = 3600
+    rfc_local_dir: str | None = None
+    rfc_offline: bool = False
+
     @classmethod
     def from_env(cls) -> ServerConfig:
         """Read all ``IVY_LSP_*`` environment variables and return a config."""
@@ -185,6 +191,10 @@ class ServerConfig:
             observability_enabled=observability_enabled,
             observability_dir=os.environ.get("IVY_OBSERVABILITY_DIR"),
             subsystem_levels=_dict_env("IVY_LSP_SUBSYSTEM_LEVELS"),
+            rfc_cache_dir=os.environ.get("IVY_LSP_RFC_CACHE_DIR"),
+            rfc_cache_ttl=_int_env("IVY_LSP_RFC_CACHE_TTL", 3600),
+            rfc_local_dir=os.environ.get("IVY_LSP_RFC_LOCAL_DIR"),
+            rfc_offline=_bool_env("IVY_LSP_RFC_OFFLINE", "0"),
         )
 
 
