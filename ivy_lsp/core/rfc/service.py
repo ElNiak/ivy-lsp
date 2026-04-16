@@ -75,7 +75,7 @@ class RfcService:
             rfc_number = f"rfc{rfc_number}"
         rfc_number = rfc_number.lower()
 
-        metadata = RfcMetadata(date="", status="")
+        metadata = RfcMetadata()
 
         if format == "metadata":
             return RfcDocument(
@@ -191,7 +191,7 @@ class RfcService:
         Args:
             path: New local directory path.
         """
-        self._cache._local_dir = path
+        self._cache.set_local_dir(path)
 
     def clear_cache(self) -> None:
         """Clear all disk-cached RFC entries."""

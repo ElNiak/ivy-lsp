@@ -153,10 +153,30 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
         "category": "testing",
         "needs_model": False,
     },
-    "ivy_rfc_get": {"cost": "low", "category": "rfc", "needs_model": False},
-    "ivy_rfc_search": {"cost": "medium", "category": "rfc", "needs_model": False},
-    "ivy_rfc_section": {"cost": "low", "category": "rfc", "needs_model": False},
+    "ivy_rfc_get": {
+        "cost": "low",
+        "category": "rfc",
+        "needs_model": False,
+        "local_only": True,
+    },
+    "ivy_rfc_search": {
+        "cost": "medium",
+        "category": "rfc",
+        "needs_model": False,
+        "local_only": True,
+    },
+    "ivy_rfc_section": {
+        "cost": "low",
+        "category": "rfc",
+        "needs_model": False,
+        "local_only": True,
+    },
 }
+
+
+_LOCAL_ONLY_TOOLS: frozenset[str] = frozenset(
+    name for name, meta in _TOOL_METADATA.items() if meta.get("local_only")
+)
 
 
 def get_tool_metadata(tool_name: str | None = None) -> dict[str, Any]:
@@ -386,8 +406,7 @@ async def _try_sidecar_delegation(tool_name: str, kwargs: dict) -> Any | None:
     Returns the sidecar result on success, or ``None`` to fall through
     to local execution.
     """
-    meta = _TOOL_METADATA.get(tool_name, {})
-    if meta.get("local_only"):
+    if tool_name in _LOCAL_ONLY_TOOLS:
         logger.debug("[TOOL-ROUTE] %s -> local (local_only)", tool_name)
         return None
     port = get_sidecar_port()

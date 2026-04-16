@@ -68,7 +68,7 @@ class DataTrackerClient:
         params = urllib.parse.urlencode(
             {
                 "format": "json",
-                "name__contains": query.lower(),
+                "title__icontains": query,
                 "type": "rfc",
                 "limit": str(limit),
             }

@@ -85,14 +85,20 @@ class RfcCache:
                 }
         return None
 
+    def set_local_dir(self, path: Path | None) -> None:
+        """Override the local RFC file directory."""
+        self._local_dir = Path(path) if path else None
+
     def clear(self) -> None:
         """Clear the in-memory cache. Disk cache is not deleted."""
         self._memory.clear()
 
     @staticmethod
     def _normalize_id(rfc_id: str) -> str:
-        """Normalize to lowercase, strip 'rfc' prefix inconsistencies."""
+        """Normalize to lowercase, reject path traversal attempts."""
         rfc_id = rfc_id.lower().strip()
+        if ".." in rfc_id or "/" in rfc_id or "\\" in rfc_id:
+            raise ValueError(f"Invalid RFC ID: {rfc_id!r}")
         if rfc_id.startswith("rfc"):
             return rfc_id
         if rfc_id.isdigit():

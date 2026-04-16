@@ -50,13 +50,10 @@ def register_rfc_tools(mcp: Any, ctx: Any) -> None:
         }
 
         if format == "metadata":
-            result["metadata"] = {
-                "authors": doc.metadata.authors,
-                "date": doc.metadata.date,
-                "status": doc.metadata.status,
-                "obsoletes": doc.metadata.obsoletes,
-                "updates": doc.metadata.updates,
-            }
+            result["note"] = (
+                "Metadata extraction from RFC headers is not yet implemented. "
+                "Use format='sections' for a table of contents."
+            )
         elif format == "sections":
             result["sections"] = [
                 {"number": s.number, "title": s.title} for s in doc.sections
