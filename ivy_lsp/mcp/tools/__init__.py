@@ -52,6 +52,9 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "ivy_serdes_correlation": 30.0,
     "ivy_change_impact": 60.0,
     "ivy_iut_test": 180.0,
+    "ivy_rfc_get": 30.0,
+    "ivy_rfc_search": 15.0,
+    "ivy_rfc_section": 30.0,
 }
 
 _DEFAULT_TIMEOUT: float = 60.0
@@ -150,6 +153,9 @@ _TOOL_METADATA: dict[str, dict[str, Any]] = {
         "category": "testing",
         "needs_model": False,
     },
+    "ivy_rfc_get": {"cost": "low", "category": "rfc", "needs_model": False},
+    "ivy_rfc_search": {"cost": "medium", "category": "rfc", "needs_model": False},
+    "ivy_rfc_section": {"cost": "low", "category": "rfc", "needs_model": False},
 }
 
 
@@ -771,6 +777,7 @@ from ivy_lsp.mcp.tools.iut_testing import register_iut_testing_tools
 from ivy_lsp.mcp.tools.patterns import register_pattern_tools
 from ivy_lsp.mcp.tools.propagation import register_propagation_tools
 from ivy_lsp.mcp.tools.quality import register_quality_tools
+from ivy_lsp.mcp.tools.rfc_tools import register_rfc_tools
 from ivy_lsp.mcp.tools.traceability import register_traceability_tools
 from ivy_lsp.mcp.tools.verification import register_verification_tools
 from ivy_lsp.mcp.tools.visualization import register_visualization_tools
@@ -793,6 +800,7 @@ def register_all_tools(mcp: Any, ctx: ToolContext) -> None:
     register_propagation_tools(mcp, ctx)
     register_iut_testing_tools(mcp, ctx)
     register_workflow_state_tools(mcp, ctx)
+    register_rfc_tools(mcp, ctx)
 
 
 __all__ = [
