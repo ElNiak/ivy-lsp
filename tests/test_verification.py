@@ -109,10 +109,12 @@ async def test_run_ivy_check_with_staging_dir(tmp_path):
             workspace_root=str(tmp_path),
             staging_dir=str(staging),
         )
-        # Should have called with staged path
+        # Should have called with basename (cwd is set to staging dir)
         call_args = mock_run.call_args
         cmd = call_args[0][0]  # first positional arg
-        assert str(staging) in cmd[-1]
+        assert cmd[-1] == "model.ivy"
+        # cwd should be the staging directory
+        assert call_args[1].get("cwd") == str(staging)
 
 
 @pytest.mark.asyncio
@@ -161,12 +163,13 @@ async def test_run_ivy_check_with_isolate():
             isolate="my_isolate",
         )
         cmd = mock_run.call_args[0][0]
-        assert cmd == ["ivy_check", "isolate=my_isolate", "/tmp/model.ivy"]
+        assert cmd == ["ivy_check", "isolate=my_isolate", "model.ivy"]
 
 
 @pytest.mark.asyncio
-async def test_run_ivy_compile_success():
+async def test_run_ivy_compile_success(tmp_path):
     """ivy_compile returns structured result with diagnostics."""
+    (tmp_path / "model.ivy").write_text("#lang ivy1.7\n")
     mock_result = SubprocessResult(
         success=True,
         message="OK",
@@ -178,8 +181,8 @@ async def test_run_ivy_compile_success():
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
-            filepath="/tmp/model.ivy",
-            workspace_root="/tmp",
+            filepath=str(tmp_path / "model.ivy"),
+            workspace_root=str(tmp_path),
         )
         assert result["success"] is True
         assert result["target"] == "test"
@@ -187,12 +190,14 @@ async def test_run_ivy_compile_success():
         assert isinstance(result["diagnostics"], list)
         assert result["diagnostic_count"] == 0
         assert "error_summary" in result
+        assert (tmp_path / "build").is_dir()
         assert "raw_output" in result
 
 
 @pytest.mark.asyncio
-async def test_run_ivy_compile_with_isolate():
+async def test_run_ivy_compile_with_isolate(tmp_path):
     """ivy_compile passes isolate and target correctly."""
+    (tmp_path / "model.ivy").write_text("#lang ivy1.7\n")
     mock_result = SubprocessResult(
         success=True,
         message="OK",
@@ -204,8 +209,8 @@ async def test_run_ivy_compile_with_isolate():
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
-            filepath="/tmp/model.ivy",
-            workspace_root="/tmp",
+            filepath=str(tmp_path / "model.ivy"),
+            workspace_root=str(tmp_path),
             target="repl",
             isolate="proto_iso",
         )
@@ -214,7 +219,7 @@ async def test_run_ivy_compile_with_isolate():
             "ivyc",
             "target=repl",
             "isolate=proto_iso",
-            "/tmp/model.ivy",
+            "model.ivy",
         ]
         assert result["target"] == "repl"
 
@@ -270,8 +275,9 @@ async def test_run_ivy_check_success_false_when_errors_in_output():
 
 
 @pytest.mark.asyncio
-async def test_run_ivy_compile_with_ivy_error_traceback():
+async def test_run_ivy_compile_with_ivy_error_traceback(tmp_path):
     """ivy_compile extracts diagnostics from IvyError tracebacks."""
+    (tmp_path / "test.ivy").write_text("#lang ivy1.7\n")
     mock_result = SubprocessResult(
         success=False,
         message="Exit code 1",
@@ -290,8 +296,8 @@ async def test_run_ivy_compile_with_ivy_error_traceback():
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
-            filepath="/tmp/test.ivy",
-            workspace_root="/tmp",
+            filepath=str(tmp_path / "test.ivy"),
+            workspace_root=str(tmp_path),
         )
         assert result["success"] is False
         assert result["diagnostic_count"] >= 1
@@ -305,8 +311,9 @@ async def test_run_ivy_compile_with_ivy_error_traceback():
 
 
 @pytest.mark.asyncio
-async def test_run_ivy_compile_with_cpp_error():
+async def test_run_ivy_compile_with_cpp_error(tmp_path):
     """ivy_compile extracts diagnostics from C++ compiler errors."""
+    (tmp_path / "test.ivy").write_text("#lang ivy1.7\n")
     mock_result = SubprocessResult(
         success=False,
         message="Exit code 1",
@@ -322,8 +329,8 @@ async def test_run_ivy_compile_with_cpp_error():
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
-            filepath="/tmp/test.ivy",
-            workspace_root="/tmp",
+            filepath=str(tmp_path / "test.ivy"),
+            workspace_root=str(tmp_path),
         )
         assert result["success"] is False
         assert result["diagnostic_count"] == 2
@@ -335,8 +342,9 @@ async def test_run_ivy_compile_with_cpp_error():
 
 
 @pytest.mark.asyncio
-async def test_run_ivy_compile_success_false_when_errors_in_output():
+async def test_run_ivy_compile_success_false_when_errors_in_output(tmp_path):
     """Even if subprocess returns 0, compile reports failure on error diagnostics."""
+    (tmp_path / "model.ivy").write_text("#lang ivy1.7\n")
     mock_result = SubprocessResult(
         success=True,
         message="OK",
@@ -351,8 +359,8 @@ async def test_run_ivy_compile_success_false_when_errors_in_output():
     ) as mock_run:
         mock_run.return_value = mock_result
         result = await run_ivy_compile(
-            filepath="/tmp/model.ivy",
-            workspace_root="/tmp",
+            filepath=str(tmp_path / "model.ivy"),
+            workspace_root=str(tmp_path),
         )
         assert result["success"] is False
         assert result["diagnostic_count"] == 1
