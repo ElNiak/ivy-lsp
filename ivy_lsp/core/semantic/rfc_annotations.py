@@ -20,6 +20,10 @@ _TAG_RE = re.compile(r"^\w+(?:[.:]\w+)*$")  # e.g. "rfc9000", "rfc9000:4.1", "4.
 _BRACKET_RE = re.compile(
     r"#\s*\[([\w:.,\s]+)\]\s*$"
 )  # e.g. "# [rfc9000:4.1, rfc9000:8.1]"
+# Matches [tags] at end of line without requiring '#' prefix.
+# Used for comment lines where the tag follows description text,
+# e.g. "# Description text [rfc4271:8]".
+_COMMENT_TAG_RE = re.compile(r"\[([\w:.,\s]+)\]\s*$")
 _BARE_NUMERIC_RE = re.compile(r"^\d+$")  # e.g. "4", "12" — no dots, no prefix
 
 
@@ -95,8 +99,14 @@ def _is_rfc_annotation(line_text: str, tags: List[str]) -> bool:
     # If any tag is *not* a bare numeric, keep the annotation
     if not all(_BARE_NUMERIC_RE.match(t) for t in tags):
         return True
-    # All tags are bare numerics — check if there is code before the bracket
-    m = _BRACKET_RE.search(line_text)
+    # All tags are bare numerics — check if there is code before the bracket.
+    # Use _COMMENT_TAG_RE for comment lines (matches [tag] without # prefix),
+    # _BRACKET_RE for code lines (matches # [tag]).
+    stripped_line = line_text.strip()
+    if stripped_line.startswith("#"):
+        m = _COMMENT_TAG_RE.search(line_text)
+    else:
+        m = _BRACKET_RE.search(line_text)
     if m is None:
         return False  # defensive: shouldn't happen since tags were parsed
     before_bracket = line_text[: m.start()].rstrip()
@@ -106,14 +116,20 @@ def _is_rfc_annotation(line_text: str, tags: List[str]) -> bool:
         # Standalone comment with all bare integers (no dots/colons)
         # → reject as field marker, not RFC annotation
         return False
-    # Code exists before bracket — reject bare numerics as phantom tags
+    # For descriptive comments like "# Description [8]", the text before
+    # the bracket is a description, not code — still reject bare numerics
+    # since they're ambiguous in comment context.
+    # For code lines, reject bare numerics as phantom tags.
     return False
 
 
 def parse_rfc_tags(line_text: str) -> List[str]:
     """Parse RFC bracket tags from a single line of source.
 
-    Supports comma-separated tags: ``# [rfc9000:4.1, rfc9000:8.1]``
+    Supports:
+    - Inline code annotations: ``require x; # [rfc9000:4.1]``
+    - Pure tag comments: ``# [rfc9000:4.1, rfc9000:8.1]``
+    - Descriptive comment annotations: ``# Description text [rfc4271:8]``
 
     Returns list of validated tag strings.
 
@@ -122,16 +138,25 @@ def parse_rfc_tags(line_text: str) -> List[str]:
     like ``# [8]`` are still parsed.
     """
     stripped = line_text.strip()
-    # Filter out commented-out code lines that happen to contain a tag.
-    # If the line starts with '#', it must be a pure tag comment (the entire
-    # line is just "# [tags]") to be parsed.  Commented-out code like
-    # "#require foo # [8]" is rejected because _BRACKET_RE won't match
-    # from the start of such a line.
-    if stripped.startswith("#") and not _BRACKET_RE.match(stripped):
-        return []
-    m = _BRACKET_RE.search(line_text)
-    if not m:
-        return []
+    if stripped.startswith("#"):
+        # Comment lines: use _COMMENT_TAG_RE which matches [tag] at end
+        # of line without requiring '#' before it.  This allows descriptive
+        # annotations like "# Description text [rfc4271:8]".
+        m = _COMMENT_TAG_RE.search(stripped)
+        if not m:
+            return []
+        # Reject commented-out code: if there is a second '#' between the
+        # leading '#' and the bracket, the tag is on an inline comment of
+        # commented-out code (e.g. "#require foo # [8]").
+        # Trade-off: "## Section [tag]" markdown headings are also rejected.
+        # Ivy files don't use markdown headings, so this is acceptable.
+        before_bracket = stripped[1 : m.start()]
+        if "#" in before_bracket:
+            return []
+    else:
+        m = _BRACKET_RE.search(line_text)
+        if not m:
+            return []
     raw = m.group(1)
     candidates = [t.strip() for t in raw.split(",") if t.strip()]
     return [t for t in candidates if _TAG_RE.match(t)]

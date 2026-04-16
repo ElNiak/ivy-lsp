@@ -23,6 +23,7 @@ from ivy_lsp.mcp.tools._helpers import (
     get_model_if_ready,
     get_model_or_error,
     load_requirements_from_manifests,
+    resolve_effective_protocol,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
     async def _ivy_traceability_matrix(
         relative_path: str | None = None,
         test_file: str | None = None,
+        protocol: str | None = None,
     ) -> dict:
         """RFC requirement-to-annotation traceability matrix."""
         model, err = await get_model_or_error(ctx)
@@ -53,9 +55,20 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         requirements = model.get_nodes_by_type(RfcRequirement)
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
+        effective_protocol = resolve_effective_protocol(
+            protocol, test_file, ctx.workspace_context
+        )
+
         # Fallback: if semantic model has no requirements, load from manifests
         if not requirements:
-            requirements.extend(load_requirements_from_manifests(ctx.root))
+            if not effective_protocol:
+                logger.warning(
+                    "[_ivy_traceability_matrix] No protocol filter — "
+                    "loading manifests from all protocols"
+                )
+            requirements.extend(
+                load_requirements_from_manifests(ctx.root, protocol=effective_protocol)
+            )
 
         filtered = await apply_scope_filter(
             annotations,
@@ -83,6 +96,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                             "line": ann.line,
                         }
                     )
+
+        # Warn when the semantic model has no annotations despite having
+        # requirements — typically means the analysis pipeline hasn't run yet.
+        if requirements and not annotations:
+            warnings.append(
+                "Semantic model contains no RFC annotations. "
+                "Run ivy_index to build the workspace index and populate "
+                "the model, then retry."
+            )
 
         # Warn if annotations exist but no requirements loaded
         if annotations and not requirements:
@@ -130,14 +152,23 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
 
         annotations = model.get_nodes_by_type(RfcAnnotation)
 
-        # When protocol is specified, load requirements only from that
-        # protocol's manifests to avoid cross-protocol contamination.
-        # Otherwise, fall back to the semantic model's requirements.
-        if protocol:
-            requirements = load_requirements_from_manifests(ctx.root, protocol=protocol)
+        effective_protocol = resolve_effective_protocol(
+            protocol, test_file, ctx.workspace_context
+        )
+
+        # When protocol is known, load only that protocol's manifests
+        # to avoid cross-protocol contamination.
+        if effective_protocol:
+            requirements = load_requirements_from_manifests(
+                ctx.root, protocol=effective_protocol
+            )
         else:
             requirements = model.get_nodes_by_type(RfcRequirement)
             if not requirements:
+                logger.warning(
+                    "[_ivy_requirement_coverage] No protocol filter — "
+                    "loading manifests from all protocols"
+                )
                 requirements.extend(load_requirements_from_manifests(ctx.root))
 
         filtered = await apply_scope_filter(
@@ -175,6 +206,15 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 resolution = normalize_tag_with_diagnostics(tag, req_ids)
                 covered_tags.update(resolution.matched_ids)
                 coverage_warnings.extend(resolution.warnings)
+
+        # Warn when the semantic model has no annotations despite having
+        # requirements — typically means the analysis pipeline hasn't run yet.
+        if requirements and not annotations:
+            coverage_warnings.append(
+                "Semantic model contains no RFC annotations. "
+                "Run ivy_index to build the workspace index and populate "
+                "the model, then retry."
+            )
 
         # Warn if annotations exist but no requirements loaded
         if annotations and not requirements:
@@ -238,7 +278,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         from ivy_lsp.core.semantic.rfc_annotations import find_manifests
 
         workspace_root = ctx.root
-        manifests = find_manifests(workspace_root, protocol=protocol)
+        manifests = find_manifests(workspace_root, protocol=effective_protocol)
         if manifests:
             result["manifests"] = [
                 os.path.relpath(m, workspace_root) if workspace_root else m
@@ -258,7 +298,13 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements."""
         from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps
 
-        params, err = build_viz_params(ctx, test_file=test_file, protocol=protocol)
+        effective_protocol = resolve_effective_protocol(
+            protocol, test_file, ctx.workspace_context
+        )
+
+        params, err = build_viz_params(
+            ctx, test_file=test_file, protocol=effective_protocol
+        )
         if err:
             return err
         server_proxy = await ctx.make_viz_server_proxy()
@@ -267,7 +313,7 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         # C4 fix: override RFC uncovered requirements using the same
         # logic as _ivy_requirement_coverage() so stats and gaps agree.
         stats = await _ivy_requirement_coverage(
-            relative_path=None, test_file=test_file, protocol=protocol
+            relative_path=None, test_file=test_file, protocol=effective_protocol
         )
         model = None
         try:
@@ -275,10 +321,12 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
             model = await get_model_if_ready(ctx)
 
             # Build req_map: prefer protocol-filtered manifests when protocol
-            # is specified, otherwise use the semantic model's requirements.
+            # is specified (or inferred), otherwise use the semantic model.
             req_map: dict[str, Any] = {}
-            if protocol:
-                for r in load_requirements_from_manifests(ctx.root, protocol=protocol):
+            if effective_protocol:
+                for r in load_requirements_from_manifests(
+                    ctx.root, protocol=effective_protocol
+                ):
                     req_map[r.id] = r
             elif model is not None:
                 from ivy_lsp.core.semantic.nodes import RfcRequirement
@@ -520,7 +568,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                 )
             )
         if mode == "matrix":
-            result_dict = await _ivy_traceability_matrix(relative_path, test_file)
+            result_dict = await _ivy_traceability_matrix(
+                relative_path, test_file, protocol
+            )
             if max_items > 0:
                 matrix = result_dict.get("matrix", [])
                 if len(matrix) > max_items:
@@ -543,12 +593,25 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
                         "unguarded_vars_truncated",
                         "unguarded_vars_total",
                     ),
+                    (
+                        "orphanRequirements",
+                        "orphan_requirements_truncated",
+                        "orphan_requirements_total",
+                    ),
                 ):
                     items = result_dict.get(key, [])
                     if len(items) > max_items:
                         result_dict[key] = items[:max_items]
                         result_dict[trunc_key] = True
                         result_dict[total_key] = len(items)
+                # Truncate pattern coverage sub-lists
+                pc = result_dict.get("patternCoverage", {})
+                for sub_key in ("serdesGaps", "monitorGaps", "shimGaps"):
+                    sub_items = pc.get(sub_key, [])
+                    if len(sub_items) > max_items:
+                        pc[sub_key] = sub_items[:max_items]
+                        pc[f"{sub_key}_truncated"] = True
+                        pc[f"{sub_key}_total"] = len(sub_items)
             inject_scope_metadata(result_dict, scope, _resolved_scope)
             return _tc.finish(result_dict)
         elif mode == "diff":

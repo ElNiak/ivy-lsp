@@ -274,20 +274,15 @@ def compute_requirement_diagnostics(
 def _protocol_from_path(filepath: str) -> str | None:
     """Extract protocol name from a file path.
 
-    Looks for 'protocol-testing/{protocol}/' in the path.
-    Returns None if the path doesn't match this layout.
+    Delegates to ``infer_protocol_from_path`` in ``_helpers.py``.
 
     Limitation: for APT-layout paths like
     ``protocol-testing/apt/apt_protocols/quic/...``, this returns
-    ``"apt"`` rather than the actual protocol. This means shadow
-    diagnostics between APT sub-protocols are not suppressed.
+    ``"apt"`` rather than the actual protocol.
     """
-    marker = "protocol-testing/"
-    idx = filepath.find(marker)
-    if idx < 0:
-        return None
-    rest = filepath[idx + len(marker) :]
-    return rest.split("/")[0] if "/" in rest else None
+    from ivy_lsp.mcp.tools._helpers import infer_protocol_from_path
+
+    return infer_protocol_from_path(filepath)
 
 
 def compute_semantic_diagnostics(

@@ -104,6 +104,61 @@ async def get_model_if_ready(ctx: Any) -> Any | None:
     return await ctx.get_model()
 
 
+_KNOWN_PROTOCOLS = frozenset({"bgp", "quic", "tls", "http", "dns", "tcp"})
+
+
+def infer_protocol_from_path(path: str) -> str | None:
+    """Infer protocol name from a path under ``protocol-testing/``.
+
+    For ``protocol-testing/bgp/bgp_stack/foo.ivy`` returns ``"bgp"``.
+    For ``bgp/bgp_tests/speaker_tests/test.ivy`` returns ``"bgp"``
+    (fallback: first component must be a known protocol name).
+    Returns None if the protocol cannot be determined.
+    """
+    parts = path.replace("\\", "/").split("/")
+    try:
+        idx = parts.index("protocol-testing")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    except ValueError:
+        pass
+    # Fallback: first path component, but only if it's a known protocol
+    # to avoid returning nonsense like "tests" or "src".
+    if parts and parts[0] in _KNOWN_PROTOCOLS:
+        return parts[0]
+    return None
+
+
+def resolve_effective_protocol(
+    protocol: str | None,
+    test_file: str | None,
+    workspace_ctx: Any | None = None,
+) -> str | None:
+    """Return the effective protocol, inferring from test_file or workspace.
+
+    Resolution order:
+    1. Explicit ``protocol`` parameter
+    2. Inferred from ``test_file`` path
+    3. Inferred from ``workspace_ctx`` when exactly one protocol is indexed
+    """
+    if protocol:
+        return protocol
+    if test_file:
+        inferred = infer_protocol_from_path(test_file)
+        if inferred:
+            return inferred
+    if workspace_ctx is not None:
+        protos = list(getattr(workspace_ctx, "protocol_indexes", {}).keys())
+        if len(protos) == 1:
+            logger.debug(
+                "[resolve_effective_protocol] Inferred protocol='%s' "
+                "from workspace context",
+                protos[0],
+            )
+            return protos[0]
+    return None
+
+
 def load_requirements_from_manifests(root: str, protocol: str | None = None) -> list:
     """Load requirements from all manifest files in a workspace root."""
     from ivy_lsp.core.semantic.rfc_annotations import (
