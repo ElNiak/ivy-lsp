@@ -1,4 +1,3 @@
-# ivy_lsp/core/rfc/types.py
 """Data types for the RFC service layer."""
 
 from __future__ import annotations

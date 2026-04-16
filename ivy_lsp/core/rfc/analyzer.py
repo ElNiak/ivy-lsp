@@ -1,4 +1,3 @@
-# ivy_lsp/core/rfc/analyzer.py
 """Structured semantic analysis of RFC section text.
 
 Extracts normative statements (RFC 2119 keywords) and cross-references
@@ -38,6 +37,10 @@ _RFC_SECTION_REF_RE = re.compile(
 )
 
 _BARE_RFC_RE = re.compile(r"(?:\[RFC\s*(\d+)\]|RFC\s+(\d+))", re.IGNORECASE)
+
+# Pre-compiled prefix check: used to skip same-document Section refs
+# that are part of an [RFCnnnn] Section pattern already captured.
+_RFC_PREFIX_RE = re.compile(r"\[RFC\s*\d+\]\s*,?\s*$", re.IGNORECASE)
 
 
 def _join_lines(text: str) -> str:
@@ -130,7 +133,7 @@ class RfcAnalyzer:
         for m in _SECTION_REF_RE.finditer(joined):
             sec_num = m.group(1)
             prefix = joined[max(0, m.start() - 15) : m.start()]
-            if re.search(r"\[RFC\s*\d+\]\s*,?\s*$", prefix, re.IGNORECASE):
+            if _RFC_PREFIX_RE.search(prefix):
                 continue
             key = (None, sec_num)
             if key not in seen:

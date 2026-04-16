@@ -1,4 +1,3 @@
-# ivy_lsp/mcp/tools/rfc_tools.py
 """RFC lookup, search, and section analysis MCP tools."""
 
 from __future__ import annotations
@@ -130,27 +129,24 @@ def register_rfc_tools(mcp: Any, ctx: Any) -> None:
             return error_response("RFC service not initialized.")
 
         try:
-            sec = await ctx.rfc_service.get_section(number, section)
+            doc = await ctx.rfc_service.get_rfc(number, format="full")
         except Exception as exc:
-            return error_response(f"Failed to fetch section: {exc}")
+            return error_response(f"Failed to fetch RFC {number}: {exc}")
 
+        sec = next((s for s in doc.sections if s.number == section), None)
         if sec is None:
             return error_response(f"Section {section} not found in RFC {number}.")
 
-        rfc_id = number.lower()
-        if not rfc_id.startswith("rfc"):
-            rfc_id = f"rfc{rfc_id}"
-
         result: dict[str, Any] = {
             "status": "ok",
-            "rfc": rfc_id,
+            "rfc": doc.number,
             "section": sec.number,
             "title": sec.title,
             "text": sec.text,
         }
 
         if analyze:
-            stmts = ctx.rfc_service.extract_normative_statements(sec, rfc=rfc_id)
+            stmts = ctx.rfc_service.extract_normative_statements(sec, rfc=doc.number)
             refs = ctx.rfc_service.extract_cross_references(sec)
 
             result["normative_statements"] = [

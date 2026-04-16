@@ -1,4 +1,3 @@
-# ivy_lsp/core/rfc/service.py
 """Unified RFC service layer.
 
 Composes fetcher, parser, analyzer, cache, and search into a single
@@ -28,7 +27,6 @@ from ivy_lsp.core.rfc.types import (
 logger = logging.getLogger(__name__)
 
 _TAG_RE = re.compile(r"^(rfc\d+):(.+)$", re.IGNORECASE)
-_RFC_NUM_RE = re.compile(r"^(?:rfc\s*)?(\d+)$", re.IGNORECASE)
 
 
 class RfcService:
@@ -48,13 +46,14 @@ class RfcService:
         local_dir: str | Path | None = None,
         offline: bool = False,
     ):
-        """Initialize the RFC service with cache and search configuration."""
+        """Initialize with cache, analyzer, and search client."""
         self._cache = RfcCache(
             cache_dir=cache_dir, cache_ttl=cache_ttl, local_dir=local_dir
         )
         self._analyzer = RfcAnalyzer()
         self._search_client = DataTrackerClient()
         self._offline = offline
+        self._parsed_cache: dict[str, RfcDocument] = {}
 
     async def get_rfc(self, number: str, format: str = "full") -> RfcDocument:
         """Fetch and return an RFC document.
@@ -66,23 +65,15 @@ class RfcService:
         Returns:
             Parsed RfcDocument.
         """
-        rfc_id = self._normalize_rfc_id(number)
-        text = await self._fetch_text(rfc_id, number)
-        parsed = parse_rfc_text(text)
-
-        rfc_number = parsed.rfc_number or rfc_id
-        if not rfc_number.startswith("rfc"):
-            rfc_number = f"rfc{rfc_number}"
-        rfc_number = rfc_number.lower()
-
-        metadata = RfcMetadata()
+        rfc_id = RfcCache.normalize_id(number)
+        doc = await self._get_or_parse(rfc_id, number)
 
         if format == "metadata":
             return RfcDocument(
-                number=rfc_number,
-                title=parsed.title,
+                number=doc.number,
+                title=doc.title,
                 sections=[],
-                metadata=metadata,
+                metadata=doc.metadata,
             )
 
         if format == "sections":
@@ -93,21 +84,16 @@ class RfcService:
                     start_line=s.start_line,
                     text="",
                 )
-                for s in parsed.sections
+                for s in doc.sections
             ]
             return RfcDocument(
-                number=rfc_number,
-                title=parsed.title,
+                number=doc.number,
+                title=doc.title,
                 sections=toc_sections,
-                metadata=metadata,
+                metadata=doc.metadata,
             )
 
-        return RfcDocument(
-            number=rfc_number,
-            title=parsed.title,
-            sections=parsed.sections,
-            metadata=metadata,
-        )
+        return doc
 
     async def get_section(self, number: str, section: str) -> Optional[RfcSection]:
         """Return a specific section from an RFC, or None if not found.
@@ -143,37 +129,15 @@ class RfcService:
     def extract_normative_statements(
         self, section: RfcSection, rfc: str
     ) -> List[NormativeStatement]:
-        """Extract MUST/SHOULD/MAY statements from a section.
-
-        Args:
-            section: The RFC section to analyze.
-            rfc: RFC identifier string.
-
-        Returns:
-            List of NormativeStatement objects.
-        """
+        """Extract MUST/SHOULD/MAY statements from a section."""
         return self._analyzer.extract_normative_statements(section, rfc=rfc)
 
     def extract_cross_references(self, section: RfcSection) -> List[CrossReference]:
-        """Extract cross-references (e.g. [RFC1771]) from a section.
-
-        Args:
-            section: The RFC section to analyze.
-
-        Returns:
-            List of CrossReference objects.
-        """
+        """Extract cross-references (e.g. [RFC1771]) from a section."""
         return self._analyzer.extract_cross_references(section)
 
     async def resolve_tag_to_section(self, tag: str) -> Optional[RfcSection]:
-        """Resolve a tag like "rfc4271:3.1" to its section, or None if invalid.
-
-        Args:
-            tag: Tag string in the format "rfcNNNN:section".
-
-        Returns:
-            Matching RfcSection or None.
-        """
+        """Resolve a tag like "rfc4271:3.1" to its section, or None."""
         m = _TAG_RE.match(tag)
         if not m:
             return None
@@ -186,20 +150,45 @@ class RfcService:
             return None
 
     def set_local_cache_dir(self, path: Path) -> None:
-        """Override the local RFC file directory at runtime.
-
-        Args:
-            path: New local directory path.
-        """
+        """Override the local RFC file directory at runtime."""
         self._cache.set_local_dir(path)
 
     def clear_cache(self) -> None:
-        """Clear all disk-cached RFC entries."""
+        """Clear all in-memory and search caches."""
         self._cache.clear()
+        self._parsed_cache.clear()
+        self._search_client._search_cache.clear()
+
+    async def _get_or_parse(self, rfc_id: str, original_source: str) -> RfcDocument:
+        """Return a cached RfcDocument, or fetch + parse + cache it."""
+        if rfc_id in self._parsed_cache:
+            return self._parsed_cache[rfc_id]
+
+        text = await self._fetch_text(rfc_id, original_source)
+        parsed = parse_rfc_text(text)
+
+        rfc_number = parsed.rfc_number or rfc_id
+        if not rfc_number.startswith("rfc"):
+            rfc_number = f"rfc{rfc_number}"
+        rfc_number = rfc_number.lower()
+
+        doc = RfcDocument(
+            number=rfc_number,
+            title=parsed.title,
+            sections=parsed.sections,
+            metadata=RfcMetadata(),
+        )
+        self._parsed_cache[rfc_id] = doc
+        return doc
 
     async def _fetch_text(self, rfc_id: str, original_source: str) -> str:
+        """Fetch RFC text: local files -> cache -> remote."""
         local = self._cache.get_local(rfc_id)
         if local is not None:
+            # Promote local file into memory cache to avoid re-reading/re-hashing.
+            self._cache.put(
+                rfc_id, local["text"], local["content_hash"], local["source"]
+            )
             return local["text"]
 
         cached = self._cache.get(rfc_id)
@@ -214,13 +203,3 @@ class RfcService:
         result = await fetch_rfc(original_source, use_cache=False)
         self._cache.put(rfc_id, result.text, result.content_hash, result.source)
         return result.text
-
-    @staticmethod
-    def _normalize_rfc_id(number: str) -> str:
-        number = number.strip()
-        m = _RFC_NUM_RE.match(number)
-        if m:
-            return f"rfc{m.group(1)}"
-        if number.lower().startswith("rfc"):
-            return number.lower()
-        return number.lower()

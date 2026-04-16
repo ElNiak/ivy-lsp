@@ -1,4 +1,3 @@
-# ivy_lsp/core/rfc/cache.py
 """Two-tier (memory + disk) cache for RFC documents."""
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ class RfcCache:
 
     def get(self, rfc_id: str) -> Optional[dict]:
         """Look up *rfc_id* in memory, then disk. Returns None on miss."""
-        rfc_id = self._normalize_id(rfc_id)
+        rfc_id = self.normalize_id(rfc_id)
 
         # Memory tier.
         if rfc_id in self._memory:
@@ -56,7 +55,7 @@ class RfcCache:
 
     def put(self, rfc_id: str, text: str, content_hash: str, source: str) -> None:
         """Store an RFC in both memory and disk tiers."""
-        rfc_id = self._normalize_id(rfc_id)
+        rfc_id = self.normalize_id(rfc_id)
         entry = {
             "text": text,
             "content_hash": content_hash,
@@ -72,7 +71,7 @@ class RfcCache:
         if self._local_dir is None:
             return None
 
-        rfc_id = self._normalize_id(rfc_id)
+        rfc_id = self.normalize_id(rfc_id)
         for ext in (".txt", ".text", ""):
             path = self._local_dir / f"{rfc_id}{ext}"
             if path.is_file():
@@ -94,7 +93,7 @@ class RfcCache:
         self._memory.clear()
 
     @staticmethod
-    def _normalize_id(rfc_id: str) -> str:
+    def normalize_id(rfc_id: str) -> str:
         """Normalize to lowercase, reject path traversal attempts."""
         rfc_id = rfc_id.lower().strip()
         if ".." in rfc_id or "/" in rfc_id or "\\" in rfc_id:

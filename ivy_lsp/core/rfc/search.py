@@ -1,4 +1,3 @@
-# ivy_lsp/core/rfc/search.py
 """Async client for the IETF Datatracker REST API.
 
 Uses urllib.request + asyncio.to_thread, matching the pattern in fetcher.py.
