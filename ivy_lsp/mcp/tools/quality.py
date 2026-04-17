@@ -1,8 +1,4 @@
-"""Quality tools: ivy_quality.
-
-Consolidated from the original two tools:
-- ivy_smart_suggestions + ivy_quality_gate -> ivy_quality
-"""
+"""Quality tools: ivy_quality."""
 
 from __future__ import annotations
 

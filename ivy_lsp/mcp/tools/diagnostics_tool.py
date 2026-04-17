@@ -12,7 +12,12 @@ from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
 from ivy_lsp.core.patterns import BRACKET_TAG_RE as _BRACKET_TAG_RE
 from ivy_lsp.core.patterns import EXPORT_ACTION_RE, MONITOR_RE
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
+from ivy_lsp.mcp.tools import (
+    error_response,
+    inject_dispatch_key,
+    inject_scope_metadata,
+    safe_tool,
+)
 from ivy_lsp.mcp.tools._helpers import resolve_scope, validated_path_or_error
 
 logger = logging.getLogger(__name__)
@@ -82,23 +87,15 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                 )
             )
 
-        # dashboard mode: workspace-level verification cache status
         if mode == "dashboard":
-            dashboard_result = await _verification_dashboard_impl(
-                ctx, get_cache_summary_fn
-            )
-            if isinstance(dashboard_result, dict):
-                dashboard_result["mode"] = "dashboard"
-            return _tc.finish(dashboard_result)
+            result = await _verification_dashboard_impl(ctx, get_cache_summary_fn)
+            return _tc.finish(inject_dispatch_key(result, "dashboard"))
 
-        # collisions mode: workspace-level, does not need a file path
         if mode == "collisions":
             from ivy_lsp.mcp.tools.analysis import _handle_collisions_mode
 
-            collision_result = await _handle_collisions_mode(ctx)
-            if isinstance(collision_result, dict):
-                collision_result["mode"] = "collisions"
-            return _tc.finish(collision_result)
+            result = await _handle_collisions_mode(ctx)
+            return _tc.finish(inject_dispatch_key(result, "collisions"))
 
         abs_path, err = validated_path_or_error(ctx, relative_path)
         if err:
@@ -127,7 +124,6 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             source = f.read()
 
-        # Fast path: structural-only mode (replaces former ivy_lint tool)
         if mode == "structural":
             resolve_cb = ctx.make_resolve_callback()
             diagnostics = ctx.check_structural_issues(source, abs_path, resolve_cb)

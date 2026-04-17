@@ -1,12 +1,4 @@
-"""Visualization tools: ivy_visualize.
-
-Consolidated from the original six tools:
-- ivy_action_dependency_graph, ivy_state_machine_view, ivy_layered_overview
-  -> ivy_visualize (views: dependencies, state_machine, layers)
-- ivy_model_summary + ivy_action_requirements
-  -> ivy_visualize (views: summary, requirements)
-- ivy_coverage_gaps -> moved to traceability.py (ivy_coverage mode="gaps")
-"""
+"""Visualization tools: ivy_visualize."""
 
 from __future__ import annotations
 
@@ -14,7 +6,7 @@ import logging
 from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools import error_response, inject_dispatch_key, safe_tool
 from ivy_lsp.mcp.tools._helpers import build_viz_params
 
 logger = logging.getLogger(__name__)
@@ -251,6 +243,4 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 test_file, include_state_vars, protocol
             )
             result = _apply_max_items(result, "nodes", max_items)
-        if isinstance(result, dict):
-            result["view"] = view
-        return _tc.finish(result)
+        return _tc.finish(inject_dispatch_key(result, view, key="view"))

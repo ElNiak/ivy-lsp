@@ -7,16 +7,17 @@ import os
 from typing import Any, Literal
 
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.mcp.tools import error_response, safe_tool
+from ivy_lsp.mcp.tools import error_response, inject_dispatch_key, safe_tool
 
 logger = logging.getLogger(__name__)
+
+_VALID_PATTERN_MODES: frozenset[str] = frozenset(
+    {"analyze", "validate", "compare", "check", "scaffold"}
+)
 
 
 def register_pattern_tools(mcp: Any, ctx: Any) -> None:
     """Register pattern-related MCP tools."""
-    # ------------------------------------------------------------------
-    # Private helpers (former standalone tool bodies)
-    # ------------------------------------------------------------------
 
     async def _ivy_pattern_analysis(
         protocol: str,
@@ -163,10 +164,6 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
             "suggestions": suggestions,
         }
 
-    # ------------------------------------------------------------------
-    # Private impl for scaffold mode
-    # ------------------------------------------------------------------
-
     async def _pattern_scaffold_impl(
         protocol: str,
         pattern: str,
@@ -248,6 +245,12 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         _tc = ToolTraceContext(
             "ivy_patterns", {"protocol": protocol, "mode": mode, "pattern": pattern}
         )
+        if mode not in _VALID_PATTERN_MODES:
+            return _tc.finish(
+                error_response(
+                    f"Unknown mode '{mode}'. Valid: {sorted(_VALID_PATTERN_MODES)}"
+                )
+            )
         if mode == "scaffold":
             if not pattern:
                 return _tc.finish(
@@ -262,17 +265,10 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
         elif mode == "check":
             result = await _ivy_scaffold_check(protocol)
         else:
-            _VALID_MODES = {"analyze", "validate", "compare", "check", "scaffold"}
-            if mode not in _VALID_MODES:
-                return _tc.finish(
-                    error_response(
-                        f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"
-                    )
-                )
+            # _ivy_pattern_analysis expects "detect" as the internal label
+            # for pattern detection; surface it as "analyze" in the result.
             effective_mode = "detect" if mode == "analyze" else mode
             result = await _ivy_pattern_analysis(
                 protocol, effective_mode, pattern, reference_protocol
             )
-        if isinstance(result, dict):
-            result["mode"] = mode
-        return _tc.finish(result)
+        return _tc.finish(inject_dispatch_key(result, mode))

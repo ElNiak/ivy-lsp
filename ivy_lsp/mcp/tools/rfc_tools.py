@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from ivy_lsp.mcp.tools import error_response, safe_tool
 
@@ -131,10 +131,10 @@ def register_rfc_tools(mcp: Any, ctx: Any) -> None:
     @safe_tool(ctx=ctx)
     async def ivy_rfc(
         mode: Literal["get", "search", "section"] = "get",
-        number: Optional[str] = None,
-        query: Optional[str] = None,
+        number: str | None = None,
+        query: str | None = None,
         format: str = "full",
-        section: Optional[str] = None,
+        section: str | None = None,
         analyze: bool = True,
         limit: int = 10,
     ) -> dict:

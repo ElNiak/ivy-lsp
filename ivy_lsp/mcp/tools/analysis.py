@@ -10,7 +10,12 @@ from typing import Any, Literal
 
 from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
 from ivy_lsp.infra.observability import ToolTraceContext
-from ivy_lsp.mcp.tools import error_response, inject_scope_metadata, safe_tool
+from ivy_lsp.mcp.tools import (
+    error_response,
+    inject_dispatch_key,
+    inject_scope_metadata,
+    safe_tool,
+)
 from ivy_lsp.mcp.tools._helpers import resolve_scope, validated_path_or_error
 
 logger = logging.getLogger(__name__)
@@ -278,7 +283,6 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         return _tc.finish(result)
 
     async def _capabilities_impl(ctx: Any) -> dict:
-        from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
         from ivy_lsp.mcp.tools import get_tool_metadata
 
         _tc = ToolTraceContext("ivy_status", {"mode": "capabilities"})
@@ -316,7 +320,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         try:
             loop = asyncio.get_running_loop()
             result["parsing_tiers"] = await asyncio.wait_for(
-                loop.run_in_executor(ctx.tool_executor, TieredExtractor().probe_tiers),
+                loop.run_in_executor(ctx.tool_executor, _extractor.probe_tiers),
                 timeout=3.0,
             )
         except asyncio.TimeoutError:
@@ -414,13 +418,9 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         """
         if mode == "capabilities":
             result = await _capabilities_impl(ctx)
-        elif mode == "health":
+        else:  # mode == "health"
             result = await _health_check_impl(ctx)
-        else:
-            return error_response(f"Unknown mode '{mode}'. Valid: capabilities, health")
-        if isinstance(result, dict):
-            result["mode"] = mode
-        return result
+        return inject_dispatch_key(result, mode)
 
     @mcp.tool()
     @safe_tool(ctx=ctx)
@@ -442,15 +442,11 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         """
         if mode == "includes":
             result = await _include_graph_impl(relative_path, detail, limit, scope, ctx)
-        elif mode == "scope":
+        else:  # mode == "scope"
             if not relative_path:
                 return error_response("mode='scope' requires 'relative_path'.")
             result = await _scope_impl(relative_path, ctx)
-        else:
-            return error_response(f"Unknown mode '{mode}'. Valid: includes, scope")
-        if isinstance(result, dict):
-            result["mode"] = mode
-        return result
+        return inject_dispatch_key(result, mode)
 
     @mcp.tool()
     @safe_tool(ctx=ctx)

@@ -806,6 +806,17 @@ def inject_scope_metadata(
     result["include_closure_size"] = len(closure)
 
 
+def inject_dispatch_key(result: Any, value: str, key: str = "mode") -> Any:
+    """Inject the dispatch key (mode/view/action) into a consolidated-tool result.
+
+    The formatter registry routes by result[key], so every dispatch branch
+    must stamp the value before the result is serialized or rendered.
+    """
+    if isinstance(result, dict):
+        result[key] = value
+    return result
+
+
 from ivy_lsp.mcp.tools.analysis import register_analysis_tools
 from ivy_lsp.mcp.tools.iut_testing import register_iut_testing_tools
 from ivy_lsp.mcp.tools.patterns import register_pattern_tools
@@ -842,6 +853,7 @@ __all__ = [
     "error_response",
     "get_tool_metadata",
     "get_tool_metrics",
+    "inject_dispatch_key",
     "inject_scope_metadata",
     "register_all_tools",
     "register_workspace_tools",
