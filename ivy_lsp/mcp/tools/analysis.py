@@ -407,17 +407,20 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         """Reports server state: available CLI tools, MCP tool metadata, and runtime health.
 
         Modes:
-        - capabilities: CLI tool availability, parsing tier, staging health
-        - health: uptime, memory, cache status, tool call metrics
+        - capabilities: CLI tool availability, parsing tier, staging health → {cli_tools, mcp_tools, mcp_tool_count, workspace_index_loaded, parsing_tiers, staging_health}
+        - health: uptime, memory, cache status, tool call metrics → {server, model_status, verification_cache, tool_metrics, capabilities, workspace_files}
 
         Use capabilities to check prerequisites before ivy_verify or ivy_compile.
         """
         if mode == "capabilities":
-            return await _capabilities_impl(ctx)
+            result = await _capabilities_impl(ctx)
         elif mode == "health":
-            return await _health_check_impl(ctx)
+            result = await _health_check_impl(ctx)
         else:
             return error_response(f"Unknown mode '{mode}'. Valid: capabilities, health")
+        if isinstance(result, dict):
+            result["mode"] = mode
+        return result
 
     @mcp.tool()
     @safe_tool(ctx=ctx)
@@ -431,20 +434,23 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         """Analyzes file relationships: include dependencies and endpoint mirror scoping.
 
         Modes:
-        - includes: include dependency graph for Ivy files
-        - scope: endpoint mirror scope info
+        - includes: include dependency graph → {file, includes, included_by, transitive_includes} (single-file) or {total_files, entry_points, most_included} (summary)
+        - scope: endpoint mirror scope → {file, endpoint_mirrors, tester_role, include_closure, partition, collision_report}
 
         Run ivy_index first for accurate include resolution. For workspace-level
         collisions, use ivy_diagnostics mode=collisions.
         """
         if mode == "includes":
-            return await _include_graph_impl(relative_path, detail, limit, scope, ctx)
+            result = await _include_graph_impl(relative_path, detail, limit, scope, ctx)
         elif mode == "scope":
             if not relative_path:
                 return error_response("mode='scope' requires 'relative_path'.")
-            return await _scope_impl(relative_path, ctx)
+            result = await _scope_impl(relative_path, ctx)
         else:
             return error_response(f"Unknown mode '{mode}'. Valid: includes, scope")
+        if isinstance(result, dict):
+            result["mode"] = mode
+        return result
 
     @mcp.tool()
     @safe_tool(ctx=ctx)

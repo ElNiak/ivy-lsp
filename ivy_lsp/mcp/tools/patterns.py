@@ -256,22 +256,23 @@ def register_pattern_tools(mcp: Any, ctx: Any) -> None:
                         "(e.g., 'serdes', 'variants', 'shim')"
                     )
                 )
-            return _tc.finish(
-                await _pattern_scaffold_impl(
-                    protocol, pattern, wire_format, role_type, variant_names, roles
+            result = await _pattern_scaffold_impl(
+                protocol, pattern, wire_format, role_type, variant_names, roles
+            )
+        elif mode == "check":
+            result = await _ivy_scaffold_check(protocol)
+        else:
+            _VALID_MODES = {"analyze", "validate", "compare", "check", "scaffold"}
+            if mode not in _VALID_MODES:
+                return _tc.finish(
+                    error_response(
+                        f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}"
+                    )
                 )
-            )
-        if mode == "check":
-            return _tc.finish(await _ivy_scaffold_check(protocol))
-
-        _VALID_MODES = {"analyze", "detect", "validate", "compare", "check", "scaffold"}
-        if mode not in _VALID_MODES:
-            return _tc.finish(
-                error_response(f"Unknown mode '{mode}'. Valid: {sorted(_VALID_MODES)}")
-            )
-        effective_mode = "detect" if mode == "analyze" else mode
-        return _tc.finish(
-            await _ivy_pattern_analysis(
+            effective_mode = "detect" if mode == "analyze" else mode
+            result = await _ivy_pattern_analysis(
                 protocol, effective_mode, pattern, reference_protocol
             )
-        )
+        if isinstance(result, dict):
+            result["mode"] = mode
+        return _tc.finish(result)

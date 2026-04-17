@@ -231,11 +231,9 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
             )
             result = _apply_max_items(result, "states", max_items)
             result = _apply_max_items(result, "transitions", max_items)
-            return _tc.finish(result)
         elif view == "layers":
             result = await _ivy_layered_overview(test_file, group_by, protocol)
             result = _apply_max_items(result, "layers", max_items)
-            return _tc.finish(result)
         elif view in ("summary", "requirements"):
             result = await _model_summary_impl(
                 detail=view,
@@ -248,10 +246,11 @@ def register_visualization_tools(mcp: Any, ctx: Any) -> None:
                 offset=offset,
                 max_items=max_items,
             )
-            return _tc.finish(result)
         else:  # default: dependencies
             result = await _ivy_action_dependency_graph(
                 test_file, include_state_vars, protocol
             )
             result = _apply_max_items(result, "nodes", max_items)
-            return _tc.finish(result)
+        if isinstance(result, dict):
+            result["view"] = view
+        return _tc.finish(result)

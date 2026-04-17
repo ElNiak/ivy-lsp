@@ -84,15 +84,20 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
 
         # dashboard mode: workspace-level verification cache status
         if mode == "dashboard":
-            return _tc.finish(
-                await _verification_dashboard_impl(ctx, get_cache_summary_fn)
+            dashboard_result = await _verification_dashboard_impl(
+                ctx, get_cache_summary_fn
             )
+            if isinstance(dashboard_result, dict):
+                dashboard_result["mode"] = "dashboard"
+            return _tc.finish(dashboard_result)
 
         # collisions mode: workspace-level, does not need a file path
         if mode == "collisions":
             from ivy_lsp.mcp.tools.analysis import _handle_collisions_mode
 
             collision_result = await _handle_collisions_mode(ctx)
+            if isinstance(collision_result, dict):
+                collision_result["mode"] = "collisions"
             return _tc.finish(collision_result)
 
         abs_path, err = validated_path_or_error(ctx, relative_path)
@@ -356,6 +361,7 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
         _diag_result: dict[str, Any] = {
             "success": True,
             "file": relative_path,
+            "mode": mode,
             "diagnostics": all_diags,
             "diagnostic_count": len(all_diags),
             "by_source": by_source,
