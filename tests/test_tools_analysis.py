@@ -37,7 +37,9 @@ class TestIncludeGraphSimple:
             "#lang ivy1.7\n\ninclude types\n\nrelation connected(X:cid, Y:cid)\n"
         )
         mcp = get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_include_graph", {"relative_path": "conn.ivy"})
+        result = await mcp.call_tool(
+            "ivy_analysis", {"mode": "includes", "relative_path": "conn.ivy"}
+        )
         data = json.loads(extract_text(result))
         assert data["file"] == "conn.ivy"
         module_names = [inc["module"] for inc in data["includes"]]
@@ -55,7 +57,7 @@ class TestIncludeGraphSimple:
         )
         mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
-            "ivy_include_graph", {"relative_path": "types.ivy"}
+            "ivy_analysis", {"mode": "includes", "relative_path": "types.ivy"}
         )
         data = json.loads(extract_text(result))
         assert len(data["included_by"]) == 2
@@ -71,7 +73,9 @@ class TestIncludeGraphTransitive:
         )
         (tmp_path / "top.ivy").write_text("#lang ivy1.7\n\ninclude mid\n\ntype top_t\n")
         mcp = get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_include_graph", {"relative_path": "top.ivy"})
+        result = await mcp.call_tool(
+            "ivy_analysis", {"mode": "includes", "relative_path": "top.ivy"}
+        )
         data = json.loads(extract_text(result))
         # Should include both "mid" and transitively "base"
         assert "mid" in data["transitive_includes"]
@@ -87,7 +91,7 @@ class TestIncludeGraphMissing:
         )
         mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
-            "ivy_include_graph", {"relative_path": "uses_missing.ivy"}
+            "ivy_analysis", {"mode": "includes", "relative_path": "uses_missing.ivy"}
         )
         data = json.loads(extract_text(result))
         inc = data["includes"][0]
@@ -104,13 +108,15 @@ class TestIncludeGraphFull:
         mcp = get_mcp_app(workspace_root=str(tmp_path))
 
         # Default: summary mode
-        result = await mcp.call_tool("ivy_include_graph", {})
+        result = await mcp.call_tool("ivy_analysis", {"mode": "includes"})
         data = json.loads(extract_text(result))
         assert data["total_files"] == 2
         assert "entry_points" in data
 
         # Full mode
-        result = await mcp.call_tool("ivy_include_graph", {"detail": "full"})
+        result = await mcp.call_tool(
+            "ivy_analysis", {"mode": "includes", "detail": "full"}
+        )
         data = json.loads(extract_text(result))
         assert "files" in data
         assert data["total_files"] == 2

@@ -42,10 +42,10 @@ async def test_call_sidecar_once_success():
             mock_session_ctx.__aenter__.return_value = mock_session
             mock_session_cls.return_value = mock_session_ctx
 
-            result = await call_sidecar_once(19847, "ivy_capabilities", {}, 5.0)
+            result = await call_sidecar_once(19847, "ivy_status", {}, 5.0)
 
     assert result is mock_result
-    mock_session.call_tool.assert_called_once_with("ivy_capabilities", {})
+    mock_session.call_tool.assert_called_once_with("ivy_status", {})
 
 
 @pytest.mark.asyncio
@@ -57,7 +57,7 @@ async def test_call_sidecar_once_connection_failure():
         "mcp.client.streamable_http.streamablehttp_client",
         side_effect=ConnectionError("refused"),
     ):
-        result = await call_sidecar_once(19847, "ivy_capabilities", {}, 5.0)
+        result = await call_sidecar_once(19847, "ivy_status", {}, 5.0)
 
     assert result is None
 
@@ -198,12 +198,12 @@ def test_error_result_timeout_message():
             "success": False,
             "message": "Tool timed out after 60s",
             "timeout": True,
-            "tool": "ivy_include_graph",
+            "tool": "ivy_analysis",
         }
     )
     assert result.isError is True
     assert "timed out" in result.content[0].text
-    assert "ivy_include_graph" in result.content[0].text
+    assert "ivy_analysis" in result.content[0].text
 
 
 # ---------------------------------------------------------------------------

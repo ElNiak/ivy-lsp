@@ -212,7 +212,9 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
             ctx.root,
             {"relative_path": relative_path},
         )
-        _tc = ToolTraceContext("ivy_scope", {"relative_path": relative_path})
+        _tc = ToolTraceContext(
+            "ivy_analysis", {"mode": "scope", "relative_path": relative_path}
+        )
         abs_path, err = validated_path_or_error(ctx, relative_path)
         if err:
             return _tc.finish(err)
@@ -278,7 +280,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         from ivy_lsp.core.parsing.tiered_extractor import TieredExtractor
         from ivy_lsp.mcp.tools import get_tool_metadata
 
-        _tc = ToolTraceContext("ivy_capabilities", {})
+        _tc = ToolTraceContext("ivy_status", {"mode": "capabilities"})
         result: dict[str, Any] = {
             "success": True,
             "cli_tools": {
@@ -350,7 +352,7 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
     async def _health_check_impl(ctx: Any) -> dict:
         from ivy_lsp.mcp.tools import get_tool_metrics
 
-        _tc = ToolTraceContext("ivy_health_check", {})
+        _tc = ToolTraceContext("ivy_status", {"mode": "health"})
 
         health: dict[str, Any] = {
             "success": True,

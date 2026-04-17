@@ -238,15 +238,16 @@ class TestDiagnosticsFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_verification_dashboard
+# ivy_diagnostics (mode="dashboard")
 # ---------------------------------------------------------------------------
 
 
 class TestDashboardFormatter:
     def test_basic(self):
         md = format_tool_result(
-            "ivy_verification_dashboard",
+            "ivy_diagnostics",
             {
+                "mode": "dashboard",
                 "success": True,
                 "total_files": 10,
                 "verified": 5,
@@ -264,15 +265,16 @@ class TestDashboardFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_include_graph
+# ivy_analysis (mode="includes")
 # ---------------------------------------------------------------------------
 
 
 class TestIncludeGraphFormatter:
     def test_single_file(self):
         md = format_tool_result(
-            "ivy_include_graph",
+            "ivy_analysis",
             {
+                "mode": "includes",
                 "file": "quic_types.ivy",
                 "includes": [{"module": "quic_base", "resolved_path": "quic_base.ivy"}],
                 "included_by": ["quic_packet.ivy"],
@@ -285,8 +287,9 @@ class TestIncludeGraphFormatter:
 
     def test_full_graph(self):
         md = format_tool_result(
-            "ivy_include_graph",
+            "ivy_analysis",
             {
+                "mode": "includes",
                 "files": {"a.ivy": {"includes": ["b"]}, "b.ivy": {"includes": []}},
                 "total_files": 2,
             },
@@ -296,15 +299,16 @@ class TestIncludeGraphFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_capabilities
+# ivy_status (mode="capabilities")
 # ---------------------------------------------------------------------------
 
 
 class TestCapabilitiesFormatter:
     def test_all_available(self):
         md = format_tool_result(
-            "ivy_capabilities",
+            "ivy_status",
             {
+                "mode": "capabilities",
                 "success": True,
                 "cli_tools": {
                     "ivy_check": True,
@@ -505,6 +509,7 @@ class TestPatternsFormatter:
         md = format_tool_result(
             "ivy_patterns",
             {
+                "mode": "check",
                 "protocol": "quic",
                 "completeness_score": 71,
                 "total_layers": 14,
@@ -570,15 +575,16 @@ class TestQualityFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_health_check
+# ivy_status (mode="health")
 # ---------------------------------------------------------------------------
 
 
 class TestHealthCheckFormatter:
     def test_basic(self):
         md = format_tool_result(
-            "ivy_health_check",
+            "ivy_status",
             {
+                "mode": "health",
                 "success": True,
                 "server": {"workspace": "/tmp/test", "staging_dir": None},
                 "model_status": {"state": "ready"},
@@ -602,15 +608,16 @@ class TestHealthCheckFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_scope
+# ivy_analysis (mode="scope")
 # ---------------------------------------------------------------------------
 
 
 class TestScopeFormatter:
     def test_with_mirrors(self):
         md = format_tool_result(
-            "ivy_scope",
+            "ivy_analysis",
             {
+                "mode": "scope",
                 "file": "quic_types.ivy",
                 "abs_path": "/tmp/quic_types.ivy",
                 "endpoint_mirrors": ["quic_server_test_stream.ivy"],
@@ -634,6 +641,7 @@ class TestVisualizeFormatter:
         md = format_tool_result(
             "ivy_visualize",
             {
+                "view": "dependencies",
                 "nodes": [{"name": "send_packet"}, {"name": "recv_packet"}],
                 "edges": [{"from": "send_packet", "to": "recv_packet"}],
             },
@@ -645,6 +653,7 @@ class TestVisualizeFormatter:
         md = format_tool_result(
             "ivy_visualize",
             {
+                "view": "state_machine",
                 "states": [{"name": "conn_state", "type": "enum"}],
                 "transitions": [
                     {
@@ -662,6 +671,7 @@ class TestVisualizeFormatter:
         md = format_tool_result(
             "ivy_visualize",
             {
+                "view": "layers",
                 "layers": [{"name": "quic_types.ivy", "items": ["type1", "type2"]}],
             },
         )
@@ -669,15 +679,16 @@ class TestVisualizeFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_model_summary
+# ivy_visualize (view="summary")
 # ---------------------------------------------------------------------------
 
 
 class TestModelSummaryFormatter:
     def test_summary_table(self):
         md = format_tool_result(
-            "ivy_model_summary",
+            "ivy_visualize",
             {
+                "view": "summary",
                 "rows": [
                     {"actionName": "send", "counts": {"MUST": 3}, "stateVarCount": 2},
                     {"actionName": "recv", "counts": {"SHOULD": 1}, "stateVarCount": 1},
@@ -690,15 +701,16 @@ class TestModelSummaryFormatter:
 
 
 # ---------------------------------------------------------------------------
-# ivy_pattern_scaffold
+# ivy_patterns (mode="scaffold")
 # ---------------------------------------------------------------------------
 
 
 class TestPatternScaffoldFormatter:
     def test_generated_code(self):
         md = format_tool_result(
-            "ivy_pattern_scaffold",
+            "ivy_patterns",
             {
+                "mode": "scaffold",
                 "protocol": "minip",
                 "pattern": "serdes",
                 "code": "#lang ivy1.8\nmodule minip_serdes = { }",

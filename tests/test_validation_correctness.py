@@ -73,7 +73,9 @@ def mcp_app():
     os.environ.setdefault("IVY_LSP_TOOL_TIMEOUT_SCALE", "3")
     app = start_mcp(workspace_root=ws_root, ws_config=ws_config, _return_app=True)
     # Warm up: first tool call builds the index.
-    asyncio.get_event_loop().run_until_complete(app.call_tool("ivy_capabilities", {}))
+    asyncio.get_event_loop().run_until_complete(
+        app.call_tool("ivy_status", {"mode": "capabilities"})
+    )
     return app
 
 
@@ -94,16 +96,16 @@ def _call_and_parse(mcp_app, tool_name, args=None):
 
 class TestCapabilities:
     def test_ivy_check_available(self, mcp_app):
-        data = _call_and_parse(mcp_app, "ivy_capabilities")
+        data = _call_and_parse(mcp_app, "ivy_status", {"mode": "capabilities"})
         assert data["success"] is True
         assert isinstance(data["cli_tools"]["ivy_check"], bool)
 
     def test_ivyc_available(self, mcp_app):
-        data = _call_and_parse(mcp_app, "ivy_capabilities")
+        data = _call_and_parse(mcp_app, "ivy_status", {"mode": "capabilities"})
         assert isinstance(data["cli_tools"]["ivyc"], bool)
 
     def test_ivy_show_available(self, mcp_app):
-        data = _call_and_parse(mcp_app, "ivy_capabilities")
+        data = _call_and_parse(mcp_app, "ivy_status", {"mode": "capabilities"})
         assert isinstance(data["cli_tools"]["ivy_show"], bool)
 
 
@@ -137,8 +139,11 @@ class TestIncludeGraphCorrectness:
         """quic_connection.ivy should have exactly 11 includes."""
         data = _call_and_parse(
             mcp_app,
-            "ivy_include_graph",
-            {"relative_path": "quic/quic_stack/quic_connection.ivy"},
+            "ivy_analysis",
+            {
+                "mode": "includes",
+                "relative_path": "quic/quic_stack/quic_connection.ivy",
+            },
         )
         gt = ground_truth["quic_connection"]
         assert len(data["includes"]) == gt["include_count"]
@@ -150,8 +155,11 @@ class TestIncludeGraphCorrectness:
         """All 11 include modules should be present."""
         data = _call_and_parse(
             mcp_app,
-            "ivy_include_graph",
-            {"relative_path": "quic/quic_stack/quic_connection.ivy"},
+            "ivy_analysis",
+            {
+                "mode": "includes",
+                "relative_path": "quic/quic_stack/quic_connection.ivy",
+            },
         )
         gt = ground_truth["quic_connection"]
         actual_modules = {inc["module"] for inc in data["includes"]}
@@ -161,8 +169,11 @@ class TestIncludeGraphCorrectness:
         """All includes should have non-null resolved_path."""
         data = _call_and_parse(
             mcp_app,
-            "ivy_include_graph",
-            {"relative_path": "quic/quic_stack/quic_connection.ivy"},
+            "ivy_analysis",
+            {
+                "mode": "includes",
+                "relative_path": "quic/quic_stack/quic_connection.ivy",
+            },
         )
         for inc in data["includes"]:
             assert (
@@ -173,8 +184,11 @@ class TestIncludeGraphCorrectness:
         """Commented-out includes should NOT appear."""
         data = _call_and_parse(
             mcp_app,
-            "ivy_include_graph",
-            {"relative_path": "quic/quic_stack/quic_connection.ivy"},
+            "ivy_analysis",
+            {
+                "mode": "includes",
+                "relative_path": "quic/quic_stack/quic_connection.ivy",
+            },
         )
         gt = ground_truth["quic_connection"]
         actual_modules = {inc["module"] for inc in data["includes"]}
@@ -186,7 +200,7 @@ class TestIncludeGraphCorrectness:
     )
     def test_full_graph_file_count(self, mcp_app, ground_truth):
         """Full graph should report correct total .ivy file count."""
-        data = _call_and_parse(mcp_app, "ivy_include_graph", {})
+        data = _call_and_parse(mcp_app, "ivy_analysis", {"mode": "includes"})
         gt = ground_truth["workspace"]
         assert data["total_files"] == gt["total_ivy_files"]
 
@@ -222,9 +236,9 @@ class TestVerifyDiagnosticParsing:
         ), "diagnostics=[] but error_summary has: " + data.get("error_summary", "")
 
     def test_dashboard_does_not_crash(self, mcp_app):
-        """ivy_verification_dashboard should not crash."""
+        """ivy_diagnostics (mode=dashboard) should not crash."""
         try:
-            _call_and_parse(mcp_app, "ivy_verification_dashboard")
+            _call_and_parse(mcp_app, "ivy_diagnostics", {"mode": "dashboard"})
         except Exception as e:
             pytest.fail(f"Dashboard crashed: {e}")
 

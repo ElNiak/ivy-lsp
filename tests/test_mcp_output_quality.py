@@ -240,7 +240,7 @@ class TestActionRequirementsSchema:
     async def test_json_shape(self):
         """Top-level keys include: actions, scopeInfo, modelReady."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         parsed = json.loads(_extract_text(result))
         assert "actions" in parsed
         assert "modelReady" in parsed
@@ -250,7 +250,7 @@ class TestActionRequirementsSchema:
     async def test_action_entry_shape(self):
         """Each action entry has actionName, qualifiedName, file, line."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         parsed = json.loads(_extract_text(result))
         for action in parsed["actions"]:
             assert "actionName" in action
@@ -263,7 +263,7 @@ class TestActionRequirementsSchema:
         """offset=3, limit=5 on 10 actions -> 5 results."""
         mcp = _get_mcp_app(requirement_graph=_build_large_graph(10))
         result = await mcp.call_tool(
-            "ivy_model_summary", {"detail": "requirements", "offset": 3, "limit": 5}
+            "ivy_visualize", {"view": "requirements", "offset": 3, "limit": 5}
         )
         parsed = json.loads(_extract_text(result))
         assert len(parsed["actions"]) == 5
@@ -279,7 +279,7 @@ class TestModelSummarySchema:
     async def test_row_shape(self):
         """Each row has actionName, qualifiedName."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert "rows" in parsed
         assert "totals" in parsed
@@ -291,7 +291,7 @@ class TestModelSummarySchema:
     async def test_totals_present(self):
         """Totals dict has expected keys."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert "actions" in parsed["totals"]
         assert "requirements" in parsed["totals"]
@@ -374,7 +374,7 @@ class TestAllToolsReturnJSON:
     async def test_capabilities_returns_json(self):
         """ivy_capabilities returns valid JSON."""
         mcp = _get_mcp_app()
-        result = await mcp.call_tool("ivy_capabilities", {})
+        result = await mcp.call_tool("ivy_status", {"mode": "capabilities"})
         text = _extract_text(result)
         parsed = json.loads(text)
         assert isinstance(parsed, dict)
@@ -510,7 +510,7 @@ class TestP1ModelSummarySortLimit:
     async def test_model_summary_limit(self):
         """limit=1 on 2 actions -> 1 row + hasMore=True."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"limit": 1})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary", "limit": 1})
         parsed = json.loads(_extract_text(result))
         assert len(parsed["rows"]) == 1
         assert parsed.get("hasMore") is True
@@ -519,7 +519,9 @@ class TestP1ModelSummarySortLimit:
     async def test_model_summary_sort_by_name(self):
         """sort_by='name' -> rows sorted alphabetically by actionName."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"sort_by": "name"})
+        result = await mcp.call_tool(
+            "ivy_visualize", {"view": "summary", "sort_by": "name"}
+        )
         parsed = json.loads(_extract_text(result))
         names = [r["actionName"] for r in parsed["rows"]]
         assert names == sorted(names)

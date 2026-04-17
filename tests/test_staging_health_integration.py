@@ -1,9 +1,9 @@
-"""Integration test: ivy_capabilities returns staging_health via lazy resolver."""
+"""Integration test: ivy_status mode=capabilities returns staging_health via lazy resolver."""
 
 from unittest.mock import MagicMock
 
 
-def test_ivy_capabilities_includes_staging_health_from_lazy_resolver():
+def test_ivy_status_capabilities_includes_staging_health_from_lazy_resolver():
     """When include_resolver is available via lazy lookup, staging_health appears."""
     from ivy_lsp.mcp.context import ToolContext
 
@@ -34,7 +34,7 @@ def test_ivy_capabilities_includes_staging_health_from_lazy_resolver():
     assert health["total_staged"] == 637
 
 
-def test_ivy_capabilities_no_staging_health_when_no_resolver():
+def test_ivy_status_capabilities_no_staging_health_when_no_resolver():
     """When no resolver is available, staging_health call should not be attempted."""
     from ivy_lsp.mcp.context import ToolContext
 

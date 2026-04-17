@@ -156,7 +156,6 @@ class TestToolRegistration:
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
         tools = await mcp.list_tools()
         tool_names = {t.name for t in tools}
-        assert "ivy_model_summary" in tool_names
         assert "ivy_visualize" in tool_names
         assert "ivy_coverage" in tool_names
 
@@ -168,7 +167,7 @@ class TestToolRegistration:
         tool_names = {t.name for t in tools}
         assert "ivy_verify" in tool_names
         assert "ivy_diagnostics" in tool_names
-        assert "ivy_capabilities" in tool_names
+        assert "ivy_status" in tool_names
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +180,7 @@ class TestIvyActionRequirementsTool:
     async def test_returns_valid_json(self):
         """Tool should return a parseable JSON string."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         # call_tool returns content blocks; extract text
         text = _extract_text(result)
         parsed = json.loads(text)
@@ -192,7 +191,7 @@ class TestIvyActionRequirementsTool:
     async def test_returns_all_actions_when_no_filter(self):
         """Without filters, all actions should be returned."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         parsed = json.loads(_extract_text(result))
         names = {a["actionName"] for a in parsed["actions"]}
         assert "send" in names
@@ -203,7 +202,7 @@ class TestIvyActionRequirementsTool:
         """Filtering by action_name should return only matching actions."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
         result = await mcp.call_tool(
-            "ivy_model_summary", {"detail": "requirements", "action_name": "send"}
+            "ivy_visualize", {"view": "requirements", "action_name": "send"}
         )
         parsed = json.loads(_extract_text(result))
         assert len(parsed["actions"]) == 1
@@ -213,7 +212,7 @@ class TestIvyActionRequirementsTool:
     async def test_missing_graph_returns_empty(self):
         """When no requirement_graph is provided, modelReady should be False."""
         mcp = _get_mcp_app(requirement_graph=None)
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         parsed = json.loads(_extract_text(result))
         assert parsed["modelReady"] is False
         assert parsed["actions"] == []
@@ -229,7 +228,7 @@ class TestIvyModelSummaryTool:
     async def test_returns_valid_json(self):
         """Tool should return a parseable JSON string with rows and totals."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert isinstance(parsed["rows"], list)
         assert "totals" in parsed
@@ -238,7 +237,7 @@ class TestIvyModelSummaryTool:
     async def test_row_per_action(self):
         """Each action should produce one row."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert len(parsed["rows"]) == 2
 
@@ -246,7 +245,7 @@ class TestIvyModelSummaryTool:
     async def test_totals_correct(self):
         """Totals should reflect the graph contents."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert parsed["totals"]["actions"] == 2
         assert parsed["totals"]["requirements"] == 2
@@ -255,7 +254,7 @@ class TestIvyModelSummaryTool:
     async def test_missing_graph_returns_empty(self):
         """When no requirement_graph is provided, rows should be empty."""
         mcp = _get_mcp_app(requirement_graph=None)
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert parsed["rows"] == []
         assert parsed["totals"]["actions"] == 0

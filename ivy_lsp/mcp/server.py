@@ -139,19 +139,16 @@ async def _sidecar_monitor(
 _MCP_INSTRUCTIONS = (
     "Ivy Language Server MCP tools for formal verification. "
     "Tools: ivy_verify (check), ivy_compile (ivyc), ivy_model_info (show), "
-    "ivy_diagnostics (mode: structural|full), "
-    "ivy_status (mode: capabilities|health), "
-    "ivy_analysis (mode: includes|scope); "
+    "ivy_diagnostics (mode: structural|full|collisions|dashboard), "
+    "ivy_analysis (mode: includes|scope), "
+    "ivy_status (mode: capabilities|health); "
     "ivy_coverage (mode: matrix|stats|gaps|diff), "
-    "ivy_extract_requirements (output: structured|manifest); "
-    "ivy_visualize (view: dependencies|state_machine|layers), "
-    "ivy_model_summary (detail: summary|requirements); "
-    "ivy_patterns (mode: analyze|validate|compare|check), "
-    "ivy_pattern_scaffold; "
+    "ivy_extract_requirements (output: structured|manifest), ivy_manifest; "
+    "ivy_visualize (view: dependencies|state_machine|layers|summary|requirements), "
+    "ivy_patterns (mode: analyze|validate|compare|check|scaffold); "
     "ivy_quality (mode: suggestions|gate); "
-    "ivy_rfc_get (format: full|metadata|sections), "
-    "ivy_rfc_search (keyword search via IETF Datatracker), "
-    "ivy_rfc_section (section text + normative MUST/SHOULD/MAY analysis)."
+    "ivy_propagation (mode: variants|serdes|impact); "
+    "ivy_rfc (mode: get|search|section)."
 )
 
 

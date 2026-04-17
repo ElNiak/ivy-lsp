@@ -272,7 +272,8 @@ class TestIncludeGraphScope:
         )
         mcp = get_mcp_app(workspace_root=str(tmp_path))
         result = await mcp.call_tool(
-            "ivy_include_graph", {"relative_path": "conn.ivy", "scope": ""}
+            "ivy_analysis",
+            {"mode": "includes", "relative_path": "conn.ivy", "scope": ""},
         )
         data = json.loads(extract_text(result))
         assert data["file"] == "conn.ivy"
@@ -299,7 +300,8 @@ class TestIncludeGraphScope:
         mcp = create_mcp_app(ctx)
 
         result = await mcp.call_tool(
-            "ivy_include_graph", {"detail": "full", "scope": "ab_scope"}
+            "ivy_analysis",
+            {"mode": "includes", "detail": "full", "scope": "ab_scope"},
         )
         data = json.loads(extract_text(result))
         # c.ivy should be filtered out
