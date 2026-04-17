@@ -143,11 +143,9 @@ class TestScaffoldCheck:
 class TestModeValidation:
     @pytest.mark.asyncio
     async def test_unknown_mode_returns_error(self, tmp_path):
-        """ivy_patterns with unknown mode returns error."""
+        """ivy_patterns with unknown mode is rejected by FastMCP arg validation."""
+        import mcp.server.fastmcp.exceptions as mcp_exc
+
         mcp = get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_patterns", {"protocol": "test", "mode": "bogus"}
-        )
-        data = json.loads(extract_text(result))
-        assert data["success"] is False
-        assert "bogus" in data["message"]
+        with pytest.raises(mcp_exc.ToolError, match="Input should be"):
+            await mcp.call_tool("ivy_patterns", {"protocol": "test", "mode": "bogus"})

@@ -29,18 +29,19 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         ctx: Any,
     ) -> dict:
         logger.debug(
-            "[ivy_include_graph] workspace=%s, args=%r",
+            "[ivy_analysis/includes] workspace=%s, args=%r",
             ctx.root,
             {"relative_path": relative_path, "scope": scope},
         )
 
-        _resolved_scope = resolve_scope(ctx, scope, "ivy_include_graph")
+        _resolved_scope = resolve_scope(ctx, scope, "ivy_analysis")
         _scope_files: frozenset[str] | None = (
             _resolved_scope.include_closure if _resolved_scope is not None else None
         )
 
         _tc = ToolTraceContext(
-            "ivy_include_graph", {"relative_path": relative_path, "scope": scope}
+            "ivy_analysis",
+            {"mode": "includes", "relative_path": relative_path, "scope": scope},
         )
 
         def _build_graph():

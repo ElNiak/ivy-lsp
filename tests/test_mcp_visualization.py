@@ -419,7 +419,6 @@ class TestP2ToolRegistration:
         tools = await mcp.list_tools()
         tool_names = {t.name for t in tools}
         assert "ivy_visualize" in tool_names
-        assert "ivy_model_summary" in tool_names
         assert "ivy_coverage" in tool_names
 
 

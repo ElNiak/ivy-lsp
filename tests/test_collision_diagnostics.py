@@ -232,15 +232,16 @@ class TestCollisionDiagnosticsMCPTool:
 
     @pytest.mark.asyncio
     async def test_invalid_mode_returns_error(self, tmp_path):
-        """ivy_diagnostics with an unknown mode returns an error."""
+        """ivy_diagnostics with an unknown mode is rejected by FastMCP arg validation."""
+        import mcp.server.fastmcp.exceptions as mcp_exc
+
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\n\ntype cid\n")
         mcp = get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool(
-            "ivy_diagnostics",
-            {"relative_path": "types.ivy", "mode": "bogus_mode_xyz"},
-        )
-        data = json.loads(extract_text(result))
-        assert "error" in data or "success" not in data or data.get("success") is False
+        with pytest.raises(mcp_exc.ToolError, match="Input should be"):
+            await mcp.call_tool(
+                "ivy_diagnostics",
+                {"relative_path": "types.ivy", "mode": "bogus_mode_xyz"},
+            )
 
     @pytest.mark.asyncio
     async def test_collisions_mode_no_resolver_graceful(self, tmp_path):
