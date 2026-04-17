@@ -259,9 +259,13 @@ def register_iut_testing_tools(mcp: Any, ctx: Any) -> None:
         extra_params: dict | None = None,
         config_path: str | None = None,
     ) -> dict[str, Any]:
-        """Run an Ivy test against an IUT via PANTHER's experiment pipeline.
+        """Runs an Ivy test against an IUT via PANTHER's experiment pipeline.
 
-        Generates a temporary experiment config and invokes `panther run`.
+        Returns: {verdict: pass|fail|timeout, test_name, iut_name, logs: str, duration_s, config_path — generated experiment config}
+
+        Run ivy_compile first to verify the test compiles. Use ivy_diagnostics mode=full to check for model issues before testing.
+
+        IMPORTANT: spawns Docker containers; takes 30s-3min. Requires PANTHER framework installed.
 
         Args:
             protocol: Protocol name (e.g., "bgp", "quic").

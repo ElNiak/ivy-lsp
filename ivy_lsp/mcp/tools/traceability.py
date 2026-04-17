@@ -481,24 +481,20 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         max_items: int = 50,
         scope: str = "",
     ) -> dict:
-        """Unified RFC coverage analysis tool.
+        """Analyzes RFC requirement coverage across Ivy protocol models.
 
-        Combines traceability matrix, coverage statistics, gap detection,
-        and regression diff into a single tool with mode-based dispatch.
+        Modes:
+        - matrix: requirement-to-annotation traceability map -> {matrix[], coverage_pct, warnings[]}
+        - stats: coverage by priority (MUST/SHOULD/MAY) and layer -> {summary, by_level: {MUST|SHOULD|MAY: {total, covered}}, by_layer{}}
+        - gaps: unguarded state vars, uncovered requirements, orphan annotations -> {unguarded[], uncovered[], orphans[]}
+        - diff: delta against last stats baseline -> {new_gaps[], recovered[], delta_pct}
+
+        Run ivy_index first to populate the semantic model. Use ivy_extract_requirements to load manifests before first matrix/stats run.
+
+        IMPORTANT: scope by test_file for NCT-aligned results; test_file takes precedence when both test_file and relative_path are set.
 
         Args:
-            mode: Analysis mode.
-                - "matrix": Requirement-to-annotation traceability mapping.
-                  Shows which RFC requirements are covered by bracket-tag
-                  annotations in the codebase.
-                - "stats": Coverage statistics by requirement level
-                  (MUST/SHOULD/MAY) and layer (default). Also saves a
-                  baseline snapshot for later diff comparison.
-                - "gaps": Identify unguarded state variables, uncovered RFC
-                  requirements, and orphan requirements.
-                - "diff": Compare current coverage against the last baseline
-                  saved by "stats" mode. Reports new gaps, recovered
-                  coverage, and overall delta.
+            mode: Analysis mode ("matrix", "stats", "gaps", or "diff").
             relative_path: Optional file to scope the analysis to
                 (used by "matrix", "stats", and "diff" modes).
             test_file: Optional test entry point whose transitive include

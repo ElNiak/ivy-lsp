@@ -450,15 +450,18 @@ def register_analysis_tools(mcp: Any, ctx: Any) -> None:
         fast: bool = False,
         status: bool = False,
     ) -> dict:
-        """Build or check the offline .ivy-index/ for a protocol.
+        """Builds or checks the offline .ivy-index/ for semantic model population.
+
+        Returns: {protocol, status: built|stale|up_to_date, files_indexed, duration_s, tier — parsing tier used}
+
+        Run before ivy_coverage, ivy_visualize, or ivy_diagnostics mode=full. Use status=True to check staleness without rebuilding.
+
+        IMPORTANT: full index build takes 30s-5min. Use fast=True for Tier 2 (lexer-only) when full parsing is not needed.
 
         Args:
             protocol: Protocol name (e.g. "quic") or "all" for all protocols.
             fast: Use Tier 2 (lexer) only, skip full parser.
             status: Check staleness without rebuilding.
-
-        Returns:
-            Build summary or staleness report.
         """
         _tc = ToolTraceContext(
             "ivy_index", {"protocol": protocol, "fast": fast, "status": status}

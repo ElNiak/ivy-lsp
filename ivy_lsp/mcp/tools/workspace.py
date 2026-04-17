@@ -25,10 +25,15 @@ def register_workspace_tools(mcp: Any, ctx: Any) -> None:
         target: str | None = None,
         roles: str | None = None,
     ) -> dict:
-        """Manage the active Ivy protocol workspace.
+        """Controls which protocol layers are in scope for verification, diagnostics, and coverage tools.
 
-        Controls which protocol layers are "in scope" for verification,
-        diagnostics, and coverage tools.
+        Modes:
+        - set: activate a workspace group or test file scope -> {active_group, layers[], role_filter}
+        - get: return current workspace state -> {active_group, layers[], role_filter}
+        - list: enumerate available workspace groups -> {groups: [{name, test_files[], layers[]}]}
+        - clear: deactivate workspace scoping -> {cleared: bool}
+
+        Set workspace before running ivy_coverage or ivy_diagnostics to scope results to a specific test.
 
         Args:
             action: One of "set", "get", "list", or "clear".

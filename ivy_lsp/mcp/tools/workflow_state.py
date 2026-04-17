@@ -129,10 +129,14 @@ def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
         event_type: str | None = None,
         last_n: int = 20,
     ) -> dict:
-        """Manage workflow state files for multi-session build tracking.
+        """Manages workflow state files for multi-session build tracking.
 
-        Controls the active-workflow flag, build-state persistence, and
-        workflow journal under ``<protocol_dir>/.panther-ivy/``.
+        Modes:
+        - set/get/clear: manage active workflow flag -> {workflow, phase, caller}
+        - get_build/set_build: persist build state across sessions -> {state: dict}
+        - append_journal/get_journal: workflow event log -> {entries: [{timestamp, event_type, state}]}
+
+        Use set at workflow start, append_journal for progress events, get_journal to resume after session break.
 
         Args:
             action: One of "set", "get", "clear", "get_build", "set_build",

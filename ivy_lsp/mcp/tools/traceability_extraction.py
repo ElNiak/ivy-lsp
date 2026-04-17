@@ -145,10 +145,13 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
         rfc_source: str = "",
         sections: str = "",
     ) -> dict:
-        """Parse RFC text to extract MUST/SHOULD/MAY requirements.
+        """Parses RFC text to extract MUST/SHOULD/MAY requirements.
 
-        Can output either structured requirement data or a YAML manifest
-        ready for traceability tools.
+        Modes:
+        - structured: parsed requirement objects -> {requirements: [{id, keyword, text, section}], count}
+        - manifest: YAML manifest ready for traceability tools -> {yaml: str, rfc_name, requirement_count}
+
+        Use before ivy_coverage to populate requirement manifests. Provide rfc_text directly or use rfc_source to fetch automatically.
 
         Args:
             rfc_text: Raw RFC text to parse for normative requirements.
@@ -258,18 +261,18 @@ def register_extraction_tools(mcp: Any, ctx: Any) -> None:
         rfc_source: str = "",
         check_online: bool = False,
     ) -> dict:
-        """Manage and inspect requirement manifests.
+        """Manages and inspects requirement manifests for traceability.
+
+        Modes:
+        - info: manifest summary -> {protocols[], total_requirements, last_updated}
+        - validate: check manifest consistency -> {valid: bool, issues[]}
+        - staleness: check if manifests are outdated -> {stale: bool, stale_rfcs[]}
+        - refresh: re-extract requirements from RFC source -> {refreshed_count, protocol}
+
+        Use info to check manifest state before running ivy_coverage.
 
         Args:
-            mode: Operation mode.
-                - "info": Discover all manifests, summarize each, detect
-                  protocols without manifests.
-                - "validate": Run validation on discovered manifests.
-                  Reports missing fields, invalid levels, etc.
-                - "staleness": Check if manifests are up-to-date
-                  relative to their source RFCs.
-                - "refresh": Fetch RFC source, extract requirements,
-                  and diff against current manifest by ID.
+            mode: Operation mode ("info", "validate", "staleness", or "refresh").
             protocol: Protocol name to filter (e.g. "quic").
             rfc_source: RFC source for refresh mode.
             check_online: Whether to check RFC editor API for

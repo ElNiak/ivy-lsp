@@ -80,26 +80,44 @@ def _format_generic(data: dict) -> str:
 # Dispatch registry
 # ---------------------------------------------------------------------------
 
-_FORMATTERS: dict[str, Callable[[dict], str]] = {
+_FORMATTERS: dict[str, Callable | dict[str, Callable]] = {
     "ivy_verify": _format_ivy_verify,
     "ivy_compile": _format_ivy_compile,
     "ivy_model_info": _format_ivy_model_info,
-    "ivy_diagnostics": _format_ivy_diagnostics,
-    "ivy_verification_dashboard": _format_ivy_verification_dashboard,
-    "ivy_status": _format_ivy_capabilities,
-    "ivy_analysis": _format_ivy_include_graph,
-    "ivy_include_graph": _format_ivy_include_graph,
-    "ivy_capabilities": _format_ivy_capabilities,
-    "ivy_scope": _format_ivy_scope,
-    "ivy_health_check": _format_ivy_health_check,
+    "ivy_diagnostics": {
+        "structural": _format_ivy_diagnostics,
+        "full": _format_ivy_diagnostics,
+        "collisions": _format_ivy_diagnostics,
+        "dashboard": _format_ivy_verification_dashboard,
+    },
+    "ivy_analysis": {
+        "includes": _format_ivy_include_graph,
+        "scope": _format_ivy_scope,
+    },
+    "ivy_status": {
+        "capabilities": _format_ivy_capabilities,
+        "health": _format_ivy_health_check,
+    },
     "ivy_coverage": _format_ivy_coverage,
     "ivy_extract_requirements": _format_ivy_extract_requirements,
     "ivy_manifest": _format_ivy_manifest,
-    "ivy_visualize": _format_ivy_visualize,
-    "ivy_model_summary": _format_ivy_model_summary,
-    "ivy_patterns": _format_ivy_patterns,
-    "ivy_pattern_scaffold": _format_ivy_pattern_scaffold,
+    "ivy_visualize": {
+        "dependencies": _format_ivy_visualize,
+        "state_machine": _format_ivy_visualize,
+        "layers": _format_ivy_visualize,
+        "summary": _format_ivy_model_summary,
+        "requirements": _format_ivy_model_summary,
+    },
+    "ivy_patterns": {
+        "analyze": _format_ivy_patterns,
+        "validate": _format_ivy_patterns,
+        "compare": _format_ivy_patterns,
+        "check": _format_ivy_patterns,
+        "scaffold": _format_ivy_pattern_scaffold,
+    },
+    "ivy_propagation": _format_generic,
     "ivy_quality": _format_ivy_quality,
+    "ivy_rfc": _format_generic,
 }
 
 
@@ -107,7 +125,12 @@ def format_tool_result(tool_name: str, data: dict) -> str:
     """Dispatch to a per-tool formatter, falling back to generic."""
     if not isinstance(data, dict):
         return _code_block(str(data))
-    formatter = _FORMATTERS.get(tool_name, _format_generic)
+    entry = _FORMATTERS.get(tool_name, _format_generic)
+    if isinstance(entry, dict):
+        mode = data.get("mode") or data.get("view") or data.get("action", "")
+        formatter = entry.get(mode, _format_generic)
+    else:
+        formatter = entry
     banner = _format_context_banner(data)
     try:
         body = formatter(data)
@@ -115,7 +138,7 @@ def format_tool_result(tool_name: str, data: dict) -> str:
         try:
             body = _format_generic(data)
         except Exception:
-            body = _code_block(str(data))
+            body = _code_block(json.dumps(data, indent=2), "json")
     return (banner + "\n" + body) if banner else body
 
 

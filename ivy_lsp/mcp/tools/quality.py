@@ -304,23 +304,16 @@ def register_quality_tools(mcp: Any, ctx: Any) -> None:
         gate_level: str = "minimal",
         max_items: int = 50,
     ) -> dict:
-        """Unified quality analysis tool for Ivy specifications.
+        """Analyzes Ivy specification quality: context-aware suggestions and gate validation.
 
-        Combines context-aware suggestions with quality gate validation
-        into a single tool with mode-based dispatch.
+        Modes:
+        - suggestions: quality improvement suggestions for a file -> {suggestions: [{line, severity, message, category}]}
+        - gate: pass/fail quality gate validation -> {passed: bool, gate_level, checks_passed, checks_total, failures[]}
+
+        Use suggestions during editing. Use gate before committing or in CI.
 
         Args:
-            mode: Quality analysis mode.
-                - "suggestions": Get context-aware suggestions for improving
-                  the Ivy specification (default). Analyzes the file at
-                  file_path (optionally at a specific line) and returns
-                  improvement suggestions.
-                - "gate": Validate a protocol model against quality gates.
-                  Checks at one of three levels: minimal (lang header,
-                  balanced braces, includes resolve), standard (+ test
-                  specs, behavior files, monitors), or comprehensive
-                  (+ manifest, coverage, no unguarded state vars).
-                  Requires protocol.
+            mode: Quality analysis mode ("suggestions" or "gate").
             file_path: File to analyze (relative path). Used by
                 mode="suggestions".
             line: Optional line number for cursor-local suggestions.

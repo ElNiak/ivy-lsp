@@ -45,11 +45,13 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         scope: str = "",
         timeout: float = 120.0,
     ) -> dict:
-        """Run ivy_check on an Ivy file to verify formal properties.
+        """Runs ivy_check on an Ivy file to verify formal properties.
 
-        Returns structured diagnostics with file, line, severity, and message.
-        Requires the ``ivy_check`` CLI tool (available inside Docker or with
-        native Ivy installation).
+        Returns: {file, status: OK|FAIL, diagnostics: [{file, line, severity, message}], cached: bool, duration_s — wall-clock seconds}
+
+        Run ivy_compile first to catch compilation errors. For fast structural lint, use ivy_diagnostics mode=structural.
+
+        IMPORTANT: verification takes 30s-10min depending on model complexity. Use compact=True (default) to reduce output size.
 
         Args:
             relative_path: Relative path to the .ivy file to check.
@@ -237,14 +239,13 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         isolate: str | None = None,
         scope: str = "",
     ) -> dict:
-        """Compile an Ivy file to a test executable using ivyc.
+        """Compiles an Ivy file to a test executable using ivyc. Runs inside Docker when configured, falls back to native.
 
-        When a Docker image is configured (--docker-image), compilation runs
-        inside a Docker container with all required C++ dependencies.
-        Otherwise falls back to native subprocess execution.
+        Returns: {success: bool, diagnostics: [{file, line, severity, message}], executable_path — path to compiled binary}
 
-        Requires the ``ivyc`` CLI tool (available inside Docker or with
-        native Ivy installation).
+        Run before ivy_iut_test. For property checking without compilation, use ivy_verify instead.
+
+        IMPORTANT: compilation takes 1-6 minutes. Use ivy_diagnostics mode=structural for fast lint.
 
         Args:
             relative_path: Relative path to the .ivy file to compile.
@@ -394,10 +395,11 @@ def register_verification_tools(mcp: Any, ctx: Any) -> None:
         relative_path: str,
         isolate: str | None = None,
     ) -> dict:
-        """Display the structure of an Ivy model using ivy_show.
+        """Displays the structure of an Ivy model using ivy_show.
 
-        Requires the ``ivy_show`` CLI tool (available inside Docker containers
-        built by the PANTHER framework, or when Ivy is installed natively).
+        Returns: {isolates: [{name, actions[], state_vars[]}], includes[], exports[]}
+
+        Use to inspect model structure before ivy_verify or ivy_compile.
 
         Args:
             relative_path: Relative path to the .ivy file to inspect.
