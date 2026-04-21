@@ -33,6 +33,11 @@ _VALID_EVENT_TYPES = frozenset(
         "progress",
         "error",
         "context_switch",
+        "gate_dispatched",
+        "gate_verdict",
+        "plan_approved",
+        "workflow_resumed",
+        "knowledge_captured",
     }
 )
 
@@ -131,12 +136,21 @@ def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
     ) -> dict:
         """Manages workflow state files for multi-session build tracking.
 
-        Modes:
-        - set/get/clear: manage active workflow flag -> {workflow, phase, caller}
-        - get_build/set_build: persist build state across sessions -> {state: dict}
-        - append_journal/get_journal: workflow event log -> {entries: [{timestamp, event_type, state}]}
+        Responses are trimmed to novel information only (no echo of input
+        parameters). Success paths return ``{"success": True, ...}``; failures
+        go through ``error_response()``.
 
-        Use set at workflow start, append_journal for progress events, get_journal to resume after session break.
+        Modes (return shapes):
+        - set: {success, protocol_dir, started, phase_transition}
+        - get: {success, active, workflow, phase, protocol_dir, ...}
+        - clear: {success, protocol_dir}
+        - get_build: {success, has_build, state, protocol_dir}
+        - set_build: {success, protocol_dir}
+        - append_journal: {success, protocol_dir, ts, journal_size, rotated}
+        - get_journal: {success, entries, count, total, protocol_dir}
+
+        Use set at workflow start, append_journal for progress events,
+        get_journal to resume after session break.
 
         Args:
             action: One of "set", "get", "clear", "get_build", "set_build",
@@ -200,11 +214,12 @@ def _handle_set(
     prev_state = _read_active_state(state_path)
     previous_phase = prev_state.get("phase") if prev_state else None
 
+    started = datetime.now(timezone.utc).isoformat()
     data: dict[str, Any] = {
         "workflow": workflow,
         "phase": phase,
         "invocation_depth": invocation_depth,
-        "started": datetime.now(timezone.utc).isoformat(),
+        "started": started,
     }
     if caller is not None:
         data["caller"] = caller
@@ -213,21 +228,28 @@ def _handle_set(
     with open(filepath, "w") as f:
         yaml.safe_dump(data, f)
 
+    phase_transition: dict[str, str] | None = None
     if previous_phase and previous_phase != phase:
+        phase_transition = {"from": previous_phase, "to": phase}
         entries = _read_journal(state_path)
         entries.append(
             {
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": started,
                 "type": "phase_transition",
                 "workflow": workflow,
                 "phase": phase,
-                "payload": {"from": previous_phase, "to": phase},
+                "payload": phase_transition,
             }
         )
         _write_journal(state_path, entries)
 
     logger.info("Workflow state set: %s/%s in %s", workflow, phase, protocol_dir)
-    return {"success": True, "action": "set", "protocol_dir": protocol_dir, **data}
+    return {
+        "success": True,
+        "protocol_dir": protocol_dir,
+        "started": started,
+        "phase_transition": phase_transition,
+    }
 
 
 def _handle_get(ctx: Any, protocol: str | None) -> dict:
@@ -235,7 +257,6 @@ def _handle_get(ctx: Any, protocol: str | None) -> dict:
     if protocol_dir is None:
         return {
             "success": True,
-            "action": "get",
             "active": False,
             "workflow": None,
             "phase": None,
@@ -246,7 +267,6 @@ def _handle_get(ctx: Any, protocol: str | None) -> dict:
     if not os.path.exists(filepath):
         return {
             "success": True,
-            "action": "get",
             "active": False,
             "workflow": None,
             "phase": None,
@@ -263,7 +283,6 @@ def _handle_get(ctx: Any, protocol: str | None) -> dict:
 
     return {
         "success": True,
-        "action": "get",
         "active": bool(data.get("workflow")),
         "protocol_dir": protocol_dir,
         **data,
@@ -285,7 +304,7 @@ def _handle_clear(ctx: Any, protocol: str | None) -> dict:
         pass
 
     logger.info("Workflow state cleared in %s", protocol_dir)
-    return {"success": True, "action": "clear", "protocol_dir": protocol_dir}
+    return {"success": True, "protocol_dir": protocol_dir}
 
 
 def _handle_get_build(ctx: Any, protocol: str | None) -> dict:
@@ -293,7 +312,6 @@ def _handle_get_build(ctx: Any, protocol: str | None) -> dict:
     if protocol_dir is None:
         return {
             "success": True,
-            "action": "get_build",
             "has_build": False,
             "state": None,
             "message": "No protocol directory resolved.",
@@ -303,7 +321,6 @@ def _handle_get_build(ctx: Any, protocol: str | None) -> dict:
     if not os.path.exists(filepath):
         return {
             "success": True,
-            "action": "get_build",
             "has_build": False,
             "state": None,
             "protocol_dir": protocol_dir,
@@ -317,7 +334,6 @@ def _handle_get_build(ctx: Any, protocol: str | None) -> dict:
 
     return {
         "success": True,
-        "action": "get_build",
         "has_build": data is not None,
         "state": data,
         "protocol_dir": protocol_dir,
@@ -357,9 +373,7 @@ def _handle_set_build(
     logger.info("Build state written in %s", protocol_dir)
     return {
         "success": True,
-        "action": "set_build",
         "protocol_dir": protocol_dir,
-        "state": state_dict,
     }
 
 
@@ -408,26 +422,33 @@ def _handle_append_journal(
     workflow = active.get("workflow") if active else None
     phase = active.get("phase") if active else None
 
+    ts = datetime.now(timezone.utc).isoformat()
     entries = _read_journal(state_path)
-    entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "type": event_type,
-        "workflow": workflow,
-        "phase": phase,
-        "payload": payload,
-    }
-    entries.append(entry)
+    entries.append(
+        {
+            "ts": ts,
+            "type": event_type,
+            "workflow": workflow,
+            "phase": phase,
+            "payload": payload,
+        }
+    )
     _write_journal(state_path, entries)
 
-    if len(entries) > 200:
+    rotated = False
+    journal_size = len(entries)
+    if journal_size > 200:
         _rotate_journal(state_path, entries)
+        rotated = True
+        journal_size -= journal_size // 2
 
     logger.info("Journal event appended: %s in %s", event_type, protocol_dir)
     return {
         "success": True,
-        "action": "append_journal",
         "protocol_dir": protocol_dir,
-        "event": entry,
+        "ts": ts,
+        "journal_size": journal_size,
+        "rotated": rotated,
     }
 
 
@@ -467,7 +488,6 @@ def _handle_get_journal(
     if protocol_dir is None:
         return {
             "success": True,
-            "action": "get_journal",
             "entries": [],
             "message": "No protocol directory resolved.",
         }
@@ -476,7 +496,6 @@ def _handle_get_journal(
     result_entries = entries[-last_n:] if last_n < len(entries) else entries
     return {
         "success": True,
-        "action": "get_journal",
         "entries": result_entries,
         "count": len(result_entries),
         "total": len(entries),
