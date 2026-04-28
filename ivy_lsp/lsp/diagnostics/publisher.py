@@ -196,6 +196,7 @@ def register(server) -> None:
     """Register diagnostic handlers for didOpen, didChange, didSave, and didClose."""
     _debounce_tasks: Dict[str, asyncio.Task] = {}
     _deep_tasks: Dict[str, asyncio.Task] = {}
+    _reindex_locks: Dict[str, asyncio.Lock] = {}
 
     def _get_semantic_model():
         return getattr(server, "semantic_model", None)
@@ -211,6 +212,40 @@ def register(server) -> None:
                     "Pipeline analysis failed for %s", filepath, exc_info=True
                 )
         return None
+
+    async def _reindex_before_publish(
+        loop: asyncio.AbstractEventLoop, filepath: str
+    ) -> None:
+        """Re-register a .ivy file in the workspace index before diagnostics run.
+
+        Ensures newly-created files the index has not yet walked are present
+        in the symbol table, include graph, and requirement graph before
+        ``compute_diagnostics`` queries them. The per-filepath lock serializes
+        concurrent didOpen / didSave for the same URI, which share the
+        non-atomic reindex sequence in ``ScopeManager``.
+
+        Note: ``_index_single_file`` reads source from disk. For LSP clients
+        that publish didOpen / didSave while the buffer is dirty relative to
+        disk, the indexer snapshots an older source than ``compute_diagnostics``
+        sees; this is a pre-existing asymmetry tracked separately.
+        """
+        if not filepath.endswith(".ivy") or server.indexer is None:
+            return
+        lock = _reindex_locks.get(filepath)
+        if lock is None:
+            lock = asyncio.Lock()
+            _reindex_locks[filepath] = lock
+        async with lock:
+            try:
+                await loop.run_in_executor(
+                    None, server.indexer.reindex_file_with_dependents, filepath
+                )
+            except Exception:
+                logger.warning(
+                    "reindex_file_with_dependents failed for %s",
+                    filepath,
+                    exc_info=True,
+                )
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
     async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
@@ -228,6 +263,7 @@ def register(server) -> None:
             except Exception:
                 logger.debug("Overlay notification failed on open", exc_info=True)
         loop = asyncio.get_running_loop()
+        await _reindex_before_publish(loop, filepath)
         pipeline_result = await loop.run_in_executor(
             None, _run_pipeline, source, filepath, "change"
         )
@@ -250,6 +286,9 @@ def register(server) -> None:
 
     @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
     async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
+        # did_change intentionally skips _reindex_before_publish: the buffer
+        # diverges from disk during editing, and reindex reads from disk
+        # (see _index_single_file). Indexer freshness is restored on didSave.
         uri = params.text_document.uri
         server._last_active_uri = uri
 
@@ -318,6 +357,7 @@ def register(server) -> None:
         doc = server.workspace.get_text_document(uri)
         source = doc.source or ""
         loop = asyncio.get_running_loop()
+        await _reindex_before_publish(loop, filepath)
         pipeline_result = await loop.run_in_executor(
             None, _run_pipeline, source, filepath, "save"
         )
@@ -337,11 +377,6 @@ def register(server) -> None:
                 uri=uri, version=doc.version, diagnostics=diags
             )
         )
-
-        if filepath.endswith(".ivy") and server.indexer is not None:
-            await loop.run_in_executor(
-                None, server.indexer.reindex_file_with_dependents, filepath
-            )
 
         doc_version = doc.version
 

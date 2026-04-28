@@ -27,11 +27,15 @@ def register_workspace_tools(mcp: Any, ctx: Any) -> None:
     ) -> dict:
         """Controls which protocol layers are in scope for verification, diagnostics, and coverage tools.
 
-        Modes:
-        - set: activate a workspace group or test file scope -> {active_group, layers[], role_filter}
-        - get: return current workspace state -> {active_group, layers[], role_filter}
-        - list: enumerate available workspace groups -> {groups: [{name, test_files[], layers[]}]}
-        - clear: deactivate workspace scoping -> {cleared: bool}
+        Responses are trimmed to novel information only (echoed input params
+        are omitted). Success paths return ``{"success": True, ...}``; failures
+        go through ``error_response()``.
+
+        Modes (return shapes):
+        - set: {success, active_layers, files_in_scope}
+        - get: {success, active_group, active_layers, active_tests, granularity, set_by}
+        - list: {success, active_group, available_groups}
+        - clear: {success}
 
         Set workspace before running ivy_coverage or ivy_diagnostics to scope results to a specific test.
 
@@ -136,10 +140,8 @@ async def _handle_set(ctx: Any, target: str | None, roles: str | None) -> dict:
         )
 
     return {
-        "status": "ok",
-        "active_group": ws.active_group,
+        "success": True,
         "active_layers": sorted(ws.active_layers),
-        "granularity": ws.granularity,
         "files_in_scope": files_in_scope,
     }
 
@@ -169,7 +171,7 @@ def _handle_get(ctx: Any) -> dict:
             ws = ActiveWorkspace.cleared()
 
     return {
-        "status": "ok",
+        "success": True,
         "active_group": ws.active_group,
         "active_layers": sorted(ws.active_layers),
         "active_tests": ws.active_tests,
@@ -184,7 +186,7 @@ def _handle_list(ctx: Any) -> dict:
     active_group = ws.active_group if ws is not None else None
 
     return {
-        "status": "ok",
+        "success": True,
         "active_group": active_group,
         "available_groups": dict(ctx.workspace_groups),
     }
@@ -209,9 +211,4 @@ def _handle_clear(ctx: Any) -> dict:
     # Store on context
     ctx.active_workspace = ws
 
-    return {
-        "status": "ok",
-        "active_group": ws.active_group,
-        "active_layers": sorted(ws.active_layers),
-        "granularity": ws.granularity,
-    }
+    return {"success": True}

@@ -118,13 +118,13 @@ async def test_set_workspace_protocol(make_workspace_tool):
 
     result = await tool_fn(action="set", target="quic")
 
-    assert result["status"] == "ok"
-    assert result["active_group"] == "quic"
+    assert result["success"] is True
     assert set(result["active_layers"]) == {"quic_stack", "quic_tests", "tls_stack"}
-    assert result["granularity"] == "protocol"
-    # Verify ctx was mutated
+    assert "files_in_scope" in result
+    # Verify ctx was mutated (canonical source of truth for active_group/granularity)
     assert ctx.active_workspace is not None
     assert ctx.active_workspace.active_group == "quic"
+    assert ctx.active_workspace.granularity == "protocol"
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_get_workspace(make_workspace_tool):
     # Then get it
     result = await tool_fn(action="get")
 
-    assert result["status"] == "ok"
+    assert result["success"] is True
     assert result["active_group"] == "quic"
     assert set(result["active_layers"]) == {"quic_stack", "quic_tests"}
     assert result["granularity"] == "protocol"
@@ -167,7 +167,7 @@ async def test_get_workspace_not_set(make_workspace_tool):
 
     result = await tool_fn(action="get")
 
-    assert result["status"] == "ok"
+    assert result["success"] is True
     assert result["active_group"] is None
     assert result["granularity"] == "none"
 
@@ -187,7 +187,7 @@ async def test_list_workspaces(make_workspace_tool):
     # List
     result = await tool_fn(action="list")
 
-    assert result["status"] == "ok"
+    assert result["success"] is True
     assert result["active_group"] == "quic"
     assert "quic" in result["available_groups"]
     assert "minip" in result["available_groups"]
@@ -207,9 +207,10 @@ async def test_clear_workspace(make_workspace_tool):
 
     result = await tool_fn(action="clear")
 
-    assert result["status"] == "ok"
-    assert result["active_group"] is None
-    assert result["granularity"] == "none"
+    assert result == {"success": True}
+    # Canonical state lives on ctx, not the trimmed response
+    assert ctx.active_workspace.active_group is None
+    assert ctx.active_workspace.granularity == "none"
     # Resolver should have been called with empty set
     ctx.include_resolver.set_active_workspace.assert_called()
     last_call_arg = ctx.include_resolver.set_active_workspace.call_args[0][0]
@@ -241,9 +242,10 @@ async def test_set_workspace_with_roles(make_workspace_tool):
 
     result = await tool_fn(action="set", target="quic", roles="client,server")
 
-    assert result["status"] == "ok"
-    assert result["active_group"] == "quic"
-    assert result["granularity"] == "role_pair"
+    assert result["success"] is True
+    # Canonical state lives on ctx; response does not echo input target/roles
+    assert ctx.active_workspace.active_group == "quic"
+    assert ctx.active_workspace.granularity == "role_pair"
 
 
 @pytest.mark.asyncio
@@ -284,7 +286,7 @@ class TestHandleGetFallbackToPersisted:
         ctx.active_workspace = None
         result = _handle_get(ctx)
 
-        assert result["status"] == "ok"
+        assert result["success"] is True
         assert result["active_group"] == "quic"
         assert result["set_by"] == "explicit"
         assert ctx.active_workspace is not None

@@ -828,3 +828,144 @@ class TestEdgeCases:
         result = await handler(params)
         assert isinstance(result, lsp.RelatedFullDocumentDiagnosticReport)
         assert isinstance(result.items, list)
+
+
+# ===========================================================================
+# 7. Reindex-before-diagnostics ordering
+# ===========================================================================
+
+
+class TestReindexBeforeDiagnostics:
+    """Verify did_open and did_save reindex new .ivy files before diagnostics.
+
+    The first published diagnostics for a freshly-created file should reflect a
+    fresh include graph rather than a pre-creation snapshot.
+    """
+
+    @pytest.mark.asyncio
+    async def test_did_open_reindexes_ivy_file(self):
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock()
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///new.ivy"
+        await handlers[lsp.TEXT_DOCUMENT_DID_OPEN](params)
+
+        server.indexer.reindex_file_with_dependents.assert_called_once()
+        called_path = server.indexer.reindex_file_with_dependents.call_args[0][0]
+        assert called_path.endswith("new.ivy")
+
+    @pytest.mark.asyncio
+    async def test_did_save_reindexes_ivy_file(self):
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock()
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///saved.ivy"
+        await handlers[lsp.TEXT_DOCUMENT_DID_SAVE](params)
+
+        server.indexer.reindex_file_with_dependents.assert_called_once()
+        called_path = server.indexer.reindex_file_with_dependents.call_args[0][0]
+        assert called_path.endswith("saved.ivy")
+
+    @pytest.mark.asyncio
+    async def test_did_open_skips_reindex_for_non_ivy(self):
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock()
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///notes.md"
+        await handlers[lsp.TEXT_DOCUMENT_DID_OPEN](params)
+
+        server.indexer.reindex_file_with_dependents.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_did_open_reindex_precedes_diagnostics(self, monkeypatch):
+        from ivy_lsp.lsp.diagnostics import publisher as pub_module
+
+        call_order: list[str] = []
+
+        def fake_reindex(path: str) -> None:
+            call_order.append("reindex")
+
+        def fake_compute(*args, **kwargs):
+            call_order.append("compute_diagnostics")
+            return []
+
+        monkeypatch.setattr(pub_module, "compute_diagnostics", fake_compute)
+
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock(
+            side_effect=fake_reindex
+        )
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///new.ivy"
+        await handlers[lsp.TEXT_DOCUMENT_DID_OPEN](params)
+
+        assert call_order == ["reindex", "compute_diagnostics"]
+
+    @pytest.mark.asyncio
+    async def test_did_save_reindex_precedes_diagnostics(self, monkeypatch):
+        from ivy_lsp.lsp.diagnostics import publisher as pub_module
+
+        call_order: list[str] = []
+
+        def fake_reindex(path: str) -> None:
+            call_order.append("reindex")
+
+        def fake_compute(*args, **kwargs):
+            call_order.append("compute_diagnostics")
+            return []
+
+        monkeypatch.setattr(pub_module, "compute_diagnostics", fake_compute)
+
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock(
+            side_effect=fake_reindex
+        )
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///saved.ivy"
+        await handlers[lsp.TEXT_DOCUMENT_DID_SAVE](params)
+
+        assert call_order == ["reindex", "compute_diagnostics"]
+
+    @pytest.mark.asyncio
+    async def test_reindex_failure_does_not_block_diagnostics(self):
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock(
+            side_effect=RuntimeError("indexer exploded")
+        )
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///broken.ivy"
+        await handlers[lsp.TEXT_DOCUMENT_DID_OPEN](params)
+
+        server.indexer.reindex_file_with_dependents.assert_called_once()
+        server.text_document_publish_diagnostics.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_did_change_does_not_reindex(self):
+        server = _make_server_mock()
+        server.indexer = MagicMock()
+        server.indexer.reindex_file_with_dependents = MagicMock()
+        handlers, _ = _register_handlers(server)
+
+        params = MagicMock()
+        params.text_document.uri = "file:///editing.ivy"
+        await handlers[lsp.TEXT_DOCUMENT_DID_CHANGE](params)
+
+        server.indexer.reindex_file_with_dependents.assert_not_called()
