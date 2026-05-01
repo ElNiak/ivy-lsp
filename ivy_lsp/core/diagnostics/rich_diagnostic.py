@@ -155,3 +155,51 @@ class IvyDiagnostic:
             result["has_quick_fix"] = True
 
         return result
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "IvyDiagnostic":
+        """Build an IvyDiagnostic from a legacy raw-dict emission.
+
+        Accepts the wire shape used by structural_lint and the MCP tools:
+        ``{code, message, line(1-based), severity(str), source?(str)}``.
+        Unknown severity strings degrade to Hint. Source defaults to the
+        registry descriptor if absent.
+
+        Args:
+            d: Raw-dict emission with at minimum `code`, `message`, `line`.
+
+        Returns:
+            Validated IvyDiagnostic instance.
+
+        Raises:
+            ValueError: If the code is not in DIAGNOSTIC_REGISTRY (raised by
+                the validator in __post_init__) or if message is empty/line negative.
+        """
+        from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
+
+        sev_map = {
+            "error": lsp.DiagnosticSeverity.Error,
+            "warning": lsp.DiagnosticSeverity.Warning,
+            "info": lsp.DiagnosticSeverity.Information,
+            "information": lsp.DiagnosticSeverity.Information,
+            "hint": lsp.DiagnosticSeverity.Hint,
+        }
+        severity = sev_map.get(
+            str(d.get("severity", "hint")).lower(),
+            lsp.DiagnosticSeverity.Hint,
+        )
+
+        code = d["code"]
+        descriptor = DIAGNOSTIC_REGISTRY.get(code)
+        source = d.get("source") or (descriptor.source if descriptor else "ivy")
+
+        # Wire shape uses 1-based lines; IR uses 0-based.
+        line_zero = max(0, int(d["line"]) - 1)
+
+        return cls(
+            code=code,
+            message=str(d["message"]),
+            line=line_zero,
+            severity=severity,
+            source=source,
+        )
