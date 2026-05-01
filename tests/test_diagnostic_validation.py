@@ -10,6 +10,8 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 
+pytestmark = pytest.mark.unit
+
 
 class TestIvyDiagnosticValidation:
     def test_valid_construction_succeeds(self):
@@ -47,7 +49,7 @@ class TestIvyDiagnosticValidation:
             )
 
     def test_unregistered_code_raises(self):
-        with pytest.raises(KeyError, match="not registered"):
+        with pytest.raises(ValueError, match="not registered"):
             IvyDiagnostic(
                 code="ivy.bogus.notRegistered",
                 message="Should not exist",
@@ -58,7 +60,7 @@ class TestIvyDiagnosticValidation:
         # The pre-namespace forms used in raw-dict emit sites (e.g.
         # "missing-lang-header", "param-name-style") must not be accepted —
         # migration replaces them with the namespaced forms from the registry.
-        with pytest.raises(KeyError, match="not registered"):
+        with pytest.raises(ValueError, match="not registered"):
             IvyDiagnostic(
                 code="missing-lang-header",
                 message="legacy form",
