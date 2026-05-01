@@ -61,6 +61,25 @@ class IvyDiagnostic:
     suggested_fix: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
 
+    def __post_init__(self) -> None:
+        """Validate fields at construction time to catch malformed emit sites early."""
+        # Local import avoids circular module load at definition time.
+        from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
+
+        if not self.message or not self.message.strip():
+            raise ValueError(
+                f"IvyDiagnostic.message must be non-empty (code={self.code!r})"
+            )
+        if self.line < 0:
+            raise ValueError(
+                f"IvyDiagnostic.line must be >= 0 (got {self.line}, code={self.code!r})"
+            )
+        if self.code not in DIAGNOSTIC_REGISTRY:
+            raise KeyError(
+                f"Diagnostic code {self.code!r} not registered in DIAGNOSTIC_REGISTRY. "
+                f"Add a DiagnosticDescriptor in ivy_lsp/core/diagnostics/codes.py."
+            )
+
     def to_lsp(self) -> lsp.Diagnostic:
         """Convert to an LSP Diagnostic."""
         from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
