@@ -88,7 +88,7 @@ def compute_code_actions(
                     )
                 )
 
-        elif code == "ivy.no-monitor":
+        elif code == "ivy.action.noMonitor":
             # Extract action name from message like "Action 'foo' has no ..."
             m = re.search(r"Action '(\w+)'", diag.message)
             action_name = m.group(1) if m else "action_name"
@@ -117,7 +117,7 @@ def compute_code_actions(
                 )
             )
 
-        elif code == "ivy.unguarded-write":
+        elif code == "ivy.action.unguardedWrite":
             # Extract var name from message like "State var 'foo' is written ..."
             m = re.search(r"State var '([\w.]+)'", diag.message)
             var_name = m.group(1) if m else "state_var"

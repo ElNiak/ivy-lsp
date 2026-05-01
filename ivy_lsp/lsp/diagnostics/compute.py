@@ -495,7 +495,7 @@ def compute_diagnostics(
         diags = [
             d
             for d in diags
-            if not (hasattr(d, "code") and d.code == "ivy.action.unguardedAction")
+            if not (hasattr(d, "code") and d.code == "ivy.action.unguardedWrite")
         ]
 
     if parser is None and parse_result is None:

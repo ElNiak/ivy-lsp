@@ -62,25 +62,34 @@ def _make_graph_with_guarded_action():
 
 
 def test_unguarded_action_names_variables():
-    """Action with unguarded write produces diagnostic naming the variable."""
+    """Action-centric unguarded-write hint names both the action and the variable."""
     g = _make_graph_with_unguarded_action()
     hints = compute_coverage_hints(g, FILEPATH)
-    action_hints = [h for h in hints if h["code"] == "ivy.action.unguardedWrite"]
+    # Section 2b emits action-centric hints (message contains the action name).
+    action_hints = [
+        h
+        for h in hints
+        if h["code"] == "ivy.action.unguardedWrite" and "'send'" in h["message"]
+    ]
     assert len(action_hints) == 1
     h = action_hints[0]
     assert h["line"] == 10
-    assert "'send'" in h["message"]
     assert "'sent_pkt'" in h["message"]
     assert h["severity"] == "hint"
 
 
 def test_duplicate_writes_deduplicated():
-    """Same var written twice in one action appears only once in message."""
+    """Same var written twice in one action appears only once in the action-centric message."""
     g = _make_graph_with_unguarded_action()
     # Add a second write of 'sent_pkt' at a different line in the same action
     g.add_edge(f"{FILEPATH}:14:write:sent_pkt", EdgeType.WRITES, "sent_pkt")
     hints = compute_coverage_hints(g, FILEPATH)
-    action_hints = [h for h in hints if h["code"] == "ivy.action.unguardedWrite"]
+    # Section 2b emits action-centric hints; filter by action name in message.
+    action_hints = [
+        h
+        for h in hints
+        if h["code"] == "ivy.action.unguardedWrite" and "'send'" in h["message"]
+    ]
     assert len(action_hints) == 1
     # 'sent_pkt' should appear exactly once in the message
     assert action_hints[0]["message"].count("'sent_pkt'") == 1
@@ -140,7 +149,13 @@ def test_multiple_actions_line_bucketing():
     g.add_edge(f"{FILEPATH}:25:write:var_b", EdgeType.WRITES, "var_b")
 
     hints = compute_coverage_hints(g, FILEPATH)
-    action_hints = [h for h in hints if h["code"] == "ivy.action.unguardedWrite"]
+    # Section 2b emits action-centric hints; filter by action name in message.
+    action_hints = [
+        h
+        for h in hints
+        if h["code"] == "ivy.action.unguardedWrite"
+        and ("'alpha'" in h["message"] or "'beta'" in h["message"])
+    ]
     assert len(action_hints) == 2
 
     alpha_hint = [h for h in action_hints if "'alpha'" in h["message"]]
@@ -155,7 +170,7 @@ def test_multiple_actions_line_bucketing():
 
 
 def test_structural_unguarded_action_suppressed_with_graph():
-    """When graph is available, structural 'ivy.action.unguardedAction' is filtered out."""
+    """When graph is available, structural 'ivy.action.unguardedWrite' is filtered out."""
     source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
     indexer = MagicMock()
     indexer.requirement_graph = RequirementGraph()
@@ -170,11 +185,11 @@ def test_structural_unguarded_action_suppressed_with_graph():
         indexer=indexer,
     )
     codes = [d.code for d in diags if d.code is not None]
-    assert "ivy.action.unguardedAction" not in codes
+    assert "ivy.action.unguardedWrite" not in codes
 
 
 def test_structural_unguarded_action_present_without_graph():
-    """Without graph, structural 'ivy.action.unguardedAction' fires as fallback."""
+    """Without graph, structural 'ivy.action.unguardedWrite' fires as fallback."""
     source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
 
     diags = compute_diagnostics(
@@ -184,4 +199,4 @@ def test_structural_unguarded_action_present_without_graph():
         indexer=None,
     )
     codes = [d.code for d in diags if d.code is not None]
-    assert "ivy.action.unguardedAction" in codes
+    assert "ivy.action.unguardedWrite" in codes

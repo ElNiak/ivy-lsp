@@ -326,11 +326,11 @@ def test_unguarded_action():
     source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
     issues = check_structural_issues(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
-    assert "ivy.action.unguardedAction" in codes
+    assert "ivy.action.unguardedWrite" in codes
 
 
 def test_guarded_action_ok():
     source = "#lang ivy1.7\naction send(S:cid) = {\n    require connected(S);\n    sent(S) := true;\n}\n"
     issues = check_structural_issues(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
-    assert "ivy.action.unguardedAction" not in codes
+    assert "ivy.action.unguardedWrite" not in codes

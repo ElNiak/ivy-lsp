@@ -55,7 +55,7 @@ def compute_coverage_hints(
                         f"requirements (before/after)"
                     ),
                     "severity": "hint",
-                    "code": "ivy.no-monitor",
+                    "code": "ivy.action.noMonitor",
                     "template": (
                         f"after {action_node.name} {{\n" f"    ensure ...\n" f"}}"
                     ),
@@ -96,7 +96,7 @@ def compute_coverage_hints(
                         f"not guarded by any requirement"
                     ),
                     "severity": "hint",
-                    "code": "ivy.unguarded-write",
+                    "code": "ivy.action.unguardedWrite",
                     "template": f"require {var_node.name}(...) ",
                 }
             )

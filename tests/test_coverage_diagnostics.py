@@ -117,7 +117,9 @@ class TestComputeCoverageHints:
         """Unmonitored-action hints should include a template snippet."""
         graph = _build_hint_graph()
         result = compute_coverage_hints(graph, "/test/quic.ivy")
-        no_monitor_hints = [h for h in result if h.get("code") == "ivy.no-monitor"]
+        no_monitor_hints = [
+            h for h in result if h.get("code") == "ivy.action.noMonitor"
+        ]
         assert len(no_monitor_hints) > 0
         for hint in no_monitor_hints:
             assert "template" in hint

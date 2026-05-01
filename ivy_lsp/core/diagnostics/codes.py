@@ -444,21 +444,6 @@ _reg(
     )
 )
 
-# -- ivy.action.unguardedAction -------------------------------------------
-
-_reg(
-    DiagnosticDescriptor(
-        code="ivy.action.unguardedAction",
-        title="Action '{action}' modifies state without a 'require' precondition",
-        explanation=(
-            "The action writes to a state variable but has no 'require' guard. "
-            "Add preconditions to prevent unintended state mutations."
-        ),
-        default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-lint",
-    )
-)
-
 _reg(
     DiagnosticDescriptor(
         code="ivy.type.placeholderTag",
@@ -486,28 +471,6 @@ _reg(
         explanation="A requirement keyword appears inside a comment; consider re-enabling or removing it to keep the model accurate.",
         default_severity=lsp.DiagnosticSeverity.Hint,
         source="ivy-lint",
-    )
-)
-
-_reg(
-    DiagnosticDescriptor(
-        code="ivy.no-monitor",
-        title="Action has no monitor requirements",
-        explanation="An action has no before/after monitor requirements; add monitors to verify its behavior.",
-        default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-lsp-coverage",
-        has_quick_fix=True,
-    )
-)
-
-_reg(
-    DiagnosticDescriptor(
-        code="ivy.unguarded-write",
-        title="State variable written without a 'require' guard",
-        explanation="A state variable is written by an action but is not guarded by any requirement in the requirement graph.",
-        default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-lsp-coverage",
-        has_quick_fix=True,
     )
 )
 

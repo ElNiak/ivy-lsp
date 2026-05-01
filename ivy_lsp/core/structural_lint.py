@@ -225,7 +225,7 @@ def check_structural_issues(
         if has_assignment and not has_require:
             diags.append(
                 IvyDiagnostic(
-                    code="ivy.action.unguardedAction",
+                    code="ivy.action.unguardedWrite",
                     message=(
                         "Action modifies state but has no 'require' precondition "
                         "— consider adding guards."
