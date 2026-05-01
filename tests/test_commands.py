@@ -30,7 +30,7 @@ from ivy_lsp.lsp.diagnostics.compute import parse_ivy_check_output
 class TestParseIvyCheckOutput:
     def test_errors(self):
         output = "file.ivy:10: error: type mismatch"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1
         assert diags[0].severity == lsp.DiagnosticSeverity.Error
         assert diags[0].range.start.line == 9  # 0-indexed
@@ -38,7 +38,7 @@ class TestParseIvyCheckOutput:
 
     def test_warnings(self):
         output = "file.ivy:5: warning: unused variable"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1
         assert diags[0].severity == lsp.DiagnosticSeverity.Warning
         assert diags[0].range.start.line == 4
@@ -53,14 +53,14 @@ class TestParseIvyCheckOutput:
             "file.ivy:2: warning: second\n"
             "another info line\n"
         )
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 2
         assert diags[0].severity == lsp.DiagnosticSeverity.Error
         assert diags[1].severity == lsp.DiagnosticSeverity.Warning
 
     def test_line_zero_clamped(self):
         output = "file.ivy:0: error: at line zero"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1
         assert diags[0].range.start.line == 0  # max(0, 0-1) = 0
 

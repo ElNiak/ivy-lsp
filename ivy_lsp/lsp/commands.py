@@ -73,7 +73,8 @@ def register(server: Any) -> None:
             from ivy_lsp.lsp.diagnostics.compute import parse_ivy_check_output
 
             combined = "\n".join(result["output"])
-            deep_diags = parse_ivy_check_output(combined)
+            deep_diags_ir = parse_ivy_check_output(combined)
+            deep_diags = [d.to_lsp() for d in deep_diags_ir]
             result["diagnosticCount"] = len(deep_diags)
 
             # Publish merged diagnostics

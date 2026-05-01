@@ -625,25 +625,50 @@ def compute_diagnostics(
     return diags
 
 
-def parse_ivy_check_output(output: str) -> List[lsp.Diagnostic]:
-    """Parse ivy_check stderr/stdout into LSP diagnostics."""
-    from ivy_lsp.infra.utils.ivy_output import parse_ivy_check_lines
+def parse_ivy_check_output(output: str) -> List[IvyDiagnostic]:
+    """Parse ivy_check stderr/stdout into IvyDiagnostic IR.
 
-    diags: List[lsp.Diagnostic] = []
-    for entry in parse_ivy_check_lines(output):
+    Uses ``parse_ivy_output`` directly (not ``parse_ivy_check_lines``) so
+    the ``source`` field is available for granular code selection:
+    - ``cpp_compiler`` source -> ``ivy.verify.compileError``
+    - error severity         -> ``ivy.verify.checkError``
+    - warning severity       -> ``ivy.verify.checkWarning``
+
+    Callers at LSP boundaries must call ``.to_lsp()`` on each result.
+    """
+    from ivy_lsp.infra.utils.ivy_output import parse_ivy_output
+
+    _CODE_MAP = {
+        ("cpp_compiler", "error"): "ivy.verify.compileError",
+        ("cpp_compiler", "warning"): "ivy.verify.checkWarning",
+    }
+
+    diags: List[IvyDiagnostic] = []
+    for entry in parse_ivy_output(output):
         lineno = max(0, entry["line"] - 1)
+        severity_str = entry["severity"]
+        source_str = entry.get("source", "ivy_check")
         severity = (
             lsp.DiagnosticSeverity.Error
-            if entry["severity"] == "error"
+            if severity_str == "error"
             else lsp.DiagnosticSeverity.Warning
         )
+        code = _CODE_MAP.get(
+            (source_str, severity_str),
+            (
+                "ivy.verify.checkError"
+                if severity_str == "error"
+                else "ivy.verify.checkWarning"
+            ),
+        )
         diags.append(
-            lsp.Diagnostic(
-                range=lsp.Range(
-                    start=lsp.Position(lineno, 0),
-                    end=lsp.Position(lineno + 1, 0),
-                ),
+            IvyDiagnostic(
+                code=code,
                 message=entry["message"],
+                line=lineno,
+                end_line=lineno + 1,
+                character=0,
+                end_character=0,
                 severity=severity,
                 source="ivy_check",
             )
@@ -704,4 +729,4 @@ async def run_deep_diagnostics(
             return []
 
     output = "\n".join(result.output_lines)
-    return parse_ivy_check_output(output)
+    return [d.to_lsp() for d in parse_ivy_check_output(output)]

@@ -520,7 +520,7 @@ class TestDiagnosticEndPosition:
 
         # Format matches regex: "file:linenum: severity: message"
         output = "test.ivy:5: error: something went wrong"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1, "Expected one diagnostic from ivy_check output"
         for d in diags:
             assert d.range.end.character != 999, "ivy_check diagnostic uses magic 999"
@@ -531,7 +531,7 @@ class TestDiagnosticEndPosition:
 
         # Format: "file:line: severity: message"
         output = "test.ivy:5: error: something went wrong"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1
         d = diags[0]
         # lineno = max(0, 5 - 1) = 4, so end should be line 5, char 0
