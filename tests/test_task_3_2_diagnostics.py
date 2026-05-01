@@ -448,7 +448,13 @@ class TestDiagnosticEndPosition:
             parse_result=fake_result,
         )
 
-        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        # After IvyDiagnostic migration, coverage hints carry DiagnosticTag.Unnecessary
+        # instead of a uniform source="ivy-lsp-coverage". Filter by that tag.
+        from lsprotocol import types as _lsp
+
+        coverage_diags = [
+            d for d in diags if d.tags and _lsp.DiagnosticTag.Unnecessary in d.tags
+        ]
         assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
         for d in coverage_diags:
             assert (
@@ -491,7 +497,13 @@ class TestDiagnosticEndPosition:
             parse_result=fake_result,
         )
 
-        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        # After IvyDiagnostic migration, coverage hints carry DiagnosticTag.Unnecessary
+        # instead of a uniform source="ivy-lsp-coverage". Filter by that tag.
+        from lsprotocol import types as _lsp
+
+        coverage_diags = [
+            d for d in diags if d.tags and _lsp.DiagnosticTag.Unnecessary in d.tags
+        ]
         assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
         for d in coverage_diags:
             line_idx = d.range.start.line

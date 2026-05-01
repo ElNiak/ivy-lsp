@@ -546,27 +546,22 @@ def compute_diagnostics(
 
             lines = source.split("\n")
             for hint in compute_coverage_hints(graph, filepath):
-                line = hint.get("line", 0)
+                lsp_diag = hint.to_lsp()
+                line = hint.line
                 line_len = len(lines[line]) if line < len(lines) else 0
-                sev_map = {
-                    "hint": lsp.DiagnosticSeverity.Hint,
-                    "info": lsp.DiagnosticSeverity.Information,
-                    "warning": lsp.DiagnosticSeverity.Warning,
-                    "error": lsp.DiagnosticSeverity.Error,
-                }
+                # Expand the range to cover the full line and attach the
+                # Unnecessary tag (coverage hints are not errors, just gaps).
                 diags.append(
                     lsp.Diagnostic(
                         range=lsp.Range(
                             start=lsp.Position(line=line, character=0),
                             end=lsp.Position(line=line, character=line_len),
                         ),
-                        message=hint["message"],
-                        severity=sev_map.get(
-                            hint.get("severity", "hint"),
-                            lsp.DiagnosticSeverity.Hint,
-                        ),
-                        source="ivy-lsp-coverage",
-                        code=hint.get("code"),
+                        message=lsp_diag.message,
+                        severity=lsp_diag.severity,
+                        source=lsp_diag.source,
+                        code=lsp_diag.code,
+                        code_description=lsp_diag.code_description,
                         tags=[lsp.DiagnosticTag.Unnecessary],
                     )
                 )

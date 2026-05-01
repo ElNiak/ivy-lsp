@@ -69,13 +69,15 @@ def test_unguarded_action_names_variables():
     action_hints = [
         h
         for h in hints
-        if h["code"] == "ivy.action.unguardedWrite" and "'send'" in h["message"]
+        if h.code == "ivy.action.unguardedWrite" and "'send'" in h.message
     ]
     assert len(action_hints) == 1
     h = action_hints[0]
-    assert h["line"] == 10
-    assert "'sent_pkt'" in h["message"]
-    assert h["severity"] == "hint"
+    assert h.line == 10
+    assert "'sent_pkt'" in h.message
+    from lsprotocol import types as lsp
+
+    assert h.severity == lsp.DiagnosticSeverity.Hint
 
 
 def test_duplicate_writes_deduplicated():
@@ -88,18 +90,18 @@ def test_duplicate_writes_deduplicated():
     action_hints = [
         h
         for h in hints
-        if h["code"] == "ivy.action.unguardedWrite" and "'send'" in h["message"]
+        if h.code == "ivy.action.unguardedWrite" and "'send'" in h.message
     ]
     assert len(action_hints) == 1
     # 'sent_pkt' should appear exactly once in the message
-    assert action_hints[0]["message"].count("'sent_pkt'") == 1
+    assert action_hints[0].message.count("'sent_pkt'") == 1
 
 
 def test_guarded_action_no_diagnostic():
     """Action whose written vars are all guarded produces no diagnostic."""
     g = _make_graph_with_guarded_action()
     hints = compute_coverage_hints(g, FILEPATH)
-    action_hints = [h for h in hints if h["code"] == "ivy.action.unguardedWrite"]
+    action_hints = [h for h in hints if h.code == "ivy.action.unguardedWrite"]
     assert len(action_hints) == 0
 
 
@@ -153,17 +155,17 @@ def test_multiple_actions_line_bucketing():
     action_hints = [
         h
         for h in hints
-        if h["code"] == "ivy.action.unguardedWrite"
-        and ("'alpha'" in h["message"] or "'beta'" in h["message"])
+        if h.code == "ivy.action.unguardedWrite"
+        and ("'alpha'" in h.message or "'beta'" in h.message)
     ]
     assert len(action_hints) == 2
 
-    alpha_hint = [h for h in action_hints if "'alpha'" in h["message"]]
-    beta_hint = [h for h in action_hints if "'beta'" in h["message"]]
+    alpha_hint = [h for h in action_hints if "'alpha'" in h.message]
+    beta_hint = [h for h in action_hints if "'beta'" in h.message]
     assert len(alpha_hint) == 1
-    assert "'var_a'" in alpha_hint[0]["message"]
+    assert "'var_a'" in alpha_hint[0].message
     assert len(beta_hint) == 1
-    assert "'var_b'" in beta_hint[0]["message"]
+    assert "'var_b'" in beta_hint[0].message
 
 
 # -- Deduplication tests (structural vs graph-based) -----------------------

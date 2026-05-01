@@ -258,15 +258,7 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                     from ivy_lsp.core.coverage_hints import compute_coverage_hints
 
                     for hint in compute_coverage_hints(graph, abs_path):
-                        all_diags.append(
-                            {
-                                "line": hint.get("line", 0),
-                                "severity": hint.get("severity", "hint"),
-                                "message": hint["message"],
-                                "source": "ivy-lsp-coverage",
-                                "code": hint.get("code"),
-                            }
-                        )
+                        all_diags.append(hint.to_mcp_dict())
             except Exception as exc:
                 logger.warning("Coverage hints failed for %s: %s", relative_path, exc)
                 layer_errors.append({"layer": "coverage", "error": str(exc)})

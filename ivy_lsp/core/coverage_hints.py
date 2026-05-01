@@ -8,7 +8,11 @@ Generates Hint-severity diagnostics for missing coverage:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, List
+
+from lsprotocol import types as lsp
+
+from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -16,28 +20,22 @@ logger = logging.getLogger(__name__)
 def compute_coverage_hints(
     graph: Any,
     filepath: str,
-) -> List[Dict[str, Any]]:
+) -> List[IvyDiagnostic]:
     """Compute coverage hint diagnostics for a file.
 
-    Parameters
-    ----------
-    graph:
-        A :class:`RequirementGraph` instance (or ``None``).
-    filepath:
-        Absolute path of the file to produce hints for.
+    Args:
+        graph: A RequirementGraph instance (or ``None``).
+        filepath: Absolute path of the file to produce hints for.
 
     Returns:
-    -------
-    List of dicts, each with keys:
-        ``line``, ``message``, ``severity``, ``code``, and optionally
-        ``template`` (a skeleton snippet the user can insert).
+        List of IvyDiagnostic instances with registry-validated codes.
     """
     if graph is None:
         return []
 
     from ivy_lsp.core.analysis.requirement_graph import EdgeType
 
-    hints: List[Dict[str, Any]] = []
+    hints: List[IvyDiagnostic] = []
 
     # -----------------------------------------------------------------
     # 1. Actions with no monitors (no before/after requirements)
@@ -48,18 +46,19 @@ def compute_coverage_hints(
         reqs = graph.get_requirements_for_action(action_id)
         if not reqs:
             hints.append(
-                {
-                    "line": action_node.line,
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.action.noMonitor",
+                    message=(
                         f"Action '{action_node.name}' has no monitor "
                         f"requirements (before/after)"
                     ),
-                    "severity": "hint",
-                    "code": "ivy.action.noMonitor",
-                    "template": (
+                    line=action_node.line,
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-semantic",
+                    suggested_fix=(
                         f"after {action_node.name} {{\n" f"    ensure ...\n" f"}}"
                     ),
-                }
+                )
             )
 
     # -----------------------------------------------------------------
@@ -89,16 +88,17 @@ def compute_coverage_hints(
         is_written = var_id in written_vars
         if is_written and var_id not in guarded_vars:
             hints.append(
-                {
-                    "line": var_node.line,
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.action.unguardedWrite",
+                    message=(
                         f"State var '{var_node.name}' is written but "
                         f"not guarded by any requirement"
                     ),
-                    "severity": "hint",
-                    "code": "ivy.action.unguardedWrite",
-                    "template": f"require {var_node.name}(...) ",
-                }
+                    line=var_node.line,
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-semantic",
+                    suggested_fix=f"require {var_node.name}(...) ",
+                )
             )
 
     # -----------------------------------------------------------------
@@ -157,16 +157,17 @@ def compute_coverage_hints(
                 if var_names:
                     var_list = ", ".join(f"'{v}'" for v in var_names)
                     hints.append(
-                        {
-                            "line": action_node.line,
-                            "message": (
+                        IvyDiagnostic(
+                            code="ivy.action.unguardedWrite",
+                            message=(
                                 f"Action '{action_node.name}' writes {var_list} "
                                 f"without a 'require' precondition"
                             ),
-                            "severity": "hint",
-                            "code": "ivy.action.unguardedWrite",
-                            "template": f"require {var_names[0]}(...) ",
-                        }
+                            line=action_node.line,
+                            severity=lsp.DiagnosticSeverity.Hint,
+                            source="ivy-semantic",
+                            suggested_fix=f"require {var_names[0]}(...) ",
+                        )
                     )
 
     # -----------------------------------------------------------------
@@ -179,15 +180,16 @@ def compute_coverage_hints(
         # Dead guard: require false as unreachability sentinel
         if req.formula_text.strip() == "false":
             hints.append(
-                {
-                    "line": req.line,
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.require.deadGuard",
+                    message=(
                         "Dead guard: 'require false' marks this action as "
                         "unreachable. Called only through variant specializations."
                     ),
-                    "severity": "info",
-                    "code": "ivy.require.deadGuard",
-                }
+                    line=req.line,
+                    severity=lsp.DiagnosticSeverity.Information,
+                    source="ivy-lsp-coverage",
+                )
             )
 
         # Orphaned hook: monitor targets a backfill-only action
@@ -201,15 +203,16 @@ def compute_coverage_hints(
                 and action.line == req.line
             ):
                 hints.append(
-                    {
-                        "line": req.line,
-                        "message": (
+                    IvyDiagnostic(
+                        code="ivy.monitor.orphanedHook",
+                        message=(
                             f"Monitor targets action '{req.monitor_action}' "
                             "which has no definition in the include closure."
                         ),
-                        "severity": "warning",
-                        "code": "ivy.monitor.orphanedHook",
-                    }
+                        line=req.line,
+                        severity=lsp.DiagnosticSeverity.Warning,
+                        source="ivy-lsp-coverage",
+                    )
                 )
 
     # -----------------------------------------------------------------
@@ -222,15 +225,16 @@ def compute_coverage_hints(
         has_incoming = len(graph.incoming.get(var_id, [])) > 0
         if not has_outgoing and not has_incoming:
             hints.append(
-                {
-                    "line": var_node.line,
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.state.unusedStateVar",
+                    message=(
                         f"State variable '{var_node.name}' has no reads or "
                         "writes in the requirement graph."
                     ),
-                    "severity": "hint",
-                    "code": "ivy.state.unusedStateVar",
-                }
+                    line=var_node.line,
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-lsp-coverage",
+                )
             )
 
     return hints
