@@ -581,16 +581,14 @@ def compute_diagnostics(
             has_export = bool(re.search(r"^\s*export\s+action", source, re.MULTILINE))
             if has_export:
                 diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line=0, character=0),
-                            end=lsp.Position(line=0, character=1),
-                        ),
+                    IvyDiagnostic(
+                        code="ivy.action.missingFinalize",
                         message="Test file has exports but no _finalize action. "
                         "Consider adding 'export action _finalize' for end-of-test assertions.",
+                        line=0,
                         severity=lsp.DiagnosticSeverity.Warning,
-                        source="ivy-pattern",
-                    )
+                        source="ivy-semantic",
+                    ).to_lsp()
                 )
 
         # Check for exported actions without monitors
@@ -618,15 +616,13 @@ def compute_diagnostics(
                     )
                     line_num = source[: match.start()].count("\n") if match else 0
                     diags.append(
-                        lsp.Diagnostic(
-                            range=lsp.Range(
-                                start=lsp.Position(line=line_num, character=0),
-                                end=lsp.Position(line=line_num, character=80),
-                            ),
+                        IvyDiagnostic(
+                            code="ivy.action.noMonitor",
                             message=f"Exported action '{exp_action}' has no before/after monitor in this file.",
+                            line=line_num,
                             severity=lsp.DiagnosticSeverity.Hint,
-                            source="ivy-pattern",
-                        )
+                            source="ivy-semantic",
+                        ).to_lsp()
                     )
     except Exception:
         pass  # Don't let pattern checks break diagnostics
