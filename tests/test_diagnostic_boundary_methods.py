@@ -13,8 +13,8 @@ from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocat
 pytestmark = pytest.mark.unit
 
 
-def _make_diag(**overrides):
-    base = dict(
+def _make_diag(**overrides: object) -> IvyDiagnostic:
+    base: dict[str, object] = dict(
         code="ivy.syntax.missingLangHeader",
         message="Missing #lang header",
         line=4,
@@ -22,7 +22,7 @@ def _make_diag(**overrides):
         source="ivy-lint",
     )
     base.update(overrides)
-    return IvyDiagnostic(**base)
+    return IvyDiagnostic(**base)  # type: ignore[arg-type]
 
 
 class TestToLsp:

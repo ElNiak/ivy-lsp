@@ -80,7 +80,10 @@ class IvyDiagnostic:
             raise ValueError(
                 f"IvyDiagnostic.line must be >= 0 (got {self.line}, code={self.code!r})"
             )
-        if self.severity is None:
+        # The dataclass field default is non-None, but callers can pass None
+        # at runtime (e.g. via dict-spread from legacy emit sites). Defensive
+        # check survives the type-system "unreachable" pyright lint.
+        if self.severity is None:  # type: ignore[unreachable]
             raise ValueError(
                 f"IvyDiagnostic.severity must not be None (code={self.code!r})"
             )
