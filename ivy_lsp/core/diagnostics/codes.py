@@ -380,3 +380,104 @@ _reg(
         has_related_info=True,
     )
 )
+
+# ---------------------------------------------------------------------------
+# Namespaced emit-site backfill — registered so the IR migration can build
+# IvyDiagnostic from these emit sites. Hyphenated legacy codes
+# (missing-lang-header, param-name-style, unguarded-action, missing-init,
+# empty-init, duplicate-decl, unresolved-include) are intentionally NOT
+# registered here; their emit sites are renamed to canonical namespaced
+# forms in Tasks 4 and 7.
+# ---------------------------------------------------------------------------
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.include.nearMiss",
+        title="Unresolved include — did you mean '{suggestion}'?",
+        explanation="An include directive could not be resolved but a similarly named file was found nearby.",
+        default_severity=lsp.DiagnosticSeverity.Warning,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.type.placeholderTag",
+        title="Non-numeric tag value — placeholder?",
+        explanation="A # tag= comment contains a non-numeric value, which is likely a placeholder that has not been assigned a real RFC tag number.",
+        default_severity=lsp.DiagnosticSeverity.Information,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.type.duplicateTag",
+        title="Duplicate RFC tag value",
+        explanation="The same numeric tag value appears more than once in the file; each requirement should have a unique tag.",
+        default_severity=lsp.DiagnosticSeverity.Warning,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.require.commentedOut",
+        title="Commented-out require/ensure/assume/assert statement",
+        explanation="A requirement keyword appears inside a comment; consider re-enabling or removing it to keep the model accurate.",
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.no-monitor",
+        title="Action has no monitor requirements",
+        explanation="An action has no before/after monitor requirements; add monitors to verify its behavior.",
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lint",
+        has_quick_fix=True,
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.unguarded-write",
+        title="State variable written without a 'require' guard",
+        explanation="A state variable is written by an action but is not guarded by any requirement in the requirement graph.",
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lint",
+        has_quick_fix=True,
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.require.deadGuard",
+        title="Dead guard: 'require false'",
+        explanation="A 'require false' statement marks this path as unreachable; it is only reachable through variant specializations.",
+        default_severity=lsp.DiagnosticSeverity.Information,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.monitor.orphanedHook",
+        title="Monitor targets action with no definition in include closure",
+        explanation="A before/after monitor references an action that has no declaration in the transitive include closure.",
+        default_severity=lsp.DiagnosticSeverity.Warning,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.state.unusedStateVar",
+        title="Unused state variable",
+        explanation="A state variable has no reads or writes recorded in the requirement graph.",
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lint",
+    )
+)
