@@ -1,8 +1,8 @@
 """textDocument/codeAction feature handler.
 
 Provides quick-fix code actions for known diagnostic codes:
-- ``missing-lang-header``: Insert ``#lang ivy1.7`` at the top
-- ``unresolved-include``: Remove the offending include line
+- ``ivy.syntax.missingLangHeader``: Insert ``#lang ivy1.7`` at the top
+- ``ivy.module.unresolvedInclude``: Remove the offending include line
 - ``ivy.no-monitor``: Insert a skeleton ``after`` monitor block
 - ``ivy.unguarded-write``: Insert a skeleton ``require`` guard
 """
@@ -37,7 +37,7 @@ def compute_code_actions(
         else:
             code = str(diag.code)
 
-        if code == "missing-lang-header":
+        if code == "ivy.syntax.missingLangHeader":
             actions.append(
                 lsp.CodeAction(
                     title="Insert #lang ivy1.7 header",
@@ -56,7 +56,7 @@ def compute_code_actions(
                 )
             )
 
-        elif code == "unresolved-include":
+        elif code == "ivy.module.unresolvedInclude":
             lines = source.split("\n")
             line_no = diag.range.start.line
             if line_no < len(lines):

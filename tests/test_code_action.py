@@ -29,7 +29,7 @@ class TestCodeActionImport:
 
 class TestMissingLangHeader:
     def test_quickfix_inserts_lang_header(self):
-        """A diagnostic with code 'missing-lang-header' produces an insert action."""
+        """A diagnostic with code 'ivy.syntax.missingLangHeader' produces an insert action."""
         from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
@@ -37,7 +37,7 @@ class TestMissingLangHeader:
             message="Missing #lang header",
             severity=DiagnosticSeverity.Warning,
             source="ivy-lsp",
-            code="missing-lang-header",
+            code="ivy.syntax.missingLangHeader",
         )
         source = "type cid\n"
         actions = compute_code_actions("file:///test.ivy", source, [diag])
@@ -56,7 +56,7 @@ class TestMissingLangHeader:
 
 class TestUnresolvedInclude:
     def test_quickfix_removes_include_line(self):
-        """A diagnostic with code 'unresolved-include' produces a remove action."""
+        """A diagnostic with code 'ivy.module.unresolvedInclude' produces a remove action."""
         from ivy_lsp.lsp.code_action import compute_code_actions
 
         diag = Diagnostic(
@@ -64,7 +64,7 @@ class TestUnresolvedInclude:
             message="Unresolved include: missing_file",
             severity=DiagnosticSeverity.Warning,
             source="ivy-lsp",
-            code="unresolved-include",
+            code="ivy.module.unresolvedInclude",
         )
         source = "#lang ivy1.7\n\ninclude missing_file\ntype cid\n"
         actions = compute_code_actions("file:///test.ivy", source, [diag])
@@ -81,7 +81,7 @@ class TestUnresolvedInclude:
             message="Unresolved include: missing",
             severity=DiagnosticSeverity.Warning,
             source="ivy-lsp",
-            code="unresolved-include",
+            code="ivy.module.unresolvedInclude",
         )
         source = "#lang ivy1.7\ninclude missing"  # No trailing newline
         actions = compute_code_actions("file:///test.ivy", source, [diag])
@@ -121,7 +121,7 @@ class TestNoMatchingDiagnostic:
             message="Unresolved include",
             severity=DiagnosticSeverity.Warning,
             source="ivy-lsp",
-            code="unresolved-include",
+            code="ivy.module.unresolvedInclude",
         )
         source = "#lang ivy1.7\ntype cid\n"
         actions = compute_code_actions("file:///test.ivy", source, [diag])
@@ -130,16 +130,16 @@ class TestNoMatchingDiagnostic:
 
 class TestDiagnosticCodeField:
     def test_missing_lang_header_has_code(self):
-        """check_structural_issues sets code='missing-lang-header'."""
+        """check_structural_issues sets code='ivy.syntax.missingLangHeader'."""
         from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         source = "type cid\n"
         diags = check_structural_issues(source, "/tmp/test.ivy")
-        lang_diags = [d for d in diags if d.code == "missing-lang-header"]
+        lang_diags = [d for d in diags if d.code == "ivy.syntax.missingLangHeader"]
         assert len(lang_diags) == 1
 
     def test_unresolved_include_has_code(self):
-        """check_structural_issues sets code='unresolved-include'."""
+        """check_structural_issues sets code='ivy.module.unresolvedInclude'."""
         from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         # check_structural_issues requires an indexer whose
@@ -149,5 +149,5 @@ class TestDiagnosticCodeField:
 
         source = "#lang ivy1.7\ninclude nonexistent\n"
         diags = check_structural_issues(source, "/tmp/test.ivy", indexer=mock_indexer)
-        include_diags = [d for d in diags if d.code == "unresolved-include"]
+        include_diags = [d for d in diags if d.code == "ivy.module.unresolvedInclude"]
         assert len(include_diags) == 1

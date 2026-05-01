@@ -400,6 +400,65 @@ _reg(
     )
 )
 
+# -- ivy.state.* -----------------------------------------------------------
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.state.missingInit",
+        title="State variable '{name}' never initialized",
+        explanation=(
+            "A relation or function is declared but never assigned in an 'after init' block. "
+            "Ivy state starts with arbitrary values; add an initializer to make behavior deterministic."
+        ),
+        default_severity=lsp.DiagnosticSeverity.Warning,
+        source="ivy-lint",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.state.emptyInit",
+        title="Empty 'after init' block",
+        explanation=(
+            "An 'after init' block is present but contains no statements. "
+            "Either add initializers or remove the empty block."
+        ),
+        default_severity=lsp.DiagnosticSeverity.Warning,
+        source="ivy-lint",
+    )
+)
+
+# -- ivy.naming.duplicateDecl ---------------------------------------------
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.naming.duplicateDecl",
+        title="Duplicate declaration of '{name}'",
+        explanation=(
+            "A relation, function, type, or individual is declared more than once in the same file. "
+            "Remove or rename one of the declarations."
+        ),
+        default_severity=lsp.DiagnosticSeverity.Error,
+        source="ivy-lint",
+        has_related_info=True,
+    )
+)
+
+# -- ivy.action.unguardedAction -------------------------------------------
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.action.unguardedAction",
+        title="Action '{action}' modifies state without a 'require' precondition",
+        explanation=(
+            "The action writes to a state variable but has no 'require' guard. "
+            "Add preconditions to prevent unintended state mutations."
+        ),
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lint",
+    )
+)
+
 _reg(
     DiagnosticDescriptor(
         code="ivy.type.placeholderTag",

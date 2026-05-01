@@ -48,11 +48,15 @@ def check_structural_issues(
         check_commented_out_requires,
         check_duplicate_tags,
         check_lowercase_params,
-        check_structural_issues_raw,
-        check_unresolved_includes_raw,
     )
+    from ivy_lsp.core.structural_lint import (
+        check_structural_issues as _core_check_structural_issues,
+    )
+    from ivy_lsp.core.structural_lint import check_unresolved_includes_raw
 
-    raw = check_structural_issues_raw(source, filepath)
+    # Core structural checks return IvyDiagnostic; convert to LSP at this boundary.
+    core_diags = _core_check_structural_issues(source, filepath)
+    diags: List[lsp.Diagnostic] = [d.to_lsp() for d in core_diags]
 
     # Include resolution: use partition-aware resolver when available,
     # falling back to the default resolver.
@@ -72,18 +76,19 @@ def check_structural_issues(
 
         else:
             resolve_cb = resolver.resolve
+
+    # Remaining helpers still return plain dicts; convert with the dict loop.
+    raw_dicts: list[dict] = []
     if resolve_cb is not None:
-        raw.extend(
+        raw_dicts.extend(
             check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
         )
-
-    raw.extend(check_duplicate_tags(source, filepath))
-    raw.extend(check_commented_out_requires(source, filepath))
-    raw.extend(check_lowercase_params(source, filepath))
+    raw_dicts.extend(check_duplicate_tags(source, filepath))
+    raw_dicts.extend(check_commented_out_requires(source, filepath))
+    raw_dicts.extend(check_lowercase_params(source, filepath))
 
     lines = source.split("\n")
-    diags: List[lsp.Diagnostic] = []
-    for entry in raw:
+    for entry in raw_dicts:
         lineno = max(0, entry["line"] - 1)  # convert 1-based to 0-based
         line_text = lines[lineno] if lineno < len(lines) else ""
         severity = _SEVERITY_MAP.get(entry["severity"], lsp.DiagnosticSeverity.Warning)
@@ -490,7 +495,7 @@ def compute_diagnostics(
         diags = [
             d
             for d in diags
-            if not (hasattr(d, "code") and d.code == "unguarded-action")
+            if not (hasattr(d, "code") and d.code == "ivy.action.unguardedAction")
         ]
 
     if parser is None and parse_result is None:

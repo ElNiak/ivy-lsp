@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ivy_lsp.core.structural_lint import (
-    check_structural_issues_raw,
-    check_unresolved_includes_raw,
+    check_structural_issues as _check_structural_issues_core,
 )
+from ivy_lsp.core.structural_lint import check_unresolved_includes_raw
 from ivy_lsp.infra.utils.basename_cache import BasenameCache
 from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
 from ivy_lsp.infra.utils.ivy_output import (  # noqa: F401
@@ -46,8 +46,15 @@ def _check_structural_issues(
     filepath: str,
     resolve_callback: Any = None,
 ) -> list[dict[str, Any]]:
-    """Fast structural checks without full parsing."""
-    diags = check_structural_issues_raw(source, filepath)
+    """Fast structural checks without full parsing.
+
+    Returns MCP-compatible dicts so callers using ``d.get("code")`` or
+    ``d["severity"]`` continue to work at the MCP boundary.
+    """
+    # Core check returns IvyDiagnostic; convert to MCP dict at this boundary.
+    diags: list[dict[str, Any]] = [
+        d.to_mcp_dict() for d in _check_structural_issues_core(source, filepath)
+    ]
     diags.extend(check_unresolved_includes_raw(source, filepath, resolve_callback))
     return diags
 

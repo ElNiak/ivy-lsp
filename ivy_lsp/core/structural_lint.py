@@ -1,7 +1,9 @@
 """Shared structural lint checks for Ivy source files.
 
-Returns plain dicts so consumers (LSP diagnostics, MCP tools) can
-convert to their own output types.
+``check_structural_issues`` returns ``List[IvyDiagnostic]``; boundary
+consumers convert via ``d.to_lsp()`` (LSP) or ``d.to_mcp_dict()`` (MCP).
+The dict-returning helpers (``check_unresolved_includes_raw`` etc.) remain
+as plain-dict emitters until their own migration tasks land.
 """
 
 from __future__ import annotations
@@ -10,64 +12,77 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+from lsprotocol import types as lsp
+
+from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
 
 
-def check_structural_issues_raw(
+def check_structural_issues(
     source: str,
     filepath: str,
-) -> List[Dict[str, Any]]:
+) -> List[IvyDiagnostic]:
     """Fast structural checks without full parsing.
 
-    Returns list of dicts with keys: line (1-based int), severity (str),
-    message (str), source (str), code (Optional[str]).
+    Returns a list of validated ``IvyDiagnostic`` objects with canonical
+    namespaced codes.  Callers that need LSP ``Diagnostic`` objects call
+    ``[d.to_lsp() for d in diags]``; MCP callers use ``d.to_mcp_dict()``.
+
+    Args:
+        source: Ivy source text to check.
+        filepath: Absolute path to the source file (used for context only).
+
+    Returns:
+        List of ``IvyDiagnostic`` instances, one per structural issue found.
     """
-    diags: List[Dict[str, Any]] = []
+    diags: List[IvyDiagnostic] = []
     lines = source.split("\n")
 
     # 1. Missing #lang header
     stripped = source.lstrip()
     if not stripped.startswith("#lang"):
         diags.append(
-            {
-                "line": 1,
-                "severity": "warning",
-                "message": "Missing '#lang ivy1.7' header",
-                "source": "ivy-lint",
-                "code": "missing-lang-header",
-            }
+            IvyDiagnostic(
+                code="ivy.syntax.missingLangHeader",
+                message="Missing '#lang ivy1.7' header",
+                line=0,
+                severity=lsp.DiagnosticSeverity.Warning,
+                source="ivy-lint",
+            )
         )
 
     # 2. Unmatched braces
     depth = 0
     for i, line_text in enumerate(lines):
         if line_text.strip().startswith("#lang"):
-            code = line_text
+            code_text = line_text
         else:
-            code = line_text.split("#")[0]
-        for ch in code:
+            code_text = line_text.split("#")[0]
+        for ch in code_text:
             if ch == "{":
                 depth += 1
             elif ch == "}":
                 depth -= 1
             if depth < 0:
                 diags.append(
-                    {
-                        "line": i + 1,
-                        "severity": "error",
-                        "message": "Unmatched closing brace",
-                        "source": "ivy-lint",
-                    }
+                    IvyDiagnostic(
+                        code="ivy.syntax.unmatchedBrace",
+                        message="Unmatched closing brace",
+                        line=i,
+                        severity=lsp.DiagnosticSeverity.Error,
+                        source="ivy-lint",
+                    )
                 )
                 depth = 0
     if depth > 0:
         diags.append(
-            {
-                "line": len(lines),
-                "severity": "error",
-                "message": f"Unmatched opening brace ({depth} unclosed)",
-                "source": "ivy-lint",
-            }
+            IvyDiagnostic(
+                code="ivy.syntax.unmatchedBrace",
+                message=f"Unmatched opening brace ({depth} unclosed)",
+                line=max(0, len(lines) - 1),
+                severity=lsp.DiagnosticSeverity.Error,
+                source="ivy-lint",
+            )
         )
 
     # 3. Parameter name style — flag multi-char lowercase param names
@@ -85,17 +100,17 @@ def check_structural_issues_raw(
             name = param.split(":")[0].strip()
             if len(name) > 1 and name[0].islower():
                 diags.append(
-                    {
-                        "line": decl_line + 1,
-                        "severity": "warning",
-                        "message": (
+                    IvyDiagnostic(
+                        code="ivy.declaration.lowercaseParam",
+                        message=(
                             f"Parameter name '{name}' is a multi-character lowercase "
                             f"identifier — may collide with Ivy symbols. "
                             f"Prefer single uppercase letters (e.g., S, D, C)."
                         ),
-                        "source": "ivy-lint",
-                        "code": "param-name-style",
-                    }
+                        line=decl_line,
+                        severity=lsp.DiagnosticSeverity.Warning,
+                        source="ivy-lint",
+                    )
                 )
 
     # 4. Missing after init — heuristic for uninitialized mutable state
@@ -109,40 +124,40 @@ def check_structural_issues_raw(
             continue
         name = m.group(1)
         mutable_names.add(name)
-        mutable_lines[name] = line_no + 1
+        mutable_lines[name] = line_no
 
     initialized: set[str] = set()
     in_init = False
     init_depth = 0
     for i, line_text in enumerate(lines):
-        stripped = line_text.strip()
-        if "after init" in stripped:
+        stripped_line = line_text.strip()
+        if "after init" in stripped_line:
             in_init = True
             init_depth = 0
         if in_init:
-            for ch in stripped:
+            for ch in stripped_line:
                 if ch == "{":
                     init_depth += 1
                 elif ch == "}":
                     init_depth -= 1
                     if init_depth <= 0:
                         in_init = False
-            assign_match = re.match(r"(\w+)(?:\(.*?\))?\s*:=", stripped)
+            assign_match = re.match(r"(\w+)(?:\(.*?\))?\s*:=", stripped_line)
             if assign_match:
                 initialized.add(assign_match.group(1))
 
     for name in mutable_names - initialized:
         diags.append(
-            {
-                "line": mutable_lines[name],
-                "severity": "warning",
-                "message": (
+            IvyDiagnostic(
+                code="ivy.state.missingInit",
+                message=(
                     f"'{name}' is never initialized in an 'after init' block "
                     f"— it will start with arbitrary values."
                 ),
-                "source": "ivy-lint",
-                "code": "missing-init",
-            }
+                line=mutable_lines[name],
+                severity=lsp.DiagnosticSeverity.Warning,
+                source="ivy-lint",
+            )
         )
 
     # 5. Empty after init blocks
@@ -150,15 +165,15 @@ def check_structural_issues_raw(
     for m in _INIT_BLOCK_RE.finditer(source):
         body = m.group(1).strip()
         if not body:
-            line_no = source[: m.start()].count("\n") + 1
+            line_no = source[: m.start()].count("\n")
             diags.append(
-                {
-                    "line": line_no,
-                    "severity": "warning",
-                    "message": "Empty 'after init' block — no state is initialized.",
-                    "source": "ivy-lint",
-                    "code": "empty-init",
-                }
+                IvyDiagnostic(
+                    code="ivy.state.emptyInit",
+                    message="Empty 'after init' block — no state is initialized.",
+                    line=line_no,
+                    severity=lsp.DiagnosticSeverity.Warning,
+                    source="ivy-lint",
+                )
             )
 
     # 6. Duplicate top-level declarations (same file)
@@ -174,19 +189,19 @@ def check_structural_issues_raw(
         name = m.group(2)
         if name in seen_decls:
             diags.append(
-                {
-                    "line": line_no + 1,
-                    "severity": "error",
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.naming.duplicateDecl",
+                    message=(
                         f"Duplicate declaration of '{name}' "
-                        f"(first declared at line {seen_decls[name]})."
+                        f"(first declared at line {seen_decls[name] + 1})."
                     ),
-                    "source": "ivy-lint",
-                    "code": "duplicate-decl",
-                }
+                    line=line_no,
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source="ivy-lint",
+                )
             )
         else:
-            seen_decls[name] = line_no + 1
+            seen_decls[name] = line_no
 
     # 7. Action without require (unguarded state modification)
     _ACTION_RE = re.compile(r"^(\s*)action\s+\w+[^=]*=\s*\{", re.MULTILINE)
@@ -209,16 +224,16 @@ def check_structural_issues_raw(
         has_assignment = ":=" in action_body
         if has_assignment and not has_require:
             diags.append(
-                {
-                    "line": action_line + 1,
-                    "severity": "hint",
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.action.unguardedAction",
+                    message=(
                         "Action modifies state but has no 'require' precondition "
                         "— consider adding guards."
                     ),
-                    "source": "ivy-lint",
-                    "code": "unguarded-action",
-                }
+                    line=action_line,
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-lint",
+                )
             )
 
     return diags
@@ -306,7 +321,7 @@ def check_unresolved_includes_raw(
                         "severity": "error",
                         "message": f"Unresolved include: {inc_name}",
                         "source": "ivy-lint",
-                        "code": "unresolved-include",
+                        "code": "ivy.module.unresolvedInclude",
                     }
                 )
 

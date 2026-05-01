@@ -155,7 +155,7 @@ def test_multiple_actions_line_bucketing():
 
 
 def test_structural_unguarded_action_suppressed_with_graph():
-    """When graph is available, structural 'unguarded-action' is filtered out."""
+    """When graph is available, structural 'ivy.action.unguardedAction' is filtered out."""
     source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
     indexer = MagicMock()
     indexer.requirement_graph = RequirementGraph()
@@ -170,11 +170,11 @@ def test_structural_unguarded_action_suppressed_with_graph():
         indexer=indexer,
     )
     codes = [d.code for d in diags if d.code is not None]
-    assert "unguarded-action" not in codes
+    assert "ivy.action.unguardedAction" not in codes
 
 
 def test_structural_unguarded_action_present_without_graph():
-    """Without graph, structural 'unguarded-action' fires as fallback."""
+    """Without graph, structural 'ivy.action.unguardedAction' fires as fallback."""
     source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
 
     diags = compute_diagnostics(
@@ -184,4 +184,4 @@ def test_structural_unguarded_action_present_without_graph():
         indexer=None,
     )
     codes = [d.code for d in diags if d.code is not None]
-    assert "unguarded-action" in codes
+    assert "ivy.action.unguardedAction" in codes

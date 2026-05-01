@@ -205,7 +205,7 @@ def test_from_lsp_server_structural_diagnostics_no_false_unresolved(tmp_path):
     # Before indexer ready: expect unresolved for our custom include
     resolve_cb = ctx.make_resolve_callback()
     diags = _check_structural_issues(test_file.read_text(), str(test_file), resolve_cb)
-    unresolved = [d for d in diags if d.get("code") == "unresolved-include"]
+    unresolved = [d for d in diags if d.get("code") == "ivy.module.unresolvedInclude"]
     assert len(unresolved) >= 1
 
     _attach_late_indexer(
@@ -219,7 +219,9 @@ def test_from_lsp_server_structural_diagnostics_no_false_unresolved(tmp_path):
     diags_after = _check_structural_issues(
         test_file.read_text(), str(test_file), resolve_cb_after
     )
-    unresolved_after = [d for d in diags_after if d.get("code") == "unresolved-include"]
+    unresolved_after = [
+        d for d in diags_after if d.get("code") == "ivy.module.unresolvedInclude"
+    ]
     assert (
         len(unresolved_after) == 0
     ), f"Expected no unresolved includes after indexer ready, got: {unresolved_after}"
