@@ -15,6 +15,7 @@ from typing import Any, List, Optional
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocation
 from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
 from ivy_lsp.core.patterns import BRACKET_TAG_RE as _TAG_RE
 from ivy_lsp.core.patterns import INCLUDE_RE as _INCLUDE_RE
@@ -111,7 +112,7 @@ def compute_requirement_diagnostics(
     source: str,
     filepath: str,
     indexer: Any = None,
-) -> List[lsp.Diagnostic]:
+) -> List[IvyDiagnostic]:
     """Compute requirement-analysis diagnostics for a source file.
 
     Emits diagnostics for:
@@ -127,7 +128,7 @@ def compute_requirement_diagnostics(
     if graph is None:
         return []
 
-    diags: List[lsp.Diagnostic] = []
+    diags: List[IvyDiagnostic] = []
     abs_path = os.path.abspath(filepath)
     lines = source.split("\n")
 
@@ -173,32 +174,26 @@ def compute_requirement_diagnostics(
                 continue
 
             related = [
-                lsp.DiagnosticRelatedInformation(
-                    location=lsp.Location(
-                        uri=f"file://{req.file}",
-                        range=lsp.Range(
-                            start=lsp.Position(req.line, 0),
-                            end=lsp.Position(req.line, 80),
-                        ),
-                    ),
+                RelatedLocation(
+                    file=req.file,
+                    line=req.line,
                     message=f"{req.kind}: {req.formula_text[:60]}",
                 )
                 for req in inherited_reqs
             ]
 
             diags.append(
-                lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(line_no, 0),
-                        end=lsp.Position(line_no, len(line_text)),
-                    ),
+                IvyDiagnostic(
+                    code="ivy.module.inheritedRequirements",
                     message=(
                         f"Brings {len(inherited_reqs)} requirements into scope "
                         f"from {inc_name} (and transitive includes)"
                     ),
+                    line=line_no,
+                    end_character=len(line_text),
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-lsp-reqs",
-                    related_information=related[:10],
+                    related=related[:10],
                 )
             )
 
@@ -214,15 +209,14 @@ def compute_requirement_diagnostics(
             scoped_counts = graph.get_scoped_counts(active_scope.test_file, action_name)
             if not scoped_counts:
                 diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line_no, 0),
-                            end=lsp.Position(line_no, len(line_text)),
-                        ),
+                    IvyDiagnostic(
+                        code="ivy.action.noMonitor",
                         message=(
                             f"Action '{action_name}' has no before/after "
                             f"monitors in active test scope"
                         ),
+                        line=line_no,
+                        end_character=len(line_text),
                         severity=lsp.DiagnosticSeverity.Hint,
                         source="ivy-lsp-reqs",
                     )
@@ -231,15 +225,14 @@ def compute_requirement_diagnostics(
             reqs = graph.get_requirements_for_action(action_name)
             if not reqs:
                 diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line_no, 0),
-                            end=lsp.Position(line_no, len(line_text)),
-                        ),
+                    IvyDiagnostic(
+                        code="ivy.action.noMonitor",
                         message=(
                             f"Action '{action_name}' has no before/after "
                             f"monitors in scope"
                         ),
+                        line=line_no,
+                        end_character=len(line_text),
                         severity=lsp.DiagnosticSeverity.Hint,
                         source="ivy-lsp-reqs",
                     )
@@ -259,15 +252,14 @@ def compute_requirement_diagnostics(
         if len(readers) >= impact_threshold:
             files = {r.file for r in readers}
             diags.append(
-                lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(line_no, 0),
-                        end=lsp.Position(line_no, len(line_text)),
-                    ),
+                IvyDiagnostic(
+                    code="ivy.invariant.highImpactVar",
                     message=(
                         f"High-impact state variable '{var_name}': read by "
                         f"{len(readers)} requirements across {len(files)} files"
                     ),
+                    line=line_no,
+                    end_character=len(line_text),
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-lsp-reqs",
                 )
@@ -538,7 +530,7 @@ def compute_diagnostics(
 
     # Requirement analysis diagnostics
     req_diags = compute_requirement_diagnostics(source, filepath, indexer)
-    diags.extend(req_diags)
+    diags.extend(d.to_lsp() for d in req_diags)
 
     # Semantic model diagnostics
     sem_diags = compute_semantic_diagnostics(semantic_model, filepath, source)

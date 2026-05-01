@@ -177,10 +177,10 @@ class TestIncludeChainPropagation:
         include_diags = [d for d in diags if "brings" in d.message.lower()]
         assert len(include_diags) >= 1
         diag = include_diags[0]
-        assert diag.related_information is not None
-        assert len(diag.related_information) >= 1
-        related = diag.related_information[0]
-        assert other_file in related.location.uri
+        assert diag.related is not None
+        assert len(diag.related) >= 1
+        related = diag.related[0]
+        assert other_file in related.file
 
     def test_no_include_graph_skips_propagation(self):
         """Without an include graph, no propagation diagnostics are emitted."""
