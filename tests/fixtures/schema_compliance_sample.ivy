@@ -1,0 +1,12 @@
+# Deliberately broken to exercise diagnostics: missing #lang header,
+# unmatched brace, multi-char lowercase parameter, exported action
+# without monitor and no _finalize.
+type session
+
+relation r(srcvar:t)            # multi-char lowercase param
+
+module bad = {                  # opens a brace that never closes
+  type s
+  export action foo
+                                # no _finalize, no monitor
+}
