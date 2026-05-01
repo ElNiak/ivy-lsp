@@ -82,7 +82,7 @@ class IvyDiagnostic:
         if self.code not in DIAGNOSTIC_REGISTRY:
             raise ValueError(
                 f"Diagnostic code {self.code!r} not registered in DIAGNOSTIC_REGISTRY."
-                " Add a DiagnosticDescriptor in ivy_lsp/core/diagnostics/codes.py."
+                + " Add a DiagnosticDescriptor in ivy_lsp/core/diagnostics/codes.py."
             )
 
     def to_lsp(self) -> lsp.Diagnostic:
