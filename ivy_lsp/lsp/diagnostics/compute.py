@@ -286,7 +286,7 @@ def compute_semantic_diagnostics(
     model: Any,
     filepath: str,
     source: str,
-) -> List[lsp.Diagnostic]:
+) -> List[IvyDiagnostic]:
     """Compute diagnostics from the SemanticModel.
 
     Categories:
@@ -299,7 +299,7 @@ def compute_semantic_diagnostics(
     from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
     from ivy_lsp.core.semantic.rfc_annotations import is_tag_covered
 
-    diags: List[lsp.Diagnostic] = []
+    diags: List[IvyDiagnostic] = []
     abs_path = os.path.abspath(filepath)
     lines = source.split("\n")
 
@@ -319,18 +319,17 @@ def compute_semantic_diagnostics(
                     line = ann.line
                     line_len = len(lines[line]) if line < len(lines) else 0
                     diags.append(
-                        lsp.Diagnostic(
-                            range=lsp.Range(
-                                start=lsp.Position(line, 0),
-                                end=lsp.Position(line, line_len),
-                            ),
+                        IvyDiagnostic(
+                            code="ivy.rfc.orphanedTag",
                             message=(
                                 f"Orphaned RFC tag: [{tag}] does not match "
                                 "any loaded requirement manifest"
                             ),
+                            line=line,
+                            end_line=line,
+                            end_character=line_len,
                             severity=lsp.DiagnosticSeverity.Warning,
                             source="ivy-lsp-semantic",
-                            code="ivy.rfc.orphanedTag",
                         )
                     )
 
@@ -358,18 +357,17 @@ def compute_semantic_diagnostics(
                 if val in seen_tags:
                     line_len = len(lines[ann.line]) if ann.line < len(lines) else 0
                     diags.append(
-                        lsp.Diagnostic(
-                            range=lsp.Range(
-                                start=lsp.Position(ann.line, 0),
-                                end=lsp.Position(ann.line, line_len),
-                            ),
+                        IvyDiagnostic(
+                            code="ivy.rfc.tagDuplicate",
                             message=(
                                 f"Duplicate RFC tag [{val}] — also at"
                                 f" line {seen_tags[val] + 1}."
                             ),
+                            line=ann.line,
+                            end_line=ann.line,
+                            end_character=line_len,
                             severity=lsp.DiagnosticSeverity.Warning,
                             source="ivy-lsp-semantic",
-                            code="ivy.rfc.tagDuplicate",
                         )
                     )
                 else:
@@ -391,15 +389,14 @@ def compute_semantic_diagnostics(
                             nearest_line = tag_to_line[t]
                             break
                     diags.append(
-                        lsp.Diagnostic(
-                            range=lsp.Range(
-                                start=lsp.Position(nearest_line, 0),
-                                end=lsp.Position(nearest_line, 0),
-                            ),
+                        IvyDiagnostic(
+                            code="ivy.rfc.tagGap",
                             message=f"RFC tag gap: [{m}] is missing.",
+                            line=nearest_line,
+                            end_line=nearest_line,
+                            end_character=0,
                             severity=lsp.DiagnosticSeverity.Information,
                             source="ivy-lsp-semantic",
-                            code="ivy.rfc.tagGap",
                         )
                     )
 
@@ -426,19 +423,25 @@ def compute_semantic_diagnostics(
                             )
                             other_basename = other.file.rsplit("/", 1)[-1]
                             diags.append(
-                                lsp.Diagnostic(
-                                    range=lsp.Range(
-                                        start=lsp.Position(local_line, 0),
-                                        end=lsp.Position(local_line, line_len),
-                                    ),
+                                IvyDiagnostic(
+                                    code="ivy.include.shadowDeclaration",
                                     message=(
                                         f"'{name}' shadows a declaration in"
                                         f" '{other_basename}'"
                                         f" (line {other.line + 1})."
                                     ),
+                                    line=local_line,
+                                    end_line=local_line,
+                                    end_character=line_len,
                                     severity=lsp.DiagnosticSeverity.Hint,
                                     source="ivy-lsp-semantic",
-                                    code="ivy.include.shadowDeclaration",
+                                    related=[
+                                        RelatedLocation(
+                                            file=other.file,
+                                            line=other.line,
+                                            message=f"original declaration of '{name}'",
+                                        )
+                                    ],
                                 )
                             )
                             break  # one shadow warning per local symbol
@@ -449,15 +452,14 @@ def compute_semantic_diagnostics(
         line_text = lines[line_no] if line_no < len(lines) else ""
         if not _TAG_RE.search(line_text):
             diags.append(
-                lsp.Diagnostic(
-                    range=lsp.Range(
-                        start=lsp.Position(line_no, 0),
-                        end=lsp.Position(line_no, len(line_text)),
-                    ),
+                IvyDiagnostic(
+                    code="ivy.rfc.missingBracketTag",
                     message="Assertion without RFC bracket tag annotation",
+                    line=line_no,
+                    end_line=line_no,
+                    end_character=len(line_text),
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-lsp-semantic",
-                    code="ivy.rfc.missingBracketTag",
                 )
             )
 
@@ -534,7 +536,7 @@ def compute_diagnostics(
 
     # Semantic model diagnostics
     sem_diags = compute_semantic_diagnostics(semantic_model, filepath, source)
-    diags.extend(sem_diags)
+    diags.extend(d.to_lsp() for d in sem_diags)
 
     # Coverage hint diagnostics (C1)
     if indexer is not None:
