@@ -47,11 +47,14 @@ def _check_structural_issues(
     Returns MCP-compatible dicts so callers using ``d.get("code")`` or
     ``d["severity"]`` continue to work at the MCP boundary.
     """
-    # Core check returns IvyDiagnostic; convert to MCP dict at this boundary.
+    # Core checks return IvyDiagnostic; convert to MCP dict at this boundary.
     diags: list[dict[str, Any]] = [
         d.to_mcp_dict() for d in _check_structural_issues_core(source, filepath)
     ]
-    diags.extend(check_unresolved_includes_raw(source, filepath, resolve_callback))
+    diags.extend(
+        d.to_mcp_dict()
+        for d in check_unresolved_includes_raw(source, filepath, resolve_callback)
+    )
     return diags
 
 

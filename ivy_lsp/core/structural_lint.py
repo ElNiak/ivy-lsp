@@ -1,9 +1,7 @@
 """Shared structural lint checks for Ivy source files.
 
-``check_structural_issues`` returns ``List[IvyDiagnostic]``; boundary
-consumers convert via ``d.to_lsp()`` (LSP) or ``d.to_mcp_dict()`` (MCP).
-The dict-returning helpers (``check_unresolved_includes_raw`` etc.) remain
-as plain-dict emitters until their own migration tasks land.
+All public helpers return ``List[IvyDiagnostic]``; boundary consumers
+convert via ``d.to_lsp()`` (LSP) or ``d.to_mcp_dict()`` (MCP).
 """
 
 from __future__ import annotations
@@ -16,6 +14,15 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
+
+# Map string severity names (used in legacy callsites) to LSP enum values.
+_STR_SEVERITY_MAP: Dict[str, lsp.DiagnosticSeverity] = {
+    "error": lsp.DiagnosticSeverity.Error,
+    "warning": lsp.DiagnosticSeverity.Warning,
+    "info": lsp.DiagnosticSeverity.Information,
+    "information": lsp.DiagnosticSeverity.Information,
+    "hint": lsp.DiagnosticSeverity.Hint,
+}
 
 
 def check_structural_issues(
@@ -277,7 +284,7 @@ def check_unresolved_includes_raw(
     filepath: str,
     resolve_callback: Any = None,
     basename_map: Optional[Dict[str, List[str]]] = None,
-) -> List[Dict[str, Any]]:
+) -> List[IvyDiagnostic]:
     """Check for unresolved include directives.
 
     Args:
@@ -287,8 +294,11 @@ def check_unresolved_includes_raw(
             If None, uses simple os.path.isfile check in parent directory.
         basename_map: Optional mapping of basename -> list of paths, used
             to suggest near-miss corrections for unresolved includes.
+
+    Returns:
+        List of ``IvyDiagnostic`` instances, one per unresolved include.
     """
-    diags: List[Dict[str, Any]] = []
+    diags: List[IvyDiagnostic] = []
     parent_dir = os.path.dirname(filepath)
 
     for match in INCLUDE_PATTERN.finditer(source):
@@ -300,29 +310,29 @@ def check_unresolved_includes_raw(
             resolved = candidate if os.path.isfile(candidate) else None
 
         if resolved is None:
-            line_no = source[: match.start()].count("\n") + 1
+            line_no = source[: match.start()].count("\n")  # 0-based
             suggestion = (
                 _find_near_miss(inc_name, basename_map) if basename_map else None
             )
             if suggestion:
                 diags.append(
-                    {
-                        "line": line_no,
-                        "severity": "warning",
-                        "message": f"Cannot resolve include '{inc_name}'. Did you mean '{suggestion}'?",
-                        "source": "ivy-lint",
-                        "code": "ivy.include.nearMiss",
-                    }
+                    IvyDiagnostic(
+                        code="ivy.include.nearMiss",
+                        message=f"Cannot resolve include '{inc_name}'. Did you mean '{suggestion}'?",
+                        line=line_no,
+                        severity=lsp.DiagnosticSeverity.Warning,
+                        source="ivy-lint",
+                    )
                 )
             else:
                 diags.append(
-                    {
-                        "line": line_no,
-                        "severity": "error",
-                        "message": f"Unresolved include: {inc_name}",
-                        "source": "ivy-lint",
-                        "code": "ivy.module.unresolvedInclude",
-                    }
+                    IvyDiagnostic(
+                        code="ivy.module.unresolvedInclude",
+                        message=f"Unresolved include: {inc_name}",
+                        line=line_no,
+                        severity=lsp.DiagnosticSeverity.Error,
+                        source="ivy-lint",
+                    )
                 )
 
     return diags
@@ -334,30 +344,33 @@ _TAG_COMMENT_RE = re.compile(r"#\s*tag\s*=\s*(\w+)")
 def check_duplicate_tags(
     source: str,
     _filepath: str,
-) -> List[Dict[str, Any]]:
+) -> List[IvyDiagnostic]:
     """Detect duplicate or placeholder variant tag comments.
 
     Args:
         source: The Ivy source text.
         filepath: Absolute path to the source file.
+
+    Returns:
+        List of ``IvyDiagnostic`` instances for tag issues found.
     """
-    diags: List[Dict[str, Any]] = []
+    diags: List[IvyDiagnostic] = []
     tags: List[Tuple[str, int]] = []
 
     for i, line in enumerate(source.splitlines()):
         m = _TAG_COMMENT_RE.search(line)
         if m:
             tag_val = m.group(1)
-            line_no = i + 1
+            line_no = i  # 0-based
             if not tag_val.isdigit():
                 diags.append(
-                    {
-                        "line": line_no,
-                        "severity": "info",
-                        "message": f"Tag value '{tag_val}' is not numeric — placeholder?",
-                        "source": "ivy-lint",
-                        "code": "ivy.type.placeholderTag",
-                    }
+                    IvyDiagnostic(
+                        code="ivy.type.placeholderTag",
+                        message=f"Tag value '{tag_val}' is not numeric — placeholder?",
+                        line=line_no,
+                        severity=lsp.DiagnosticSeverity.Information,
+                        source="ivy-lint",
+                    )
                 )
             else:
                 tags.append((tag_val, line_no))
@@ -366,16 +379,16 @@ def check_duplicate_tags(
     for tag_val, line_no in tags:
         if tag_val in seen:
             diags.append(
-                {
-                    "line": line_no,
-                    "severity": "warning",
-                    "message": (
+                IvyDiagnostic(
+                    code="ivy.type.duplicateTag",
+                    message=(
                         f"Duplicate tag value {tag_val}"
-                        f" — also used at line {seen[tag_val]}."
+                        f" — also used at line {seen[tag_val] + 1}."
                     ),
-                    "source": "ivy-lint",
-                    "code": "ivy.type.duplicateTag",
-                }
+                    line=line_no,
+                    severity=lsp.DiagnosticSeverity.Warning,
+                    source="ivy-lint",
+                )
             )
         else:
             seen[tag_val] = line_no
@@ -391,7 +404,7 @@ _DECL_PARAM_RE = re.compile(
 def check_lowercase_params(
     source: str,
     _filepath: str,
-) -> List[Dict[str, Any]]:
+) -> List[IvyDiagnostic]:
     """Check for lowercase-initial parameters in relation/function declarations.
 
     In Ivy, uppercase-initial names are logical variables (universally
@@ -400,13 +413,16 @@ def check_lowercase_params(
 
     Only checks ``relation`` and ``function`` declarations. ``action``
     parameters are concrete and legitimately use lowercase names.
+
+    Returns:
+        List of ``IvyDiagnostic`` instances for lowercase parameter issues.
     """
-    diags: List[Dict[str, Any]] = []
+    diags: List[IvyDiagnostic] = []
 
     for match in _DECL_PARAM_RE.finditer(source):
         kind = match.group(1)
         params_str = match.group(3)
-        line_no = source[: match.start()].count("\n") + 1
+        line_no = source[: match.start()].count("\n")  # 0-based
 
         for param in params_str.split(","):
             param = param.strip()
@@ -417,17 +433,17 @@ def check_lowercase_params(
                 continue
             if name[0].islower():
                 diags.append(
-                    {
-                        "line": line_no,
-                        "severity": "error",
-                        "message": (
+                    IvyDiagnostic(
+                        code="ivy.declaration.lowercaseParam",
+                        message=(
                             f"Parameter '{name}' in {kind} declaration must"
                             f" start with uppercase (Ivy treats lowercase"
                             f" as constant references)"
                         ),
-                        "source": "ivy-lint",
-                        "code": "ivy.declaration.lowercaseParam",
-                    }
+                        line=line_no,
+                        severity=lsp.DiagnosticSeverity.Error,
+                        source="ivy-lint",
+                    )
                 )
 
     return diags
@@ -440,14 +456,17 @@ _SUPPRESS_KEYWORDS = frozenset({"todo", "fixme", "disabled", "skip", "intentiona
 def check_commented_out_requires(
     source: str,
     _filepath: str,
-) -> List[Dict[str, Any]]:
+) -> List[IvyDiagnostic]:
     """Detect commented-out require/ensure/assume/assert statements.
 
     Args:
         source: The Ivy source text.
         filepath: Absolute path to the source file.
+
+    Returns:
+        List of ``IvyDiagnostic`` instances for commented-out requirements.
     """
-    diags: List[Dict[str, Any]] = []
+    diags: List[IvyDiagnostic] = []
     lines = source.splitlines()
 
     for i, line in enumerate(lines):
@@ -460,26 +479,26 @@ def check_commented_out_requires(
         if first_word not in _REQUIREMENT_KEYWORDS:
             continue
 
-        severity = "hint"
+        severity = lsp.DiagnosticSeverity.Hint
         for offset in (-1, -2, 1):
             adj_idx = i + offset
             if 0 <= adj_idx < len(lines):
                 adj_lower = lines[adj_idx].lower()
                 if any(kw in adj_lower for kw in _SUPPRESS_KEYWORDS):
-                    severity = "info"
+                    severity = lsp.DiagnosticSeverity.Information
                     break
 
         diags.append(
-            {
-                "line": i + 1,
-                "severity": severity,
-                "message": (
+            IvyDiagnostic(
+                code="ivy.require.commentedOut",
+                message=(
                     "Commented-out require statement."
                     " Consider removing or re-enabling."
                 ),
-                "source": "ivy-lint",
-                "code": "ivy.require.commentedOut",
-            }
+                line=i,  # 0-based
+                severity=severity,
+                source="ivy-lint",
+            )
         )
 
     return diags

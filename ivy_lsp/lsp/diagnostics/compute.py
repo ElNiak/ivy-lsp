@@ -78,33 +78,17 @@ def check_structural_issues(
         else:
             resolve_cb = resolver.resolve
 
-    # Remaining helpers still return plain dicts; convert with the dict loop.
-    raw_dicts: list[dict] = []
+    # Helpers return IvyDiagnostic; convert to LSP at this boundary.
+    helper_diags: list[IvyDiagnostic] = []
     if resolve_cb is not None:
-        raw_dicts.extend(
+        helper_diags.extend(
             check_unresolved_includes_raw(source, filepath, resolve_callback=resolve_cb)
         )
-    raw_dicts.extend(check_duplicate_tags(source, filepath))
-    raw_dicts.extend(check_commented_out_requires(source, filepath))
-    raw_dicts.extend(check_lowercase_params(source, filepath))
+    helper_diags.extend(check_duplicate_tags(source, filepath))
+    helper_diags.extend(check_commented_out_requires(source, filepath))
+    helper_diags.extend(check_lowercase_params(source, filepath))
 
-    lines = source.split("\n")
-    for entry in raw_dicts:
-        lineno = max(0, entry["line"] - 1)  # convert 1-based to 0-based
-        line_text = lines[lineno] if lineno < len(lines) else ""
-        severity = _SEVERITY_MAP.get(entry["severity"], lsp.DiagnosticSeverity.Warning)
-        diags.append(
-            lsp.Diagnostic(
-                range=lsp.Range(
-                    start=lsp.Position(lineno, 0),
-                    end=lsp.Position(lineno, len(line_text)),
-                ),
-                message=entry["message"],
-                severity=severity,
-                source="ivy-lsp",
-                code=entry.get("code"),
-            )
-        )
+    diags.extend(d.to_lsp() for d in helper_diags)
     return diags
 
 
@@ -516,18 +500,14 @@ def compute_diagnostics(
             if error_info is not None:
                 err_line = max(0, error_info.get("line", 1) - 1)
                 err_msg = error_info.get("message", "Lexer error")
-                lines = source.split("\n")
-                line_len = len(lines[err_line]) if err_line < len(lines) else 0
                 diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line=err_line, character=0),
-                            end=lsp.Position(line=err_line, character=line_len),
-                        ),
+                    IvyDiagnostic(
+                        code="ivy.syntax.lexerError",
                         message=f"Lexer error: {err_msg}",
+                        line=err_line,
                         severity=lsp.DiagnosticSeverity.Error,
                         source="ivy-lsp",
-                    )
+                    ).to_lsp()
                 )
 
     # Requirement analysis diagnostics

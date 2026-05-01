@@ -63,9 +63,9 @@ def test_near_miss_include_suggestion():
         resolve_callback=resolver,
         basename_map=known_basenames,
     )
-    near_miss = [i for i in issues if i.get("code") == "ivy.include.nearMiss"]
+    near_miss = [i for i in issues if i.code == "ivy.include.nearMiss"]
     assert len(near_miss) == 1
-    assert "ivy_quic_shim_client_ext_example" in near_miss[0]["message"]
+    assert "ivy_quic_shim_client_ext_example" in near_miss[0].message
 
 
 def test_no_near_miss_when_no_close_match():
@@ -83,9 +83,9 @@ def test_no_near_miss_when_no_close_match():
         resolve_callback=resolver,
         basename_map=known_basenames,
     )
-    near_miss = [i for i in issues if i.get("code") == "ivy.include.nearMiss"]
+    near_miss = [i for i in issues if i.code == "ivy.include.nearMiss"]
     assert len(near_miss) == 0
-    unresolved = [i for i in issues if i.get("code") == "ivy.module.unresolvedInclude"]
+    unresolved = [i for i in issues if i.code == "ivy.module.unresolvedInclude"]
     assert len(unresolved) == 1
 
 
@@ -103,9 +103,9 @@ def test_duplicate_tag_detected():
         "}\n"
     )
     issues = check_duplicate_tags(source, "/fake/tp.ivy")
-    dupes = [i for i in issues if i.get("code") == "ivy.type.duplicateTag"]
+    dupes = [i for i in issues if i.code == "ivy.type.duplicateTag"]
     assert len(dupes) >= 1
-    assert "15" in dupes[0]["message"]
+    assert "15" in dupes[0].message
 
 
 def test_placeholder_tag_flagged():
@@ -116,9 +116,9 @@ def test_placeholder_tag_flagged():
         "}\n"
     )
     issues = check_duplicate_tags(source, "/fake/tp.ivy")
-    placeholders = [i for i in issues if "placeholder" in i.get("message", "").lower()]
+    placeholders = [i for i in issues if "placeholder" in i.message.lower()]
     assert len(placeholders) == 1
-    assert placeholders[0]["code"] == "ivy.type.placeholderTag"
+    assert placeholders[0].code == "ivy.type.placeholderTag"
 
 
 def test_unique_tags_no_issue():
@@ -132,7 +132,7 @@ def test_unique_tags_no_issue():
         "}\n"
     )
     issues = check_duplicate_tags(source, "/fake/tp.ivy")
-    dupes = [i for i in issues if i.get("code") == "ivy.type.duplicateTag"]
+    dupes = [i for i in issues if i.code == "ivy.type.duplicateTag"]
     assert len(dupes) == 0
 
 
@@ -149,7 +149,7 @@ def test_commented_require_detected():
         "}\n"
     )
     issues = check_commented_out_requires(source, "/fake/test.ivy")
-    commented = [i for i in issues if i.get("code") == "ivy.require.commentedOut"]
+    commented = [i for i in issues if i.code == "ivy.require.commentedOut"]
     assert len(commented) == 2
 
 
@@ -163,11 +163,13 @@ def test_no_false_positive_on_regular_comment():
         "}\n"
     )
     issues = check_commented_out_requires(source, "/fake/test.ivy")
-    commented = [i for i in issues if i.get("code") == "ivy.require.commentedOut"]
+    commented = [i for i in issues if i.code == "ivy.require.commentedOut"]
     assert len(commented) == 0
 
 
 def test_intentional_comment_suppressed():
+    from lsprotocol import types as lsp
+
     source = (
         "#lang ivy1.7\n"
         "# TODO: re-enable this\n"
@@ -177,8 +179,11 @@ def test_intentional_comment_suppressed():
         "}\n"
     )
     issues = check_commented_out_requires(source, "/fake/test.ivy")
-    commented = [i for i in issues if i.get("code") == "ivy.require.commentedOut"]
-    assert all(c["severity"] in ("hint", "info") for c in commented)
+    commented = [i for i in issues if i.code == "ivy.require.commentedOut"]
+    assert all(
+        c.severity in (lsp.DiagnosticSeverity.Hint, lsp.DiagnosticSeverity.Information)
+        for c in commented
+    )
 
 
 # --- D5: Lowercase parameter tests ---
@@ -187,12 +192,14 @@ from ivy_lsp.core.structural_lint import check_lowercase_params
 
 
 def test_lowercase_relation_param_flagged():
+    from lsprotocol import types as lsp
+
     source = "#lang ivy1.7\n\nrelation connected(src:cid, dst:cid)\n"
     issues = check_lowercase_params(source, "/fake/test.ivy")
     assert len(issues) == 2
-    assert issues[0]["severity"] == "error"
-    assert "src" in issues[0]["message"]
-    assert "dst" in issues[1]["message"]
+    assert issues[0].severity == lsp.DiagnosticSeverity.Error
+    assert "src" in issues[0].message
+    assert "dst" in issues[1].message
 
 
 def test_uppercase_relation_param_accepted():
@@ -205,7 +212,7 @@ def test_lowercase_function_param_flagged():
     source = "#lang ivy1.7\n\nfunction count(x:nat) : nat\n"
     issues = check_lowercase_params(source, "/fake/test.ivy")
     assert len(issues) == 1
-    assert "x" in issues[0]["message"]
+    assert "x" in issues[0].message
 
 
 def test_action_lowercase_param_not_flagged():
@@ -224,7 +231,7 @@ def test_mixed_case_params():
     source = "#lang ivy1.7\n\nrelation link(X:node, y:node)\n"
     issues = check_lowercase_params(source, "/fake/test.ivy")
     assert len(issues) == 1
-    assert "y" in issues[0]["message"]
+    assert "y" in issues[0].message
 
 
 # --- Task 7: param-name-style (now ivy.declaration.lowercaseParam) ---

@@ -20,9 +20,6 @@ pytestmark = pytest.mark.unit
 # Each entry must carry a one-line justification. Remove when the site is
 # migrated to IvyDiagnostic (Phase 1 gap — tracked for follow-up).
 ALLOWLIST: set[str] = {
-    # Tasks 4-9 migration gap: structural_lint still appends raw dicts.
-    # Remove once the lint producer is migrated to IvyDiagnostic.
-    "ivy_lsp/core/structural_lint.py",
     # Tasks 4-9 migration gap: diagnostics_tool builds raw-dict payloads
     # for the legacy MCP envelope. Remove when Phase 1.5 unifies the tool.
     "ivy_lsp/mcp/tools/diagnostics_tool.py",

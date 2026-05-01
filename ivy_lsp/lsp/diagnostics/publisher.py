@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol import types as lsp
 
+from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.lsp.diagnostics.compute import (
     _EXPORT_RE,
@@ -178,18 +179,13 @@ def _convert_error_to_diagnostic(error: Any, source: str) -> lsp.Diagnostic:
                     line = loc[1] - 1
                     break
 
-    lines = source.split("\n")
-    line_len = len(lines[line]) if line < len(lines) else 0
-
-    return lsp.Diagnostic(
-        range=lsp.Range(
-            start=lsp.Position(line=line, character=0),
-            end=lsp.Position(line=line, character=line_len),
-        ),
+    return IvyDiagnostic(
+        code="ivy.syntax.unexpectedToken",
         message=message,
+        line=line,
         severity=lsp.DiagnosticSeverity.Error,
         source="ivy",
-    )
+    ).to_lsp()
 
 
 def register(server) -> None:
