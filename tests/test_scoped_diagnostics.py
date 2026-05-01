@@ -364,4 +364,4 @@ class TestScopedDiagnosticProperties:
         source = "    action quic.send(x:t)\n"
         diags = compute_requirement_diagnostics(source, _abs("f.ivy"), indexer)
         hints = _unmonitored_diags(diags)
-        assert hints[0].source == "ivy-lsp-reqs"
+        assert hints[0].source == "ivy-semantic"

@@ -192,7 +192,7 @@ def compute_requirement_diagnostics(
                     line=line_no,
                     end_character=len(line_text),
                     severity=lsp.DiagnosticSeverity.Information,
-                    source="ivy-lsp-reqs",
+                    source="ivy-semantic",
                     related=related[:10],
                 )
             )
@@ -218,7 +218,7 @@ def compute_requirement_diagnostics(
                         line=line_no,
                         end_character=len(line_text),
                         severity=lsp.DiagnosticSeverity.Hint,
-                        source="ivy-lsp-reqs",
+                        source="ivy-semantic",
                     )
                 )
         else:
@@ -234,7 +234,7 @@ def compute_requirement_diagnostics(
                         line=line_no,
                         end_character=len(line_text),
                         severity=lsp.DiagnosticSeverity.Hint,
-                        source="ivy-lsp-reqs",
+                        source="ivy-semantic",
                     )
                 )
 
@@ -261,7 +261,7 @@ def compute_requirement_diagnostics(
                     line=line_no,
                     end_character=len(line_text),
                     severity=lsp.DiagnosticSeverity.Information,
-                    source="ivy-lsp-reqs",
+                    source="ivy-semantic",
                 )
             )
 

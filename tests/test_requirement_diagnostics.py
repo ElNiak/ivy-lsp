@@ -120,7 +120,7 @@ class TestIncludeChainPropagation:
         assert len(include_diags) >= 1
         diag = include_diags[0]
         assert diag.severity == DiagnosticSeverity.Information
-        assert diag.source == "ivy-lsp-reqs"
+        assert diag.source == "ivy-semantic"
         assert "1" in diag.message  # 1 inherited requirement
 
     def test_include_with_no_inherited_requirements(self):
@@ -351,7 +351,7 @@ class TestUnmonitoredAction:
         assert len(action_diags) >= 1
         diag = action_diags[0]
         assert diag.severity == DiagnosticSeverity.Hint
-        assert diag.source == "ivy-lsp-reqs"
+        assert diag.source == "ivy-semantic"
         assert "send" in diag.message
 
     def test_monitored_action_no_hint(self):
@@ -442,7 +442,7 @@ class TestHighImpactStateVariable:
         assert len(impact_diags) >= 1
         diag = impact_diags[0]
         assert diag.severity == DiagnosticSeverity.Information
-        assert diag.source == "ivy-lsp-reqs"
+        assert diag.source == "ivy-semantic"
         assert "6" in diag.message  # 6 requirements
         assert "'connected'" in diag.message  # variable name included
 
@@ -632,7 +632,7 @@ class TestComputeDiagnosticsIntegration:
 
         # Should have at least one include propagation diag and one unmonitored action diag
         sources = {d.source for d in diags}
-        assert "ivy-lsp-reqs" in sources
+        assert "ivy-semantic" in sources
 
         severities = {d.severity for d in diags}
         assert (
