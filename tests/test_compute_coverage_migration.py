@@ -2,53 +2,84 @@
 
 Asserts the function returns List[IvyDiagnostic] with registry-validated
 codes and registry-matching source strings.
+
+I2 note: vacuous empty-graph tests replaced with a real RequirementGraph
+fixture (same pattern as test_coverage_hints.py). Behavioral correctness
+for all 6 emit paths is covered by test_coverage_hints.py; this file
+focuses on the migration contract and the C1 data["tags"] fix.
 """
 
-from typing import Any
-from unittest.mock import MagicMock
-
 import pytest
+from lsprotocol import types as lsp
 
+from ivy_lsp.core.analysis.requirement_graph import (
+    ActionNode,
+    EdgeType,
+    RequirementGraph,
+    StateVarNode,
+)
 from ivy_lsp.core.coverage_hints import compute_coverage_hints
 from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 
 pytestmark = pytest.mark.unit
 
+FILEPATH = "/fake/migration_test.ivy"
 
-def _make_minimal_graph() -> Any:
-    """Stub a RequirementGraph with no actions, requirements, or state vars.
 
-    The function should return an empty list for an empty graph.
-    """
-    graph = MagicMock()
-    graph.actions = {}
-    graph.requirements = {}
-    graph.properties = {}
-    graph.state_vars = {}
-    graph.edges = []
-    graph.get_requirements_for_action = MagicMock(return_value=[])
-    graph.get_outgoing_edges = MagicMock(return_value=[])
-    return graph
+def _make_graph_with_unguarded_action() -> RequirementGraph:
+    """Graph: action 'send' writes 'sent_pkt' (unguarded). Triggers emit path 2b."""
+    g = RequirementGraph()
+    g.add_action(
+        ActionNode(
+            id="send",
+            name="send",
+            qualified_name="send",
+            file=FILEPATH,
+            line=10,
+        )
+    )
+    g.add_state_var(
+        StateVarNode(
+            id="sent_pkt",
+            name="sent_pkt",
+            qualified_name="sent_pkt",
+            file=FILEPATH,
+            line=5,
+            is_relation=True,
+        )
+    )
+    g.add_edge(f"{FILEPATH}:12:write:sent_pkt", EdgeType.WRITES, "sent_pkt")
+    return g
 
 
 class TestReturnType:
-    def test_returns_list_on_empty_graph(self):
-        graph = _make_minimal_graph()
-        result = compute_coverage_hints(graph, "/tmp/x.ivy")
-        assert isinstance(result, list)
+    def test_returns_empty_list_for_none_graph(self):
+        result = compute_coverage_hints(None, FILEPATH)
+        assert result == []
 
     def test_every_returned_item_is_ivydiagnostic(self):
-        graph = _make_minimal_graph()
-        result = compute_coverage_hints(graph, "/tmp/x.ivy")
+        """Populated graph — all returned items must be IvyDiagnostic instances."""
+        graph = _make_graph_with_unguarded_action()
+        result = compute_coverage_hints(graph, FILEPATH)
+        assert result, "Expected at least one diagnostic from the populated graph"
         for d in result:
             assert isinstance(
                 d, IvyDiagnostic
             ), f"expected IvyDiagnostic, got {type(d).__name__}"
 
-    def test_returns_none_for_none_graph(self):
-        result = compute_coverage_hints(None, "/tmp/x.ivy")
-        assert result == []
+    def test_data_tags_include_unnecessary_on_all_hints(self):
+        """C1 fix: every coverage hint must carry DiagnosticTag.Unnecessary in data."""
+        graph = _make_graph_with_unguarded_action()
+        result = compute_coverage_hints(graph, FILEPATH)
+        assert result, "Expected at least one diagnostic to check tags"
+        for d in result:
+            assert d.data is not None, f"data is None on {d.code!r}"
+            tags = d.data.get("tags", [])
+            assert lsp.DiagnosticTag.Unnecessary in tags, (
+                f"DiagnosticTag.Unnecessary missing from data['tags'] on {d.code!r}; "
+                f"got: {tags!r}"
+            )
 
 
 class TestSourceConsistency:
@@ -61,8 +92,8 @@ class TestSourceConsistency:
     """
 
     def test_emitted_source_matches_descriptor(self):
-        graph = _make_minimal_graph()
-        result = compute_coverage_hints(graph, "/tmp/x.ivy")
+        graph = _make_graph_with_unguarded_action()
+        result = compute_coverage_hints(graph, FILEPATH)
         for d in result:
             descriptor = DIAGNOSTIC_REGISTRY[d.code]
             assert d.source == descriptor.source, (

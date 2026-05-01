@@ -15,14 +15,12 @@ from ivy_lsp.infra.utils import uri_to_path
 from ivy_lsp.infra.utils.validation import validate_ivy_param as _validate_ivy_param
 from ivy_lsp.lsp.commands_helpers import (
     _collect_all_isolates,
-    _detect_isolate_at_position,
     _detect_isolate_from_params,
     _find_enclosing_test,
     _find_tool,
     _get_compile_env,
     _redirect_to_enclosing_test,
     _refresh_open_diagnostics_async,
-    _refresh_open_diagnostics_sync,
     _resolve_via_staging,
     _run_tool,
     _track_end,

@@ -58,6 +58,7 @@ def compute_coverage_hints(
                     suggested_fix=(
                         f"after {action_node.name} {{\n" f"    ensure ...\n" f"}}"
                     ),
+                    data={"tags": [lsp.DiagnosticTag.Unnecessary]},
                 )
             )
 
@@ -98,6 +99,7 @@ def compute_coverage_hints(
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-semantic",
                     suggested_fix=f"require {var_node.name}(...) ",
+                    data={"tags": [lsp.DiagnosticTag.Unnecessary]},
                 )
             )
 
@@ -167,6 +169,7 @@ def compute_coverage_hints(
                             severity=lsp.DiagnosticSeverity.Hint,
                             source="ivy-semantic",
                             suggested_fix=f"require {var_names[0]}(...) ",
+                            data={"tags": [lsp.DiagnosticTag.Unnecessary]},
                         )
                     )
 
@@ -189,6 +192,7 @@ def compute_coverage_hints(
                     line=req.line,
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-lsp-coverage",
+                    data={"tags": [lsp.DiagnosticTag.Unnecessary]},
                 )
             )
 
@@ -212,6 +216,7 @@ def compute_coverage_hints(
                         line=req.line,
                         severity=lsp.DiagnosticSeverity.Warning,
                         source="ivy-lsp-coverage",
+                        data={"tags": [lsp.DiagnosticTag.Unnecessary]},
                     )
                 )
 
@@ -234,6 +239,7 @@ def compute_coverage_hints(
                     line=var_node.line,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-lsp-coverage",
+                    data={"tags": [lsp.DiagnosticTag.Unnecessary]},
                 )
             )
 

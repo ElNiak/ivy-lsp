@@ -97,3 +97,8 @@ class TestToMcpDict:
         d = _make_diag()
         out = d.to_mcp_dict()
         assert out.get("has_quick_fix") is True
+
+    def test_tags_from_data_propagate_to_mcp_dict(self):
+        d = _make_diag(data={"tags": [lsp.DiagnosticTag.Unnecessary]})
+        out = d.to_mcp_dict()
+        assert out.get("tags") == ["unnecessary"]

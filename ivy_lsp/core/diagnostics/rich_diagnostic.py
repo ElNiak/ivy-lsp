@@ -141,6 +141,13 @@ class IvyDiagnostic:
             "source": self.source,
         }
 
+        if self.data and self.data.get("tags"):
+            tag_names = {
+                lsp.DiagnosticTag.Unnecessary: "unnecessary",
+                lsp.DiagnosticTag.Deprecated: "deprecated",
+            }
+            result["tags"] = [tag_names.get(t, str(t)) for t in self.data["tags"]]
+
         if descriptor:
             result["explanation"] = descriptor.explanation
 

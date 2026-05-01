@@ -41,7 +41,7 @@ def _make_parse_result_success() -> MagicMock:
     return pr
 
 
-def test_missing_finalize_emits_registered_code(tmp_path):
+def test_missing_finalize_emits_registered_code(tmp_path: Path):
     """_finalize check must produce a diagnostic with code ivy.action.missingFinalize."""
     f = tmp_path / "test_foo.ivy"
     f.write_text(SOURCE_EXPORT_NO_MONITOR_NO_FINALIZE)
@@ -59,7 +59,7 @@ def test_missing_finalize_emits_registered_code(tmp_path):
     ), f"Expected ivy.action.missingFinalize in diagnostic codes, got: {codes}"
 
 
-def test_exported_action_without_monitor_emits_registered_code(tmp_path):
+def test_exported_action_without_monitor_emits_registered_code(tmp_path: Path):
     """ivy.action.noMonitor code must appear when exported action has no monitor."""
     f = tmp_path / "test_bar.ivy"
     f.write_text(SOURCE_EXPORT_NO_MONITOR_NO_FINALIZE)
@@ -77,7 +77,7 @@ def test_exported_action_without_monitor_emits_registered_code(tmp_path):
     ), f"Expected ivy.action.noMonitor in diagnostic codes, got: {codes}"
 
 
-def test_pattern_diagnostics_use_canonical_source(tmp_path):
+def test_pattern_diagnostics_use_canonical_source(tmp_path: Path):
     """Source string on returned lsp.Diagnostic must match the registry descriptor.
 
     Specifically must be 'ivy-semantic', NOT 'ivy-pattern' (the old coined value).

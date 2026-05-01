@@ -549,22 +549,13 @@ def compute_diagnostics(
                 lsp_diag = hint.to_lsp()
                 line = hint.line
                 line_len = len(lines[line]) if line < len(lines) else 0
-                # Expand the range to cover the full line and attach the
-                # Unnecessary tag (coverage hints are not errors, just gaps).
-                diags.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line=line, character=0),
-                            end=lsp.Position(line=line, character=line_len),
-                        ),
-                        message=lsp_diag.message,
-                        severity=lsp_diag.severity,
-                        source=lsp_diag.source,
-                        code=lsp_diag.code,
-                        code_description=lsp_diag.code_description,
-                        tags=[lsp.DiagnosticTag.Unnecessary],
-                    )
+                # Expand the range to the full line (IR stores column; coverage
+                # hints are more useful when highlighted end-to-end).
+                lsp_diag.range = lsp.Range(
+                    start=lsp.Position(line=line, character=0),
+                    end=lsp.Position(line=line, character=line_len),
                 )
+                diags.append(lsp_diag)
 
     # --- Pattern diagnostics (cheap regex checks) ---
     try:
@@ -578,8 +569,10 @@ def compute_diagnostics(
                 diags.append(
                     IvyDiagnostic(
                         code="ivy.action.missingFinalize",
-                        message="Test file has exports but no _finalize action. "
-                        "Consider adding 'export action _finalize' for end-of-test assertions.",
+                        message=(
+                            "Test file has exports but no _finalize action. "
+                            "Consider adding 'export action _finalize' for end-of-test assertions."
+                        ),
                         line=0,
                         severity=lsp.DiagnosticSeverity.Warning,
                         source="ivy-semantic",
