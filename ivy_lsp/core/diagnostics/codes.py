@@ -290,7 +290,7 @@ _reg(
             "Check that the RFC number and section are correct."
         ),
         default_severity=lsp.DiagnosticSeverity.Warning,
-        source="ivy-rfc",
+        source="ivy-lsp-semantic",
     )
 )
 

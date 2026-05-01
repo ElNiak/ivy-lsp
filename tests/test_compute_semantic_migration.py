@@ -4,12 +4,8 @@ Asserts the function returns List[IvyDiagnostic] with registry-validated
 codes. RFC-tag and shadow-declaration paths covered.
 """
 
-from typing import Any
-from unittest.mock import MagicMock
-
 import pytest
 
-from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocation
 from ivy_lsp.core.semantic.model import SemanticModel
 from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode
@@ -125,53 +121,44 @@ class TestReturnType:
             ), f"expected IvyDiagnostic, got {type(d).__name__}"
 
 
-class TestRegisteredCodes:
-    def test_orphaned_tag_code_is_registered(self):
+class TestEmittedCodes:
+    """Verify each emit-site code is what we expect.
+
+    Note: registry membership is enforced at IvyDiagnostic construction
+    (via ``__post_init__``); a successfully-returned diagnostic with an
+    unregistered code is impossible. These tests only assert that the
+    emit sites use the *expected* canonical codes.
+    """
+
+    def test_orphaned_tag_emit_site_uses_canonical_code(self):
         model = _make_model_with_orphaned_tag()
         diags = compute_semantic_diagnostics(
             model=model,
             filepath="/tmp/x.ivy",
             source="#lang ivy1.7\n\n\nrequire x > 0;  # [rfc9000:99.99]\n",
         )
-        orphans = [d for d in diags if d.code == "ivy.rfc.orphanedTag"]
-        assert len(orphans) >= 1
-        for d in orphans:
-            assert d.code in DIAGNOSTIC_REGISTRY, f"emitted unregistered code: {d.code}"
+        codes = [d.code for d in diags]
+        assert "ivy.rfc.orphanedTag" in codes
 
-    def test_missing_bracket_tag_code_is_registered(self):
+    def test_missing_bracket_tag_emit_site_uses_canonical_code(self):
         model = _make_empty_model()
         diags = compute_semantic_diagnostics(
             model=model,
             filepath="/tmp/x.ivy",
             source="#lang ivy1.7\nbefore foo {\n  require x > 0;\n}\n",
         )
-        hints = [d for d in diags if d.code == "ivy.rfc.missingBracketTag"]
-        assert len(hints) >= 1
-        for d in hints:
-            assert d.code in DIAGNOSTIC_REGISTRY, f"emitted unregistered code: {d.code}"
+        codes = [d.code for d in diags]
+        assert "ivy.rfc.missingBracketTag" in codes
 
-    def test_shadow_declaration_code_is_registered(self):
+    def test_shadow_declaration_emit_site_uses_canonical_code(self):
         model, filepath = _make_model_with_shadow()
         diags = compute_semantic_diagnostics(
             model=model,
             filepath=filepath,
             source="#lang ivy1.7\nrelation foo\n",
         )
-        shadows = [d for d in diags if d.code == "ivy.include.shadowDeclaration"]
-        assert len(shadows) >= 1
-        for d in shadows:
-            assert d.code in DIAGNOSTIC_REGISTRY, f"emitted unregistered code: {d.code}"
-
-    def test_all_emitted_codes_are_registered(self):
-        """Exhaustive: every code from every code path must be in the registry."""
-        model = _make_model_with_orphaned_tag()
-        diags = compute_semantic_diagnostics(
-            model=model,
-            filepath="/tmp/x.ivy",
-            source="#lang ivy1.7\n\n\nrequire x > 0;  # [rfc9000:99.99]\n",
-        )
-        for d in diags:
-            assert d.code in DIAGNOSTIC_REGISTRY, f"emitted unregistered code: {d.code}"
+        codes = [d.code for d in diags]
+        assert "ivy.include.shadowDeclaration" in codes
 
 
 class TestShadowDeclarationRelatedInfo:

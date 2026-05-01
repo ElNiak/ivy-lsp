@@ -98,6 +98,9 @@ def test_pattern_diagnostics_use_canonical_source(tmp_path):
     assert pattern_diags, "Expected at least one pattern diagnostic to be emitted"
 
     for d in pattern_diags:
+        # `lsp.Diagnostic.code` is typed as `int | str | None`; narrow to
+        # the str case since registry lookups require it.
+        assert isinstance(d.code, str), f"non-string code on diagnostic: {d.code!r}"
         descriptor = DIAGNOSTIC_REGISTRY[d.code]
         assert d.source == descriptor.source, (
             f"emit-site source {d.source!r} != descriptor source "
