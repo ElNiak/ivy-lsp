@@ -5,6 +5,72 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phase 1 Diagnostic IR Migration
+
+Phase 1 of the diagnostic redesign. Every diagnostic producer in ivy-lsp now
+constructs `IvyDiagnostic` IR objects (with construction-time validation) and
+converts to the LSP / MCP wire shape only at the boundary via `.to_lsp()` /
+`.to_mcp_dict()`. This eliminates raw-dict emissions, unifies the source of
+truth for diagnostic codes, and ensures every published `lsp.Diagnostic`
+carries the full LSP 3.17 schema (range, code, codeDescription.href, source,
+severity, related-information, tags).
+
+### Added
+
+- **`IvyDiagnostic.__post_init__` validation** rejects empty/whitespace-only
+  messages, negative lines, `severity=None`, and codes not in
+  `DIAGNOSTIC_REGISTRY`. All raise `ValueError`.
+- **`IvyDiagnostic.from_dict()`** boundary helper for converting legacy raw-dict
+  emissions to validated IR. Handles 1-based → 0-based line conversion,
+  case-insensitive severity strings, `severity=None` degradation to Hint.
+- **`DIAGNOSTIC_REGISTRY` namespaced backfill**: every emit-site `ivy.*` code
+  has a registered descriptor with `source` matching the runtime wire value.
+- **Migration tests per emit cluster** (`test_structural_lint_migration`,
+  `test_compute_requirement_migration`, `test_compute_semantic_migration`,
+  `test_compute_pattern_migration`, `test_compute_coverage_migration`,
+  `test_parse_ivy_check_output_migration`).
+- **`tests/test_no_raw_dict_diagnostics.py`** CI fence forbidding raw-dict
+  diagnostic emissions in `ivy_lsp/core/`, `ivy_lsp/lsp/diagnostics/`, and
+  `ivy_lsp/mcp/tools/`. Allowlist carries 3 known-debt entries in
+  `mcp/tools/` deferred to Phase 1.5.
+- **`tests/test_diagnostic_schema_compliance.py`** integration test asserting
+  every published `lsp.Diagnostic` carries the LSP 3.17 schema fields.
+- **`tests/test_diagnostic_boundary_methods.py`** round-trip tests for
+  `IvyDiagnostic.to_lsp()` and `to_mcp_dict()`.
+- **`DiagnosticTag.Unnecessary`** is propagated through the IR (`data["tags"]`)
+  and serialized in `to_mcp_dict()` so MCP consumers can filter coverage hints.
+
+### Changed
+
+- `check_structural_issues` (renamed from `check_structural_issues_raw`),
+  `compute_requirement_diagnostics`, `compute_semantic_diagnostics`,
+  `compute_coverage_hints`, the inline pattern checks in
+  `compute_full_diagnostics`, and `parse_ivy_check_output` all return
+  `List[IvyDiagnostic]` (was `List[Dict]` or `List[lsp.Diagnostic]`).
+- Internal callers convert via `.to_lsp()` / `.to_mcp_dict()` at the LSP and
+  MCP boundaries.
+- Diagnostic-code synonyms consolidated. Removed `ivy.action.unguardedAction`,
+  `ivy.unguarded-write`, `ivy.no-monitor` in favour of canonical
+  `ivy.action.unguardedWrite`, `ivy.invariant.unguardedWrite`,
+  `ivy.action.noMonitor`. Source strings on emit sites now match the registry
+  descriptor for every code (no coined alternatives).
+- Hyphenated legacy codes (`missing-lang-header`, `param-name-style`,
+  `unguarded-action`, `missing-init`, `empty-init`, `duplicate-decl`,
+  `unresolved-include`) renamed to canonical namespaced forms during their
+  emit-site migrations.
+
+### Fixed
+
+- `IvyDiagnostic.to_mcp_dict()` previously did not serialize `tags`; now does.
+- Several emit sites in `structural_lint.py` (`check_lowercase_params`,
+  `check_duplicate_tags`, `check_commented_out_requires`,
+  `check_unresolved_includes_raw`) bypassed `IvyDiagnostic.to_lsp()` and lost
+  `code_description.href` on the wire. All migrated to construct
+  `IvyDiagnostic` and convert at the boundary.
+- `publisher.py:_convert_error_to_diagnostic` and the lexer-error fallback in
+  `compute.py` no longer build raw `lsp.Diagnostic` directly; both go through
+  `IvyDiagnostic.to_lsp()`.
+
 ## [0.11.0] - 2026-03-03
 
 This is a collapsed entry covering all changes from v0.7.1 through v0.11.0.
