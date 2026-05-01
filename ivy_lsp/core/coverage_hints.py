@@ -109,7 +109,7 @@ def compute_coverage_hints(
         key=lambda a: a.line,
     )
 
-    file_writes: list[tuple] = []
+    file_writes: list[tuple[int, str]] = []
     prefix_match = filepath + ":"
     for src, etype, dst in graph.edges:
         if etype != EdgeType.WRITES or not src.startswith(prefix_match):

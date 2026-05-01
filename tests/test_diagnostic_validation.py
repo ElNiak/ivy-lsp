@@ -66,3 +66,12 @@ class TestIvyDiagnosticValidation:
                 message="legacy form",
                 line=0,
             )
+
+    def test_severity_none_raises(self):
+        with pytest.raises(ValueError, match="severity must not be None"):
+            IvyDiagnostic(
+                code="ivy.syntax.missingLangHeader",
+                message="x",
+                line=0,
+                severity=None,  # type: ignore[arg-type]
+            )

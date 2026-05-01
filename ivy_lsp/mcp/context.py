@@ -16,10 +16,6 @@ from ivy_lsp.core.structural_lint import (
 )
 from ivy_lsp.core.structural_lint import check_unresolved_includes_raw
 from ivy_lsp.infra.utils.basename_cache import BasenameCache
-from ivy_lsp.infra.utils.ivy_output import DEFAULT_EXCLUDE_DIRS
-from ivy_lsp.infra.utils.ivy_output import (  # noqa: F401
-    find_ivy_files as _find_ivy_files_raw,
-)
 
 
 def _validate_path(root: str, relative_path: str) -> str:

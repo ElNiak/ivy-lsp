@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol import types as lsp
 
@@ -20,7 +20,7 @@ from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
 
 def check_structural_issues(
     source: str,
-    filepath: str,
+    _filepath: str,
 ) -> List[IvyDiagnostic]:
     """Fast structural checks without full parsing.
 
@@ -333,7 +333,7 @@ _TAG_COMMENT_RE = re.compile(r"#\s*tag\s*=\s*(\w+)")
 
 def check_duplicate_tags(
     source: str,
-    filepath: str,
+    _filepath: str,
 ) -> List[Dict[str, Any]]:
     """Detect duplicate or placeholder variant tag comments.
 
@@ -342,7 +342,7 @@ def check_duplicate_tags(
         filepath: Absolute path to the source file.
     """
     diags: List[Dict[str, Any]] = []
-    tags: List[tuple] = []
+    tags: List[Tuple[str, int]] = []
 
     for i, line in enumerate(source.splitlines()):
         m = _TAG_COMMENT_RE.search(line)
@@ -390,7 +390,7 @@ _DECL_PARAM_RE = re.compile(
 
 def check_lowercase_params(
     source: str,
-    filepath: str,
+    _filepath: str,
 ) -> List[Dict[str, Any]]:
     """Check for lowercase-initial parameters in relation/function declarations.
 
@@ -439,7 +439,7 @@ _SUPPRESS_KEYWORDS = frozenset({"todo", "fixme", "disabled", "skip", "intentiona
 
 def check_commented_out_requires(
     source: str,
-    filepath: str,
+    _filepath: str,
 ) -> List[Dict[str, Any]]:
     """Detect commented-out require/ensure/assume/assert statements.
 

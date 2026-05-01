@@ -66,7 +66,8 @@ class IvyDiagnostic:
 
         Raises:
             ValueError: If `message` is empty or whitespace-only, if `line` is
-                negative, or if `code` is not registered in DIAGNOSTIC_REGISTRY.
+                negative, if `severity` is None, or if `code` is not registered
+                in DIAGNOSTIC_REGISTRY.
         """
         # Local import avoids circular module load at definition time.
         from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
@@ -78,6 +79,10 @@ class IvyDiagnostic:
         if self.line < 0:
             raise ValueError(
                 f"IvyDiagnostic.line must be >= 0 (got {self.line}, code={self.code!r})"
+            )
+        if self.severity is None:
+            raise ValueError(
+                f"IvyDiagnostic.severity must not be None (code={self.code!r})"
             )
         if self.code not in DIAGNOSTIC_REGISTRY:
             raise ValueError(
@@ -191,10 +196,9 @@ class IvyDiagnostic:
             "information": lsp.DiagnosticSeverity.Information,
             "hint": lsp.DiagnosticSeverity.Hint,
         }
-        severity = sev_map.get(
-            str(d.get("severity", "hint")).lower(),
-            lsp.DiagnosticSeverity.Hint,
-        )
+        # Treat severity=None / missing key consistently — fall back to "hint".
+        sev_raw = d.get("severity") or "hint"
+        severity = sev_map.get(str(sev_raw).lower(), lsp.DiagnosticSeverity.Hint)
 
         code = d["code"]
         descriptor = DIAGNOSTIC_REGISTRY.get(code)

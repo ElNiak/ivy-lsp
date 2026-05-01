@@ -4,15 +4,12 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 from lsprotocol.types import (
-    CodeActionContext,
     CodeActionKind,
     Diagnostic,
     DiagnosticSeverity,
     Position,
     Range,
-    TextDocumentIdentifier,
 )
 
 IVY_ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +46,7 @@ class TestMissingLangHeader:
         edit = fix[0].edit
         assert edit is not None
         changes = edit.changes
+        assert changes is not None
         assert "file:///test.ivy" in changes
         text_edit = changes["file:///test.ivy"][0]
         assert "#lang ivy1.7" in text_edit.new_text
@@ -87,7 +85,10 @@ class TestUnresolvedInclude:
         actions = compute_code_actions("file:///test.ivy", source, [diag])
         fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
         assert len(fix) == 1
-        edit = fix[0].edit.changes["file:///test.ivy"][0]
+        assert fix[0].edit is not None
+        _changes = fix[0].edit.changes
+        assert _changes is not None
+        edit = _changes["file:///test.ivy"][0]
         # end_line should not exceed the last line index (1)
         assert edit.range.end.line <= 1
 

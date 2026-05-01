@@ -93,3 +93,14 @@ class TestFromDict:
             IvyDiagnostic.from_dict(
                 {"code": "totally.bogus.code", "message": "x", "line": 1}
             )
+
+    def test_severity_none_value_degrades_to_hint(self):
+        diag = IvyDiagnostic.from_dict(
+            {
+                "code": "ivy.syntax.missingLangHeader",
+                "message": "x",
+                "line": 1,
+                "severity": None,
+            }
+        )
+        assert diag.severity == lsp.DiagnosticSeverity.Hint

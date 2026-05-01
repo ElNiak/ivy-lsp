@@ -17,7 +17,7 @@ SOURCE_MISSING_HEADER = "type t\n# no #lang line\n"
 SOURCE_UNMATCHED_BRACE = (
     "#lang ivy1.7\nmodule m = {\n  type t\n# missing closing brace\n"
 )
-SOURCE_LOWERCASE_PARAM = "#lang ivy1.7\n" "relation r(srcvar:t)\n"
+SOURCE_LOWERCASE_PARAM = "#lang ivy1.7\n" + "relation r(srcvar:t)\n"
 
 
 def test_returns_ivydiagnostic_list():
