@@ -172,10 +172,17 @@ class IvyDiagnostic:
             Validated IvyDiagnostic instance.
 
         Raises:
-            ValueError: If the code is not in DIAGNOSTIC_REGISTRY (raised by
-                the validator in __post_init__) or if message is empty/line negative.
+            ValueError: If `code`, `message`, or `line` is missing from `d`,
+                or if the resulting IvyDiagnostic fails ``__post_init__``
+                validation (unregistered code, empty message, negative line).
         """
         from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
+
+        for required in ("code", "message", "line"):
+            if required not in d:
+                raise ValueError(
+                    f"IvyDiagnostic.from_dict: missing required key {required!r}"
+                )
 
         sev_map = {
             "error": lsp.DiagnosticSeverity.Error,

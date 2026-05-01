@@ -27,10 +27,13 @@ class TestFromDict:
         assert diag.line == 0  # 1-based wire → 0-based IR
 
     def test_string_severity_maps_to_lsp_enum(self):
+        # `information` is a documented alias for `info`; both must map to
+        # `lsp.DiagnosticSeverity.Information`. Case-insensitive match.
         for wire, expected in [
             ("error", lsp.DiagnosticSeverity.Error),
             ("warning", lsp.DiagnosticSeverity.Warning),
             ("info", lsp.DiagnosticSeverity.Information),
+            ("information", lsp.DiagnosticSeverity.Information),
             ("hint", lsp.DiagnosticSeverity.Hint),
         ]:
             diag = IvyDiagnostic.from_dict(
@@ -42,6 +45,20 @@ class TestFromDict:
                 }
             )
             assert diag.severity == expected, f"{wire} → {expected}"
+
+    def test_missing_required_key_raises_value_error(self):
+        # `from_dict` validates required keys explicitly so callers get a
+        # ValueError matching the rest of the IR's failure-mode contract,
+        # not a bare KeyError.
+        for missing in ("code", "message", "line"):
+            d = {
+                "code": "ivy.syntax.missingLangHeader",
+                "message": "x",
+                "line": 1,
+            }
+            d.pop(missing)
+            with pytest.raises(ValueError, match=f"missing required key '{missing}'"):
+                IvyDiagnostic.from_dict(d)
 
     def test_unknown_severity_falls_back_to_hint(self):
         diag = IvyDiagnostic.from_dict(
