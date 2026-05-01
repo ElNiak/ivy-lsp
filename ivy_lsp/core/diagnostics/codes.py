@@ -436,7 +436,7 @@ _reg(
         title="Action has no monitor requirements",
         explanation="An action has no before/after monitor requirements; add monitors to verify its behavior.",
         default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-lint",
+        source="ivy-lsp-coverage",
         has_quick_fix=True,
     )
 )
@@ -447,7 +447,7 @@ _reg(
         title="State variable written without a 'require' guard",
         explanation="A state variable is written by an action but is not guarded by any requirement in the requirement graph.",
         default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-lint",
+        source="ivy-lsp-coverage",
         has_quick_fix=True,
     )
 )
@@ -458,7 +458,7 @@ _reg(
         title="Dead guard: 'require false'",
         explanation="A 'require false' statement marks this path as unreachable; it is only reachable through variant specializations.",
         default_severity=lsp.DiagnosticSeverity.Information,
-        source="ivy-lint",
+        source="ivy-lsp-coverage",
     )
 )
 
@@ -468,7 +468,7 @@ _reg(
         title="Monitor targets action with no definition in include closure",
         explanation="A before/after monitor references an action that has no declaration in the transitive include closure.",
         default_severity=lsp.DiagnosticSeverity.Warning,
-        source="ivy-lint",
+        source="ivy-lsp-coverage",
     )
 )
 
@@ -478,6 +478,52 @@ _reg(
         title="Unused state variable",
         explanation="A state variable has no reads or writes recorded in the requirement graph.",
         default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-lint",
+        source="ivy-lsp-coverage",
+    )
+)
+
+# RFC-tag and shadow-declaration emit sites in compute.py use the
+# `lsp.Diagnostic(code=...)` keyword-arg form rather than a raw dict; they
+# were invisible to the original dict-only completeness regex. Registered
+# here with severity/source matching their emit sites.
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.rfc.tagDuplicate",
+        title="Duplicate RFC tag in file",
+        explanation="The same RFC bracket tag appears at two annotation sites in the same file; merge or differentiate them.",
+        default_severity=lsp.DiagnosticSeverity.Warning,
+        source="ivy-lsp-semantic",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.rfc.tagGap",
+        title="Missing RFC tag in numeric sequence",
+        explanation="A numeric RFC tag is missing from an otherwise dense sequence in the file; this may indicate an unintentional skip.",
+        default_severity=lsp.DiagnosticSeverity.Information,
+        source="ivy-lsp-semantic",
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.include.shadowDeclaration",
+        title="Symbol shadows declaration in another file",
+        explanation="A symbol with the same name is also declared in a different file in the same protocol; the local declaration shadows the other.",
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lsp-semantic",
+        has_related_info=True,
+    )
+)
+
+_reg(
+    DiagnosticDescriptor(
+        code="ivy.rfc.missingBracketTag",
+        title="Assertion without RFC bracket tag",
+        explanation="An assertion (require / ensure / assume / assert) is not annotated with an RFC bracket tag for traceability.",
+        default_severity=lsp.DiagnosticSeverity.Hint,
+        source="ivy-lsp-semantic",
     )
 )

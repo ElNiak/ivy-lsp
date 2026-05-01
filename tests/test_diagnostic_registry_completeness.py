@@ -17,7 +17,11 @@ from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 pytestmark = pytest.mark.unit
 
 EMIT_DIRS = ["ivy_lsp/core", "ivy_lsp/lsp/diagnostics", "ivy_lsp/mcp/tools"]
-CODE_PATTERN = re.compile(r'"code":\s*"([^"]+)"')
+# Match both dict-style `"code": "..."` and keyword-arg `code="..."` forms.
+# The keyword form is used inside lsp.Diagnostic(...) constructor calls and
+# was originally invisible to a dict-only regex (see Task 2 review).
+_CODE_DICT_PATTERN = re.compile(r'"code":\s*"([^"]+)"')
+_CODE_KWARG_PATTERN = re.compile(r'\bcode\s*=\s*"([^"]+)"')
 
 
 def _collect_emit_site_codes(repo_root: Path) -> set[str]:
@@ -25,11 +29,12 @@ def _collect_emit_site_codes(repo_root: Path) -> set[str]:
     for d in EMIT_DIRS:
         for path in (repo_root / d).rglob("*.py"):
             text = path.read_text(encoding="utf-8")
-            for match in CODE_PATTERN.finditer(text):
-                code = match.group(1)
-                if code in {"undefined", "unknown"}:
-                    continue
-                found.add(code)
+            for pattern in (_CODE_DICT_PATTERN, _CODE_KWARG_PATTERN):
+                for match in pattern.finditer(text):
+                    code = match.group(1)
+                    if code in {"undefined", "unknown"}:
+                        continue
+                    found.add(code)
     return found
 
 
