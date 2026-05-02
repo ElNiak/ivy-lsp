@@ -585,8 +585,10 @@ def compute_diagnostics(
                             source="ivy-semantic",
                         ).to_lsp()
                     )
+    except ValueError:
+        raise
     except Exception:
-        pass  # Don't let pattern checks break diagnostics
+        logger.debug("pattern check failed", exc_info=True)
 
     return diags
 

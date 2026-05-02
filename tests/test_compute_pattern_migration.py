@@ -106,3 +106,30 @@ def test_pattern_diagnostics_use_canonical_source(tmp_path: Path):
             f"emit-site source {d.source!r} != descriptor source "
             f"{descriptor.source!r} for code {d.code}"
         )
+
+
+def test_validation_error_propagates_through_pattern_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """ValueError from IvyDiagnostic.__post_init__ inside pattern checks must propagate.
+
+    The pattern-checks block previously wrapped its emit sites in
+    `except Exception: pass`, silently swallowing the validation errors
+    raised by the Phase 1 IR migration. Regression for Phase 1 review
+    issue 1 (compute.py:588).
+    """
+    monkeypatch.delitem(
+        DIAGNOSTIC_REGISTRY, "ivy.action.missingFinalize", raising=False
+    )
+
+    f = tmp_path / "test_validation.ivy"
+    f.write_text(SOURCE_EXPORT_NO_MONITOR_NO_FINALIZE)
+
+    with pytest.raises(ValueError, match="not registered in DIAGNOSTIC_REGISTRY"):
+        compute_diagnostics(
+            parser=None,
+            source=SOURCE_EXPORT_NO_MONITOR_NO_FINALIZE,
+            filepath=str(f),
+            parse_result=_make_parse_result_success(),
+        )
