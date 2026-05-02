@@ -307,3 +307,60 @@ def test_from_dict_does_not_warn_on_known_severity(caplog: pytest.LogCaptureFixt
         record.levelname == "WARNING" and "unknown severity" in record.message.lower()
         for record in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# Range geometry validation (Phase 1 review issue 10)
+# ---------------------------------------------------------------------------
+
+
+def test_post_init_rejects_inverted_end_line():
+    """end_line < line is invalid LSP geometry; must raise ValueError."""
+    with pytest.raises(ValueError, match="end_line.*must be >= line"):
+        IvyDiagnostic(
+            code="ivy.syntax.missingLangHeader",
+            message="Missing #lang header",
+            line=10,
+            end_line=5,  # inverted
+        )
+
+
+def test_post_init_rejects_negative_character():
+    """Character < 0 is invalid LSP geometry; must raise ValueError."""
+    with pytest.raises(ValueError, match="character must be >= 0"):
+        IvyDiagnostic(
+            code="ivy.syntax.missingLangHeader",
+            message="Missing #lang header",
+            line=10,
+            character=-1,
+        )
+
+
+def test_post_init_rejects_inverted_end_character_same_line():
+    """end_character < character on the same line is invalid; must raise ValueError."""
+    with pytest.raises(ValueError, match="end_character.*must be >= "):
+        IvyDiagnostic(
+            code="ivy.syntax.missingLangHeader",
+            message="Missing #lang header",
+            line=10,
+            character=20,
+            end_character=5,  # inverted on same line
+        )
+
+
+def test_post_init_allows_inverted_end_character_across_lines():
+    """end_character may legitimately precede character across lines (e.g. multi-line span).
+
+    Negative case for the same-line guard: across-lines inversions must NOT raise.
+    """
+    # Should succeed — no raise.
+    d = IvyDiagnostic(
+        code="ivy.syntax.missingLangHeader",
+        message="Missing #lang header",
+        line=10,
+        end_line=15,
+        character=20,
+        end_character=5,  # legitimately less, but on a different line
+    )
+    assert d.end_line == 15
+    assert d.end_character == 5

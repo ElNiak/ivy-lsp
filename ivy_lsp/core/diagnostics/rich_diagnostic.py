@@ -121,6 +121,29 @@ class IvyDiagnostic:
                 f"Diagnostic code {self.code!r} not registered in DIAGNOSTIC_REGISTRY."
                 + " Add a DiagnosticDescriptor in ivy_lsp/core/diagnostics/codes.py."
             )
+        # Geometric range validation. end_line < line, negative character,
+        # and end_character < character (on the same line) all produce
+        # invalid LSP Ranges and editor UI glitches. Catch at construction.
+        if self.end_line is not None and self.end_line < self.line:
+            raise ValueError(
+                f"IvyDiagnostic.end_line ({self.end_line}) must be >= line "
+                f"({self.line}) (code={self.code!r})"
+            )
+        if self.character < 0:
+            raise ValueError(
+                f"IvyDiagnostic.character must be >= 0 "
+                f"(got {self.character}, code={self.code!r})"
+            )
+        if (
+            self.end_character is not None
+            and (self.end_line is None or self.end_line == self.line)
+            and self.end_character < self.character
+        ):
+            raise ValueError(
+                f"IvyDiagnostic.end_character ({self.end_character}) must be >= "
+                f"character ({self.character}) on the same line "
+                f"(code={self.code!r})"
+            )
 
     def to_lsp(self) -> lsp.Diagnostic:
         """Convert to an LSP Diagnostic."""
