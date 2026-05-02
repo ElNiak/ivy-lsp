@@ -32,7 +32,18 @@ ALLOWLIST: set[str] = {
 }
 
 EMIT_DIRS = ["ivy_lsp/core", "ivy_lsp/lsp/diagnostics", "ivy_lsp/mcp/tools"]
-RAW_DICT_PATTERN = re.compile(r'\.append\(\s*\{\s*\n[^}]*?"line"\s*:', re.DOTALL)
+# Catches both shapes:
+#   .append({\n  "line": ..., ...})         # multi-line
+#   .append({"line": ..., ...})              # single-line
+# Requires "line" AND one of (severity|file|code|message) so internal
+# pattern-extraction records like {"name": ..., "line": 0} don't trigger.
+# Lookaheads make key order irrelevant.
+RAW_DICT_PATTERN = re.compile(
+    r"\.append\(\s*\{"
+    r'(?=[^}]*"line"\s*:)'
+    r'(?=[^}]*"(?:severity|file|code|message)")',
+    re.DOTALL,
+)
 
 
 def test_no_raw_dict_diagnostic_emissions():
@@ -58,3 +69,35 @@ def test_no_raw_dict_diagnostic_emissions():
         + "\n\nUse IvyDiagnostic instead. See "
         + "ivy_lsp/core/diagnostics/rich_diagnostic.py."
     )
+
+
+def test_audit_fence_regex_catches_both_shapes():
+    """RAW_DICT_PATTERN must catch both single-line and multi-line raw-dict emissions.
+
+    Phase 1.5 will start migrating the three ALLOWLIST'd MCP files; the fence
+    is the only structural guard preventing regressions. A regex that requires
+    a literal newline misses single-line dict emissions entirely.
+    """
+    multi_line = """
+    diags.append({
+        "line": 1,
+        "code": "ivy.x",
+        "message": "..",
+    })
+    """
+    single_line = 'diags.append({"line": 1, "code": "ivy.x", "message": ".."})'
+    no_emission = 'result = {"line": 1}  # not an .append call'
+    internal_record = 'includes.append({"name": "x", "line": 0})'
+
+    assert (
+        RAW_DICT_PATTERN.search(multi_line) is not None
+    ), "multi-line shape should match"
+    assert (
+        RAW_DICT_PATTERN.search(single_line) is not None
+    ), "single-line shape should match"
+    assert (
+        RAW_DICT_PATTERN.search(no_emission) is None
+    ), "non-append dict literals must not match"
+    assert (
+        RAW_DICT_PATTERN.search(internal_record) is None
+    ), "non-diagnostic append-dicts must not match"
