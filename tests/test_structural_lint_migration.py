@@ -8,7 +8,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
-from ivy_lsp.core.structural_lint import check_structural_issues
+from ivy_lsp.core.structural_lint import check_lowercase_params, check_structural_issues
 
 pytestmark = pytest.mark.unit
 
@@ -40,7 +40,7 @@ def test_unmatched_brace_uses_namespaced_code():
 
 
 def test_param_name_style_uses_namespaced_code():
-    diags = check_structural_issues(SOURCE_LOWERCASE_PARAM, "/tmp/x.ivy")
+    diags = check_lowercase_params(SOURCE_LOWERCASE_PARAM, "/tmp/x.ivy")
     codes = [d.code for d in diags]
     # Post-rename: only the namespaced form is acceptable.
     assert "ivy.declaration.lowercaseParam" in codes

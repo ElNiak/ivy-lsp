@@ -239,28 +239,28 @@ def test_mixed_case_params():
 
 def test_param_name_collision_lowercase_multi_char():
     source = "#lang ivy1.7\nrelation update_processed(src:bgp_id, dst:bgp_id)\n"
-    issues = check_structural_issues(source, "/fake/test.ivy")
+    issues = check_lowercase_params(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
     assert "ivy.declaration.lowercaseParam" in codes
 
 
 def test_param_name_single_letter_ok():
     source = "#lang ivy1.7\nrelation conn_seen(C:cid)\n"
-    issues = check_structural_issues(source, "/fake/test.ivy")
+    issues = check_lowercase_params(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
     assert "ivy.declaration.lowercaseParam" not in codes
 
 
 def test_param_name_function_declaration():
     source = "#lang ivy1.7\nfunction getsock(addr:ip.addr) : net.socket\n"
-    issues = check_structural_issues(source, "/fake/test.ivy")
+    issues = check_lowercase_params(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
     assert "ivy.declaration.lowercaseParam" in codes
 
 
 def test_param_name_in_comment_ignored():
     source = "#lang ivy1.7\n# relation foo(src:bar)\n"
-    issues = check_structural_issues(source, "/fake/test.ivy")
+    issues = check_lowercase_params(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
     assert "ivy.declaration.lowercaseParam" not in codes
 

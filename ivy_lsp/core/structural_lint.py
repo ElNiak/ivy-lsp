@@ -83,35 +83,7 @@ def check_structural_issues(
             )
         )
 
-    # 3. Parameter name style — flag multi-char lowercase param names
-    _DECL_RE = re.compile(r"^(?:relation|function)\s+\w+\(([^)]+)\)", re.MULTILINE)
-    for m in _DECL_RE.finditer(source):
-        decl_line = source[: m.start()].count("\n")
-        line_text = lines[decl_line].lstrip()
-        if line_text.startswith("#"):
-            continue
-        params_str = m.group(1)
-        for param in params_str.split(","):
-            param = param.strip()
-            if ":" not in param:
-                continue
-            name = param.split(":")[0].strip()
-            if len(name) > 1 and name[0].islower():
-                diags.append(
-                    IvyDiagnostic(
-                        code="ivy.declaration.lowercaseParam",
-                        message=(
-                            f"Parameter name '{name}' is a multi-character lowercase "
-                            f"identifier — may collide with Ivy symbols. "
-                            f"Prefer single uppercase letters (e.g., S, D, C)."
-                        ),
-                        line=decl_line,
-                        severity=lsp.DiagnosticSeverity.Warning,
-                        source="ivy-lint",
-                    )
-                )
-
-    # 4. Missing after init — heuristic for uninitialized mutable state
+    # 3. Missing after init — heuristic for uninitialized mutable state
     _MUTABLE_RE = re.compile(r"^(?:relation|function)\s+(\w+)", re.MULTILINE)
     mutable_names: set[str] = set()
     mutable_lines: dict[str, int] = {}
@@ -158,7 +130,7 @@ def check_structural_issues(
             )
         )
 
-    # 5. Empty after init blocks
+    # 4. Empty after init blocks
     _INIT_BLOCK_RE = re.compile(r"after\s+init\s*\{([^}]*)\}", re.MULTILINE | re.DOTALL)
     for m in _INIT_BLOCK_RE.finditer(source):
         body = m.group(1).strip()
@@ -174,7 +146,7 @@ def check_structural_issues(
                 )
             )
 
-    # 6. Duplicate top-level declarations (same file)
+    # 5. Duplicate top-level declarations (same file)
     _TOP_DECL_RE = re.compile(
         r"^(relation|function|type|individual)\s+(\w+)", re.MULTILINE
     )
@@ -201,7 +173,7 @@ def check_structural_issues(
         else:
             seen_decls[name] = line_no
 
-    # 7. Action without require (unguarded state modification)
+    # 6. Action without require (unguarded state modification)
     _ACTION_RE = re.compile(r"^(\s*)action\s+\w+[^=]*=\s*\{", re.MULTILINE)
     for m in _ACTION_RE.finditer(source):
         action_start = m.end()
@@ -409,11 +381,15 @@ def check_lowercase_params(
         List of ``IvyDiagnostic`` instances for lowercase parameter issues.
     """
     diags: List[IvyDiagnostic] = []
+    lines = source.split("\n")
 
     for match in _DECL_PARAM_RE.finditer(source):
         kind = match.group(1)
         params_str = match.group(3)
         line_no = source[: match.start()].count("\n")  # 0-based
+        line_text = lines[line_no].lstrip() if line_no < len(lines) else ""
+        if line_text.startswith("#"):
+            continue
 
         for param in params_str.split(","):
             param = param.strip()
