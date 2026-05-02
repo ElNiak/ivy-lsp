@@ -261,7 +261,7 @@ class TestDiagnosticModes:
 # ---------------------------------------------------------------------------
 
 
-def test_from_dict_warns_on_unknown_severity(caplog):
+def test_from_dict_warns_on_unknown_severity(caplog: pytest.LogCaptureFixture):
     """Unknown severity strings must produce a WARNING log so typos are visible.
 
     A typo like "warn" (instead of "warning") previously degraded silently to
@@ -288,7 +288,7 @@ def test_from_dict_warns_on_unknown_severity(caplog):
     ), f"Expected WARNING log, got: {[r.message for r in caplog.records]}"
 
 
-def test_from_dict_does_not_warn_on_known_severity(caplog):
+def test_from_dict_does_not_warn_on_known_severity(caplog: pytest.LogCaptureFixture):
     """Known severity strings must NOT log anything (avoid log spam)."""
     import logging
 
