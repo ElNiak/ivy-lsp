@@ -127,12 +127,12 @@ class IvyDiagnostic:
         if self.end_line is not None and self.end_line < self.line:
             raise ValueError(
                 f"IvyDiagnostic.end_line ({self.end_line}) must be >= line "
-                f"({self.line}) (code={self.code!r})"
+                + f"({self.line}) (code={self.code!r})"
             )
         if self.character < 0:
             raise ValueError(
                 f"IvyDiagnostic.character must be >= 0 "
-                f"(got {self.character}, code={self.code!r})"
+                + f"(got {self.character}, code={self.code!r})"
             )
         if (
             self.end_character is not None
@@ -141,8 +141,8 @@ class IvyDiagnostic:
         ):
             raise ValueError(
                 f"IvyDiagnostic.end_character ({self.end_character}) must be >= "
-                f"character ({self.character}) on the same line "
-                f"(code={self.code!r})"
+                + f"character ({self.character}) on the same line "
+                + f"(code={self.code!r})"
             )
 
     def to_lsp(self) -> lsp.Diagnostic:
