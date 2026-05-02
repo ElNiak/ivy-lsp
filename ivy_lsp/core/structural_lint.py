@@ -15,15 +15,6 @@ from lsprotocol import types as lsp
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
 
-# Map string severity names (used in legacy callsites) to LSP enum values.
-_STR_SEVERITY_MAP: Dict[str, lsp.DiagnosticSeverity] = {
-    "error": lsp.DiagnosticSeverity.Error,
-    "warning": lsp.DiagnosticSeverity.Warning,
-    "info": lsp.DiagnosticSeverity.Information,
-    "information": lsp.DiagnosticSeverity.Information,
-    "hint": lsp.DiagnosticSeverity.Hint,
-}
-
 
 def check_structural_issues(
     source: str,

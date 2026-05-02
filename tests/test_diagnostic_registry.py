@@ -190,7 +190,7 @@ class TestIvyDiagnostic:
             line=3,
             severity=lsp.DiagnosticSeverity.Hint,
             source="ivy-semantic",
-            data={"tags": [lsp.DiagnosticTag.Unnecessary]},
+            tags=[lsp.DiagnosticTag.Unnecessary],
         )
         lsp_diag = diag.to_lsp()
         assert lsp_diag.tags == [lsp.DiagnosticTag.Unnecessary]

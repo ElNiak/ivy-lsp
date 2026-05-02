@@ -57,8 +57,8 @@ class TestToLsp:
         assert len(out.related_information) == 1
         assert out.related_information[0].message == "see also"
 
-    def test_tags_from_data_dict(self):
-        d = _make_diag(data={"tags": [lsp.DiagnosticTag.Unnecessary]})
+    def test_tags_propagate_to_lsp(self):
+        d = _make_diag(tags=[lsp.DiagnosticTag.Unnecessary])
         out = d.to_lsp()
         assert out.tags == [lsp.DiagnosticTag.Unnecessary]
 
@@ -98,7 +98,7 @@ class TestToMcpDict:
         out = d.to_mcp_dict()
         assert out.get("has_quick_fix") is True
 
-    def test_tags_from_data_propagate_to_mcp_dict(self):
-        d = _make_diag(data={"tags": [lsp.DiagnosticTag.Unnecessary]})
+    def test_tags_propagate_to_mcp_dict(self):
+        d = _make_diag(tags=[lsp.DiagnosticTag.Unnecessary])
         out = d.to_mcp_dict()
         assert out.get("tags") == ["unnecessary"]

@@ -13,6 +13,25 @@ from typing import Any, Dict, List, Optional
 
 from lsprotocol import types as lsp
 
+# Module-level severity / tag mappings — used by from_dict, to_lsp, to_mcp_dict.
+_STR_TO_SEVERITY: Dict[str, lsp.DiagnosticSeverity] = {
+    "error": lsp.DiagnosticSeverity.Error,
+    "warning": lsp.DiagnosticSeverity.Warning,
+    "info": lsp.DiagnosticSeverity.Information,
+    "information": lsp.DiagnosticSeverity.Information,
+    "hint": lsp.DiagnosticSeverity.Hint,
+}
+_SEVERITY_TO_STR: Dict[lsp.DiagnosticSeverity, str] = {
+    lsp.DiagnosticSeverity.Error: "error",
+    lsp.DiagnosticSeverity.Warning: "warning",
+    lsp.DiagnosticSeverity.Information: "info",
+    lsp.DiagnosticSeverity.Hint: "hint",
+}
+_DIAGNOSTIC_TAG_TO_STR: Dict[lsp.DiagnosticTag, str] = {
+    lsp.DiagnosticTag.Unnecessary: "unnecessary",
+    lsp.DiagnosticTag.Deprecated: "deprecated",
+}
+
 
 @dataclass
 class RelatedLocation:
@@ -60,6 +79,7 @@ class IvyDiagnostic:
     related: List[RelatedLocation] = field(default_factory=list)
     suggested_fix: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
+    tags: Optional[List[lsp.DiagnosticTag]] = None
 
     def __post_init__(self) -> None:
         """Validate fields at construction time to catch malformed emit sites early.
@@ -120,7 +140,7 @@ class IvyDiagnostic:
             code=self.code,
             code_description=code_description,
             related_information=related_info,
-            tags=self.data.get("tags") if self.data else None,
+            tags=self.tags,
         )
 
     def to_mcp_dict(self) -> Dict[str, Any]:
@@ -129,27 +149,16 @@ class IvyDiagnostic:
 
         descriptor = DIAGNOSTIC_REGISTRY.get(self.code)
 
-        sev_names = {
-            lsp.DiagnosticSeverity.Error: "error",
-            lsp.DiagnosticSeverity.Warning: "warning",
-            lsp.DiagnosticSeverity.Information: "info",
-            lsp.DiagnosticSeverity.Hint: "hint",
-        }
-
         result: Dict[str, Any] = {
             "code": self.code,
             "message": self.message,
             "line": self.line + 1,  # MCP uses 1-based lines
-            "severity": sev_names.get(self.severity, "hint"),
+            "severity": _SEVERITY_TO_STR.get(self.severity, "hint"),
             "source": self.source,
         }
 
-        if self.data and self.data.get("tags"):
-            tag_names = {
-                lsp.DiagnosticTag.Unnecessary: "unnecessary",
-                lsp.DiagnosticTag.Deprecated: "deprecated",
-            }
-            result["tags"] = [tag_names.get(t, str(t)) for t in self.data["tags"]]
+        if self.tags:
+            result["tags"] = [_DIAGNOSTIC_TAG_TO_STR.get(t, str(t)) for t in self.tags]
 
         if descriptor:
             result["explanation"] = descriptor.explanation
@@ -199,16 +208,11 @@ class IvyDiagnostic:
                     f"IvyDiagnostic.from_dict: missing required key {required!r}"
                 )
 
-        sev_map = {
-            "error": lsp.DiagnosticSeverity.Error,
-            "warning": lsp.DiagnosticSeverity.Warning,
-            "info": lsp.DiagnosticSeverity.Information,
-            "information": lsp.DiagnosticSeverity.Information,
-            "hint": lsp.DiagnosticSeverity.Hint,
-        }
         # Treat severity=None / missing key consistently — fall back to "hint".
         sev_raw = d.get("severity") or "hint"
-        severity = sev_map.get(str(sev_raw).lower(), lsp.DiagnosticSeverity.Hint)
+        severity = _STR_TO_SEVERITY.get(
+            str(sev_raw).lower(), lsp.DiagnosticSeverity.Hint
+        )
 
         code = d["code"]
         descriptor = DIAGNOSTIC_REGISTRY.get(code)

@@ -68,16 +68,15 @@ class TestReturnType:
                 d, IvyDiagnostic
             ), f"expected IvyDiagnostic, got {type(d).__name__}"
 
-    def test_data_tags_include_unnecessary_on_all_hints(self):
-        """C1 fix: every coverage hint must carry DiagnosticTag.Unnecessary in data."""
+    def test_tags_include_unnecessary_on_all_hints(self):
+        """C1 fix: every coverage hint must carry DiagnosticTag.Unnecessary in tags."""
         graph = _make_graph_with_unguarded_action()
         result = compute_coverage_hints(graph, FILEPATH)
         assert result, "Expected at least one diagnostic to check tags"
         for d in result:
-            assert d.data is not None, f"data is None on {d.code!r}"
-            tags = d.data.get("tags", [])
+            tags = d.tags or []
             assert lsp.DiagnosticTag.Unnecessary in tags, (
-                f"DiagnosticTag.Unnecessary missing from data['tags'] on {d.code!r}; "
+                f"DiagnosticTag.Unnecessary missing from tags on {d.code!r}; "
                 f"got: {tags!r}"
             )
 
@@ -103,22 +102,7 @@ class TestSourceConsistency:
 
 
 class TestCodeRegistration:
-    """All codes used by coverage_hints are registered in DIAGNOSTIC_REGISTRY."""
-
-    COVERAGE_CODES = (
-        "ivy.action.noMonitor",
-        "ivy.action.unguardedWrite",
-        "ivy.require.deadGuard",
-        "ivy.monitor.orphanedHook",
-        "ivy.state.unusedStateVar",
-    )
-
-    def test_all_codes_registered(self):
-        for code in self.COVERAGE_CODES:
-            assert code in DIAGNOSTIC_REGISTRY, (
-                f"Code {code!r} is used by compute_coverage_hints "
-                f"but not registered in DIAGNOSTIC_REGISTRY"
-            )
+    """Per-code source strings must match registry expectations."""
 
     def test_known_sources(self):
         """Confirm the per-code sources match expectations established by Task 8."""

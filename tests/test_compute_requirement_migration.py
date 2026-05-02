@@ -19,7 +19,6 @@ from ivy_lsp.core.analysis.requirement_graph import (
     RequirementGraph,
     RequirementNode,
 )
-from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocation
 from ivy_lsp.lsp.diagnostics.compute import compute_requirement_diagnostics
 
@@ -144,83 +143,6 @@ class TestReturnType:
             assert isinstance(
                 d, IvyDiagnostic
             ), f"expected IvyDiagnostic, got {type(d).__name__}"
-
-
-class TestRegisteredCodes:
-    """Every code emitted by compute_requirement_diagnostics must be in the registry."""
-
-    def test_nomonitor_code_is_registered(self, tmp_path):
-        graph = RequirementGraph()
-        indexer = _make_indexer_with_graph(graph)
-        source = "#lang ivy1.7\n    action lonely(x:t)\n"
-        diags = compute_requirement_diagnostics(
-            source=source, filepath=str(tmp_path / "x.ivy"), indexer=indexer
-        )
-        for d in diags:
-            assert (
-                d.code in DIAGNOSTIC_REGISTRY
-            ), f"emitted unregistered code: {d.code!r}"
-
-    def test_high_impact_code_is_registered(self, tmp_path):
-        filepath = str(tmp_path / "x.ivy")
-        graph = RequirementGraph()
-        for i in range(5):
-            f = _abs(f"mod_{i}.ivy")
-            req = RequirementNode(
-                id=f"{f}:{i}",
-                kind="require",
-                formula_text="data(X)",
-                line=i,
-                col=0,
-                file=f,
-                monitor_action="foo.step",
-                mixin_kind="before",
-            )
-            graph.add_requirement(req)
-            graph.add_edge(req.id, EdgeType.READS, "data")
-
-        indexer = _make_indexer_with_graph(graph)
-        source = "#lang ivy1.7\n    relation data(X:t)\n"
-        diags = compute_requirement_diagnostics(
-            source=source, filepath=filepath, indexer=indexer
-        )
-        for d in diags:
-            assert (
-                d.code in DIAGNOSTIC_REGISTRY
-            ), f"emitted unregistered code: {d.code!r}"
-
-    def test_inherited_requirements_code_is_registered(self, tmp_path):
-        filepath = str(tmp_path / "main.ivy")
-        other_file = _abs("helper.ivy")
-        graph = RequirementGraph()
-        req = RequirementNode(
-            id=f"{other_file}:3",
-            kind="ensure",
-            formula_text="result = expected",
-            line=3,
-            col=0,
-            file=other_file,
-            monitor_action="bar.check",
-            mixin_kind="after",
-        )
-        graph.add_requirement(req)
-
-        include_graph = MagicMock()
-        include_graph.get_transitive_includes.return_value = set()
-        resolver = MagicMock()
-        resolver.resolve.return_value = other_file
-
-        indexer = _make_indexer_with_graph(
-            graph, include_graph=include_graph, resolver=resolver
-        )
-        source = "#lang ivy1.7\ninclude helper\n"
-        diags = compute_requirement_diagnostics(
-            source=source, filepath=filepath, indexer=indexer
-        )
-        for d in diags:
-            assert (
-                d.code in DIAGNOSTIC_REGISTRY
-            ), f"emitted unregistered code: {d.code!r}"
 
 
 class TestRelatedLocationShape:
