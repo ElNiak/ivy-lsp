@@ -7,11 +7,14 @@ It converts to LSP ``Diagnostic`` (via ``to_lsp()``) or MCP dict (via
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from lsprotocol import types as lsp
+
+logger = logging.getLogger(__name__)
 
 # Module-level severity / tag mappings — used by from_dict, to_lsp, to_mcp_dict.
 _STR_TO_SEVERITY: Dict[str, lsp.DiagnosticSeverity] = {
@@ -220,9 +223,13 @@ class IvyDiagnostic:
 
         # Treat severity=None / missing key consistently — fall back to "hint".
         sev_raw = d.get("severity") or "hint"
-        severity = _STR_TO_SEVERITY.get(
-            str(sev_raw).lower(), lsp.DiagnosticSeverity.Hint
-        )
+        sev_key = str(sev_raw).lower()
+        if sev_key not in _STR_TO_SEVERITY:
+            logger.warning(
+                "IvyDiagnostic.from_dict: unknown severity %r, falling back to Hint",
+                sev_raw,
+            )
+        severity = _STR_TO_SEVERITY.get(sev_key, lsp.DiagnosticSeverity.Hint)
 
         code = d["code"]
         descriptor = DIAGNOSTIC_REGISTRY.get(code)

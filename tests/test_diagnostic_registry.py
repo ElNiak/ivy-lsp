@@ -254,3 +254,56 @@ class TestDiagnosticModes:
         with patch.dict(os.environ, {"IVY_LSP_DIAGNOSTIC_MODE": "nonexistent"}):
             mode = get_active_mode()
             assert mode.name == "standard"
+
+
+# ---------------------------------------------------------------------------
+# from_dict severity-fallback observability (Phase 1 review issue 6)
+# ---------------------------------------------------------------------------
+
+
+def test_from_dict_warns_on_unknown_severity(caplog):
+    """Unknown severity strings must produce a WARNING log so typos are visible.
+
+    A typo like "warn" (instead of "warning") previously degraded silently to
+    Hint severity. Phase 1 review issue 6: surface the fallback path.
+    """
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="ivy_lsp.core.diagnostics.rich_diagnostic")
+
+    # Use any registered code; we are testing the severity-fallback path,
+    # not the registry-validation path.
+    d = IvyDiagnostic.from_dict(
+        {
+            "code": "ivy.syntax.missingLangHeader",  # registered, valid
+            "message": "Missing #lang header",
+            "line": 1,
+            "severity": "warn",  # typo — should fall back to Hint with a warning
+        }
+    )
+    assert d.severity == lsp.DiagnosticSeverity.Hint
+    assert any(
+        "unknown severity" in record.message.lower() and record.levelname == "WARNING"
+        for record in caplog.records
+    ), f"Expected WARNING log, got: {[r.message for r in caplog.records]}"
+
+
+def test_from_dict_does_not_warn_on_known_severity(caplog):
+    """Known severity strings must NOT log anything (avoid log spam)."""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="ivy_lsp.core.diagnostics.rich_diagnostic")
+
+    d = IvyDiagnostic.from_dict(
+        {
+            "code": "ivy.syntax.missingLangHeader",
+            "message": "Missing #lang header",
+            "line": 1,
+            "severity": "warning",
+        }
+    )
+    assert d.severity == lsp.DiagnosticSeverity.Warning
+    assert not any(
+        record.levelname == "WARNING" and "unknown severity" in record.message.lower()
+        for record in caplog.records
+    )
