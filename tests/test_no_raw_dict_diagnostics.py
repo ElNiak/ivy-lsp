@@ -39,9 +39,7 @@ EMIT_DIRS = ["ivy_lsp/core", "ivy_lsp/lsp/diagnostics", "ivy_lsp/mcp/tools"]
 # pattern-extraction records like {"name": ..., "line": 0} don't trigger.
 # Lookaheads make key order irrelevant.
 RAW_DICT_PATTERN = re.compile(
-    r"\.append\(\s*\{"
-    r'(?=[^}]*"line"\s*:)'
-    r'(?=[^}]*"(?:severity|file|code|message)")',
+    r'\.append\(\s*\{(?=[^}]*"line"\s*:)(?=[^}]*"(?:severity|file|code|message)")',
     re.DOTALL,
 )
 
