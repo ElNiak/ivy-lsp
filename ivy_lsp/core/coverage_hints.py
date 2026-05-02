@@ -83,28 +83,11 @@ def compute_coverage_hints(
         if etype == EdgeType.WRITES:
             written_vars.add(target_id)
 
-    for var_id, var_node in graph.state_vars.items():
-        if var_node.file != filepath:
-            continue
-        is_written = var_id in written_vars
-        if is_written and var_id not in guarded_vars:
-            hints.append(
-                IvyDiagnostic(
-                    code="ivy.action.unguardedWrite",
-                    message=(
-                        f"State var '{var_node.name}' is written but "
-                        f"not guarded by any requirement"
-                    ),
-                    line=var_node.line,
-                    severity=lsp.DiagnosticSeverity.Hint,
-                    source="ivy-semantic",
-                    suggested_fix=f"require {var_node.name}(...) ",
-                    tags=[lsp.DiagnosticTag.Unnecessary],
-                )
-            )
-
     # -----------------------------------------------------------------
-    # 2b. Action-centric unguarded writes (names specific vars per action)
+    # 2a. Action-centric unguarded writes (names specific vars per action)
+    # Runs FIRST so it can record which vars it covers; the var-centric
+    # path below then skips those to avoid double-warning the same
+    # (action, var) pair (Phase 1 review issue 7: cross-path dedup).
     # -----------------------------------------------------------------
     file_actions = sorted(
         (a for a in graph.actions.values() if a.file == filepath),
@@ -130,6 +113,8 @@ def compute_coverage_hints(
             continue
         file_writes.append((write_line, dst))
     file_writes.sort(key=lambda w: w[0])
+
+    vars_covered_by_action_emit: set[str] = set()
 
     if file_actions:
 
@@ -172,6 +157,38 @@ def compute_coverage_hints(
                             tags=[lsp.DiagnosticTag.Unnecessary],
                         )
                     )
+                    vars_covered_by_action_emit.update(
+                        v for v in unguarded_vars if v in graph.state_vars
+                    )
+
+    # -----------------------------------------------------------------
+    # 2b. State vars written outside any in-file action's range — covered
+    # by neither the action-centric emit above nor a `require`. Catches
+    # writes from cross-file actions or module-level statements that the
+    # action-centric path cannot reach. Phase 1 review issue 7: cross-path
+    # dedup via vars_covered_by_action_emit.
+    # -----------------------------------------------------------------
+    for var_id, var_node in graph.state_vars.items():
+        if var_node.file != filepath:
+            continue
+        is_written = var_id in written_vars
+        if is_written and var_id not in guarded_vars:
+            if var_id in vars_covered_by_action_emit:
+                continue
+            hints.append(
+                IvyDiagnostic(
+                    code="ivy.action.unguardedWrite",
+                    message=(
+                        f"State var '{var_node.name}' is written but "
+                        f"not guarded by any requirement"
+                    ),
+                    line=var_node.line,
+                    severity=lsp.DiagnosticSeverity.Hint,
+                    source="ivy-semantic",
+                    suggested_fix=f"require {var_node.name}(...) ",
+                    tags=[lsp.DiagnosticTag.Unnecessary],
+                )
+            )
 
     # -----------------------------------------------------------------
     # 3. Per-requirement checks: dead guards + orphaned monitor hooks

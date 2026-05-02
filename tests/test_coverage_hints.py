@@ -202,3 +202,78 @@ def test_structural_unguarded_action_present_without_graph():
     )
     codes = [d.code for d in diags if d.code is not None]
     assert "ivy.action.unguardedWrite" in codes
+
+
+# -- Cross-path dedup tests (Phase 1 review issue 7) -----------------------
+
+
+def test_unguarded_write_deduplicated_across_paths():
+    """Var-centric emit is suppressed when action-centric covers the same var.
+
+    The user sees ONE diagnostic at the action line, not two squiggles for
+    the same (action, var) pair.
+    """
+    g = _make_graph_with_unguarded_action()
+    hints = compute_coverage_hints(g, FILEPATH)
+    # Total ivy.action.unguardedWrite count: exactly one (action-centric).
+    unguarded = [h for h in hints if h.code == "ivy.action.unguardedWrite"]
+    assert len(unguarded) == 1, (
+        f"expected exactly one unguardedWrite after dedup, "
+        f"got {len(unguarded)}: {[h.message for h in unguarded]}"
+    )
+    h = unguarded[0]
+    # Anchored at the action declaration (line 10), not the var (line 5).
+    assert h.line == 10
+    # Action-centric message names the action; var-centric does not.
+    assert "'send'" in h.message
+    assert "without a 'require' precondition" in h.message
+
+
+def test_var_centric_fires_for_writes_outside_in_file_actions():
+    """Var-centric path still fires for writes outside any in-file action.
+
+    Covers writes attributed to a cross-file action. Without this fall-through
+    the dedup would silently drop coverage for cross-file writes.
+    """
+    g = RequirementGraph()
+    g.add_state_var(
+        StateVarNode(
+            id="shared_state",
+            name="shared_state",
+            qualified_name="shared_state",
+            file=FILEPATH,
+            line=4,
+            is_relation=True,
+        )
+    )
+    # Action declared in a DIFFERENT file. The action-centric loop only
+    # iterates actions whose .file == filepath, so it cannot pick this up.
+    OTHER_FILE = "/fake/other.ivy"
+    g.add_action(
+        ActionNode(
+            id="cross_file_writer",
+            name="cross_file_writer",
+            qualified_name="cross_file_writer",
+            file=OTHER_FILE,
+            line=20,
+        )
+    )
+    # Write edge attributed to the OTHER file at line 22. Even if the
+    # action-centric loop ran on FILEPATH, the source prefix wouldn't
+    # match `FILEPATH:` so the write wouldn't be bucketed.
+    g.add_edge(f"{OTHER_FILE}:22:write:shared_state", EdgeType.WRITES, "shared_state")
+
+    hints = compute_coverage_hints(g, FILEPATH)
+    unguarded = [h for h in hints if h.code == "ivy.action.unguardedWrite"]
+    # The var-centric path should fire because the action-centric path
+    # cannot reach this cross-file write.
+    assert len(unguarded) == 1, (
+        f"expected one unguardedWrite from var-centric fall-through, "
+        f"got {len(unguarded)}: {[h.message for h in unguarded]}"
+    )
+    h = unguarded[0]
+    # Anchored at the var declaration (line 4) since the action lives
+    # in another file.
+    assert h.line == 4
+    assert "'shared_state'" in h.message
+    assert "written but" in h.message
