@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from lsprotocol import types as lsp
 
@@ -30,6 +30,11 @@ _STATE_VAR_RE = re.compile(
     r"^\s*(?:relation|function|individual|var)\s+([\w.]+)", re.MULTILINE
 )
 _EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
+
+_IVY_CHECK_CODE_MAP: Dict[Tuple[str, str], str] = {
+    ("cpp_compiler", "error"): "ivy.verify.compileError",
+    ("cpp_compiler", "warning"): "ivy.verify.checkWarning",
+}
 
 
 def check_structural_issues(
@@ -602,11 +607,6 @@ def parse_ivy_check_output(output: str) -> List[IvyDiagnostic]:
     """
     from ivy_lsp.infra.utils.ivy_output import parse_ivy_output
 
-    _CODE_MAP = {
-        ("cpp_compiler", "error"): "ivy.verify.compileError",
-        ("cpp_compiler", "warning"): "ivy.verify.checkWarning",
-    }
-
     diags: List[IvyDiagnostic] = []
     for entry in parse_ivy_output(output):
         lineno = max(0, entry["line"] - 1)
@@ -617,7 +617,7 @@ def parse_ivy_check_output(output: str) -> List[IvyDiagnostic]:
             if severity_str == "error"
             else lsp.DiagnosticSeverity.Warning
         )
-        code = _CODE_MAP.get(
+        code = _IVY_CHECK_CODE_MAP.get(
             (source_str, severity_str),
             (
                 "ivy.verify.checkError"
