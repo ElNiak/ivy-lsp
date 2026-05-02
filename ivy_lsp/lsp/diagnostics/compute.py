@@ -50,6 +50,10 @@ def check_structural_issues(
 
     # Core structural checks return IvyDiagnostic; convert to LSP at this boundary.
     core_diags = _core_check_structural_issues(source, filepath)
+    # Graph-based coverage hints supersede the generic structural-lint
+    # unguardedWrite emission; suppress here so coverage_hints can take over.
+    if indexer is not None and getattr(indexer, "requirement_graph", None) is not None:
+        core_diags = [d for d in core_diags if d.code != "ivy.action.unguardedWrite"]
     diags: List[lsp.Diagnostic] = [d.to_lsp() for d in core_diags]
 
     # Include resolution: use partition-aware resolver when available,
@@ -460,14 +464,6 @@ def compute_diagnostics(
     from ivy_lsp.lsp.diagnostics.publisher import _convert_error_to_diagnostic
 
     diags = check_structural_issues(source, filepath, indexer)
-
-    # Graph-based coverage hints supersede the generic structural lint.
-    if indexer is not None and getattr(indexer, "requirement_graph", None) is not None:
-        diags = [
-            d
-            for d in diags
-            if not (hasattr(d, "code") and d.code == "ivy.action.unguardedWrite")
-        ]
 
     if parser is None and parse_result is None:
         return diags
