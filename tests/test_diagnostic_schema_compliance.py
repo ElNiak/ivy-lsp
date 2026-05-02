@@ -68,10 +68,7 @@ def _drive_full_pipeline(filepath: Path) -> List[lsp.Diagnostic]:
     parser); mirrors the behavior of the ``minip_indexer`` fixture in
     conftest.py.
     """
-    try:
-        import ivy  # noqa: F401
-    except ImportError:
-        pytest.skip("ivy package not installed (required for parser)")
+    pytest.importorskip("ivy")
 
     from ivy_lsp.core.indexer.include_resolver import IncludeResolver
     from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
@@ -216,7 +213,7 @@ def test_at_least_one_code_description_present(tmp_path):
     )
 
 
-def test_all_clusters_have_lsp_schema_fields(tmp_path):
+def test_all_clusters_have_lsp_schema_fields(tmp_path: Path):
     """Wire-level fence across all five clusters in compute_diagnostics.
 
     The parser=None path only exercises check_structural_issues. The other
