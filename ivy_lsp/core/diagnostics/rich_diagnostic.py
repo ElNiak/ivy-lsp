@@ -32,6 +32,12 @@ _DIAGNOSTIC_TAG_TO_STR: Dict[lsp.DiagnosticTag, str] = {
     lsp.DiagnosticTag.Deprecated: "deprecated",
 }
 
+# Heuristic upper bound for source line length when an emit site does not
+# provide an explicit `end_character`. IvyDiagnostic instances that need a
+# precise end column should set `end_character` explicitly; this default
+# is used only as a "highlight to roughly the end of line" approximation.
+_DEFAULT_END_COLUMN = 80
+
 
 @dataclass
 class RelatedLocation:
@@ -53,7 +59,7 @@ class RelatedLocation:
                 uri=uri,
                 range=lsp.Range(
                     start=lsp.Position(self.line, 0),
-                    end=lsp.Position(end, 80),
+                    end=lsp.Position(end, _DEFAULT_END_COLUMN),
                 ),
             ),
             message=self.message,
@@ -118,7 +124,11 @@ class IvyDiagnostic:
         from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 
         end_line = self.end_line if self.end_line is not None else self.line
-        end_char = self.end_character if self.end_character is not None else 80
+        end_char = (
+            self.end_character
+            if self.end_character is not None
+            else _DEFAULT_END_COLUMN
+        )
 
         related_info = [r.to_lsp() for r in self.related] if self.related else None
 
