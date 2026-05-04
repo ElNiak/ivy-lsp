@@ -150,6 +150,44 @@ def compute_code_actions(
                 )
             )
 
+        elif code == "ivy.action.missingFinalize":
+            # Append a skeleton `export action _finalize` block at end of
+            # file. The diagnostic is file-level (line=0); end-of-file
+            # placement keeps the insertion at top-level scope without
+            # disrupting includes or other declarations. Keep the leading
+            # newline so the skeleton is visually separated from the
+            # preceding declaration.
+            lines = source.split("\n")
+            insert_line = max(0, len(lines) - 1)
+            insert_col = len(lines[insert_line]) if lines else 0
+            snippet = (
+                "\n\nexport action _finalize = {\n"
+                "    # End-of-test assertions go here\n"
+                "}\n"
+            )
+            actions.append(
+                lsp.CodeAction(
+                    title="Add export action _finalize skeleton",
+                    kind=lsp.CodeActionKind.QuickFix,
+                    diagnostics=[diag],
+                    edit=lsp.WorkspaceEdit(
+                        changes={
+                            uri: [
+                                lsp.TextEdit(
+                                    range=make_range(
+                                        insert_line,
+                                        insert_col,
+                                        insert_line,
+                                        insert_col,
+                                    ),
+                                    new_text=snippet,
+                                )
+                            ]
+                        }
+                    ),
+                )
+            )
+
         elif code == "ivy.rfc.missingTag":
             # Append a placeholder bracket-tag template to the end of the
             # assertion line. After Phase 5, diag.range spans the assertion

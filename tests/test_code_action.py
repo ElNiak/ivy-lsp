@@ -154,6 +154,35 @@ class TestDiagnosticCodeField:
         assert len(include_diags) == 1
 
 
+class TestMissingFinalizeQuickFix:
+    def test_appends_finalize_skeleton_at_eof(self):
+        """Quickfix appends an `export action _finalize` skeleton at end of file."""
+        from ivy_lsp.lsp.code_action import compute_code_actions
+
+        source = "#lang ivy1.7\nexport action send(x:t)\n"
+        diag = Diagnostic(
+            range=Range(start=Position(0, 0), end=Position(0, 0)),
+            message="Test file has exports but no _finalize action.",
+            severity=DiagnosticSeverity.Warning,
+            source="ivy-semantic",
+            code="ivy.action.missingFinalize",
+        )
+        actions = compute_code_actions("file:///x_test.ivy", source, [diag])
+        fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
+        assert len(fix) == 1
+        assert "_finalize" in fix[0].title.lower() or "finalize" in fix[0].title.lower()
+        edits = fix[0].edit.changes["file:///x_test.ivy"]
+        assert len(edits) == 1
+        edit = edits[0]
+        # Insert at end of file (zero-width).
+        lines = source.split("\n")
+        last_line = max(0, len(lines) - 1)
+        assert edit.range.start.line == last_line
+        assert edit.range.end == edit.range.start
+        # Skeleton content
+        assert "export action _finalize" in edit.new_text
+
+
 class TestRfcMissingTagQuickFix:
     def test_appends_template_at_assertion_end(self):
         """Quickfix appends a bracket-tag template at the assertion's end_character."""
