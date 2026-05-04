@@ -3,8 +3,12 @@
 Provides quick-fix code actions for known diagnostic codes:
 - ``ivy.syntax.missingLangHeader``: Insert ``#lang ivy1.7`` at the top
 - ``ivy.module.unresolvedInclude``: Remove the offending include line
-- ``ivy.no-monitor``: Insert a skeleton ``after`` monitor block
-- ``ivy.unguarded-write``: Insert a skeleton ``require`` guard
+- ``ivy.action.noMonitor``: Insert a skeleton ``after`` monitor block
+- ``ivy.action.unguardedWrite``: Insert a skeleton ``require`` guard
+- ``ivy.invariant.unguardedWrite``: Insert a skeleton ``require`` guard
+  (mirrors action.unguardedWrite shape)
+- ``ivy.action.missingFinalize``: Insert a skeleton ``export action _finalize``
+- ``ivy.rfc.missingTag``: Append a ``# [rfcNNNN:X.Y]`` template to the line
 """
 
 from __future__ import annotations
@@ -137,6 +141,41 @@ def compute_code_actions(
                                         0,
                                         insert_line,
                                         0,
+                                    ),
+                                    new_text=snippet,
+                                )
+                            ]
+                        }
+                    ),
+                )
+            )
+
+        elif code == "ivy.rfc.missingTag":
+            # Append a placeholder bracket-tag template to the end of the
+            # assertion line. After Phase 5, diag.range spans the assertion
+            # keyword + body; we insert at end_character so the template
+            # follows the `;` without overlapping the assertion text.
+            #
+            # Note: ivy.rfc.missingTag is declared in DIAGNOSTIC_REGISTRY but
+            # no emit site uses it today (the active emission code is
+            # ivy.rfc.missingBracketTag). This branch is forward-looking.
+            insert_line = diag.range.end.line
+            insert_col = diag.range.end.character
+            snippet = "  # [rfcNNNN:X.Y]"
+            actions.append(
+                lsp.CodeAction(
+                    title="Append RFC bracket-tag template",
+                    kind=lsp.CodeActionKind.QuickFix,
+                    diagnostics=[diag],
+                    edit=lsp.WorkspaceEdit(
+                        changes={
+                            uri: [
+                                lsp.TextEdit(
+                                    range=make_range(
+                                        insert_line,
+                                        insert_col,
+                                        insert_line,
+                                        insert_col,
                                     ),
                                     new_text=snippet,
                                 )

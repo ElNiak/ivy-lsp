@@ -152,3 +152,34 @@ class TestDiagnosticCodeField:
         diags = check_structural_issues(source, "/tmp/test.ivy", indexer=mock_indexer)
         include_diags = [d for d in diags if d.code == "ivy.module.unresolvedInclude"]
         assert len(include_diags) == 1
+
+
+class TestRfcMissingTagQuickFix:
+    def test_appends_template_at_assertion_end(self):
+        """Quickfix appends a bracket-tag template at the assertion's end_character."""
+        from ivy_lsp.lsp.code_action import compute_code_actions
+
+        # Source line 2 = "  require x > 0;"; assertion ends at col 16.
+        source = "#lang ivy1.7\n\n  require x > 0;\n"
+        diag = Diagnostic(
+            # diag.range spans the assertion: col 2 = "require" .. col 16 = end of `;`.
+            range=Range(start=Position(2, 2), end=Position(2, 16)),
+            message="Assertion without RFC bracket tag annotation",
+            severity=DiagnosticSeverity.Hint,
+            source="ivy-rfc",
+            code="ivy.rfc.missingTag",
+        )
+        actions = compute_code_actions("file:///test.ivy", source, [diag])
+        fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
+        assert len(fix) == 1
+        assert "rfc" in fix[0].title.lower() or "tag" in fix[0].title.lower()
+        edits = fix[0].edit.changes["file:///test.ivy"]
+        assert len(edits) == 1
+        edit = edits[0]
+        # Insert at end of assertion (zero-width range at line 2 col 16).
+        assert edit.range.start.line == 2
+        assert edit.range.start.character == 16
+        assert edit.range.end == edit.range.start
+        # Template content
+        assert "rfc" in edit.new_text.lower()
+        assert "[" in edit.new_text and "]" in edit.new_text
