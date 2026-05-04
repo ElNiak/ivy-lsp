@@ -179,6 +179,7 @@ class IvyDiagnostic:
             code_description=code_description,
             related_information=related_info,
             tags=self.tags,
+            data=self.data,
         )
 
     def to_mcp_dict(self) -> Dict[str, Any]:

@@ -162,11 +162,12 @@ class TestUnmatchedBraceQuickFix:
         # Line 1 = "}"; the `}` at col 0 is unmatched.
         source = "#lang ivy1.7\n}\n"
         diag = Diagnostic(
-            range=Range(start=Position(1, 0), end=Position(1, 0)),
+            range=Range(start=Position(1, 0), end=Position(1, 1)),
             message="Unmatched closing brace",
             severity=DiagnosticSeverity.Error,
             source="ivy-lint",
             code="ivy.syntax.unmatchedBrace",
+            data={"offending_col": 0},
         )
         actions = compute_code_actions("file:///test.ivy", source, [diag])
         fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
@@ -192,6 +193,7 @@ class TestUnmatchedBraceQuickFix:
             severity=DiagnosticSeverity.Error,
             source="ivy-lint",
             code="ivy.syntax.unmatchedBrace",
+            data={"unclosed_count": 2},
         )
         actions = compute_code_actions("file:///test.ivy", source, [diag])
         fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]

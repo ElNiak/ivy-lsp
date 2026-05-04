@@ -526,12 +526,28 @@ def test_line_only_missing_lang_header_no_regression():
     assert d.end_character is None
 
 
-def test_line_only_unmatched_brace_no_regression():
-    """Line-only fallback site: brace-depth tracking lost the token position."""
+def test_unmatched_closing_brace_carries_offending_col():
+    """Simplify D: closing-brace site emits precise (col, col+1) range and data."""
     source = "#lang ivy1.7\n}\n"
     issues = check_structural_issues(source, "/fake/test.ivy")
     d = _diag_by_code(issues, "ivy.syntax.unmatchedBrace")
     assert d is not None
+    assert d.line == 1
+    assert d.character == 0
+    assert d.end_character == 1
+    assert d.data == {"offending_col": 0}
+
+
+def test_unmatched_opening_brace_carries_unclosed_count():
+    """Simplify D: opening-brace site stays line-only but populates data['unclosed_count']."""
+    source = "#lang ivy1.7\nobject foo = {\nobject bar = {\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.syntax.unmatchedBrace")
+    assert d is not None
+    assert "opening" in d.message.lower()
+    assert d.data == {"unclosed_count": 2}
+    # Line-only by design: no source token to span (which `{` was the
+    # offending one is ambiguous when multiple are unclosed).
     assert d.end_character is None
 
 

@@ -29,6 +29,9 @@ def _node_span(
     ``_DEFAULT_END_COLUMN`` at ``to_lsp()`` conversion. The ``name``
     fallback spans the named token when only ``start_col`` is populated.
     """
+    # TODO: rename RequirementNode.col -> start_col so this duck-type
+    # branch can collapse; rename touches 37+ call sites across the
+    # codebase and is a separate refactor.
     start = getattr(node, "start_col", None)
     if start is None:
         start = getattr(node, "col", 0)

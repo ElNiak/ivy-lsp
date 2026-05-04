@@ -150,68 +150,46 @@ def compute_code_actions(
             )
 
         elif code == "ivy.syntax.unmatchedBrace":
-            # Two emit shapes (per check_structural_issues):
-            #   - "Unmatched closing brace" → an extra `}` on diag.line
-            #   - "Unmatched opening brace (N unclosed)" → N missing `}` at EOF
-            # Distinguish by the message wording.
-            msg = diag.message
-            if "closing brace" in msg:
-                # Locate the offending `}` by re-running the depth pass up
-                # to and including diag.line, mirroring the emit-site logic.
-                lines = source.split("\n")
+            # Both emit shapes carry their positional payload via
+            # IvyDiagnostic.data: {"offending_col": col} for closing braces
+            # and {"unclosed_count": N} for opening braces. The emit site
+            # in structural_lint.py is the single source of truth; this
+            # branch is a thin reader of that data.
+            data = diag.data if isinstance(diag.data, dict) else {}
+            offending_col = data.get("offending_col")
+            unclosed_count = data.get("unclosed_count")
+            if offending_col is not None:
                 target_line = diag.range.start.line
-                depth = 0
-                offending_col = None
-                for i, line_text in enumerate(lines[: target_line + 1]):
-                    code_text = (
-                        line_text
-                        if line_text.strip().startswith("#lang")
-                        else line_text.split("#")[0]
+                actions.append(
+                    lsp.CodeAction(
+                        title="Remove unmatched closing brace",
+                        kind=lsp.CodeActionKind.QuickFix,
+                        diagnostics=[diag],
+                        edit=lsp.WorkspaceEdit(
+                            changes={
+                                uri: [
+                                    lsp.TextEdit(
+                                        range=make_range(
+                                            target_line,
+                                            offending_col,
+                                            target_line,
+                                            offending_col + 1,
+                                        ),
+                                        new_text="",
+                                    )
+                                ]
+                            }
+                        ),
                     )
-                    for col_idx, ch in enumerate(code_text):
-                        if ch == "{":
-                            depth += 1
-                        elif ch == "}":
-                            depth -= 1
-                            if depth < 0 and i == target_line:
-                                offending_col = col_idx
-                                break
-                    if offending_col is not None:
-                        break
-                if offending_col is not None:
-                    actions.append(
-                        lsp.CodeAction(
-                            title="Remove unmatched closing brace",
-                            kind=lsp.CodeActionKind.QuickFix,
-                            diagnostics=[diag],
-                            edit=lsp.WorkspaceEdit(
-                                changes={
-                                    uri: [
-                                        lsp.TextEdit(
-                                            range=make_range(
-                                                target_line,
-                                                offending_col,
-                                                target_line,
-                                                offending_col + 1,
-                                            ),
-                                            new_text="",
-                                        )
-                                    ]
-                                }
-                            ),
-                        )
-                    )
-            elif "opening brace" in msg:
-                # Append matching `}` count at end of file.
-                m = re.search(r"\((\d+)\s+unclosed\)", msg)
-                count = int(m.group(1)) if m else 1
+                )
+            elif unclosed_count is not None and unclosed_count > 0:
                 lines = source.split("\n")
                 last_line = max(0, len(lines) - 1)
                 last_col = len(lines[last_line]) if lines else 0
-                snippet = "\n" + "}\n" * count
+                snippet = "\n" + "}\n" * unclosed_count
                 actions.append(
                     lsp.CodeAction(
-                        title=f"Append {count} closing brace(s) at end of file",
+                        title=f"Append {unclosed_count} closing brace(s) at end of file",
                         kind=lsp.CodeActionKind.QuickFix,
                         diagnostics=[diag],
                         edit=lsp.WorkspaceEdit(

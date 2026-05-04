@@ -14,17 +14,7 @@ from lsprotocol import types as lsp
 
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
-
-
-def _offset_to_line_col(source: str, offset: int) -> Tuple[int, int]:
-    """Convert an absolute byte offset in `source` to (line, column), both 0-based.
-
-    Handles multi-line content correctly: an offset on line 5 column 12
-    returns ``(5, 12)`` regardless of where the surrounding match started.
-    """
-    line = source.count("\n", 0, offset)
-    line_start = source.rfind("\n", 0, offset) + 1
-    return line, offset - line_start
+from ivy_lsp.infra.utils.position_utils import offset_to_position
 
 
 def check_structural_issues(
@@ -64,18 +54,17 @@ def check_structural_issues(
         )
 
     # 2. Unmatched braces
-    # Line-only by design: the brace-depth pass operates character-by-character
-    # but does not retain the source offset of the offending `{`/`}` token at
-    # the moment it triggers the imbalance. Refactoring the depth pass to
-    # remember positions is out of scope for this cluster; a future pass
-    # could swap this for a stack-of-positions approach.
+    # Records the offending column of each `}` that triggers a depth
+    # imbalance, plus the unclosed `{` count at EOF; both flow through
+    # IvyDiagnostic.data so the corresponding code-action quickfix can
+    # locate the offending token without re-scanning the source.
     depth = 0
     for i, line_text in enumerate(lines):
         if line_text.strip().startswith("#lang"):
             code_text = line_text
         else:
             code_text = line_text.split("#")[0]
-        for ch in code_text:
+        for col, ch in enumerate(code_text):
             if ch == "{":
                 depth += 1
             elif ch == "}":
@@ -86,8 +75,12 @@ def check_structural_issues(
                         code="ivy.syntax.unmatchedBrace",
                         message="Unmatched closing brace",
                         line=i,
+                        character=col,
+                        end_line=i,
+                        end_character=col + 1,
                         severity=lsp.DiagnosticSeverity.Error,
                         source="ivy-lint",
+                        data={"offending_col": col},
                     )
                 )
                 depth = 0
@@ -99,6 +92,7 @@ def check_structural_issues(
                 line=max(0, len(lines) - 1),
                 severity=lsp.DiagnosticSeverity.Error,
                 source="ivy-lint",
+                data={"unclosed_count": depth},
             )
         )
 
@@ -107,7 +101,7 @@ def check_structural_issues(
     mutable_names: set[str] = set()
     mutable_lines: dict[str, int] = {}
     for m in _MUTABLE_RE.finditer(source):
-        line_no = source[: m.start()].count("\n")
+        line_no = offset_to_position(m.start(), source).line
         line_text = lines[line_no].lstrip()
         if line_text.startswith("#"):
             continue
@@ -158,20 +152,20 @@ def check_structural_issues(
     for m in _INIT_BLOCK_RE.finditer(source):
         body = m.group(1).strip()
         if not body:
-            start_line, start_char = _offset_to_line_col(source, m.start())
+            start = offset_to_position(m.start(), source)
             # Span "after init {" on the starting line. The block can span
             # multiple lines via re.DOTALL; cap end at the first newline.
             first_newline = source.find("\n", m.start())
             block_end = m.end() if first_newline == -1 else min(m.end(), first_newline)
-            end_line, end_char = _offset_to_line_col(source, block_end)
+            end = offset_to_position(block_end, source)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.state.emptyInit",
                     message="Empty 'after init' block — no state is initialized.",
-                    line=start_line,
-                    character=start_char,
-                    end_line=end_line,
-                    end_character=end_char,
+                    line=start.line,
+                    character=start.character,
+                    end_line=end.line,
+                    end_character=end.character,
                     severity=lsp.DiagnosticSeverity.Warning,
                     source="ivy-lint",
                 )
@@ -183,14 +177,14 @@ def check_structural_issues(
     )
     seen_decls: dict[str, int] = {}
     for m in _TOP_DECL_RE.finditer(source):
-        line_no = source[: m.start()].count("\n")
+        line_no = offset_to_position(m.start(), source).line
         line_text = lines[line_no].lstrip()
         if line_text.startswith("#"):
             continue
         name = m.group(2)
         if name in seen_decls:
-            name_line, name_char = _offset_to_line_col(source, m.start(2))
-            _, name_end_char = _offset_to_line_col(source, m.end(2))
+            start = offset_to_position(m.start(2), source)
+            end = offset_to_position(m.end(2), source)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.naming.duplicateDecl",
@@ -198,10 +192,10 @@ def check_structural_issues(
                         f"Duplicate declaration of '{name}' "
                         f"(first declared at line {seen_decls[name] + 1})."
                     ),
-                    line=name_line,
-                    character=name_char,
-                    end_line=name_line,
-                    end_character=name_end_char,
+                    line=start.line,
+                    character=start.character,
+                    end_line=start.line,
+                    end_character=end.character,
                     severity=lsp.DiagnosticSeverity.Error,
                     source="ivy-lint",
                 )
@@ -237,8 +231,8 @@ def check_structural_issues(
             first_newline = source.find("\n", header_start)
             if first_newline != -1 and first_newline < header_end:
                 header_end = first_newline
-            start_line, start_char = _offset_to_line_col(source, header_start)
-            _, end_char = _offset_to_line_col(source, header_end)
+            start = offset_to_position(header_start, source)
+            end = offset_to_position(header_end, source)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.action.unguardedWrite",
@@ -246,10 +240,10 @@ def check_structural_issues(
                         "Action modifies state but has no 'require' precondition "
                         "— consider adding guards."
                     ),
-                    line=start_line,
-                    character=start_char,
-                    end_line=start_line,
-                    end_character=end_char,
+                    line=start.line,
+                    character=start.character,
+                    end_line=start.line,
+                    end_character=end.character,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-semantic",
                 )
@@ -323,8 +317,8 @@ def check_unresolved_includes_raw(
 
         if resolved is None:
             # Span the include name token (group 1 of INCLUDE_PATTERN).
-            name_line, name_char = _offset_to_line_col(source, match.start(1))
-            _, name_end_char = _offset_to_line_col(source, match.end(1))
+            name_start = offset_to_position(match.start(1), source)
+            name_end = offset_to_position(match.end(1), source)
             suggestion = (
                 _find_near_miss(inc_name, basename_map) if basename_map else None
             )
@@ -333,10 +327,10 @@ def check_unresolved_includes_raw(
                     IvyDiagnostic(
                         code="ivy.include.nearMiss",
                         message=f"Cannot resolve include '{inc_name}'. Did you mean '{suggestion}'?",
-                        line=name_line,
-                        character=name_char,
-                        end_line=name_line,
-                        end_character=name_end_char,
+                        line=name_start.line,
+                        character=name_start.character,
+                        end_line=name_start.line,
+                        end_character=name_end.character,
                         severity=lsp.DiagnosticSeverity.Warning,
                         source="ivy-lint",
                     )
@@ -346,10 +340,10 @@ def check_unresolved_includes_raw(
                     IvyDiagnostic(
                         code="ivy.module.unresolvedInclude",
                         message=f"Unresolved include: {inc_name}",
-                        line=name_line,
-                        character=name_char,
-                        end_line=name_line,
-                        end_character=name_end_char,
+                        line=name_start.line,
+                        character=name_start.character,
+                        end_line=name_start.line,
+                        end_character=name_end.character,
                         severity=lsp.DiagnosticSeverity.Error,
                         source="ivy-lint",
                     )
@@ -454,7 +448,7 @@ def check_lowercase_params(
         kind = match.group(1)
         params_str = match.group(3)
         params_offset_in_source = match.start(3)
-        line_no = source[: match.start()].count("\n")  # 0-based
+        line_no = offset_to_position(match.start(), source).line  # 0-based
         line_text = lines[line_no].lstrip() if line_no < len(lines) else ""
         if line_text.startswith("#"):
             continue
@@ -484,7 +478,7 @@ def check_lowercase_params(
                     + raw_param_start_in_str
                     + name_offset_in_raw
                 )
-                name_line, name_char = _offset_to_line_col(source, name_abs_offset)
+                name_pos = offset_to_position(name_abs_offset, source)
                 diags.append(
                     IvyDiagnostic(
                         code="ivy.declaration.lowercaseParam",
@@ -493,10 +487,10 @@ def check_lowercase_params(
                             f" start with uppercase (Ivy treats lowercase"
                             f" as constant references)"
                         ),
-                        line=name_line,
-                        character=name_char,
-                        end_line=name_line,
-                        end_character=name_char + len(name),
+                        line=name_pos.line,
+                        character=name_pos.character,
+                        end_line=name_pos.line,
+                        end_character=name_pos.character + len(name),
                         severity=lsp.DiagnosticSeverity.Error,
                         source="ivy-lint",
                     )

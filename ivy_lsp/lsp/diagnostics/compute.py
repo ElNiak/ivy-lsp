@@ -17,9 +17,11 @@ from lsprotocol import types as lsp
 from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic, RelatedLocation
 from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
+from ivy_lsp.core.patterns import BRACKET_BLOCK_RE as _BRACKET_BLOCK_RE
 from ivy_lsp.core.patterns import BRACKET_TAG_RE as _TAG_RE
 from ivy_lsp.core.patterns import INCLUDE_RE as _INCLUDE_RE
 from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
+from ivy_lsp.infra.utils.position_utils import offset_to_position
 
 logger = logging.getLogger(__name__)
 slog = StructuredLogAdapter(logger, {})
@@ -30,7 +32,6 @@ _STATE_VAR_RE = re.compile(
     r"^\s*(?:relation|function|individual|var)\s+([\w.]+)", re.MULTILINE
 )
 _EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
-_BRACKET_BLOCK_RE = re.compile(r"#\s*\[([^\]]+)\]")
 
 
 def _find_tag_span_in_line(
@@ -160,7 +161,8 @@ def compute_requirement_diagnostics(
 
         for match in _INCLUDE_RE.finditer(source):
             inc_name = match.group(1)
-            line_no = source[: match.start()].count("\n")
+            inc_start = offset_to_position(match.start(1), source)
+            inc_end = offset_to_position(match.end(1), source)
 
             # Resolve include to file path
             resolved_path = None
@@ -199,9 +201,6 @@ def compute_requirement_diagnostics(
             ]
 
             # Span the include name token (group 1 of INCLUDE_RE).
-            line_start = source.rfind("\n", 0, match.start(1)) + 1
-            char_start = match.start(1) - line_start
-            char_end = match.end(1) - line_start
             diags.append(
                 IvyDiagnostic(
                     code="ivy.module.inheritedRequirements",
@@ -209,10 +208,10 @@ def compute_requirement_diagnostics(
                         f"Brings {len(inherited_reqs)} requirements into scope "
                         f"from {inc_name} (and transitive includes)"
                     ),
-                    line=line_no,
-                    character=char_start,
-                    end_line=line_no,
-                    end_character=char_end,
+                    line=inc_start.line,
+                    character=inc_start.character,
+                    end_line=inc_start.line,
+                    end_character=inc_end.character,
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-semantic",
                     related=related[:10],
@@ -222,12 +221,9 @@ def compute_requirement_diagnostics(
     # 2. Unmonitored actions (Hint)
     for match in _ACTION_RE.finditer(source):
         action_name = match.group(1)
-        line_no = source[: match.start()].count("\n")
-
         # Span the action name token (group 1 of _ACTION_RE).
-        line_start = source.rfind("\n", 0, match.start(1)) + 1
-        char_start = match.start(1) - line_start
-        char_end = match.end(1) - line_start
+        name_start = offset_to_position(match.start(1), source)
+        name_end = offset_to_position(match.end(1), source)
 
         if active_scope is not None:
             if not active_scope.is_action_exported(action_name):
@@ -241,10 +237,10 @@ def compute_requirement_diagnostics(
                             f"Action '{action_name}' has no before/after "
                             f"monitors in active test scope"
                         ),
-                        line=line_no,
-                        character=char_start,
-                        end_line=line_no,
-                        end_character=char_end,
+                        line=name_start.line,
+                        character=name_start.character,
+                        end_line=name_start.line,
+                        end_character=name_end.character,
                         severity=lsp.DiagnosticSeverity.Hint,
                         source="ivy-semantic",
                     )
@@ -259,10 +255,10 @@ def compute_requirement_diagnostics(
                             f"Action '{action_name}' has no before/after "
                             f"monitors in scope"
                         ),
-                        line=line_no,
-                        character=char_start,
-                        end_line=line_no,
-                        end_character=char_end,
+                        line=name_start.line,
+                        character=name_start.character,
+                        end_line=name_start.line,
+                        end_character=name_end.character,
                         severity=lsp.DiagnosticSeverity.Hint,
                         source="ivy-semantic",
                     )
@@ -272,7 +268,6 @@ def compute_requirement_diagnostics(
     impact_threshold = 5
     for match in _STATE_VAR_RE.finditer(source):
         var_name = match.group(1)
-        line_no = source[: match.start()].count("\n")
 
         readers = graph.get_requirements_sharing_state_var(var_name)
         if active_scope is not None:
@@ -281,9 +276,8 @@ def compute_requirement_diagnostics(
         if len(readers) >= impact_threshold:
             files = {r.file for r in readers}
             # Span the state-var name token (group 1 of _STATE_VAR_RE).
-            line_start = source.rfind("\n", 0, match.start(1)) + 1
-            char_start = match.start(1) - line_start
-            char_end = match.end(1) - line_start
+            name_start = offset_to_position(match.start(1), source)
+            name_end = offset_to_position(match.end(1), source)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.invariant.highImpactVar",
@@ -291,10 +285,10 @@ def compute_requirement_diagnostics(
                         f"High-impact state variable '{var_name}': read by "
                         f"{len(readers)} requirements across {len(files)} files"
                     ),
-                    line=line_no,
-                    character=char_start,
-                    end_line=line_no,
-                    end_character=char_end,
+                    line=name_start.line,
+                    character=name_start.character,
+                    end_line=name_start.line,
+                    end_character=name_end.character,
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-semantic",
                 )
@@ -498,22 +492,20 @@ def compute_semantic_diagnostics(
 
     # Missing tags on assertions (Hint)
     for m in _ASSERTION_RE.finditer(source):
-        line_no = source[: m.start()].count("\n")
-        line_text = lines[line_no] if line_no < len(lines) else ""
+        kw_start = offset_to_position(m.start(1), source)
+        line_text = lines[kw_start.line] if kw_start.line < len(lines) else ""
         if not _TAG_RE.search(line_text):
             # Span the assertion keyword + body (group 1 start to match end),
             # excluding leading whitespace.
-            line_start = source.rfind("\n", 0, m.start(1)) + 1
-            char_start = m.start(1) - line_start
-            char_end = m.end() - line_start
+            kw_end = offset_to_position(m.end(), source)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.rfc.missingBracketTag",
                     message="Assertion without RFC bracket tag annotation",
-                    line=line_no,
-                    character=char_start,
-                    end_line=line_no,
-                    end_character=char_end,
+                    line=kw_start.line,
+                    character=kw_start.character,
+                    end_line=kw_start.line,
+                    end_character=kw_end.character,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-lsp-semantic",
                 )
@@ -652,14 +644,12 @@ def compute_diagnostics(
                         re.MULTILINE,
                     )
                     if match:
-                        line_num = source[: match.start()].count("\n")
-                        line_start = source.rfind("\n", 0, match.start(1)) + 1
-                        char_start = match.start(1) - line_start
-                        char_end = match.end(1) - line_start
-                        diag_line = line_num
-                        diag_char = char_start
-                        diag_end_line = line_num
-                        diag_end_char = char_end
+                        name_start = offset_to_position(match.start(1), source)
+                        name_end = offset_to_position(match.end(1), source)
+                        diag_line = name_start.line
+                        diag_char = name_start.character
+                        diag_end_line = name_start.line
+                        diag_end_char = name_end.character
                     else:
                         diag_line = 0
                         diag_char = 0
