@@ -346,6 +346,64 @@ def test_range_precision_unused_state_var_with_columns():
     assert h.end_character == 15
 
 
+def test_lsp_boundary_preserves_coverage_hint_precise_range():
+    """Integration: compute_diagnostics LSP Range must match IR precise range.
+
+    Phase 5.2b populates start_col/end_col on graph nodes; the LSP boundary
+    in compute_diagnostics had previously overwritten the precise range
+    with a full-line span, masking the IR data. This test asserts the
+    end-to-end LSP Range matches the IR character/end_character so the
+    override cannot be re-introduced silently.
+    """
+    g = RequirementGraph()
+    g.add_action(
+        ActionNode(
+            id="send",
+            name="send",
+            qualified_name="send",
+            file=FILEPATH,
+            line=1,
+            start_col=4,
+            end_col=8,
+        )
+    )
+
+    indexer = MagicMock()
+    indexer.requirement_graph = g
+    indexer.resolver = MagicMock()
+    indexer.resolver.resolve = MagicMock(return_value=None)
+    indexer.resolver._partition_staging = {}
+
+    # compute_diagnostics early-returns if parse_result is None; supply a
+    # successful parse_result so the coverage-hint emission path runs.
+    parse_result = MagicMock()
+    parse_result.success = True
+    parse_result.errors = []
+    parse_result.lexer_errors = []
+
+    source = "#lang ivy1.7\n    action send(S:cid)\n"
+    diags = compute_diagnostics(
+        parser=None,
+        source=source,
+        filepath=FILEPATH,
+        indexer=indexer,
+        parse_result=parse_result,
+    )
+    # Both coverage_hints and compute_requirement_diagnostics emit
+    # ivy.action.noMonitor with different messages; filter to the
+    # coverage_hints one, which carries "monitor requirements".
+    nm = next(
+        d
+        for d in diags
+        if d.code == "ivy.action.noMonitor" and "monitor requirements" in d.message
+    )
+    # LSP Range should match IR's character/end_character, NOT full-line.
+    assert nm.range.start.line == 1
+    assert nm.range.start.character == 4
+    assert nm.range.end.line == 1
+    assert nm.range.end.character == 8
+
+
 def test_range_precision_dead_guard_uses_req_col():
     """RequirementNode with col + end_col emits precise range."""
     g = RequirementGraph()

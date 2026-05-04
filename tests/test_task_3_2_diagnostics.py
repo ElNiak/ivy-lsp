@@ -461,8 +461,15 @@ class TestDiagnosticEndPosition:
                 d.range.end.character != 999
             ), "Coverage diagnostic uses magic 999 instead of actual line length"
 
-    def test_coverage_hint_end_matches_line_length(self):
-        """Coverage hint end character should match the actual line length."""
+    def test_coverage_hint_range_uses_node_column_data(self):
+        """Coverage hint range comes from ActionNode.start_col/end_col (Phase 5.2b).
+
+        Pre-Phase 5.2b, the LSP boundary in compute_diagnostics overwrote
+        coverage-hint ranges with full-line spans. Phase 5.2b populates
+        start_col/end_col on graph nodes and the LSP boundary now passes
+        them through unmodified, so the squiggle aligns with the action
+        name token instead of the full line.
+        """
         from unittest.mock import MagicMock
 
         from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementGraph
@@ -476,6 +483,8 @@ class TestDiagnosticEndPosition:
                 qualified_name="q.foo",
                 file="/tmp/test.ivy",
                 line=2,
+                start_col=7,  # column of "foo" inside "action foo(x:cid)"
+                end_col=10,  # one past "foo"
             )
         )
         indexer = MagicMock()
@@ -488,7 +497,6 @@ class TestDiagnosticEndPosition:
         fake_result.errors = []
 
         source = "#lang ivy1.7\n\naction foo(x:cid)\n"
-        # Line 2 is "action foo(x:cid)" which has length 17
         diags = compute_diagnostics(
             None,
             source,
@@ -497,8 +505,8 @@ class TestDiagnosticEndPosition:
             parse_result=fake_result,
         )
 
-        # After IvyDiagnostic migration, coverage hints carry DiagnosticTag.Unnecessary
-        # instead of a uniform source="ivy-lsp-coverage". Filter by that tag.
+        # Coverage hints carry DiagnosticTag.Unnecessary; filter by that tag
+        # to isolate them from compute_requirement_diagnostics emissions.
         from lsprotocol import types as _lsp
 
         coverage_diags = [
@@ -506,13 +514,9 @@ class TestDiagnosticEndPosition:
         ]
         assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
         for d in coverage_diags:
-            line_idx = d.range.start.line
-            lines = source.split("\n")
-            expected_len = len(lines[line_idx]) if line_idx < len(lines) else 0
-            assert d.range.end.character == expected_len, (
-                f"Expected end character {expected_len} for line {line_idx}, "
-                f"got {d.range.end.character}"
-            )
+            assert (
+                d.range.start.character == 7
+            ), f"Expected start.character=7 (start_col), got {d.range.start.character}"
 
     def test_ivy_check_output_end_character_not_999(self):
         """parse_ivy_check_output should not use magic 999."""

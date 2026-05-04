@@ -588,18 +588,16 @@ def compute_diagnostics(
         if graph is not None:
             from ivy_lsp.core.coverage_hints import compute_coverage_hints
 
-            lines = source.split("\n")
             for hint in compute_coverage_hints(graph, filepath):
-                lsp_diag = hint.to_lsp()
-                line = hint.line
-                line_len = len(lines[line]) if line < len(lines) else 0
-                # Expand the range to the full line (IR stores column; coverage
-                # hints are more useful when highlighted end-to-end).
-                lsp_diag.range = lsp.Range(
-                    start=lsp.Position(line=line, character=0),
-                    end=lsp.Position(line=line, character=line_len),
-                )
-                diags.append(lsp_diag)
+                # Phase 5.2b populates start_col/end_col on graph nodes and
+                # _node_span surfaces them as character/end_character on the
+                # IvyDiagnostic. to_lsp() then produces a token-precise
+                # LSP Range; passing it through unmodified keeps the editor
+                # squiggle aligned with the IR. (Earlier code expanded the
+                # range to the full line; that override masked Phase 5.2b's
+                # column data and contradicted the plan's "token-only
+                # squiggles" outcome.)
+                diags.append(hint.to_lsp())
 
     # --- Pattern diagnostics (cheap regex checks) ---
     try:
