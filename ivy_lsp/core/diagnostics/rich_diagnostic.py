@@ -95,8 +95,10 @@ class IvyDiagnostic:
 
         Raises:
             ValueError: If `message` is empty or whitespace-only, if `line` is
-                negative, if `severity` is None, or if `code` is not registered
-                in DIAGNOSTIC_REGISTRY.
+                negative, if `severity` is None, if `code` is not registered
+                in DIAGNOSTIC_REGISTRY, or if the range geometry is invalid
+                (`end_line < line`, `character < 0`, or `end_character <
+                character` on the same line).
         """
         # Local import avoids circular module load at definition time.
         from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
