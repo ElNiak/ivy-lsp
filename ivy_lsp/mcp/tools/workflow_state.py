@@ -38,6 +38,7 @@ _VALID_EVENT_TYPES = frozenset(
         "plan_approved",
         "workflow_resumed",
         "knowledge_captured",
+        "pending_dispatch",
     }
 )
 
