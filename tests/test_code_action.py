@@ -278,7 +278,7 @@ class TestRfcMissingTagQuickFix:
             message="Assertion without RFC bracket tag annotation",
             severity=DiagnosticSeverity.Hint,
             source="ivy-rfc",
-            code="ivy.rfc.missingTag",
+            code="ivy.rfc.missingBracketTag",
         )
         actions = compute_code_actions("file:///test.ivy", source, [diag])
         fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]

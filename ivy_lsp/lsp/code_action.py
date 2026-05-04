@@ -309,15 +309,11 @@ def compute_code_actions(
                 )
             )
 
-        elif code == "ivy.rfc.missingTag":
+        elif code == "ivy.rfc.missingBracketTag":
             # Append a placeholder bracket-tag template to the end of the
             # assertion line. After Phase 5, diag.range spans the assertion
             # keyword + body; we insert at end_character so the template
             # follows the `;` without overlapping the assertion text.
-            #
-            # Note: ivy.rfc.missingTag is declared in DIAGNOSTIC_REGISTRY but
-            # no emit site uses it today (the active emission code is
-            # ivy.rfc.missingBracketTag). This branch is forward-looking.
             insert_line = diag.range.end.line
             insert_col = diag.range.end.character
             snippet = "  # [rfcNNNN:X.Y]"

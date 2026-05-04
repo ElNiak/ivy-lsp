@@ -296,20 +296,6 @@ _reg(
 
 _reg(
     DiagnosticDescriptor(
-        code="ivy.rfc.missingTag",
-        title="Assertion without RFC tag",
-        explanation=(
-            "This assertion (require/ensure/assume/assert) has no RFC bracket "
-            "tag annotation. Add a # [rfcNNNN:X.Y] comment."
-        ),
-        default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-rfc",
-        has_quick_fix=True,
-    )
-)
-
-_reg(
-    DiagnosticDescriptor(
         code="ivy.rfc.tagFormatError",
         title="Malformed RFC tag",
         explanation="The bracket tag does not follow the expected format # [rfcNNNN:X.Y].",
@@ -547,5 +533,6 @@ _reg(
         explanation="An assertion (require / ensure / assume / assert) is not annotated with an RFC bracket tag for traceability.",
         default_severity=lsp.DiagnosticSeverity.Hint,
         source="ivy-lsp-semantic",
+        has_quick_fix=True,
     )
 )
