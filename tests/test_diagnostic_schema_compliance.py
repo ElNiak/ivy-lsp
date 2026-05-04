@@ -297,24 +297,29 @@ def test_all_clusters_have_lsp_schema_fields(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# MCP wire-shape fence (Phase 1.5)
+# MCP wire-shape pin (Phase 1.5)
 #
-# diagnostics_tool.py is the MCP-side counterpart of compute_diagnostics. Phase
-# 1.5 migrated its five raw-dict emit sites to IvyDiagnostic.to_mcp_dict().
-# The tests below pin the wire contract at the IR-to-dict boundary for each
-# of those five sites without standing up a full MCP context.
+# diagnostics_tool.py is the MCP-side counterpart of compute_diagnostics.
+# Phase 1.5 migrated its five raw-dict emit sites to IvyDiagnostic.to_mcp_dict().
+# The parametrized test below pins the to_mcp_dict() contract at the
+# IR-to-dict boundary for representative (code, severity, source) tuples
+# matching those emit sites: every wire dict carries `code`, `message`,
+# 1-based `line`, `severity`, `source`, and the registry-injected
+# `explanation`.
 #
-# The signature table mirrors the post-migration emit sites in
-# ivy_lsp/mcp/tools/diagnostics_tool.py. If a future change drifts an emit
-# site away from its registry-aligned source, the source-consistency test
-# fails loudly — closing the recurring class of source-string mismatches
-# (see feedback_source_mismatch_recurring_in_ir_migrations.md).
+# Source-consistency between emit-site source kwargs and the registry is
+# enforced separately by `test_every_emit_site_source_matches_registry`
+# in `tests/test_diagnostic_registry_completeness.py`, which scans the
+# actual `IvyDiagnostic(...)` constructor calls in `ivy_lsp/`. That fence
+# closes the source-string-mismatch failure class for every emit site,
+# not just MCP.
 # ---------------------------------------------------------------------------
 
-# (code, severity, source) signatures of the five MCP emit sites Phase 1.5
-# migrated to IvyDiagnostic. Severity strings come from to_mcp_dict()'s
-# _SEVERITY_TO_STR mapping ("info" -> Information).
-_MCP_EMIT_SIGNATURES: list[tuple[str, lsp.DiagnosticSeverity, str, str]] = [
+# Representative (code, severity, severity-string, source) tuples covering
+# the five Phase 1.5 MCP emit sites. The wire-shape test below uses these
+# to pin the to_mcp_dict() contract; emit-site coverage is enforced
+# separately in tests/test_diagnostic_registry_completeness.py.
+_MCP_WIRE_SHAPE_CASES: list[tuple[str, lsp.DiagnosticSeverity, str, str]] = [
     ("ivy.syntax.lexerError", lsp.DiagnosticSeverity.Error, "error", "ivy-lsp"),
     (
         "ivy.rfc.orphanedTag",
@@ -353,16 +358,21 @@ def _build_mcp_diagnostic(
     ).to_mcp_dict()
 
 
-@pytest.mark.parametrize("code,severity,sev_str,source", _MCP_EMIT_SIGNATURES)
-def test_mcp_emit_site_wire_shape(
+@pytest.mark.parametrize("code,severity,sev_str,source", _MCP_WIRE_SHAPE_CASES)
+def test_mcp_wire_shape_includes_full_schema(
     code: str, severity: lsp.DiagnosticSeverity, sev_str: str, source: str
 ):
-    """Each migrated MCP emit site produces an MCP wire dict with the full schema.
+    """to_mcp_dict() output for representative emit-site tuples carries the full schema.
 
     Required fields per to_mcp_dict() contract: code (registered), message
     (non-empty), line (1-based int >= 1), severity (string), source
     (non-empty). Optional fields: explanation (always present when the
     code has a registry descriptor).
+
+    This test pins the IR-to-wire boundary contract. Source-consistency
+    against the registry is enforced for every emit site by
+    `test_every_emit_site_source_matches_registry` in
+    `tests/test_diagnostic_registry_completeness.py`.
     """
     payload = _build_mcp_diagnostic(code, severity, source)
 
@@ -374,44 +384,10 @@ def test_mcp_emit_site_wire_shape(
     assert payload["severity"] == sev_str
     assert payload["source"] == source
 
-    # Every Phase 1.5 emit site uses a registered code, so to_mcp_dict()
+    # Every representative case uses a registered code, so to_mcp_dict()
     # must inject the registry's explanation for client-side tooltips.
     assert "explanation" in payload, (
         f"Missing explanation field on {code}; check that the code is "
         "still registered in DIAGNOSTIC_REGISTRY."
     )
     assert isinstance(payload["explanation"], str) and payload["explanation"].strip()
-
-
-def test_mcp_emit_site_sources_match_registry():
-    """Each MCP emit-site source must match the registry descriptor's source.
-
-    Closes the recurring source-string-mismatch failure class
-    (feedback_source_mismatch_recurring_in_ir_migrations.md): a future edit
-    that drifts an emit site away from its registry source — for example,
-    re-introducing "ivy-pattern" or "ivy-lsp-lexer" — fails this test.
-    """
-    from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
-
-    mismatches: list[str] = []
-    for signature in _MCP_EMIT_SIGNATURES:
-        code = signature[0]
-        source = signature[3]
-        descriptor = DIAGNOSTIC_REGISTRY.get(code)
-        assert (
-            descriptor is not None
-        ), f"Phase 1.5 emit-site code {code!r} is not in DIAGNOSTIC_REGISTRY."
-        if descriptor.source != source:
-            mismatches.append(
-                f"  {code}: emit-site source={source!r}, "
-                + f"registry source={descriptor.source!r}"
-            )
-
-    if mismatches:
-        pytest.fail(
-            "MCP emit-site source strings drifted from the registry:\n"
-            + "\n".join(mismatches)
-            + "\n\nUpdate either the emit site in "
-            + "ivy_lsp/mcp/tools/diagnostics_tool.py or the registry in "
-            + "ivy_lsp/core/diagnostics/codes.py so they agree."
-        )

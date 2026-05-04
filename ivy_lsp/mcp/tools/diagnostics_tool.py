@@ -269,7 +269,13 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                 logger.warning("Coverage hints failed for %s: %s", relative_path, exc)
                 layer_errors.append({"layer": "coverage", "error": str(exc)})
 
-        # 5. Pattern diagnostics (regex-based)
+        # 5. Pattern diagnostics (regex-based).
+        # Note: the "pattern" layer name is the delivery channel — a filter
+        # the caller uses to opt in or out. The diagnostics emitted here
+        # carry the registry's source on the wire (e.g. "ivy-semantic" for
+        # ivy.action.missingFinalize / ivy.action.noMonitor), not "pattern".
+        # Clients that group by_source see registered values; clients that
+        # filter by `layers=["pattern"]` still get them.
         if layers is None or "pattern" in layers:
             try:
                 basename = os.path.basename(abs_path)

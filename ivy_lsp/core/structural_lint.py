@@ -202,7 +202,7 @@ def check_structural_issues(
                     ),
                     line=action_line,
                     severity=lsp.DiagnosticSeverity.Hint,
-                    source="ivy-lint",
+                    source="ivy-semantic",
                 )
             )
 

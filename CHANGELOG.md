@@ -49,12 +49,28 @@ module under `ivy_lsp/core/`, `ivy_lsp/lsp/diagnostics/`, or
   `IvyDiagnostic.to_mcp_dict()` contract for each migrated emit site:
   `code`, `message`, 1-based `line`, `severity` string, `source`, and
   `explanation` (registry-injected) must all be present.
-- A source-consistency guard
-  (`test_mcp_emit_site_sources_match_registry`) asserting every Phase
-  1.5 emit-site `source` matches the registry descriptor's source.
-  Closes the recurring source-string-mismatch failure class — a future
-  edit reintroducing `"ivy-pattern"` or `"ivy-lsp-lexer"` fails this
-  test loudly.
+- A codebase-wide source-consistency guard
+  (`test_every_emit_site_source_matches_registry` in
+  `tests/test_diagnostic_registry_completeness.py`) scans every
+  `IvyDiagnostic(...)` constructor under `ivy_lsp/`, extracts the
+  `(code, source)` pair via paren-balance walk + kwarg regex, and
+  asserts `source == DIAGNOSTIC_REGISTRY[code].source`. Closes the
+  recurring source-string-mismatch failure class for *every* emit
+  site, not just MCP. A future edit drifting any source — e.g.
+  reintroducing `"ivy-pattern"` or `"ivy-lsp-lexer"` — fails this
+  fence loudly. Supersedes a transitional table-driven check that
+  walked a hand-maintained signature table inside the schema-compliance
+  test.
+
+### Fixed
+
+- `ivy_lsp/core/structural_lint.py`: the `ivy.action.unguardedWrite`
+  emit site used `source="ivy-lint"` while the registry and the
+  matching emit sites in `ivy_lsp/core/coverage_hints.py` use
+  `source="ivy-semantic"`. Drift surfaced by the codebase-wide
+  source-consistency guard added in this phase. Aligned to the
+  registry; existing tests pass without changes (none assert on
+  `source == "ivy-lint"` for this code).
 
 ## [Unreleased] — Phase 1 Diagnostic IR Migration
 
