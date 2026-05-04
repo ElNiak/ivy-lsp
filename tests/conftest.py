@@ -47,7 +47,12 @@ def _raw_json_for_legacy_tests(request):
 try:
     import ivy
 
-    _IVY_PKG_DIR = Path(ivy.__file__).resolve().parent
+    # Guard against namespace-package `ivy` whose ``__file__`` is None
+    # (the import succeeds but the package has no concrete file path).
+    # Treat that as the no-installed-package case so the sibling-layout
+    # fallback below kicks in.
+    _ivy_file = getattr(ivy, "__file__", None)
+    _IVY_PKG_DIR = Path(_ivy_file).resolve().parent if _ivy_file else None
 except ImportError:
     _IVY_PKG_DIR = None
 

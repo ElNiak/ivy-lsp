@@ -249,6 +249,31 @@ async def test_set_workspace_with_roles(make_workspace_tool):
 
 
 @pytest.mark.asyncio
+async def test_set_test_file_with_roles_errors_loudly(make_workspace_tool):
+    """`roles` is rejected when target is a .ivy test file (no defined semantics).
+
+    Regression for the silent-drop contract bug: `from_test_file` ignored the
+    `roles` kwarg, so callers expecting role_pair scoping silently received
+    workspace-wide diagnostics. Now the combination errors loudly with a
+    message guiding the caller toward a supported invocation.
+    """
+    groups = {"quic": ["quic_stack", "quic_tests", "tls_stack"]}
+    tool_fn, _ctx = make_workspace_tool(groups)
+
+    result = await tool_fn(
+        action="set",
+        target="protocol-testing/quic/quic_tests/quic_test_handshake.ivy",
+        roles="client,server",
+    )
+
+    assert result["success"] is False
+    msg = result["message"]
+    assert "roles" in msg
+    assert ".ivy" in msg
+    assert "not supported" in msg
+
+
+@pytest.mark.asyncio
 async def test_invalid_action(make_workspace_tool):
     """An unrecognized action returns an error."""
     tool_fn, ctx = make_workspace_tool()

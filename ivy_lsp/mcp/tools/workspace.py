@@ -69,6 +69,22 @@ async def _handle_set(ctx: Any, target: str | None, roles: str | None) -> dict:
 
     # If target ends with .ivy, use from_test_file
     if target.endswith(".ivy"):
+        # `roles` narrows a workspace group to a role-pair scope; it has no
+        # well-defined semantics when `target` is already a single test file
+        # (from_test_file scopes to granularity="test" with active_tests=[
+        # test_file]). Reject the combination loudly rather than silently
+        # dropping `roles` and returning workspace-wide diagnostics — that
+        # silent drop misled callers expecting role-pair scoping.
+        if roles:
+            return error_response(
+                "ivy_workspace(action='set', target=<.ivy file>, roles=...) "
+                "is not supported: 'roles' narrows a workspace group, but a "
+                f"specific test file ({target!r}) is already a single-file "
+                "scope. Either omit 'roles' to scope to the test file's "
+                "owning group, or pass target=<group_name> with 'roles' to "
+                "narrow the group."
+            )
+
         file_to_layer = {}
         if ctx.include_resolver is not None and hasattr(
             ctx.include_resolver, "_file_to_layer"
