@@ -154,6 +154,60 @@ class TestDiagnosticCodeField:
         assert len(include_diags) == 1
 
 
+class TestUnmatchedBraceQuickFix:
+    def test_closing_brace_removes_offending_token(self):
+        """Quickfix for "Unmatched closing brace" deletes the offending `}`."""
+        from ivy_lsp.lsp.code_action import compute_code_actions
+
+        # Line 1 = "}"; the `}` at col 0 is unmatched.
+        source = "#lang ivy1.7\n}\n"
+        diag = Diagnostic(
+            range=Range(start=Position(1, 0), end=Position(1, 0)),
+            message="Unmatched closing brace",
+            severity=DiagnosticSeverity.Error,
+            source="ivy-lint",
+            code="ivy.syntax.unmatchedBrace",
+        )
+        actions = compute_code_actions("file:///test.ivy", source, [diag])
+        fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
+        assert len(fix) == 1
+        assert "remove" in fix[0].title.lower()
+        edits = fix[0].edit.changes["file:///test.ivy"]
+        assert len(edits) == 1
+        edit = edits[0]
+        # Edit deletes 1 character at the offending `}` position.
+        assert edit.range.start.line == 1
+        assert edit.range.start.character == 0
+        assert edit.range.end.character == 1
+        assert edit.new_text == ""
+
+    def test_opening_brace_appends_closers_at_eof(self):
+        """Quickfix for "Unmatched opening brace (N unclosed)" appends N `}` at EOF."""
+        from ivy_lsp.lsp.code_action import compute_code_actions
+
+        source = "#lang ivy1.7\nobject foo = {\nobject bar = {\n"
+        diag = Diagnostic(
+            range=Range(start=Position(2, 0), end=Position(2, 0)),
+            message="Unmatched opening brace (2 unclosed)",
+            severity=DiagnosticSeverity.Error,
+            source="ivy-lint",
+            code="ivy.syntax.unmatchedBrace",
+        )
+        actions = compute_code_actions("file:///test.ivy", source, [diag])
+        fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
+        assert len(fix) == 1
+        assert "closing brace" in fix[0].title.lower()
+        edits = fix[0].edit.changes["file:///test.ivy"]
+        assert len(edits) == 1
+        edit = edits[0]
+        # Insert at end of file.
+        lines = source.split("\n")
+        last_line = max(0, len(lines) - 1)
+        assert edit.range.start.line == last_line
+        # Snippet contains exactly 2 closing braces.
+        assert edit.new_text.count("}") == 2
+
+
 class TestInvariantUnguardedWriteQuickFix:
     def test_inserts_require_guard_below_diag(self):
         """Quickfix inserts a require-guard skeleton on the line below the diagnostic."""
