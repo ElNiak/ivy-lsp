@@ -150,6 +150,44 @@ def compute_code_actions(
                 )
             )
 
+        elif code == "ivy.invariant.unguardedWrite":
+            # Mirrors the ivy.action.unguardedWrite shape: extract the var
+            # name from the diagnostic message and insert a `require`
+            # guard skeleton. Registry title is
+            # "Unguarded state variable write: '{var}'", so the message
+            # carries the var name in single quotes.
+            #
+            # Note: ivy.invariant.unguardedWrite is declared with
+            # has_quick_fix=True but no emit site uses it today (the
+            # active code is ivy.action.unguardedWrite). This branch is
+            # forward-looking.
+            m = re.search(r"'([\w.]+)'", diag.message)
+            var_name = m.group(1) if m else "state_var"
+            insert_line = diag.range.end.line + 1
+            snippet = f"    require {var_name}(...)\n"
+            actions.append(
+                lsp.CodeAction(
+                    title=f"Add require guard for '{var_name}' (invariant)",
+                    kind=lsp.CodeActionKind.QuickFix,
+                    diagnostics=[diag],
+                    edit=lsp.WorkspaceEdit(
+                        changes={
+                            uri: [
+                                lsp.TextEdit(
+                                    range=make_range(
+                                        insert_line,
+                                        0,
+                                        insert_line,
+                                        0,
+                                    ),
+                                    new_text=snippet,
+                                )
+                            ]
+                        }
+                    ),
+                )
+            )
+
         elif code == "ivy.action.missingFinalize":
             # Append a skeleton `export action _finalize` block at end of
             # file. The diagnostic is file-level (line=0); end-of-file
