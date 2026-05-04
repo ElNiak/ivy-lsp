@@ -30,6 +30,38 @@ _STATE_VAR_RE = re.compile(
     r"^\s*(?:relation|function|individual|var)\s+([\w.]+)", re.MULTILINE
 )
 _EXPORT_RE = re.compile(r"^\s*export\s", re.MULTILINE)
+_BRACKET_BLOCK_RE = re.compile(r"#\s*\[([^\]]+)\]")
+
+
+def _find_tag_span_in_line(
+    line_text: str,
+    tag: str,
+) -> Optional[Tuple[int, int]]:
+    """Locate ``[<tag>]`` within a line's bracket-annotation block.
+
+    Searches for the bracket block (``# [...]``) on ``line_text``, then
+    finds the literal ``tag`` text inside, requiring it to be bounded by
+    bracket edges, commas, or whitespace (so a tag like ``4`` does not
+    match a substring of ``rfc9000:4.1``). Returns ``(start_col, end_col)``
+    or ``None`` if no matching bracket-bounded tag is present.
+    """
+    bracket_match = _BRACKET_BLOCK_RE.search(line_text)
+    if not bracket_match:
+        return None
+    bracket_inner = bracket_match.group(1)
+    bracket_inner_start = bracket_match.start(1)
+    cursor = 0
+    while True:
+        tag_idx = bracket_inner.find(tag, cursor)
+        if tag_idx < 0:
+            return None
+        before_ok = tag_idx == 0 or bracket_inner[tag_idx - 1] in " ,"
+        after_idx = tag_idx + len(tag)
+        after_ok = after_idx == len(bracket_inner) or bracket_inner[after_idx] in " ,"
+        if before_ok and after_ok:
+            return (bracket_inner_start + tag_idx, bracket_inner_start + after_idx)
+        cursor = tag_idx + 1
+
 
 _IVY_CHECK_CODE_MAP: Dict[Tuple[str, str], str] = {
     ("cpp_compiler", "error"): "ivy.verify.compileError",
@@ -320,7 +352,15 @@ def compute_semantic_diagnostics(
             for tag in ann.tags:
                 if not is_tag_covered(tag, req_ids):
                     line = ann.line
-                    line_len = len(lines[line]) if line < len(lines) else 0
+                    line_text = lines[line] if line < len(lines) else ""
+                    span = _find_tag_span_in_line(line_text, tag)
+                    if span is not None:
+                        char_start, char_end = span
+                    else:
+                        # Fallback to full-line span when the tag cannot be
+                        # located inside a bracket block (e.g. annotation
+                        # synthesized from a non-source-derived path).
+                        char_start, char_end = 0, len(line_text)
                     diags.append(
                         IvyDiagnostic(
                             code="ivy.rfc.orphanedTag",
@@ -329,8 +369,9 @@ def compute_semantic_diagnostics(
                                 "any loaded requirement manifest"
                             ),
                             line=line,
+                            character=char_start,
                             end_line=line,
-                            end_character=line_len,
+                            end_character=char_end,
                             severity=lsp.DiagnosticSeverity.Warning,
                             source="ivy-lsp-semantic",
                         )
@@ -358,7 +399,12 @@ def compute_semantic_diagnostics(
 
                 # D7: flag duplicate tags within the file
                 if val in seen_tags:
-                    line_len = len(lines[ann.line]) if ann.line < len(lines) else 0
+                    line_text = lines[ann.line] if ann.line < len(lines) else ""
+                    span = _find_tag_span_in_line(line_text, tag)
+                    if span is not None:
+                        char_start, char_end = span
+                    else:
+                        char_start, char_end = 0, len(line_text)
                     diags.append(
                         IvyDiagnostic(
                             code="ivy.rfc.tagDuplicate",
@@ -367,8 +413,9 @@ def compute_semantic_diagnostics(
                                 f" line {seen_tags[val] + 1}."
                             ),
                             line=ann.line,
+                            character=char_start,
                             end_line=ann.line,
-                            end_character=line_len,
+                            end_character=char_end,
                             severity=lsp.DiagnosticSeverity.Warning,
                             source="ivy-lsp-semantic",
                         )
@@ -454,13 +501,19 @@ def compute_semantic_diagnostics(
         line_no = source[: m.start()].count("\n")
         line_text = lines[line_no] if line_no < len(lines) else ""
         if not _TAG_RE.search(line_text):
+            # Span the assertion keyword + body (group 1 start to match end),
+            # excluding leading whitespace.
+            line_start = source.rfind("\n", 0, m.start(1)) + 1
+            char_start = m.start(1) - line_start
+            char_end = m.end() - line_start
             diags.append(
                 IvyDiagnostic(
                     code="ivy.rfc.missingBracketTag",
                     message="Assertion without RFC bracket tag annotation",
                     line=line_no,
+                    character=char_start,
                     end_line=line_no,
-                    end_character=len(line_text),
+                    end_character=char_end,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-lsp-semantic",
                 )

@@ -205,3 +205,44 @@ class TestToLspConversion:
             lsp_diag = d.to_lsp()
             assert isinstance(lsp_diag, lsp.Diagnostic)
             assert lsp_diag.code == d.code
+
+
+class TestRangePrecision:
+    """Phase 5 cluster 5.4: token-precise spans on semantic diagnostics."""
+
+    def test_orphaned_tag_spans_bracket_tag(self):
+        """Span the tag value inside the bracket block, not full line."""
+        model = _make_model_with_orphaned_tag()
+        # Fixture marks the annotation at line 2 (0-based). Provide a
+        # source where line 2 holds the bracket block so the per-tag span
+        # search succeeds.
+        source = "#lang ivy1.7\n\nrequire x > 0;  # [rfc9000:99.99]\n"
+        diags = compute_semantic_diagnostics(
+            model=model,
+            filepath="/tmp/x.ivy",
+            source=source,
+        )
+        d = next(x for x in diags if x.code == "ivy.rfc.orphanedTag")
+        assert d.line == 2
+        line_text = source.splitlines()[2]
+        bracket_open = line_text.index("[")
+        assert d.character == bracket_open + 1
+        assert d.end_character == d.character + len("rfc9000:99.99")
+
+    def test_missing_bracket_tag_spans_assertion(self):
+        """Span the assertion keyword + body, not full line."""
+        model = _make_empty_model()
+        # Line 2 = "  require x > 0;"; assertion starts at col 2 ("require").
+        source = "#lang ivy1.7\nbefore foo {\n  require x > 0;\n}\n"
+        diags = compute_semantic_diagnostics(
+            model=model,
+            filepath="/tmp/x.ivy",
+            source=source,
+        )
+        d = next(x for x in diags if x.code == "ivy.rfc.missingBracketTag")
+        assert d.line == 2
+        line_text = source.splitlines()[2]
+        # Span starts at the keyword (skipping leading whitespace).
+        assert d.character == line_text.index("require")
+        # Span ends at the `;`.
+        assert d.end_character == line_text.index(";") + 1
