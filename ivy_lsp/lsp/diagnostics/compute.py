@@ -610,6 +610,10 @@ def compute_diagnostics(
             # Look for export action declarations
             has_export = bool(re.search(r"^\s*export\s+action", source, re.MULTILINE))
             if has_export:
+                # Line-only by design: this is a file-level diagnostic
+                # flagging the *absence* of an _finalize action; there is
+                # no source token to span. The squiggle anchors at line 0
+                # and falls through to _DEFAULT_END_COLUMN at to_lsp().
                 diags.append(
                     IvyDiagnostic(
                         code="ivy.action.missingFinalize",
@@ -641,17 +645,36 @@ def compute_diagnostics(
                     )
                 )
                 if action_defined:
+                    # Capture the action name as group 1 so we can span the
+                    # token precisely instead of pointing at line 0 or the
+                    # full export line.
                     match = re.search(
-                        rf"^\s*export\s+action\s+{re.escape(exp_action)}",
+                        rf"^\s*export\s+action\s+({re.escape(exp_action)})",
                         source,
                         re.MULTILINE,
                     )
-                    line_num = source[: match.start()].count("\n") if match else 0
+                    if match:
+                        line_num = source[: match.start()].count("\n")
+                        line_start = source.rfind("\n", 0, match.start(1)) + 1
+                        char_start = match.start(1) - line_start
+                        char_end = match.end(1) - line_start
+                        diag_line = line_num
+                        diag_char = char_start
+                        diag_end_line = line_num
+                        diag_end_char = char_end
+                    else:
+                        diag_line = 0
+                        diag_char = 0
+                        diag_end_line = None
+                        diag_end_char = None
                     diags.append(
                         IvyDiagnostic(
                             code="ivy.action.noMonitor",
                             message=f"Exported action '{exp_action}' has no before/after monitor in this file.",
-                            line=line_num,
+                            line=diag_line,
+                            character=diag_char,
+                            end_line=diag_end_line,
+                            end_character=diag_end_char,
                             severity=lsp.DiagnosticSeverity.Hint,
                             source="ivy-semantic",
                         ).to_lsp()
@@ -701,6 +724,12 @@ def parse_ivy_check_output(output: str) -> List[IvyDiagnostic]:
                 else "ivy.verify.checkWarning"
             ),
         )
+        # Line-only by design: ivy_check stderr/stdout reports
+        # "file:line: message" with no column information, so
+        # character=0/end_character=0 is the most truthful range we can
+        # construct. The next-line end (end_line=lineno+1) lets editors
+        # render a wedge across the affected line without falsely
+        # claiming column precision the compiler does not provide.
         diags.append(
             IvyDiagnostic(
                 code=code,
