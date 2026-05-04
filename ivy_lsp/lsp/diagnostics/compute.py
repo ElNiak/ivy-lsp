@@ -588,8 +588,14 @@ def compute_diagnostics(
                     )
     except ValueError:
         raise
-    except Exception:
-        logger.debug("pattern check failed", exc_info=True)
+    except (re.error, AttributeError, TypeError) as exc:
+        # Narrow handler covers the regex / None-match / type-coercion
+        # failure modes the pattern checks above could realistically hit.
+        # Promoted from logger.debug to logger.warning so MCP consumers
+        # see "pattern check crashed" at the default log level instead
+        # of having to opt into debug. Unknown exception classes
+        # propagate so they aren't masked by a too-broad handler.
+        logger.warning("pattern check failed: %s", exc, exc_info=True)
 
     return diags
 
