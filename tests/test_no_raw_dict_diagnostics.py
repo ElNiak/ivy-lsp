@@ -17,29 +17,22 @@ import pytest
 pytestmark = pytest.mark.unit
 
 # Files that may legitimately emit raw dicts during the migration window.
-# Each entry must carry a one-line justification. Remove when the site is
-# migrated to IvyDiagnostic (Phase 1 gap — tracked for follow-up).
-ALLOWLIST: set[str] = {
-    # Tasks 4-9 migration gap: diagnostics_tool builds raw-dict payloads
-    # for the legacy MCP envelope. Remove when Phase 1.5 unifies the tool.
-    "ivy_lsp/mcp/tools/diagnostics_tool.py",
-    # Tasks 4-9 migration gap: propagation tool emits raw dicts inline.
-    # Remove once the propagation producer is migrated to IvyDiagnostic.
-    "ivy_lsp/mcp/tools/propagation.py",
-    # Tasks 4-9 migration gap: traceability tool emits raw dicts inline.
-    # Remove once the traceability producer is migrated to IvyDiagnostic.
-    "ivy_lsp/mcp/tools/traceability.py",
-}
+# Each entry must carry a one-line justification. Phase 1.5 closed the
+# remaining MCP-side gaps; this set is empty unless a new transitional
+# producer is introduced.
+ALLOWLIST: set[str] = set()
 
 EMIT_DIRS = ["ivy_lsp/core", "ivy_lsp/lsp/diagnostics", "ivy_lsp/mcp/tools"]
 # Catches both shapes:
 #   .append({\n  "line": ..., ...})         # multi-line
 #   .append({"line": ..., ...})              # single-line
-# Requires "line" AND one of (severity|file|code|message) so internal
-# pattern-extraction records like {"name": ..., "line": 0} don't trigger.
+# Requires "line" AND one of (severity|code|message). Excludes "file" from
+# the alternation: pure (file, line) records are location anchors used by
+# coverage and propagation analysis, not diagnostics. True diagnostics
+# always carry severity, code, or message.
 # Lookaheads make key order irrelevant.
 RAW_DICT_PATTERN = re.compile(
-    r'\.append\(\s*\{(?=[^}]*"line"\s*:)(?=[^}]*"(?:severity|file|code|message)")',
+    r'\.append\(\s*\{(?=[^}]*"line"\s*:)(?=[^}]*"(?:severity|code|message)")',
     re.DOTALL,
 )
 
@@ -86,6 +79,11 @@ def test_audit_fence_regex_catches_both_shapes():
     single_line = 'diags.append({"line": 1, "code": "ivy.x", "message": ".."})'
     no_emission = 'result = {"line": 1}  # not an .append call'
     internal_record = 'includes.append({"name": "x", "line": 0})'
+    location_anchor = 'covered.append({"file": ann.file, "line": ann.line})'
+    correlation_record = (
+        'correlations.append({"serializer": s, "instance": '
+        '{"name": p.name, "file": p.file, "line": p.line}})'
+    )
 
     assert (
         RAW_DICT_PATTERN.search(multi_line) is not None
@@ -99,3 +97,9 @@ def test_audit_fence_regex_catches_both_shapes():
     assert (
         RAW_DICT_PATTERN.search(internal_record) is None
     ), "non-diagnostic append-dicts must not match"
+    assert (
+        RAW_DICT_PATTERN.search(location_anchor) is None
+    ), "(file, line) location anchors must not match — they are coverage records, not diagnostics"
+    assert (
+        RAW_DICT_PATTERN.search(correlation_record) is None
+    ), "correlation records carrying nested (file, line) must not match — they are propagation analysis output, not diagnostics"

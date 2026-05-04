@@ -8,6 +8,9 @@ import os
 import re
 from typing import Any, Literal
 
+from lsprotocol import types as lsp
+
+from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.patterns import ASSERTION_RE as _ASSERTION_RE
 from ivy_lsp.core.patterns import BRACKET_TAG_RE as _BRACKET_TAG_RE
 from ivy_lsp.core.patterns import EXPORT_ACTION_RE, MONITOR_RE
@@ -162,12 +165,13 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                 )
                 if error_info is not None:
                     all_diags.append(
-                        {
-                            "line": error_info.get("line", 1),
-                            "severity": "error",
-                            "message": f"Lexer error: {error_info.get('message', 'unknown')}",
-                            "source": "ivy-lsp-lexer",
-                        }
+                        IvyDiagnostic(
+                            code="ivy.syntax.lexerError",
+                            message=f"Lexer error: {error_info.get('message', 'unknown')}",
+                            line=max(0, error_info.get("line", 1) - 1),
+                            severity=lsp.DiagnosticSeverity.Error,
+                            source="ivy-lsp",
+                        ).to_mcp_dict()
                     )
             except Exception as exc:
                 logger.warning("Fallback scan failed for %s: %s", relative_path, exc)
@@ -219,15 +223,16 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                             for tag in ann.tags:
                                 if not is_tag_covered(tag, req_ids):
                                     all_diags.append(
-                                        {
-                                            "line": ann.line + 1,
-                                            "severity": "warning",
-                                            "message": (
+                                        IvyDiagnostic(
+                                            code="ivy.rfc.orphanedTag",
+                                            message=(
                                                 f"Orphaned RFC tag: [{tag}] does not "
                                                 "match any loaded requirement manifest"
                                             ),
-                                            "source": "ivy-lsp-semantic",
-                                        }
+                                            line=ann.line,
+                                            severity=lsp.DiagnosticSeverity.Warning,
+                                            source="ivy-lsp-semantic",
+                                        ).to_mcp_dict()
                                     )
 
                     # Missing tags on assertions
@@ -237,12 +242,13 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                         line_text = lines[line_no] if line_no < len(lines) else ""
                         if not _BRACKET_TAG_RE.search(line_text):
                             all_diags.append(
-                                {
-                                    "line": line_no + 1,
-                                    "severity": "hint",
-                                    "message": "Assertion without RFC bracket tag annotation",
-                                    "source": "ivy-lsp-semantic",
-                                }
+                                IvyDiagnostic(
+                                    code="ivy.rfc.missingBracketTag",
+                                    message="Assertion without RFC bracket tag annotation",
+                                    line=line_no,
+                                    severity=lsp.DiagnosticSeverity.Hint,
+                                    source="ivy-lsp-semantic",
+                                ).to_mcp_dict()
                             )
             except Exception as exc:
                 logger.warning(
@@ -275,16 +281,17 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                     )
                     if has_export:
                         all_diags.append(
-                            {
-                                "line": 1,
-                                "severity": "warning",
-                                "message": (
+                            IvyDiagnostic(
+                                code="ivy.action.missingFinalize",
+                                message=(
                                     "Test file has exports but no _finalize action. "
                                     "Consider adding 'export action _finalize' for "
                                     "end-of-test assertions."
                                 ),
-                                "source": "ivy-pattern",
-                            }
+                                line=0,
+                                severity=lsp.DiagnosticSeverity.Warning,
+                                source="ivy-semantic",
+                            ).to_mcp_dict()
                         )
 
                 # Exported actions without monitors
@@ -309,15 +316,16 @@ def register_diagnostic_tools(mcp, ctx, get_cache_summary_fn) -> None:
                                 source[: match.start()].count("\n") + 1 if match else 1
                             )
                             all_diags.append(
-                                {
-                                    "line": line_num,
-                                    "severity": "hint",
-                                    "message": (
+                                IvyDiagnostic(
+                                    code="ivy.action.noMonitor",
+                                    message=(
                                         f"Exported action '{exp_action}' has no "
                                         "before/after monitor in this file."
                                     ),
-                                    "source": "ivy-pattern",
-                                }
+                                    line=max(0, line_num - 1),
+                                    severity=lsp.DiagnosticSeverity.Hint,
+                                    source="ivy-semantic",
+                                ).to_mcp_dict()
                             )
             except Exception as exc:
                 logger.warning(
