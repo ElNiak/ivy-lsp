@@ -1276,40 +1276,143 @@ class IncludeResolver:
         result["symlink_failures"] = symlink_failures
         return result
 
+    # Canonical sentinel file proving a directory is the panther_ivy
+    # stdlib (rather than an unrelated directory tree containing
+    # ``ivy/include/``). Using a known-stable stdlib module avoids false
+    # positives when walking up an unfamiliar workspace.
+    _STDLIB_SENTINEL = "network_implementation.ivy"
+
+    def _discover_workspace_stdlib(self) -> Optional[str]:
+        """Walk up from ``workspace_root`` looking for a stdlib dir.
+
+        Searches each ancestor for ``<ancestor>/ivy/include/<version>/``
+        containing the canonical sentinel file. Prefers ``1.7`` (matches
+        ``#lang ivy1.7``); falls back to the highest version directory
+        that contains the sentinel.
+
+        This is the primary stdlib resolution path for development inside
+        a panther_ivy checkout: it makes worktree edits to
+        ``ivy/include/*.ivy`` take precedence over any system-installed
+        ivy package, which is the architecturally correct behaviour for
+        the shared-source / sibling-submodule layout panther_ivy uses.
+
+        Returns:
+            Absolute path to the workspace-relative stdlib directory,
+            or None when the workspace is not inside a panther_ivy
+            checkout (no ancestor contains the canonical layout).
+        """
+        cur = self._workspace_root
+        last = None
+        while cur != last:
+            inc_base = os.path.join(cur, "ivy", "include")
+            if os.path.isdir(inc_base):
+                preferred = os.path.join(inc_base, "1.7")
+                if os.path.isfile(os.path.join(preferred, self._STDLIB_SENTINEL)):
+                    return preferred
+                # Fall back to highest version dir containing the sentinel
+                best: Optional[str] = None
+                best_full: Optional[str] = None
+                try:
+                    for d in os.listdir(inc_base):
+                        full = os.path.join(inc_base, d)
+                        if not os.path.isdir(full):
+                            continue
+                        if not d.replace(".", "").isdigit():
+                            continue
+                        if not os.path.isfile(
+                            os.path.join(full, self._STDLIB_SENTINEL)
+                        ):
+                            continue
+                        if best is None or d > best:
+                            best = d
+                            best_full = full
+                except OSError:
+                    pass
+                if best_full is not None:
+                    return best_full
+            last = cur
+            cur = os.path.dirname(cur)
+        return None
+
     def _get_std_include_dir(self) -> Optional[str]:
         """Locate the Ivy standard library include directory.
 
-        Tries the custom ``ivy_include_path`` first, then attempts to
-        import ``ivy`` and locate ``ivy/include/<version>/``, selecting
-        the highest version directory available.
+        Resolution chain (priority order):
+
+          1. ``self._ivy_include_path`` — explicit override (constructor
+             arg or env-var-driven setup).
+          2. **Workspace walk-up** via :meth:`_discover_workspace_stdlib`
+             — looks for ``<ancestor>/ivy/include/<version>/`` starting
+             from ``self._workspace_root``. Primary path for development
+             inside a panther_ivy checkout.
+          3. ``import ivy`` fallback — resolves to the installed Python
+             ivy package's ``include/<version>/``. Used outside a
+             panther_ivy checkout (e.g., system-wide tooling).
+
+        When (2) and (3) both resolve and disagree on path, emits a
+        ``[ivy-stale-stdlib]`` warning naming both — the workspace path
+        is authoritative; the warning lets contributors investigate the
+        stale install if needed (commonly: a system-wide ``pip install
+        panther_ivy`` that's now older than the worktree).
 
         Returns:
             Absolute path to the standard library include directory,
-            or None if not found.
+            or None if no resolution strategy succeeds.
         """
+        # 1. Explicit override.
         if self._ivy_include_path is not None:
             return self._ivy_include_path
+
+        # 2. Workspace walk-up (architecturally correct path inside a
+        #    panther_ivy checkout).
+        ws_stdlib = self._discover_workspace_stdlib()
+
+        # 3. Import-ivy fallback (also computed when ws_stdlib is set so
+        #    we can detect drift between the two).
+        import_stdlib: Optional[str] = None
         try:
             import ivy as ivy_mod
 
-            ivy_dir = os.path.dirname(os.path.realpath(ivy_mod.__file__))
-            inc_base = os.path.join(ivy_dir, "include")
-            if not os.path.isdir(inc_base):
-                return None
-            # Prefer 1.7 (matching #lang ivy1.7), fall back to highest
-            preferred = os.path.join(inc_base, "1.7")
-            if os.path.isdir(preferred):
-                return preferred
-            best: Optional[str] = None
-            for d in os.listdir(inc_base):
-                full = os.path.join(inc_base, d)
-                if os.path.isdir(full) and d.replace(".", "").isdigit():
-                    if best is None or d > best:
-                        best = d
-            if best is not None:
-                return os.path.join(inc_base, best)
+            # Guard the namespace-package case where the import succeeds
+            # but ``__file__`` is None (no concrete package file). The
+            # sibling conftest.py guard in tests/ documents the same
+            # failure mode; the resolver should degrade silently rather
+            # than crash with TypeError on realpath(None).
+            ivy_file = getattr(ivy_mod, "__file__", None)
+            if ivy_file is not None:
+                ivy_dir = os.path.dirname(os.path.realpath(ivy_file))
+                inc_base = os.path.join(ivy_dir, "include")
+                if os.path.isdir(inc_base):
+                    preferred = os.path.join(inc_base, "1.7")
+                    if os.path.isdir(preferred):
+                        import_stdlib = preferred
+                    else:
+                        best: Optional[str] = None
+                        for d in os.listdir(inc_base):
+                            full = os.path.join(inc_base, d)
+                            if os.path.isdir(full) and d.replace(".", "").isdigit():
+                                if best is None or d > best:
+                                    best = d
+                        if best is not None:
+                            import_stdlib = os.path.join(inc_base, best)
         except ImportError:
-            logger.debug("ivy package not importable; no standard include dir")
-        except (AttributeError, OSError) as exc:
+            logger.debug("ivy package not importable; no fallback stdlib discovery")
+        except (AttributeError, OSError, TypeError) as exc:
             logger.warning("Failed to locate ivy standard include directory: %s", exc)
-        return None
+
+        # Workspace wins if found; warn on drift.
+        if ws_stdlib is not None:
+            if import_stdlib is not None and os.path.realpath(
+                import_stdlib
+            ) != os.path.realpath(ws_stdlib):
+                logger.warning(
+                    "[ivy-stale-stdlib] using workspace stdlib at %s; "
+                    "import ivy resolved to %s (likely a stale install). "
+                    "Set IVY_INCLUDE_PATH to suppress this check.",
+                    ws_stdlib,
+                    import_stdlib,
+                )
+            return ws_stdlib
+
+        # No workspace match — return the import-ivy fallback (or None).
+        return import_stdlib
