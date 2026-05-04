@@ -259,3 +259,82 @@ class TestCanonicalCodes:
         include_diags = [d for d in diags if "brings" in d.message.lower()]
         assert len(include_diags) >= 1
         assert include_diags[0].code == "ivy.module.inheritedRequirements"
+
+
+class TestRangePrecision:
+    """Phase 5 cluster 5.3: token-precise spans on requirement diagnostics."""
+
+    def test_nomonitor_spans_action_name_token(self, tmp_path):
+        graph = RequirementGraph()
+        indexer = _make_indexer_with_graph(graph)
+        # Line 1 = "    action unguarded(x:t)"; "unguarded" starts at column 11.
+        source = "#lang ivy1.7\n    action unguarded(x:t)\n"
+        diags = compute_requirement_diagnostics(
+            source=source, filepath=str(tmp_path / "x.ivy"), indexer=indexer
+        )
+        d = next(d for d in diags if d.code == "ivy.action.noMonitor")
+        assert d.line == 1
+        assert d.character == len("    action ")
+        assert d.end_character == d.character + len("unguarded")
+
+    def test_high_impact_spans_state_var_name(self, tmp_path):
+        filepath = str(tmp_path / "x.ivy")
+        graph = RequirementGraph()
+        for i in range(5):
+            f = _abs(f"r_{i}.ivy")
+            req = RequirementNode(
+                id=f"{f}:{i}",
+                kind="require",
+                formula_text="st(X)",
+                line=i,
+                col=0,
+                file=f,
+                monitor_action="foo.step",
+                mixin_kind="before",
+            )
+            graph.add_requirement(req)
+            graph.add_edge(req.id, EdgeType.READS, "st")
+        indexer = _make_indexer_with_graph(graph)
+        # Line 1 = "    relation st(X:t)"; "st" starts at column 13.
+        source = "#lang ivy1.7\n    relation st(X:t)\n"
+        diags = compute_requirement_diagnostics(
+            source=source, filepath=filepath, indexer=indexer
+        )
+        d = next(d for d in diags if d.code == "ivy.invariant.highImpactVar")
+        assert d.line == 1
+        assert d.character == len("    relation ")
+        assert d.end_character == d.character + len("st")
+
+    def test_inherited_requirements_spans_include_name(self, tmp_path):
+        filepath = str(tmp_path / "main.ivy")
+        other_file = _abs("dep.ivy")
+        graph = RequirementGraph()
+        req = RequirementNode(
+            id=f"{other_file}:1",
+            kind="require",
+            formula_text="true",
+            line=1,
+            col=0,
+            file=other_file,
+            monitor_action="foo.step",
+            mixin_kind="before",
+        )
+        graph.add_requirement(req)
+
+        include_graph = MagicMock()
+        include_graph.get_transitive_includes.return_value = set()
+        resolver = MagicMock()
+        resolver.resolve.return_value = other_file
+
+        indexer = _make_indexer_with_graph(
+            graph, include_graph=include_graph, resolver=resolver
+        )
+        # Line 1 = "include dep"; "dep" starts at column 8.
+        source = "#lang ivy1.7\ninclude dep\n"
+        diags = compute_requirement_diagnostics(
+            source=source, filepath=filepath, indexer=indexer
+        )
+        d = next(d for d in diags if d.code == "ivy.module.inheritedRequirements")
+        assert d.line == 1
+        assert d.character == len("include ")
+        assert d.end_character == d.character + len("dep")

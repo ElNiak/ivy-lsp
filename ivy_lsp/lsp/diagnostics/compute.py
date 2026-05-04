@@ -116,7 +116,6 @@ def compute_requirement_diagnostics(
 
     diags: List[IvyDiagnostic] = []
     abs_path = os.path.abspath(filepath)
-    lines = source.split("\n")
 
     active_scope = None
     if isinstance(graph, ScopedRequirementModel):
@@ -130,7 +129,6 @@ def compute_requirement_diagnostics(
         for match in _INCLUDE_RE.finditer(source):
             inc_name = match.group(1)
             line_no = source[: match.start()].count("\n")
-            line_text = lines[line_no] if line_no < len(lines) else ""
 
             # Resolve include to file path
             resolved_path = None
@@ -168,6 +166,10 @@ def compute_requirement_diagnostics(
                 for req in inherited_reqs
             ]
 
+            # Span the include name token (group 1 of INCLUDE_RE).
+            line_start = source.rfind("\n", 0, match.start(1)) + 1
+            char_start = match.start(1) - line_start
+            char_end = match.end(1) - line_start
             diags.append(
                 IvyDiagnostic(
                     code="ivy.module.inheritedRequirements",
@@ -176,7 +178,9 @@ def compute_requirement_diagnostics(
                         f"from {inc_name} (and transitive includes)"
                     ),
                     line=line_no,
-                    end_character=len(line_text),
+                    character=char_start,
+                    end_line=line_no,
+                    end_character=char_end,
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-semantic",
                     related=related[:10],
@@ -187,7 +191,11 @@ def compute_requirement_diagnostics(
     for match in _ACTION_RE.finditer(source):
         action_name = match.group(1)
         line_no = source[: match.start()].count("\n")
-        line_text = lines[line_no] if line_no < len(lines) else ""
+
+        # Span the action name token (group 1 of _ACTION_RE).
+        line_start = source.rfind("\n", 0, match.start(1)) + 1
+        char_start = match.start(1) - line_start
+        char_end = match.end(1) - line_start
 
         if active_scope is not None:
             if not active_scope.is_action_exported(action_name):
@@ -202,7 +210,9 @@ def compute_requirement_diagnostics(
                             f"monitors in active test scope"
                         ),
                         line=line_no,
-                        end_character=len(line_text),
+                        character=char_start,
+                        end_line=line_no,
+                        end_character=char_end,
                         severity=lsp.DiagnosticSeverity.Hint,
                         source="ivy-semantic",
                     )
@@ -218,7 +228,9 @@ def compute_requirement_diagnostics(
                             f"monitors in scope"
                         ),
                         line=line_no,
-                        end_character=len(line_text),
+                        character=char_start,
+                        end_line=line_no,
+                        end_character=char_end,
                         severity=lsp.DiagnosticSeverity.Hint,
                         source="ivy-semantic",
                     )
@@ -229,7 +241,6 @@ def compute_requirement_diagnostics(
     for match in _STATE_VAR_RE.finditer(source):
         var_name = match.group(1)
         line_no = source[: match.start()].count("\n")
-        line_text = lines[line_no] if line_no < len(lines) else ""
 
         readers = graph.get_requirements_sharing_state_var(var_name)
         if active_scope is not None:
@@ -237,6 +248,10 @@ def compute_requirement_diagnostics(
             readers = [r for r in readers if r.file in scope_files]
         if len(readers) >= impact_threshold:
             files = {r.file for r in readers}
+            # Span the state-var name token (group 1 of _STATE_VAR_RE).
+            line_start = source.rfind("\n", 0, match.start(1)) + 1
+            char_start = match.start(1) - line_start
+            char_end = match.end(1) - line_start
             diags.append(
                 IvyDiagnostic(
                     code="ivy.invariant.highImpactVar",
@@ -245,7 +260,9 @@ def compute_requirement_diagnostics(
                         f"{len(readers)} requirements across {len(files)} files"
                     ),
                     line=line_no,
-                    end_character=len(line_text),
+                    character=char_start,
+                    end_line=line_no,
+                    end_character=char_end,
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-semantic",
                 )
