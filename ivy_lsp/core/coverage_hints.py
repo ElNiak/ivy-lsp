@@ -8,13 +8,36 @@ Generates Hint-severity diagnostics for missing coverage:
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import Any, List, Optional, Tuple
 
 from lsprotocol import types as lsp
 
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 
 logger = logging.getLogger(__name__)
+
+
+def _node_span(
+    node: Any,
+    name: str = "",
+) -> Tuple[int, Optional[int], Optional[int]]:
+    """Compute (character, end_line, end_character) for a graph node.
+
+    Reads ``start_col`` (or ``col`` for RequirementNode) and ``end_col``
+    from the node. Returns ``(0, None, None)`` when no column info is
+    available, letting the diagnostic fall through to
+    ``_DEFAULT_END_COLUMN`` at ``to_lsp()`` conversion. The ``name``
+    fallback spans the named token when only ``start_col`` is populated.
+    """
+    start = getattr(node, "start_col", None)
+    if start is None:
+        start = getattr(node, "col", 0)
+    end = getattr(node, "end_col", 0)
+    if end > start:
+        return start, node.line, end
+    if start > 0 and name:
+        return start, node.line, start + len(name)
+    return 0, None, None
 
 
 def compute_coverage_hints(
@@ -45,6 +68,7 @@ def compute_coverage_hints(
             continue
         reqs = graph.get_requirements_for_action(action_id)
         if not reqs:
+            char, end_line, end_char = _node_span(action_node, action_node.name)
             hints.append(
                 IvyDiagnostic(
                     code="ivy.action.noMonitor",
@@ -53,6 +77,9 @@ def compute_coverage_hints(
                         f"requirements (before/after)"
                     ),
                     line=action_node.line,
+                    character=char,
+                    end_line=end_line,
+                    end_character=end_char,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-semantic",
                     suggested_fix=(
@@ -143,6 +170,7 @@ def compute_coverage_hints(
                 ]
                 if var_names:
                     var_list = ", ".join(f"'{v}'" for v in var_names)
+                    char, end_line, end_char = _node_span(action_node, action_node.name)
                     hints.append(
                         IvyDiagnostic(
                             code="ivy.action.unguardedWrite",
@@ -151,6 +179,9 @@ def compute_coverage_hints(
                                 f"without a 'require' precondition"
                             ),
                             line=action_node.line,
+                            character=char,
+                            end_line=end_line,
+                            end_character=end_char,
                             severity=lsp.DiagnosticSeverity.Hint,
                             source="ivy-semantic",
                             suggested_fix=f"require {var_names[0]}(...) ",
@@ -175,6 +206,7 @@ def compute_coverage_hints(
         if is_written and var_id not in guarded_vars:
             if var_id in vars_covered_by_action_emit:
                 continue
+            char, end_line, end_char = _node_span(var_node, var_node.name)
             hints.append(
                 IvyDiagnostic(
                     code="ivy.action.unguardedWrite",
@@ -183,6 +215,9 @@ def compute_coverage_hints(
                         f"not guarded by any requirement"
                     ),
                     line=var_node.line,
+                    character=char,
+                    end_line=end_line,
+                    end_character=end_char,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-semantic",
                     suggested_fix=f"require {var_node.name}(...) ",
@@ -199,6 +234,7 @@ def compute_coverage_hints(
 
         # Dead guard: require false as unreachability sentinel
         if req.formula_text.strip() == "false":
+            char, end_line, end_char = _node_span(req)
             hints.append(
                 IvyDiagnostic(
                     code="ivy.require.deadGuard",
@@ -207,6 +243,9 @@ def compute_coverage_hints(
                         "unreachable. Called only through variant specializations."
                     ),
                     line=req.line,
+                    character=char,
+                    end_line=end_line,
+                    end_character=end_char,
                     severity=lsp.DiagnosticSeverity.Information,
                     source="ivy-lsp-coverage",
                     tags=[lsp.DiagnosticTag.Unnecessary],
@@ -223,6 +262,7 @@ def compute_coverage_hints(
                 and action.file == req.file
                 and action.line == req.line
             ):
+                char, end_line, end_char = _node_span(req)
                 hints.append(
                     IvyDiagnostic(
                         code="ivy.monitor.orphanedHook",
@@ -231,6 +271,9 @@ def compute_coverage_hints(
                             "which has no definition in the include closure."
                         ),
                         line=req.line,
+                        character=char,
+                        end_line=end_line,
+                        end_character=end_char,
                         severity=lsp.DiagnosticSeverity.Warning,
                         source="ivy-lsp-coverage",
                         tags=[lsp.DiagnosticTag.Unnecessary],
@@ -246,6 +289,7 @@ def compute_coverage_hints(
         has_outgoing = len(graph.get_outgoing_edges(var_id)) > 0
         has_incoming = len(graph.incoming.get(var_id, [])) > 0
         if not has_outgoing and not has_incoming:
+            char, end_line, end_char = _node_span(var_node, var_node.name)
             hints.append(
                 IvyDiagnostic(
                     code="ivy.state.unusedStateVar",
@@ -254,6 +298,9 @@ def compute_coverage_hints(
                         "writes in the requirement graph."
                     ),
                     line=var_node.line,
+                    character=char,
+                    end_line=end_line,
+                    end_character=end_char,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-lsp-coverage",
                     tags=[lsp.DiagnosticTag.Unnecessary],

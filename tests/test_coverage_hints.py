@@ -277,3 +277,102 @@ def test_var_centric_fires_for_writes_outside_in_file_actions():
     assert h.line == 4
     assert "'shared_state'" in h.message
     assert "written but" in h.message
+
+
+# --- Phase 5 cluster 5.2b: precise-range assertions ---
+
+
+def test_range_precision_no_monitor_with_columns():
+    """ActionNode populated with start_col/end_col emits precise range."""
+    g = RequirementGraph()
+    g.add_action(
+        ActionNode(
+            id="send",
+            name="send",
+            qualified_name="send",
+            file=FILEPATH,
+            line=10,
+            start_col=4,
+            end_col=8,
+        )
+    )
+    hints = compute_coverage_hints(g, FILEPATH)
+    nm = next(h for h in hints if h.code == "ivy.action.noMonitor")
+    assert nm.line == 10
+    assert nm.character == 4
+    assert nm.end_line == 10
+    assert nm.end_character == 8
+
+
+def test_range_precision_no_monitor_falls_back_when_columns_zero():
+    """ActionNode without column info preserves prior fall-through behaviour."""
+    g = RequirementGraph()
+    g.add_action(
+        ActionNode(
+            id="send",
+            name="send",
+            qualified_name="send",
+            file=FILEPATH,
+            line=10,
+            # start_col=0, end_col=0 (defaults)
+        )
+    )
+    hints = compute_coverage_hints(g, FILEPATH)
+    nm = next(h for h in hints if h.code == "ivy.action.noMonitor")
+    assert nm.line == 10
+    assert nm.character == 0
+    # No precise end_character → falls through to _DEFAULT_END_COLUMN at to_lsp().
+    assert nm.end_character is None
+
+
+def test_range_precision_unused_state_var_with_columns():
+    """StateVarNode populated with start_col/end_col emits precise range."""
+    g = RequirementGraph()
+    g.add_state_var(
+        StateVarNode(
+            id="orphan",
+            name="orphan",
+            qualified_name="orphan",
+            file=FILEPATH,
+            line=5,
+            start_col=9,
+            end_col=15,
+        )
+    )
+    hints = compute_coverage_hints(g, FILEPATH)
+    h = next(d for d in hints if d.code == "ivy.state.unusedStateVar")
+    assert h.line == 5
+    assert h.character == 9
+    assert h.end_character == 15
+
+
+def test_range_precision_dead_guard_uses_req_col():
+    """RequirementNode with col + end_col emits precise range."""
+    g = RequirementGraph()
+    g.add_action(
+        ActionNode(
+            id="dead",
+            name="dead",
+            qualified_name="dead",
+            file=FILEPATH,
+            line=5,
+        )
+    )
+    req = RequirementNode(
+        id=f"{FILEPATH}:7:require",
+        kind="require",
+        formula_text="false",
+        line=7,
+        col=4,
+        file=FILEPATH,
+        monitor_action="dead",
+        mixin_kind="before",
+        end_col=20,
+    )
+    g.add_requirement(req)
+    g.add_edge(req.id, EdgeType.CONSTRAINS, "dead")
+    hints = compute_coverage_hints(g, FILEPATH)
+    h = next(d for d in hints if d.code == "ivy.require.deadGuard")
+    assert h.line == 7
+    assert h.character == 4
+    assert h.end_character == 20
