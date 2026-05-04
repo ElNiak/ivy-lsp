@@ -16,6 +16,17 @@ from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.parsing.tiered_extractor import INCLUDE_PATTERN
 
 
+def _offset_to_line_col(source: str, offset: int) -> Tuple[int, int]:
+    """Convert an absolute byte offset in `source` to (line, column), both 0-based.
+
+    Handles multi-line content correctly: an offset on line 5 column 12
+    returns ``(5, 12)`` regardless of where the surrounding match started.
+    """
+    line = source.count("\n", 0, offset)
+    line_start = source.rfind("\n", 0, offset) + 1
+    return line, offset - line_start
+
+
 def check_structural_issues(
     source: str,
     _filepath: str,
@@ -37,6 +48,9 @@ def check_structural_issues(
     lines = source.split("\n")
 
     # 1. Missing #lang header
+    # Line-only by design: the diagnostic flags the *absence* of a token at
+    # the file start, so there is no source span to point at — the squiggle
+    # falls back to _DEFAULT_END_COLUMN at to_lsp() time.
     stripped = source.lstrip()
     if not stripped.startswith("#lang"):
         diags.append(
@@ -50,6 +64,11 @@ def check_structural_issues(
         )
 
     # 2. Unmatched braces
+    # Line-only by design: the brace-depth pass operates character-by-character
+    # but does not retain the source offset of the offending `{`/`}` token at
+    # the moment it triggers the imbalance. Refactoring the depth pass to
+    # remember positions is out of scope for this cluster; a future pass
+    # could swap this for a stack-of-positions approach.
     depth = 0
     for i, line_text in enumerate(lines):
         if line_text.strip().startswith("#lang"):
@@ -116,6 +135,10 @@ def check_structural_issues(
             if assign_match:
                 initialized.add(assign_match.group(1))
 
+    # Line-only by design: the diagnostic flags an *uninitialized* decl, so
+    # there is no 'after init' source span to point at — the decl line itself
+    # is the most useful anchor; column information for the decl-name token
+    # would require re-scanning, which is not worth the LOC.
     for name in mutable_names - initialized:
         diags.append(
             IvyDiagnostic(
@@ -135,12 +158,20 @@ def check_structural_issues(
     for m in _INIT_BLOCK_RE.finditer(source):
         body = m.group(1).strip()
         if not body:
-            line_no = source[: m.start()].count("\n")
+            start_line, start_char = _offset_to_line_col(source, m.start())
+            # Span "after init {" on the starting line. The block can span
+            # multiple lines via re.DOTALL; cap end at the first newline.
+            first_newline = source.find("\n", m.start())
+            block_end = m.end() if first_newline == -1 else min(m.end(), first_newline)
+            end_line, end_char = _offset_to_line_col(source, block_end)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.state.emptyInit",
                     message="Empty 'after init' block — no state is initialized.",
-                    line=line_no,
+                    line=start_line,
+                    character=start_char,
+                    end_line=end_line,
+                    end_character=end_char,
                     severity=lsp.DiagnosticSeverity.Warning,
                     source="ivy-lint",
                 )
@@ -158,6 +189,8 @@ def check_structural_issues(
             continue
         name = m.group(2)
         if name in seen_decls:
+            name_line, name_char = _offset_to_line_col(source, m.start(2))
+            _, name_end_char = _offset_to_line_col(source, m.end(2))
             diags.append(
                 IvyDiagnostic(
                     code="ivy.naming.duplicateDecl",
@@ -165,7 +198,10 @@ def check_structural_issues(
                         f"Duplicate declaration of '{name}' "
                         f"(first declared at line {seen_decls[name] + 1})."
                     ),
-                    line=line_no,
+                    line=name_line,
+                    character=name_char,
+                    end_line=name_line,
+                    end_character=name_end_char,
                     severity=lsp.DiagnosticSeverity.Error,
                     source="ivy-lint",
                 )
@@ -193,6 +229,16 @@ def check_structural_issues(
         has_require = "require " in action_body or "require(" in action_body
         has_assignment = ":=" in action_body
         if has_assignment and not has_require:
+            # Span the "action <name>...= {" header from after leading
+            # whitespace up to (but not including) the opening `{`. Cap at
+            # the first newline if the header spans multiple lines.
+            header_start = m.start() + len(m.group(1))
+            header_end = m.end() - 1  # m ends just past `{`; back up by one
+            first_newline = source.find("\n", header_start)
+            if first_newline != -1 and first_newline < header_end:
+                header_end = first_newline
+            start_line, start_char = _offset_to_line_col(source, header_start)
+            _, end_char = _offset_to_line_col(source, header_end)
             diags.append(
                 IvyDiagnostic(
                     code="ivy.action.unguardedWrite",
@@ -200,7 +246,10 @@ def check_structural_issues(
                         "Action modifies state but has no 'require' precondition "
                         "— consider adding guards."
                     ),
-                    line=action_line,
+                    line=start_line,
+                    character=start_char,
+                    end_line=start_line,
+                    end_character=end_char,
                     severity=lsp.DiagnosticSeverity.Hint,
                     source="ivy-semantic",
                 )
@@ -273,7 +322,9 @@ def check_unresolved_includes_raw(
             resolved = candidate if os.path.isfile(candidate) else None
 
         if resolved is None:
-            line_no = source[: match.start()].count("\n")  # 0-based
+            # Span the include name token (group 1 of INCLUDE_PATTERN).
+            name_line, name_char = _offset_to_line_col(source, match.start(1))
+            _, name_end_char = _offset_to_line_col(source, match.end(1))
             suggestion = (
                 _find_near_miss(inc_name, basename_map) if basename_map else None
             )
@@ -282,7 +333,10 @@ def check_unresolved_includes_raw(
                     IvyDiagnostic(
                         code="ivy.include.nearMiss",
                         message=f"Cannot resolve include '{inc_name}'. Did you mean '{suggestion}'?",
-                        line=line_no,
+                        line=name_line,
+                        character=name_char,
+                        end_line=name_line,
+                        end_character=name_end_char,
                         severity=lsp.DiagnosticSeverity.Warning,
                         source="ivy-lint",
                     )
@@ -292,7 +346,10 @@ def check_unresolved_includes_raw(
                     IvyDiagnostic(
                         code="ivy.module.unresolvedInclude",
                         message=f"Unresolved include: {inc_name}",
-                        line=line_no,
+                        line=name_line,
+                        character=name_char,
+                        end_line=name_line,
+                        end_character=name_end_char,
                         severity=lsp.DiagnosticSeverity.Error,
                         source="ivy-lint",
                     )
@@ -318,28 +375,35 @@ def check_duplicate_tags(
         List of ``IvyDiagnostic`` instances for tag issues found.
     """
     diags: List[IvyDiagnostic] = []
-    tags: List[Tuple[str, int]] = []
+    # Tag entry: (tag_val, line_no, char_start, char_end) — char offsets are
+    # within-line because _TAG_COMMENT_RE is searched against each line.
+    tags: List[Tuple[str, int, int, int]] = []
 
     for i, line in enumerate(source.splitlines()):
         m = _TAG_COMMENT_RE.search(line)
         if m:
             tag_val = m.group(1)
             line_no = i  # 0-based
+            char_start = m.start(1)
+            char_end = m.end(1)
             if not tag_val.isdigit():
                 diags.append(
                     IvyDiagnostic(
                         code="ivy.type.placeholderTag",
                         message=f"Tag value '{tag_val}' is not numeric — placeholder?",
                         line=line_no,
+                        character=char_start,
+                        end_line=line_no,
+                        end_character=char_end,
                         severity=lsp.DiagnosticSeverity.Information,
                         source="ivy-lint",
                     )
                 )
             else:
-                tags.append((tag_val, line_no))
+                tags.append((tag_val, line_no, char_start, char_end))
 
     seen: Dict[str, int] = {}
-    for tag_val, line_no in tags:
+    for tag_val, line_no, char_start, char_end in tags:
         if tag_val in seen:
             diags.append(
                 IvyDiagnostic(
@@ -349,6 +413,9 @@ def check_duplicate_tags(
                         f" — also used at line {seen[tag_val] + 1}."
                     ),
                     line=line_no,
+                    character=char_start,
+                    end_line=line_no,
+                    end_character=char_end,
                     severity=lsp.DiagnosticSeverity.Warning,
                     source="ivy-lint",
                 )
@@ -386,19 +453,38 @@ def check_lowercase_params(
     for match in _DECL_PARAM_RE.finditer(source):
         kind = match.group(1)
         params_str = match.group(3)
+        params_offset_in_source = match.start(3)
         line_no = source[: match.start()].count("\n")  # 0-based
         line_text = lines[line_no].lstrip() if line_no < len(lines) else ""
         if line_text.startswith("#"):
             continue
 
-        for param in params_str.split(","):
-            param = param.strip()
+        # Walk the param list while tracking each segment's offset within
+        # `params_str`. A param list can span multiple lines via the
+        # `[^)]+` pattern, so we recompute (line, col) per offending name
+        # instead of reusing the decl line.
+        for param_match in re.finditer(r"[^,]+", params_str):
+            raw_param = param_match.group(0)
+            raw_param_start_in_str = param_match.start()
+            param = raw_param.strip()
             if not param:
                 continue
             name = param.split(":")[0].strip()
             if not name:
                 continue
             if name[0].islower():
+                # Bound the search to the segment before `:` to avoid matching
+                # a substring that also appears inside a type annotation.
+                name_search_region = raw_param.split(":")[0]
+                name_offset_in_raw = name_search_region.find(name)
+                if name_offset_in_raw < 0:
+                    continue
+                name_abs_offset = (
+                    params_offset_in_source
+                    + raw_param_start_in_str
+                    + name_offset_in_raw
+                )
+                name_line, name_char = _offset_to_line_col(source, name_abs_offset)
                 diags.append(
                     IvyDiagnostic(
                         code="ivy.declaration.lowercaseParam",
@@ -407,7 +493,10 @@ def check_lowercase_params(
                             f" start with uppercase (Ivy treats lowercase"
                             f" as constant references)"
                         ),
-                        line=line_no,
+                        line=name_line,
+                        character=name_char,
+                        end_line=name_line,
+                        end_character=name_char + len(name),
                         severity=lsp.DiagnosticSeverity.Error,
                         source="ivy-lint",
                     )
@@ -440,7 +529,8 @@ def check_commented_out_requires(
         stripped = line.lstrip()
         if not stripped.startswith("#"):
             continue
-        content = stripped.lstrip("#").strip()
+        hash_stripped = stripped.lstrip("#")
+        content = hash_stripped.strip()
         words = content.split()
         first_word = words[0].lower() if words else ""
         if first_word not in _REQUIREMENT_KEYWORDS:
@@ -455,6 +545,13 @@ def check_commented_out_requires(
                     severity = lsp.DiagnosticSeverity.Information
                     break
 
+        # Span the require/ensure/assume/assert keyword inside the comment.
+        # Offset = leading-ws + leading-hashes + post-hash-leading-ws.
+        indent = len(line) - len(stripped)
+        hashes_count = len(stripped) - len(hash_stripped)
+        post_hash_ws = len(hash_stripped) - len(hash_stripped.lstrip())
+        keyword_start = indent + hashes_count + post_hash_ws
+        keyword_text = words[0]
         diags.append(
             IvyDiagnostic(
                 code="ivy.require.commentedOut",
@@ -463,6 +560,9 @@ def check_commented_out_requires(
                     " Consider removing or re-enabling."
                 ),
                 line=i,  # 0-based
+                character=keyword_start,
+                end_line=i,
+                end_character=keyword_start + len(keyword_text),
                 severity=severity,
                 source="ivy-lint",
             )

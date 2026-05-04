@@ -341,3 +341,204 @@ def test_guarded_action_ok():
     issues = check_structural_issues(source, "/fake/test.ivy")
     codes = [i.code for i in issues]
     assert "ivy.action.unguardedWrite" not in codes
+
+
+# --- Phase 5 cluster B: precise-range assertions per emit site ---
+
+
+def _diag_by_code(issues, code):
+    """Return the first diagnostic with the given code, or None."""
+    for d in issues:
+        if d.code == code:
+            return d
+    return None
+
+
+def test_range_precision_empty_init():
+    source = "#lang ivy1.7\nrelation foo(C:cid)\nafter init {\n}\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.state.emptyInit")
+    assert d is not None
+    assert d.line == 2
+    assert d.character == 0  # "after" starts at column 0
+    assert d.end_character is not None
+    assert d.end_character > d.character
+
+
+def test_range_precision_duplicate_decl():
+    source = "#lang ivy1.7\nrelation foo(C:cid)\nrelation foo(C:cid)\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.naming.duplicateDecl")
+    assert d is not None
+    assert d.line == 2
+    # Second `foo` starts at column 9 of "relation foo(C:cid)"
+    assert d.character == len("relation ")
+    assert d.end_character == d.character + len("foo")
+
+
+def test_range_precision_unguarded_write():
+    source = "#lang ivy1.7\naction send(S:cid) = {\n    sent(S) := true;\n}\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.action.unguardedWrite")
+    assert d is not None
+    assert d.line == 1
+    assert d.character == 0
+    assert d.end_character is not None
+    # Header span ends before the `{`; should be roughly len("action send(S:cid) =")
+    assert d.end_character > d.character
+    assert d.end_character <= len("action send(S:cid) = ")
+
+
+def test_range_precision_unresolved_include():
+    source = "#lang ivy1.7\ninclude completely_unknown_module\n"
+
+    def resolver(name, from_file):
+        return None
+
+    issues = check_unresolved_includes_raw(
+        source,
+        "/fake/test.ivy",
+        resolve_callback=resolver,
+        basename_map={},
+    )
+    d = _diag_by_code(issues, "ivy.module.unresolvedInclude")
+    assert d is not None
+    assert d.line == 1
+    assert d.character == len("include ")
+    assert d.end_character == d.character + len("completely_unknown_module")
+
+
+def test_range_precision_near_miss_include():
+    source = "#lang ivy1.7\ninclude ivy_quic_shim_client_example_ext\n"
+    known_basenames = {
+        "ivy_quic_shim_client_ext_example": [
+            "/fake/ivy_quic_shim_client_ext_example.ivy"
+        ],
+    }
+
+    def resolver(name, from_file):
+        return None
+
+    issues = check_unresolved_includes_raw(
+        source,
+        "/fake/test.ivy",
+        resolve_callback=resolver,
+        basename_map=known_basenames,
+    )
+    d = _diag_by_code(issues, "ivy.include.nearMiss")
+    assert d is not None
+    assert d.line == 1
+    assert d.character == len("include ")
+    assert d.end_character == d.character + len("ivy_quic_shim_client_example_ext")
+
+
+def test_range_precision_placeholder_tag():
+    source = (
+        "#lang ivy1.7\n"
+        "object unknown = {  # tag = x\n"
+        "    variant this of tp = struct { val : nat }\n"
+        "}\n"
+    )
+    issues = check_duplicate_tags(source, "/fake/tp.ivy")
+    d = _diag_by_code(issues, "ivy.type.placeholderTag")
+    assert d is not None
+    assert d.line == 1
+    # "x" is the last char of "object unknown = {  # tag = x"
+    line_text = source.splitlines()[1]
+    assert d.character == line_text.index("= x") + 2
+    assert d.end_character == d.character + 1
+
+
+def test_range_precision_duplicate_tag():
+    source = (
+        "#lang ivy1.7\n"
+        "object foo = {  # tag = 15\n"
+        "    variant this of tp = struct { val : nat }\n"
+        "}\n"
+        "object bar = {  # tag = 15\n"
+        "    variant this of tp = struct { val : nat }\n"
+        "}\n"
+    )
+    issues = check_duplicate_tags(source, "/fake/tp.ivy")
+    d = _diag_by_code(issues, "ivy.type.duplicateTag")
+    assert d is not None
+    assert d.line == 4  # second "tag = 15" line
+    line_text = source.splitlines()[4]
+    assert d.character == line_text.index("= 15") + 2
+    assert d.end_character == d.character + 2
+
+
+def test_range_precision_lowercase_param_single_line():
+    from ivy_lsp.core.structural_lint import check_lowercase_params
+
+    source = "#lang ivy1.7\nrelation connected(src:cid, dst:cid)\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    src_d = next(i for i in issues if "src" in i.message)
+    dst_d = next(i for i in issues if "dst" in i.message)
+    line_text = source.splitlines()[1]
+    assert src_d.line == 1
+    assert src_d.character == line_text.index("src")
+    assert src_d.end_character == src_d.character + 3
+    assert dst_d.line == 1
+    assert dst_d.character == line_text.index("dst")
+    assert dst_d.end_character == dst_d.character + 3
+
+
+def test_range_precision_lowercase_param_multi_line():
+    """Param list spanning multiple lines: column tracking must follow newlines."""
+    from ivy_lsp.core.structural_lint import check_lowercase_params
+
+    source = "#lang ivy1.7\nrelation linked(\n    src:cid,\n    dst:cid\n)\n"
+    issues = check_lowercase_params(source, "/fake/test.ivy")
+    src_d = next(i for i in issues if "src" in i.message)
+    dst_d = next(i for i in issues if "dst" in i.message)
+    # `src` is on line 2 at column 4; `dst` is on line 3 at column 4
+    assert src_d.line == 2
+    assert src_d.character == 4
+    assert src_d.end_character == 7
+    assert dst_d.line == 3
+    assert dst_d.character == 4
+    assert dst_d.end_character == 7
+
+
+def test_range_precision_commented_out_require():
+    source = "#lang ivy1.7\n" "before foo {\n" "    # require y > 0;\n" "}\n"
+    issues = check_commented_out_requires(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.require.commentedOut")
+    assert d is not None
+    assert d.line == 2
+    # Line is "    # require y > 0;": "require" starts at column 6
+    line_text = source.splitlines()[2]
+    assert d.character == line_text.index("require")
+    assert d.end_character == d.character + len("require")
+
+
+# --- Phase 5 cluster B: line-only sites stay line-only by design ---
+
+
+def test_line_only_missing_lang_header_no_regression():
+    """Line-only fallback site: no token to span; diagnostic still fires."""
+    source = "type t\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.syntax.missingLangHeader")
+    assert d is not None
+    # No precise end_character set; falls through to _DEFAULT_END_COLUMN at to_lsp().
+    assert d.end_character is None
+
+
+def test_line_only_unmatched_brace_no_regression():
+    """Line-only fallback site: brace-depth tracking lost the token position."""
+    source = "#lang ivy1.7\n}\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.syntax.unmatchedBrace")
+    assert d is not None
+    assert d.end_character is None
+
+
+def test_line_only_missing_init_no_regression():
+    """Line-only fallback site: diagnostic flags absence of init."""
+    source = "#lang ivy1.7\nrelation conn_seen(C:cid)\n"
+    issues = check_structural_issues(source, "/fake/test.ivy")
+    d = _diag_by_code(issues, "ivy.state.missingInit")
+    assert d is not None
+    assert d.end_character is None
