@@ -208,34 +208,6 @@ class TestUnmatchedBraceQuickFix:
         assert edit.new_text.count("}") == 2
 
 
-class TestInvariantUnguardedWriteQuickFix:
-    def test_inserts_require_guard_below_diag(self):
-        """Quickfix inserts a require-guard skeleton on the line below the diagnostic."""
-        from ivy_lsp.lsp.code_action import compute_code_actions
-
-        source = "#lang ivy1.7\nrelation conn(C:cid)\n"
-        diag = Diagnostic(
-            range=Range(start=Position(1, 0), end=Position(1, 20)),
-            message="Unguarded state variable write: 'conn'",
-            severity=DiagnosticSeverity.Hint,
-            source="ivy-semantic",
-            code="ivy.invariant.unguardedWrite",
-        )
-        actions = compute_code_actions("file:///test.ivy", source, [diag])
-        fix = [a for a in actions if a.kind == CodeActionKind.QuickFix]
-        assert len(fix) == 1
-        assert "conn" in fix[0].title
-        edits = fix[0].edit.changes["file:///test.ivy"]
-        assert len(edits) == 1
-        edit = edits[0]
-        # Insert at line 2 (one below the diagnostic's end line).
-        assert edit.range.start.line == 2
-        assert edit.range.start.character == 0
-        # Snippet contains the require keyword and the var name.
-        assert "require" in edit.new_text
-        assert "conn" in edit.new_text
-
-
 class TestMissingFinalizeQuickFix:
     def test_appends_finalize_skeleton_at_eof(self):
         """Quickfix appends an `export action _finalize` skeleton at end of file."""

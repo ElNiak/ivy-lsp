@@ -254,20 +254,6 @@ _reg(
 
 _reg(
     DiagnosticDescriptor(
-        code="ivy.invariant.unguardedWrite",
-        title="Unguarded state variable write: '{var}'",
-        explanation=(
-            "State variable is written but not guarded by any requirement. "
-            "Add a require/ensure clause to constrain writes."
-        ),
-        default_severity=lsp.DiagnosticSeverity.Hint,
-        source="ivy-semantic",
-        has_quick_fix=True,
-    )
-)
-
-_reg(
-    DiagnosticDescriptor(
         code="ivy.invariant.highImpactVar",
         title="High-impact state variable: '{var}'",
         explanation=(
