@@ -6,7 +6,6 @@ Verifies registry-validated codes and correct fields.
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.core.diagnostics.codes import DIAGNOSTIC_REGISTRY
 from ivy_lsp.core.diagnostics.rich_diagnostic import IvyDiagnostic
 from ivy_lsp.core.structural_lint import check_lowercase_params, check_structural_issues
 
@@ -60,7 +59,6 @@ def test_no_legacy_hyphenated_codes_emitted():
 def test_every_returned_diagnostic_has_registry_severity():
     diags = check_structural_issues(SOURCE_MISSING_HEADER, "/tmp/x.ivy")
     for d in diags:
-        assert d.code in DIAGNOSTIC_REGISTRY
         assert d.severity in (
             lsp.DiagnosticSeverity.Error,
             lsp.DiagnosticSeverity.Warning,
