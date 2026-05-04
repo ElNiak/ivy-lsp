@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ivy_lsp.core.structural_lint import check_lowercase_params
 from ivy_lsp.core.structural_lint import (
     check_structural_issues as _check_structural_issues_core,
 )
@@ -55,6 +56,7 @@ def _check_structural_issues(
         d.to_mcp_dict()
         for d in check_unresolved_includes_raw(source, filepath, resolve_callback)
     )
+    diags.extend(d.to_mcp_dict() for d in check_lowercase_params(source, filepath))
     return diags
 
 
