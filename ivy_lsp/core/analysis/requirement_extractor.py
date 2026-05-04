@@ -339,7 +339,13 @@ def _add_requirement(
     """Create a RequirementNode from an AST node and add to the list."""
     line = _get_line(node)
     col = 0
+    end_col = 0
     formula_text = _formula_to_text(node)
+    # End column defaults to end-of-line so that a populated `col` plus the
+    # default `end_col=0` does not produce an inverted range. Source-line
+    # length is the safest upper bound when the AST does not carry one.
+    if 0 <= line < len(source_lines):
+        end_col = len(source_lines[line])
     bracket_tags = _extract_bracket_tags(source_lines, line)
 
     req_id = f"{filepath}:{line}"
@@ -355,6 +361,7 @@ def _add_requirement(
             mixin_kind=mixin_kind,
             bracket_tags=bracket_tags,
             ast_node=node.args[0] if node.args else None,
+            end_col=end_col,
         )
     )
 

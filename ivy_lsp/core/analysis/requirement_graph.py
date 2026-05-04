@@ -179,6 +179,7 @@ class RequirementNode:
         default_factory=list
     )  # parsed from "# [4]" or "# [rfc9000:4.1, rfc9000:8.1]"
     ast_node: Any = None  # reference to original AST node
+    end_col: int = 0  # 0-based; 0 falls through to _DEFAULT_END_COLUMN at to_lsp()
 
 
 @dataclass
@@ -192,6 +193,8 @@ class StateVarNode:
     line: int
     is_relation: bool = False  # True if relation (bool sort + args)
     params: Optional[str] = None  # e.g. "(C:cid, L:quic_packet_type)"
+    start_col: int = 0  # 0-based; 0 falls through to line-start
+    end_col: int = 0  # 0-based; 0 falls through to _DEFAULT_END_COLUMN at to_lsp()
 
 
 @dataclass
@@ -203,6 +206,8 @@ class ActionNode:
     qualified_name: str
     file: str
     line: int
+    start_col: int = 0  # 0-based; 0 falls through to line-start
+    end_col: int = 0  # 0-based; 0 falls through to _DEFAULT_END_COLUMN at to_lsp()
 
 
 @dataclass
@@ -215,6 +220,8 @@ class PropertyNode:
     formula_text: str
     file: str
     line: int
+    start_col: int = 0  # 0-based; 0 falls through to line-start
+    end_col: int = 0  # 0-based; 0 falls through to _DEFAULT_END_COLUMN at to_lsp()
 
 
 # ---------------------------------------------------------------------------
@@ -490,13 +497,17 @@ class RequirementGraph:
             for sym in symbols:
                 if sym.kind in (SymbolKind.Function, SymbolKind.Method):
                     if sym.name not in self.actions:
+                        # IvySymbol.range is (start_line, start_col, end_line, end_col).
+                        sym_range = sym.range if sym.range else None
                         self.add_action(
                             ActionNode(
                                 id=sym.name,
                                 name=get_last_component(sym.name),
                                 qualified_name=sym.name,
                                 file=sym.file_path or "",
-                                line=sym.range[0] if sym.range else 0,
+                                line=sym_range[0] if sym_range else 0,
+                                start_col=sym_range[1] if sym_range else 0,
+                                end_col=sym_range[3] if sym_range else 0,
                             )
                         )
 
@@ -509,6 +520,8 @@ class RequirementGraph:
                             qualified_name=req.monitor_action,
                             file=req.file,
                             line=req.line,
+                            # No symbol available for monitor_action references;
+                            # leave start_col/end_col at default 0.
                         )
                     )
 
@@ -525,14 +538,17 @@ class RequirementGraph:
             for var_name in known_vars:
                 if var_name not in self.state_vars:
                     sym = sym_lookup.get(var_name)
+                    sym_range = sym.range if sym and sym.range else None
                     self.add_state_var(
                         StateVarNode(
                             id=var_name,
                             name=get_last_component(var_name),
                             qualified_name=var_name,
                             file=sym.file_path if sym and sym.file_path else "",
-                            line=sym.range[0] if sym and sym.range else 0,
+                            line=sym_range[0] if sym_range else 0,
                             is_relation=False,
+                            start_col=sym_range[1] if sym_range else 0,
+                            end_col=sym_range[3] if sym_range else 0,
                         )
                     )
 
