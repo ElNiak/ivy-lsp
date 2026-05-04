@@ -87,7 +87,7 @@ def compute_coverage_hints(
     # 2a. Action-centric unguarded writes (names specific vars per action)
     # Runs FIRST so it can record which vars it covers; the var-centric
     # path below then skips those to avoid double-warning the same
-    # (action, var) pair (Phase 1 review issue 7: cross-path dedup).
+    # (action, var) pair.
     # -----------------------------------------------------------------
     file_actions = sorted(
         (a for a in graph.actions.values() if a.file == filepath),
@@ -165,8 +165,8 @@ def compute_coverage_hints(
     # 2b. State vars written outside any in-file action's range — covered
     # by neither the action-centric emit above nor a `require`. Catches
     # writes from cross-file actions or module-level statements that the
-    # action-centric path cannot reach. Phase 1 review issue 7: cross-path
-    # dedup via vars_covered_by_action_emit.
+    # action-centric path cannot reach. Skip vars already covered by 2a
+    # via vars_covered_by_action_emit.
     # -----------------------------------------------------------------
     for var_id, var_node in graph.state_vars.items():
         if var_node.file != filepath:
