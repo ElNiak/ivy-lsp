@@ -94,7 +94,13 @@ def discover_stdlib_modules(
         try:
             import ivy as ivy_mod
 
-            ivy_dir = os.path.dirname(os.path.realpath(ivy_mod.__file__))
+            # Guard against namespace-package `ivy` whose ``__file__`` is None
+            # (the import succeeds but the package has no concrete file path).
+            # Mirrors the same guard in ``tests/conftest.py``.
+            ivy_file = getattr(ivy_mod, "__file__", None)
+            if ivy_file is None:
+                return _STDLIB_FALLBACK
+            ivy_dir = os.path.dirname(os.path.realpath(ivy_file))
             inc_base = os.path.join(ivy_dir, "include")
             if not os.path.isdir(inc_base):
                 return _STDLIB_FALLBACK
