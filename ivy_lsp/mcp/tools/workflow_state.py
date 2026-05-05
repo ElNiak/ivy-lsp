@@ -129,8 +129,6 @@ def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
         workflow: str | None = None,
         phase: str | None = None,
         protocol: str | None = None,
-        caller: str | None = None,
-        invocation_depth: int = 0,
         state: str | dict | None = None,
         event_type: str | None = None,
         last_n: int = 20,
@@ -160,8 +158,6 @@ def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
             phase: For action="set": current phase within the workflow.
             protocol: Protocol name (e.g. "bgp", "quic"). Falls back to
                 active workspace if omitted.
-            caller: For action="set": identifier of the invoking workflow.
-            invocation_depth: For action="set": nesting depth (default 0).
             state: For action="set_build": JSON-encoded build state dict.
                 For action="append_journal": JSON-encoded event payload dict.
             event_type: For action="append_journal": event type
@@ -170,7 +166,7 @@ def register_workflow_state_tools(mcp: Any, ctx: Any) -> None:
                 to return (default 20).
         """
         if action == "set":
-            return _handle_set(ctx, protocol, workflow, phase, caller, invocation_depth)
+            return _handle_set(ctx, protocol, workflow, phase)
         elif action == "get":
             return _handle_get(ctx, protocol)
         elif action == "clear":
@@ -195,8 +191,6 @@ def _handle_set(
     protocol: str | None,
     workflow: str | None,
     phase: str | None,
-    caller: str | None,
-    invocation_depth: int,
 ) -> dict:
     if not workflow:
         return error_response("action='set' requires 'workflow' parameter.")
@@ -219,11 +213,8 @@ def _handle_set(
     data: dict[str, Any] = {
         "workflow": workflow,
         "phase": phase,
-        "invocation_depth": invocation_depth,
         "started": started,
     }
-    if caller is not None:
-        data["caller"] = caller
 
     filepath = os.path.join(state_path, _ACTIVE_WORKFLOW_FILE)
     with open(filepath, "w") as f:

@@ -103,7 +103,7 @@ async def test_set_response_is_trimmed(workflow_tool):
 
 @pytest.mark.asyncio
 async def test_set_persists_full_data_to_file(workflow_tool):
-    """The YAML file remains the source of truth for inputs we no longer echo."""
+    """The YAML file persists the canonical 3-field active-workflow schema."""
     tool_fn, ctx, tmp_path = workflow_tool
 
     await tool_fn(
@@ -111,8 +111,6 @@ async def test_set_persists_full_data_to_file(workflow_tool):
         workflow="build",
         phase="scoped",
         protocol="bgp",
-        caller="cli",
-        invocation_depth=2,
     )
 
     state_file = (
@@ -122,8 +120,11 @@ async def test_set_persists_full_data_to_file(workflow_tool):
     data = yaml.safe_load(state_file.read_text())
     assert data["workflow"] == "build"
     assert data["phase"] == "scoped"
-    assert data["caller"] == "cli"
-    assert data["invocation_depth"] == 2
+    assert "started" in data
+    # Regression guard for the journaling-contract.md §4 invariant: the YAML
+    # carries the 3-field current-state triple only; composition history
+    # lives in the workflow-journal pending_dispatch / workflow_resumed pair.
+    assert set(data.keys()) == {"workflow", "phase", "started"}
 
 
 @pytest.mark.asyncio
