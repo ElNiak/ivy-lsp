@@ -296,6 +296,9 @@ def register_traceability_tools(mcp: Any, ctx: Any) -> None:
         protocol: str | None = None,
     ) -> dict:
         """Identify coverage gaps: unguarded state vars, uncovered RFC requirements."""
+        model, err = await get_model_or_error(ctx)
+        if err:
+            return err
         from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps
 
         effective_protocol = resolve_effective_protocol(

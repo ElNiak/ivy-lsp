@@ -22,6 +22,40 @@ from ivy_lsp.mcp.server import McpServerState, _sidecar_monitor, create_mcp_app
 logger = logging.getLogger(__name__)
 
 
+def _restore_workspace_at_boot(ctx: Any, root: str) -> None:
+    """Restore persisted workspace state before prewarm.
+
+    Mirrors tools/workspace.py:_handle_get fall-back-restore branch so the
+    model build sees the filtered resolver scope. Without this, prewarm
+    iterates the full global scope (e.g. 643 .ivy files) and times out.
+    """
+    from ivy_lsp.core.workspace.active_workspace import ActiveWorkspace
+
+    state_path = os.path.join(root, ".ivy-workspace-state.json")
+    if not os.path.exists(state_path):
+        return
+    try:
+        ws = ActiveWorkspace.load(state_path)
+    except Exception:
+        logger.warning(
+            "Failed to restore persisted workspace at boot",
+            exc_info=True,
+        )
+        return
+    if not ws.is_set():
+        return
+    ctx.active_workspace = ws
+    if ctx.include_resolver is not None and hasattr(
+        ctx.include_resolver, "set_active_workspace"
+    ):
+        ctx.include_resolver.set_active_workspace(ws.active_layers)
+    logger.info(
+        "[MCP-WORKSPACE] Restored workspace at boot: %s (%d layers)",
+        ws.active_group,
+        len(ws.active_layers),
+    )
+
+
 def start_mcp(
     workspace_root: str | None = None,
     semantic_model: Any = None,
@@ -241,11 +275,13 @@ def start_mcp(
             state.workspace_context = ws_ctx
         except Exception:
             logger.debug("WorkspaceContext loading failed in MCP", exc_info=True)
+        _restore_workspace_at_boot(ctx, root)
         return mcp
 
     # --- Background workspace load + pre-warming (non-blocking) ---
     # Workspace context and model/graph pre-warming run in a daemon thread
     # so the MCP stdio transport starts immediately (avoids 30s timeout).
+    _restore_workspace_at_boot(ctx, root)
     state.prewarm(tool_context=ctx)
 
     # Start sidecar upgrade monitor in a daemon thread

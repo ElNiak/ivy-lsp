@@ -180,6 +180,12 @@ def _handle_get(ctx: Any) -> dict:
                 ws = None
             if ws is not None and ws.is_set():
                 ctx.active_workspace = ws  # Restore in-memory state
+                if ctx.include_resolver is not None and hasattr(
+                    ctx.include_resolver, "set_active_workspace"
+                ):
+                    ctx.include_resolver.set_active_workspace(ws.active_layers)
+                if hasattr(ctx, "_basename_cache_invalidate"):
+                    ctx._basename_cache_invalidate()
                 logger.info(
                     "Restored workspace from persisted state: %s", ws.active_group
                 )
