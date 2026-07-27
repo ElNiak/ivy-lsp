@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ivy_lsp.analysis.light_mode_extractor import extract_exports_imports_light
-from ivy_lsp.analysis.test_scope import ExportImportInfo
+from ivy_lsp.core.analysis.light_mode_extractor import extract_exports_imports_light
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
 
 class TestExportImportInfoCreation:
@@ -227,7 +227,7 @@ def _make_import_decl(names_and_lines):
 # Full-mode AST-based export/import extraction tests
 # ---------------------------------------------------------------------------
 
-from ivy_lsp.analysis.requirement_extractor import extract_exports_imports_full
+from ivy_lsp.core.analysis.requirement_extractor import extract_exports_imports_full
 
 FILEPATH = "/test/file.ivy"
 

@@ -1,0 +1,353 @@
+"""Orchestrates subprocess-based Ivy compilations with caching.
+
+Thread-safe for concurrent ``compile_async`` calls (semaphore-guarded).
+Cache reads (``get_cached``) are protected by an internal lock.
+Used by AnalysisPipeline for Tier 3 analysis and by bulk compilation
+for background model enrichment.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import multiprocessing
+import multiprocessing.connection
+import os
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
+
+from ivy_lsp.core.compilation.ir import CompiledModuleIR
+from ivy_lsp.infra.observability import LogCategory, log_phase
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _CacheEntry:
+    ir: CompiledModuleIR
+    content_hash: str
+    timestamp: float
+
+
+class CompilerManager:
+    """Manages subprocess-based Ivy compilations with caching and lifecycle."""
+
+    def __init__(
+        self,
+        staging_dir: Optional[str] = None,
+        timeout: float = 300.0,
+        cache_ttl: float = 600.0,
+        max_concurrent: int = 1,
+    ) -> None:
+        """Initialize compiler manager with cache and concurrency settings."""
+        self._staging_dir = staging_dir
+        self._timeout = timeout
+        self._cache_ttl = cache_ttl
+        self._max_concurrent = max_concurrent
+        self._cache: Dict[str, _CacheEntry] = {}
+        self._lock = threading.Lock()
+        self._active: Dict[str, Any] = {}  # Process (spawn or fork)
+        self._semaphore = threading.Semaphore(max(1, max_concurrent))
+
+    def compile_async(
+        self,
+        source: str,
+        filepath: str,
+        callback: Callable[[CompiledModuleIR], None],
+    ) -> None:
+        """Start compilation in a subprocess, call back with result."""
+        content_hash = hashlib.sha256(source.encode()).hexdigest()
+
+        cached = self._get_cached_by_hash(filepath, content_hash)
+        if cached is not None:
+            log_phase(
+                logger,
+                category=LogCategory.PERFORMANCE,
+                phase="compile",
+                message="Compiler cache hit",
+                data={"filepath": filepath},
+                level=logging.DEBUG,
+            )
+            callback(cached)
+            return
+
+        self._cancel_if_running(filepath)
+
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        try:
+            proc = ctx.Process(
+                target=_worker_entry,
+                args=(source, filepath, child_conn, self._staging_dir),
+                daemon=True,
+            )
+            log_phase(
+                logger,
+                category=LogCategory.ACTIVITY,
+                phase="compile",
+                message="Compilation process prepared",
+                data={"filepath": filepath, "staging_dir": self._staging_dir},
+                level=logging.DEBUG,
+            )
+
+            def _wait():
+                wait_start = time.monotonic()
+                acquired = self._semaphore.acquire(timeout=60.0)
+                queue_wait_ms = (time.monotonic() - wait_start) * 1000
+                if not acquired:
+                    log_phase(
+                        logger,
+                        category=LogCategory.DIAGNOSTIC,
+                        phase="compile",
+                        message="Compiler semaphore timeout",
+                        data={"filepath": filepath, "wait_ms": round(queue_wait_ms, 2)},
+                        level=logging.WARNING,
+                    )
+                    with self._lock:
+                        self._active.pop(filepath, None)
+                    callback(
+                        CompiledModuleIR.empty(
+                            filepath,
+                            errors=["Compilation queue timeout after 60s"],
+                            duration=60.0,
+                        )
+                    )
+                    return
+                log_phase(
+                    logger,
+                    category=LogCategory.PERFORMANCE,
+                    phase="compile",
+                    message="Compiler semaphore acquired",
+                    data={"filepath": filepath, "wait_ms": round(queue_wait_ms, 2)},
+                    level=logging.DEBUG,
+                )
+                try:
+                    try:
+                        proc.start()
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to start compilation process for %s: %s",
+                            filepath,
+                            exc,
+                        )
+                        raise
+                    child_conn.close()
+                    if parent_conn.poll(self._timeout):
+                        try:
+                            ir = parent_conn.recv()
+                        except EOFError:
+                            ir = CompiledModuleIR.empty(
+                                filepath,
+                                errors=[
+                                    "Compilation subprocess crashed without producing output"
+                                ],
+                                duration=self._timeout,
+                            )
+                            logger.warning(
+                                "Compilation subprocess crashed for %s (EOFError on pipe)",
+                                filepath,
+                            )
+                        except Exception as recv_exc:
+                            ir = CompiledModuleIR.empty(
+                                filepath,
+                                errors=[
+                                    f"Failed to read compilation result: {type(recv_exc).__name__}: {recv_exc}"
+                                ],
+                                duration=self._timeout,
+                            )
+                            logger.warning(
+                                "Failed to read compilation result for %s: %s",
+                                filepath,
+                                recv_exc,
+                            )
+                        if not isinstance(ir, CompiledModuleIR):
+                            ir = CompiledModuleIR.empty(
+                                filepath,
+                                errors=[
+                                    "Invalid response type from compilation subprocess"
+                                ],
+                                duration=self._timeout,
+                            )
+                        self._put_cache(filepath, content_hash, ir)
+                        log_phase(
+                            logger,
+                            category=LogCategory.PERFORMANCE,
+                            phase="compile",
+                            message="Compilation completed",
+                            data={"filepath": filepath, "success": ir.success},
+                            level=logging.INFO,
+                        )
+                        callback(ir)
+                    else:
+                        proc.kill()
+                        try:
+                            while parent_conn.poll(0):
+                                parent_conn.recv()
+                        except (EOFError, OSError):
+                            pass
+                        proc.join(timeout=5)
+                        if proc.is_alive():
+                            logger.warning(
+                                "Compilation process for %s did not exit after kill+5s",
+                                filepath,
+                            )
+                        ir = CompiledModuleIR.empty(
+                            filepath,
+                            errors=[f"Compilation timed out after {self._timeout}s"],
+                            duration=self._timeout,
+                        )
+                        log_phase(
+                            logger,
+                            category=LogCategory.DIAGNOSTIC,
+                            phase="compile",
+                            message="Compilation timed out",
+                            data={"filepath": filepath, "timeout_s": self._timeout},
+                            level=logging.WARNING,
+                        )
+                        callback(ir)
+                except Exception as exc:
+                    try:
+                        child_conn.close()
+                    except OSError:
+                        pass
+                    callback(
+                        CompiledModuleIR.empty(
+                            filepath, errors=[str(exc)], duration=0.0
+                        )
+                    )
+                finally:
+                    try:
+                        parent_conn.close()
+                    except OSError:
+                        logger.debug("Could not close parent_conn for %s", filepath)
+                    with self._lock:
+                        if self._active.get(filepath) is proc:
+                            self._active.pop(filepath, None)
+                    self._semaphore.release()
+
+            with self._lock:
+                self._active[filepath] = proc
+
+            t = threading.Thread(
+                target=_wait,
+                daemon=True,
+                name=f"ivy-compile-{os.path.basename(filepath)}",
+            )
+            t.start()
+        except Exception:
+            parent_conn.close()
+            child_conn.close()
+            raise
+
+    def compile_sync(self, source: str, filepath: str) -> CompiledModuleIR:
+        """Blocking compilation. For use in custom commands."""
+        event = threading.Event()
+        result_holder: list = [None]
+
+        def _cb(ir: CompiledModuleIR) -> None:
+            result_holder[0] = ir
+            event.set()
+
+        self.compile_async(source, filepath, _cb)
+        event.wait(timeout=self._timeout + 10)
+        return result_holder[0] or CompiledModuleIR.empty(
+            filepath, errors=["Compilation did not complete"], duration=0.0
+        )
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Return cache/process statistics under the internal lock."""
+        with self._lock:
+            return {
+                "cachedFiles": len(self._cache),
+                "activeProcesses": len(self._active),
+                "maxConcurrent": self._max_concurrent,
+            }
+
+    def get_cached(self, filepath: str) -> Optional[CompiledModuleIR]:
+        """Return cached IR for *filepath* if present and not stale."""
+        with self._lock:
+            entry = self._cache.get(filepath)
+            if entry is None:
+                return None
+            if time.time() - entry.timestamp > self._cache_ttl:
+                del self._cache[filepath]
+                return None
+            return entry.ir
+
+    def invalidate(self, filepath: str) -> None:
+        """Remove cached compilation for *filepath*."""
+        with self._lock:
+            self._cache.pop(filepath, None)
+
+    def invalidate_dependents(self, filepath: str, include_graph: Any) -> None:
+        """Invalidate *filepath* and all files that directly include it."""
+        self.invalidate(filepath)
+        if hasattr(include_graph, "get_included_by"):
+            for includer in include_graph.get_included_by(filepath):
+                self.invalidate(includer)
+
+    def shutdown(self) -> None:
+        """Kill all active compilation subprocesses."""
+        with self._lock:
+            procs = list(self._active.values())
+            for proc in procs:
+                try:
+                    proc.kill()
+                except (OSError, ProcessLookupError):
+                    pass
+            self._active.clear()
+            self._cache.clear()
+        # Join outside the lock to avoid deadlock with _wait threads
+        # that need to acquire _lock in their finally block.
+        for proc in procs:
+            try:
+                proc.join(timeout=2)
+            except (OSError, ProcessLookupError):
+                pass
+
+    def _get_cached_by_hash(
+        self, filepath: str, content_hash: str
+    ) -> Optional[CompiledModuleIR]:
+        with self._lock:
+            entry = self._cache.get(filepath)
+            if entry is None:
+                return None
+            if entry.content_hash != content_hash:
+                return None
+            if time.time() - entry.timestamp > self._cache_ttl:
+                del self._cache[filepath]
+                return None
+            return entry.ir
+
+    def _put_cache(
+        self, filepath: str, content_hash: str, ir: CompiledModuleIR
+    ) -> None:
+        with self._lock:
+            self._cache[filepath] = _CacheEntry(
+                ir=ir, content_hash=content_hash, timestamp=time.time()
+            )
+
+    def _cancel_if_running(self, filepath: str) -> None:
+        with self._lock:
+            proc = self._active.pop(filepath, None)
+        if proc is not None:
+            try:
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=2)
+            except (OSError, ProcessLookupError, ValueError):
+                logger.debug("Could not cancel process for %s", filepath)
+
+
+def _worker_entry(
+    source: str,
+    filename: str,
+    result_conn: multiprocessing.connection.Connection,
+    staging_dir: Optional[str],
+) -> None:
+    """Trampoline into the real worker (avoids pickling issues)."""
+    from ivy_lsp.core.compilation.worker import compiler_worker
+
+    compiler_worker(source, filename, result_conn, staging_dir)

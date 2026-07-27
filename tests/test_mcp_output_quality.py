@@ -14,14 +14,14 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
+from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
     ActionNode,
     EdgeType,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
-from ivy_lsp.semantic.nodes import RfcRequirement  # noqa: E402
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel  # noqa: E402
+from ivy_lsp.core.semantic.nodes import RfcRequirement  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -201,7 +201,7 @@ def _build_large_graph(n_actions=10):
 
 
 def _get_mcp_app(requirement_graph=None, workspace_root=None):
-    from ivy_lsp.mcp_server import start_mcp
+    from ivy_lsp.mcp.startup import start_mcp
 
     root = workspace_root or "/tmp/test-workspace"
     return start_mcp(
@@ -240,7 +240,7 @@ class TestActionRequirementsSchema:
     async def test_json_shape(self):
         """Top-level keys include: actions, scopeInfo, modelReady."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         parsed = json.loads(_extract_text(result))
         assert "actions" in parsed
         assert "modelReady" in parsed
@@ -250,7 +250,7 @@ class TestActionRequirementsSchema:
     async def test_action_entry_shape(self):
         """Each action entry has actionName, qualifiedName, file, line."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"detail": "requirements"})
+        result = await mcp.call_tool("ivy_visualize", {"view": "requirements"})
         parsed = json.loads(_extract_text(result))
         for action in parsed["actions"]:
             assert "actionName" in action
@@ -263,7 +263,7 @@ class TestActionRequirementsSchema:
         """offset=3, limit=5 on 10 actions -> 5 results."""
         mcp = _get_mcp_app(requirement_graph=_build_large_graph(10))
         result = await mcp.call_tool(
-            "ivy_model_summary", {"detail": "requirements", "offset": 3, "limit": 5}
+            "ivy_visualize", {"view": "requirements", "offset": 3, "limit": 5}
         )
         parsed = json.loads(_extract_text(result))
         assert len(parsed["actions"]) == 5
@@ -279,7 +279,7 @@ class TestModelSummarySchema:
     async def test_row_shape(self):
         """Each row has actionName, qualifiedName."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert "rows" in parsed
         assert "totals" in parsed
@@ -291,7 +291,7 @@ class TestModelSummarySchema:
     async def test_totals_present(self):
         """Totals dict has expected keys."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary"})
         parsed = json.loads(_extract_text(result))
         assert "actions" in parsed["totals"]
         assert "requirements" in parsed["totals"]
@@ -374,7 +374,7 @@ class TestAllToolsReturnJSON:
     async def test_capabilities_returns_json(self):
         """ivy_capabilities returns valid JSON."""
         mcp = _get_mcp_app()
-        result = await mcp.call_tool("ivy_capabilities", {})
+        result = await mcp.call_tool("ivy_status", {"mode": "capabilities"})
         text = _extract_text(result)
         parsed = json.loads(text)
         assert isinstance(parsed, dict)
@@ -399,10 +399,13 @@ class TestAllToolsReturnJSON:
 
 class TestErrorResponseConsistency:
     @pytest.mark.asyncio
-    async def test_lint_error_has_success_field(self, tmp_path):
+    async def test_diagnostics_structural_error_has_success_field(self, tmp_path):
         """Error response has success: false and message key."""
         mcp = _get_mcp_app(workspace_root=str(tmp_path))
-        result = await mcp.call_tool("ivy_lint", {"relative_path": "nonexistent.ivy"})
+        result = await mcp.call_tool(
+            "ivy_diagnostics",
+            {"relative_path": "nonexistent.ivy", "mode": "structural"},
+        )
         parsed = json.loads(_extract_text(result))
         assert parsed["success"] is False
         assert "message" in parsed
@@ -463,8 +466,8 @@ class TestP1RequirementCoverageUncoveredIds:
 
     def test_uncovered_ids_present(self):
         """Coverage computation includes uncovered_ids list."""
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         reqs = [
@@ -507,7 +510,7 @@ class TestP1ModelSummarySortLimit:
     async def test_model_summary_limit(self):
         """limit=1 on 2 actions -> 1 row + hasMore=True."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"limit": 1})
+        result = await mcp.call_tool("ivy_visualize", {"view": "summary", "limit": 1})
         parsed = json.loads(_extract_text(result))
         assert len(parsed["rows"]) == 1
         assert parsed.get("hasMore") is True
@@ -516,7 +519,9 @@ class TestP1ModelSummarySortLimit:
     async def test_model_summary_sort_by_name(self):
         """sort_by='name' -> rows sorted alphabetically by actionName."""
         mcp = _get_mcp_app(requirement_graph=_build_test_graph())
-        result = await mcp.call_tool("ivy_model_summary", {"sort_by": "name"})
+        result = await mcp.call_tool(
+            "ivy_visualize", {"view": "summary", "sort_by": "name"}
+        )
         parsed = json.loads(_extract_text(result))
         names = [r["actionName"] for r in parsed["rows"]]
         assert names == sorted(names)
@@ -527,8 +532,8 @@ class TestP1CoveragePerLevelPercent:
 
     def test_by_level_has_coverage_percent(self):
         """Each by_level entry has coverage_percent and uncovered."""
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         reqs = [

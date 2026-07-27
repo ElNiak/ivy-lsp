@@ -1,0 +1,53 @@
+#lang ivy1.7
+
+# Curated fixture for tests/test_diagnostic_schema_compliance.py.
+#
+# Designed to trigger every diagnostic cluster in compute_diagnostics
+# when driven through a real IvyParserWrapper + WorkspaceIndexer +
+# SemanticModel pipeline. Kept self-contained (no includes) so the
+# indexer can analyze it without a workspace closure.
+#
+# Cluster triggers:
+#   - structural lint  : multi-char lowercase param, no `after init` for relation
+#   - requirement      : 5+ readers of `pkt_count` -> ivy.invariant.highImpactVar
+#   - semantic         : require with [rfc9000:99.99] (orphan tag), bare requires
+#   - coverage         : actions in graph with no before/after monitors
+#   - pattern          : exported action without the end-of-test action;
+#                        the inline regex check in compute_diagnostics fires
+#                        when basename contains "test", so the new full-pipeline
+#                        test writes this content as test_schema_compliance_sample.ivy
+
+type cid
+
+relation pkt_count(srcvar:cid)
+
+action send(x:cid) = { }
+action recv(x:cid) = { }
+action open_(x:cid) = { }
+action close_(x:cid) = { }
+action retry(x:cid) = { }
+action idle(x:cid) = { }
+
+before send {
+    require pkt_count(x);
+}
+
+before recv {
+    require pkt_count(x);
+}
+
+before open_ {
+    require pkt_count(x);
+}
+
+before close_ {
+    require pkt_count(x);
+}
+
+before retry {
+    require pkt_count(x);
+}
+
+export action send
+
+require pkt_count(X);  # [rfc9000:99.99]

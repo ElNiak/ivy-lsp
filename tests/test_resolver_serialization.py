@@ -1,6 +1,6 @@
 """Tests for IncludeResolver config serialization."""
 
-from ivy_lsp.indexer.include_resolver import IncludeResolver
+from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
 
 class TestResolverSerialization:

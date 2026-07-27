@@ -14,23 +14,25 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (  # noqa: E402
+from ivy_lsp.core.analysis.requirement_graph import (  # noqa: E402
     ActionNode,
     EdgeType,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel  # noqa: E402
-from ivy_lsp.features.visualization import (  # noqa: E402
-    handle_action_dependency_graph,
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel  # noqa: E402
+from ivy_lsp.lsp.visualization import (  # noqa: E402
     handle_action_requirements,
-    handle_coverage_gaps,
-    handle_layered_overview,
     handle_model_summary_table,
-    handle_smart_suggestions,
-    handle_state_machine_view,
     register,
 )
+from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps  # noqa: E402
+from ivy_lsp.lsp.viz_graphs import (  # noqa: E402
+    handle_action_dependency_graph,
+    handle_layered_overview,
+    handle_state_machine_view,
+)
+from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Realistic multi-file graph builder

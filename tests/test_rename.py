@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestRenameImport:
     def test_import(self):
-        from ivy_lsp.features.rename import compute_rename
+        from ivy_lsp.lsp.rename import compute_rename
 
         assert compute_rename is not None
 
@@ -21,10 +21,10 @@ class TestRenameImport:
 class TestComputeRename:
     def test_rename_single_file(self, tmp_path):
         """Rename updates all occurrences in a single file."""
-        from ivy_lsp.features.rename import compute_rename
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.rename import compute_rename
 
         source = "#lang ivy1.7\ntype cid\nrelation r(X:cid)\naction send(dst:cid)\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -50,10 +50,10 @@ class TestComputeRename:
 
     def test_rename_across_files(self, tmp_path):
         """Rename updates occurrences across multiple files."""
-        from ivy_lsp.features.rename import compute_rename
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.rename import compute_rename
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         (tmp_path / "main.ivy").write_text(
@@ -77,7 +77,7 @@ class TestComputeRename:
 
     def test_rename_no_word_returns_none(self):
         """Cursor on whitespace returns None."""
-        from ivy_lsp.features.rename import compute_rename
+        from ivy_lsp.lsp.rename import compute_rename
 
         lines = ["#lang ivy1.7", "", "type cid"]
         edit = compute_rename(
@@ -89,7 +89,7 @@ class TestComputeRename:
         """When no file contains the target word, return None."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.features.rename import compute_rename
+        from ivy_lsp.lsp.rename import compute_rename
 
         mock_indexer = MagicMock()
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype pkt\n")
@@ -104,10 +104,10 @@ class TestComputeRename:
 
     def test_rename_replaces_correct_text(self, tmp_path):
         """Verify the replacement text is the new name."""
-        from ivy_lsp.features.rename import compute_rename
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.rename import compute_rename
 
         source = "#lang ivy1.7\ntype cid\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -131,7 +131,7 @@ class TestRenameErrorHandling:
         """OSError when reading a file is gracefully skipped."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.features.rename import compute_rename
+        from ivy_lsp.lsp.rename import compute_rename
 
         mock_indexer = MagicMock()
         (tmp_path / "readable.ivy").write_text("#lang ivy1.7\ntype cid\n")
@@ -156,7 +156,7 @@ class TestRenameErrorHandling:
         """Non-UTF-8 file is skipped without crashing."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.features.rename import compute_rename
+        from ivy_lsp.lsp.rename import compute_rename
 
         mock_indexer = MagicMock()
         (tmp_path / "good.ivy").write_text("#lang ivy1.7\ntype cid\n")
@@ -184,7 +184,7 @@ class TestRenameNotBlocking:
         """Structural: verify the handler awaits run_in_executor."""
         import inspect
 
-        from ivy_lsp.features import rename as rename_mod
+        from ivy_lsp.lsp import rename as rename_mod
 
         source = inspect.getsource(rename_mod.register)
         assert (

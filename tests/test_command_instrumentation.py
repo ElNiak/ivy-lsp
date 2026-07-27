@@ -1,6 +1,6 @@
 """Tests for command operation tracking instrumentation."""
 
-from ivy_lsp.features.status import ServerStateTracker
+from ivy_lsp.lsp.ui.status import ServerStateTracker
 
 
 class TestCommandInstrumentation:

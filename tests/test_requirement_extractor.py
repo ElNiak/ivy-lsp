@@ -1,4 +1,4 @@
-"""Tests for ivy_lsp.analysis.requirement_extractor module.
+"""Tests for ivy_lsp.core.analysis.requirement_extractor module.
 
 Tests the full AST-based requirement extraction and the helper functions
 that do not depend on the ivy package.
@@ -31,48 +31,48 @@ class TestExtractBracketTags:
     """Test _extract_bracket_tags with various comment patterns."""
 
     def test_numeric_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [4]"]
         assert _extract_bracket_tags(lines, 0) == ["4"]
 
     def test_rfc_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [rfc:4.1]"]
         assert _extract_bracket_tags(lines, 0) == ["rfc:4.1"]
 
     def test_no_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0;"]
         assert _extract_bracket_tags(lines, 0) == []
 
     def test_line_out_of_range_negative(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [4]"]
         assert _extract_bracket_tags(lines, -1) == []
 
     def test_line_out_of_range_beyond(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [4]"]
         assert _extract_bracket_tags(lines, 5) == []
 
     def test_empty_lines(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         assert _extract_bracket_tags([], 0) == []
 
     def test_tag_with_trailing_whitespace(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [7]   "]
         assert _extract_bracket_tags(lines, 0) == ["7"]
 
     def test_multiple_lines_correct_index(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = [
             "    require a;",
@@ -84,7 +84,7 @@ class TestExtractBracketTags:
         assert _extract_bracket_tags(lines, 2) == ["rfc:9.2"]
 
     def test_multi_tag(self):
-        from ivy_lsp.analysis.requirement_extractor import _extract_bracket_tags
+        from ivy_lsp.core.analysis.requirement_extractor import _extract_bracket_tags
 
         lines = ["    require x > 0; # [rfc9000:4.1, rfc9000:8.1]"]
         assert _extract_bracket_tags(lines, 0) == ["rfc9000:4.1", "rfc9000:8.1"]
@@ -94,7 +94,7 @@ class TestMixinNameRegex:
     """Test the _MIXIN_NAME_RE regex pattern."""
 
     def test_before_match(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("foo[before1]")
         assert m is not None
@@ -103,7 +103,7 @@ class TestMixinNameRegex:
         assert m.group(3) == "1"
 
     def test_after_match(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("bar[after2]")
         assert m is not None
@@ -112,13 +112,13 @@ class TestMixinNameRegex:
         assert m.group(3) == "2"
 
     def test_plain_name_no_match(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("plain_name")
         assert m is None
 
     def test_dotted_name_before(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("foo.step[before1]")
         assert m is not None
@@ -127,7 +127,7 @@ class TestMixinNameRegex:
         assert m.group(3) == "1"
 
     def test_multi_digit_index(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("action[after12]")
         assert m is not None
@@ -136,26 +136,26 @@ class TestMixinNameRegex:
         assert m.group(3) == "12"
 
     def test_no_brackets(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("action_before1")
         assert m is None
 
     def test_empty_string(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("")
         assert m is None
 
     def test_around_mixin(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("some_action[around1]")
         assert m is not None
         assert m.group(2) == "around"
 
     def test_implement_mixin(self):
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("some_action[implement0]")
         assert m is not None
@@ -163,7 +163,7 @@ class TestMixinNameRegex:
 
     def test_nested_bracket_does_not_match(self):
         """Greedy .+ would incorrectly match past the first bracket."""
-        from ivy_lsp.analysis.requirement_extractor import _MIXIN_NAME_RE
+        from ivy_lsp.core.analysis.requirement_extractor import _MIXIN_NAME_RE
 
         m = _MIXIN_NAME_RE.match("foo[bar][before1]")
         assert m is None, "Nested brackets should not be valid mixin names"
@@ -179,8 +179,10 @@ class TestExtractRequirementsFullBeforeBlock:
     """Parse source with `before foo.step { require x ~= y; }` and extract."""
 
     def test_require_in_before_block(self, ivy_source_mixin):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         wrapper = IvyParserWrapper()
         result = wrapper.parse(ivy_source_mixin, "mixin_test.ivy")
@@ -209,8 +211,10 @@ class TestExtractRequirementsFullAfterBlock:
     """Parse source with `after foo.step { ensure true; }` and extract."""
 
     def test_ensure_in_after_block(self, ivy_source_mixin):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         wrapper = IvyParserWrapper()
         result = wrapper.parse(ivy_source_mixin, "mixin_test.ivy")
@@ -237,8 +241,10 @@ class TestExtractRequirementsFullMultiple:
     """Parse source with multiple requirements in one before block."""
 
     def test_multiple_requires_in_before(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         source = """\
 #lang ivy1.7
@@ -271,8 +277,10 @@ class TestExtractRequirementsFullDirectAction:
     """Parse source with direct action body: action send(x:t) = { require x > 0; }."""
 
     def test_require_in_direct_action(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         source = """\
 #lang ivy1.7
@@ -308,8 +316,10 @@ class TestExtractRequirementsFullAssignment:
     """Parse source with assignment: before foo { sent := true; } and check writes."""
 
     def test_assignment_produces_write(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         source = """\
 #lang ivy1.7
@@ -354,8 +364,10 @@ class TestExtractBracketTagFromParsedSource:
     """Test bracket tag extraction from a source line via full extraction."""
 
     def test_bracket_tag_extracted(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         source = """\
 #lang ivy1.7
@@ -391,14 +403,18 @@ class TestExtractRequirementsFullNone:
     """Edge cases for extract_requirements_full."""
 
     def test_none_ast_returns_empty(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
 
         reqs, writes = extract_requirements_full(None, "test.ivy", "")
         assert reqs == []
         assert writes == []
 
     def test_ast_without_decls_returns_empty(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
 
         class FakeAst:
             pass
@@ -408,8 +424,10 @@ class TestExtractRequirementsFullNone:
         assert writes == []
 
     def test_empty_source_parses_clean(self):
-        from ivy_lsp.analysis.requirement_extractor import extract_requirements_full
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.analysis.requirement_extractor import (
+            extract_requirements_full,
+        )
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         wrapper = IvyParserWrapper()
         result = wrapper.parse("#lang ivy1.7\n\ntype t\n", "empty.ivy")

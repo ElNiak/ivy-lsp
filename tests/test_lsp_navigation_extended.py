@@ -14,21 +14,18 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.features.definition import (  # noqa: E402
+from ivy_lsp.core.parsing.symbols import IvySymbol  # noqa: E402
+from ivy_lsp.lsp.document_symbols import (  # noqa: E402
+    get_document_symbols,
+    ivy_symbol_to_document_symbol,
+)
+from ivy_lsp.lsp.navigation.definition import (  # noqa: E402
     _DECL_RE,
     _INCLUDE_RE,
     goto_definition,
 )
-from ivy_lsp.features.document_symbols import (  # noqa: E402
-    get_document_symbols,
-    ivy_symbol_to_document_symbol,
-)
-from ivy_lsp.features.hover import (  # noqa: E402
-    _sort_by_proximity,
-    format_hover_content,
-)
-from ivy_lsp.features.references import find_references  # noqa: E402
-from ivy_lsp.parsing.symbols import IvySymbol  # noqa: E402
+from ivy_lsp.lsp.navigation.hover import format_hover_content  # noqa: E402
+from ivy_lsp.lsp.navigation.references import find_references  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -230,7 +227,7 @@ class TestHoverFormatting:
         """Action with params -> shows param signature."""
         sym = IvySymbol(
             name="send",
-            kind=lsp.SymbolKind.Function,
+            kind=lsp.SymbolKind.Method,
             range=(5, 0, 5, 20),
             detail="(src:cid, dst:cid)",
         )
@@ -279,22 +276,6 @@ class TestHoverFormatting:
         assert result is not None
         assert "relation" in result
         assert "connected" in result
-
-
-class TestHoverProximityExtended:
-    def test_sort_by_proximity_common_path(self):
-        """Longer common prefix -> higher priority."""
-
-        class FakeResult:
-            def __init__(self, filepath):
-                self.filepath = filepath
-
-        results = [
-            FakeResult("/a/x/far.ivy"),
-            FakeResult("/a/b/c/near.ivy"),
-        ]
-        sorted_results = _sort_by_proximity(results, "/a/b/c/current.ivy")
-        assert sorted_results[0].filepath == "/a/b/c/near.ivy"
 
 
 # ---------------------------------------------------------------------------

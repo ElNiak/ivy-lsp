@@ -13,17 +13,17 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestDefinitionImport:
     def test_import(self):
-        from ivy_lsp.features.definition import goto_definition
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         assert goto_definition is not None
 
 
 class TestGotoDefinition:
     def test_simple_name(self, tmp_path):
-        from ivy_lsp.features.definition import goto_definition
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         (tmp_path / "user.ivy").write_text(
@@ -44,10 +44,10 @@ class TestGotoDefinition:
         assert loc.uri.endswith("types.ivy")
 
     def test_unknown_returns_none(self, tmp_path):
-        from ivy_lsp.features.definition import goto_definition
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()

@@ -2,7 +2,7 @@
 
 import pytest
 
-from ivy_lsp.adapters.null_adapter import (
+from ivy_lsp.core.adapters.null_adapter import (
     NullAstEnrichmentAdapter,
     NullCompilerAdapter,
     NullParserAdapter,

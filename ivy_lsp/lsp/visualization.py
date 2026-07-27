@@ -1,0 +1,579 @@
+"""Visualization data endpoint handlers for the Ivy LSP server.
+
+Provides handlers for model visualization features: action boundary
+requirements, summary tables, coverage gaps, dependency graphs, etc.
+All handlers follow the pure-function pattern from monitoring.py.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import time
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set
+
+from ivy_lsp.core.analysis.requirement_graph import (
+    EdgeType,
+    GraphSnapshot,
+    RequirementGraph,
+    RequirementNode,
+    StateVarNode,
+)
+from ivy_lsp.core.protocols import IvyServerProtocol
+from ivy_lsp.infra.observability import LogCategory, LogEvent, StructuredLogAdapter
+
+logger = logging.getLogger(__name__)
+slog = StructuredLogAdapter(logger, {})
+
+
+# ---------------------------------------------------------------------------
+# Response size cap
+# ---------------------------------------------------------------------------
+
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+def _cap_response(response: dict, list_key: str) -> dict:
+    """Truncate the main list in a response if serialized size exceeds MAX_RESPONSE_BYTES."""
+    encoded = json.dumps(response)
+    if len(encoded) <= MAX_RESPONSE_BYTES:
+        return response
+    items = response.get(list_key, [])
+    lo, hi = 0, len(items)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        response[list_key] = items[:mid]
+        if len(json.dumps(response)) <= MAX_RESPONSE_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+    response[list_key] = items[:lo]
+    response["truncated"] = True
+    response["totalCount"] = len(items)
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_requirement_graph(server: IvyServerProtocol) -> Optional[RequirementGraph]:
+    """Safely extract the requirement graph from the indexer."""
+    try:
+        indexer = server.indexer
+        if indexer is None:
+            if server.initializing:
+                logger.debug("_get_requirement_graph: server still initializing")
+            else:
+                logger.warning(
+                    "_get_requirement_graph: indexer is None (server not initialized?)"
+                )
+            return None
+        graph = indexer.requirement_graph
+        if graph is None:
+            logger.warning("_get_requirement_graph: requirement_graph is None")
+        return graph
+    except AttributeError:
+        logger.warning(
+            "_get_requirement_graph: AttributeError accessing server.indexer"
+        )
+        return None
+
+
+def _resolve_scope(graph: Any, params: dict) -> dict:
+    """Determine active scope from params or active test or filePath."""
+    from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel
+
+    test_file = params.get("testFile")
+    file_path = params.get("filePath", "")
+    scope = None
+    if isinstance(graph, ScopedRequirementModel):
+        if test_file is None:
+            # Try to derive scope from filePath
+            if file_path:
+                tests = graph.get_tests_for_file(file_path)
+                if tests:
+                    test_file = next(iter(tests))  # Use first matching endpoint mirror
+                    scope = graph.get_test_scope(test_file)
+            # Fall back to active scope
+            if scope is None:
+                active = graph.get_active_scope()
+                if active:
+                    test_file = active.test_file
+                    scope = active
+        else:
+            scope = graph.get_test_scope(test_file)
+    return {"testFile": test_file, "scoped": scope is not None, "_scope": scope}
+
+
+def _filter_by_scope(items: dict, scope_info: dict) -> dict:
+    """Filter a dict of ActionNode/StateVarNode by scope's include_closure.
+
+    Returns unmodified dict if no scope is active.
+    """
+    scope = scope_info.get("_scope")
+    if scope is None:
+        return items
+    closure = getattr(scope, "include_closure", None)
+    if not closure:
+        return items
+    return {k: v for k, v in items.items() if v.file in closure}
+
+
+def _filter_by_protocol(items: dict, protocol_filter: Optional[str]) -> dict:
+    """Filter items by protocol directory path substring."""
+    if not protocol_filter:
+        return items
+    return {k: v for k, v in items.items() if protocol_filter in v.file}
+
+
+def _rel(path: str, server: Any) -> str:
+    """Relativize a path against server's workspace root."""
+    ws_root = getattr(server, "workspace_root", "")
+    if not path or not ws_root:
+        return path
+    if path.startswith(ws_root):
+        rel = path[len(ws_root) :]
+        return rel.lstrip(os.sep)
+    return path
+
+
+def _classify_direction(action_id: str, scope_info: dict) -> Optional[str]:
+    """Classify an action's direction (send/receive) within a test scope."""
+    scope = scope_info.get("_scope")
+    if not scope:
+        return None
+    try:
+        from ivy_lsp.core.analysis.test_scope import classify_action_direction
+
+        return classify_action_direction(action_id, scope).value
+    except Exception:
+        logger.debug("Direction classification failed for %s", action_id, exc_info=True)
+        return None
+
+
+def _serialize_requirement(req: RequirementNode, snap: GraphSnapshot) -> dict:
+    """Convert a RequirementNode to a JSON-serializable dict."""
+    state_vars_read = [sv.name for sv in snap.get_state_vars_read_by(req.id)]
+
+    nct = None
+    try:
+        from ivy_lsp.core.analysis.test_scope import classify_requirement
+
+        nct = classify_requirement(req).value
+    except Exception:
+        logger.debug("NCT classification failed for %s", req.id, exc_info=True)
+
+    formula = req.formula_text
+    if len(formula) > 200:
+        formula = formula[:200] + "..."
+
+    return {
+        "id": req.id,
+        "kind": req.kind,
+        "mixin_kind": req.mixin_kind,
+        "formulaText": formula,
+        "line": req.line,
+        "file": req.file,
+        "bracketTags": list(req.bracket_tags),
+        "stateVarsRead": state_vars_read,
+        "nctClassification": nct,
+    }
+
+
+def _serialize_state_var(sv: StateVarNode) -> dict:
+    """Convert a StateVarNode to a JSON-serializable dict."""
+    return {
+        "name": sv.name,
+        "qualifiedName": sv.qualified_name,
+        "file": sv.file,
+        "line": sv.line,
+        "isRelation": sv.is_relation,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handler: ivy/actionRequirements
+# ---------------------------------------------------------------------------
+
+
+def handle_action_requirements(server: IvyServerProtocol, params: dict) -> dict:
+    """Handle ivy/actionRequirements request.
+
+    Returns per-action requirement breakdown with before/after monitors,
+    counts, RFC tags, and state variable information.
+    """
+    _not_ready = {
+        "actions": [],
+        "scopeInfo": {"testFile": None, "scoped": False},
+        "modelReady": False,
+    }
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        indexer = server.indexer
+        logger.warning(
+            "handle_action_requirements: graph is None, returning modelReady=False"
+        )
+        _not_ready["_debug"] = (
+            f"graph=None, indexer={type(indexer).__name__ if indexer != 'MISSING' else 'MISSING'}"
+        )
+        return _not_ready
+
+    try:
+        t0 = time.monotonic()
+        snap = graph.snapshot()
+        t_snap = time.monotonic()
+        logger.info(
+            "handle_action_requirements: snapshot in %.1fms, %d actions, %d reqs",
+            (t_snap - t0) * 1000,
+            len(snap.actions),
+            len(snap.requirements),
+        )
+        slog.info(
+            "handle_action_requirements: snapshot has %d actions, %d requirements",
+            len(snap.actions),
+            len(snap.requirements),
+            extra={
+                "event": LogEvent(
+                    LogCategory.PERFORMANCE,
+                    "analysis",
+                    {
+                        "actions": len(snap.actions),
+                        "requirements": len(snap.requirements),
+                    },
+                )
+            },
+        )
+        scope_info = _resolve_scope(graph, params)
+        action_filter = params.get("actionName")
+        file_filter = params.get("filePath")
+
+        actions_to_process = dict(snap.actions)
+        # C2: Apply scope filtering from test_file
+        actions_to_process = _filter_by_scope(actions_to_process, scope_info)
+        # H1: Apply protocol filtering
+        actions_to_process = _filter_by_protocol(
+            actions_to_process, params.get("protocolFilter")
+        )
+        if action_filter:
+            actions_to_process = {
+                k: v
+                for k, v in actions_to_process.items()
+                if v.name == action_filter
+                or v.qualified_name == action_filter
+                or k == action_filter
+            }
+        if file_filter:
+            # C8: Match by exact, basename, or suffix
+            exact = {
+                k: v for k, v in actions_to_process.items() if v.file == file_filter
+            }
+            if exact:
+                actions_to_process = exact
+            else:
+                filter_base = os.path.basename(file_filter)
+                actions_to_process = {
+                    k: v
+                    for k, v in actions_to_process.items()
+                    if os.path.basename(v.file) == filter_base
+                    or v.file.endswith("/" + file_filter)
+                }
+
+        # Pagination: limit/offset to cap response size.
+        # Default to returning all actions when no limit is specified,
+        # so clients that don't send pagination params get complete data.
+        all_action_items = list(actions_to_process.items())
+        total_actions = len(all_action_items)
+        offset = params.get("offset", 0)
+        limit = params.get("limit", total_actions)
+        paginated_items = all_action_items[offset : offset + limit]
+
+        result_actions = []
+        for action_id, action_node in paginated_items:
+            reqs = snap.get_requirements_for_action(action_id)
+            before = [r for r in reqs if r.mixin_kind == "before"]
+            after = [r for r in reqs if r.mixin_kind == "after"]
+            around = [r for r in reqs if r.mixin_kind == "around"]
+            implement = [r for r in reqs if r.mixin_kind == "implement"]
+            direct = [r for r in reqs if r.mixin_kind == "direct"]
+
+            all_tags: Set[str] = set()
+            counts: Dict[str, int] = defaultdict(int)
+            for r in reqs:
+                counts[r.kind] += 1
+                all_tags.update(r.bracket_tags)
+
+            direction = _classify_direction(action_id, scope_info)
+
+            seen_read_ids: Set[str] = set()
+            state_vars_read: List[StateVarNode] = []
+            for r in reqs:
+                for sv in snap.get_state_vars_read_by(r.id):
+                    if sv.id not in seen_read_ids:
+                        seen_read_ids.add(sv.id)
+                        state_vars_read.append(sv)
+            state_vars_written = snap.get_state_vars_written_by_action(action_id)
+
+            result_actions.append(
+                {
+                    "actionName": action_node.name,
+                    "qualifiedName": action_node.qualified_name,
+                    "file": action_node.file,
+                    "line": action_node.line,
+                    "direction": direction,
+                    "monitors": {
+                        "before": [_serialize_requirement(r, snap) for r in before],
+                        "after": [_serialize_requirement(r, snap) for r in after],
+                        "around": [_serialize_requirement(r, snap) for r in around],
+                        "implement": [
+                            _serialize_requirement(r, snap) for r in implement
+                        ],
+                        "direct": [_serialize_requirement(r, snap) for r in direct],
+                    },
+                    "stateVarsRead": [
+                        _serialize_state_var(sv) for sv in state_vars_read
+                    ],
+                    "stateVarsWritten": [
+                        _serialize_state_var(sv) for sv in state_vars_written
+                    ],
+                    "rfcTags": sorted(all_tags),
+                    "counts": {
+                        "require": counts.get("require", 0),
+                        "ensure": counts.get("ensure", 0),
+                        "assume": counts.get("assume", 0),
+                        "assert": counts.get("assert", 0),
+                        "total": len(reqs),
+                    },
+                }
+            )
+
+        result = {
+            "actions": result_actions,
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
+            "modelReady": True,
+            "pagination": {
+                "total": total_actions,
+                "offset": offset,
+                "limit": limit,
+                "hasMore": offset + limit < total_actions,
+            },
+        }
+        logger.info(
+            "handle_action_requirements: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
+        )
+        return _cap_response(result, "actions")
+    except Exception as exc:
+        logger.exception("handle_action_requirements failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
+        return _not_ready
+
+
+# ---------------------------------------------------------------------------
+# Handler: ivy/modelSummaryTable
+# ---------------------------------------------------------------------------
+
+
+def handle_model_summary_table(server: IvyServerProtocol, params: dict) -> dict:
+    """Handle ivy/modelSummaryTable request.
+
+    Returns a flat summary table with one row per action and aggregated
+    totals for requirements, state variables, and RFC coverage.
+    """
+    _not_ready = {
+        "rows": [],
+        "totals": {
+            "actions": 0,
+            "requirements": 0,
+            "stateVars": 0,
+            "rfcTagsCovered": 0,
+            "rfcTagsTotal": 0,
+        },
+        "scopeInfo": {"testFile": None, "scoped": False},
+    }
+    graph = _get_requirement_graph(server)
+    if graph is None:
+        return _not_ready
+
+    try:
+        t0 = time.monotonic()
+        snap = graph.snapshot()
+        t_snap = time.monotonic()
+        scope_info = _resolve_scope(graph, params)
+        rows: List[dict] = []
+        total_reqs = 0
+
+        # C2/H1: Apply scope and protocol filtering
+        actions_to_iter = dict(snap.actions)
+        actions_to_iter = _filter_by_scope(actions_to_iter, scope_info)
+        actions_to_iter = _filter_by_protocol(
+            actions_to_iter, params.get("protocolFilter")
+        )
+
+        for action_id, action_node in actions_to_iter.items():
+            reqs = snap.get_requirements_for_action(action_id)
+            before_reqs = [r for r in reqs if r.mixin_kind == "before"]
+            after_reqs = [r for r in reqs if r.mixin_kind == "after"]
+
+            before_require = sum(1 for r in before_reqs if r.kind == "require")
+            before_ensure = sum(1 for r in before_reqs if r.kind == "ensure")
+            after_require = sum(1 for r in after_reqs if r.kind == "require")
+            after_ensure = sum(1 for r in after_reqs if r.kind == "ensure")
+            assume_count = sum(1 for r in reqs if r.kind == "assume")
+            assert_count = sum(1 for r in reqs if r.kind == "assert")
+
+            rfc_tags: Set[str] = set()
+            for r in reqs:
+                rfc_tags.update(r.bracket_tags)
+
+            vars_read_ids: Set[str] = set()
+            for r in reqs:
+                for sv in snap.get_state_vars_read_by(r.id):
+                    vars_read_ids.add(sv.id)
+            vars_written = snap.get_state_vars_written_by_action(action_id)
+
+            direction = _classify_direction(action_id, scope_info)
+
+            total_reqs += len(reqs)
+            rows.append(
+                {
+                    "actionName": action_node.name,
+                    "qualifiedName": action_node.qualified_name,
+                    "file": action_node.file,
+                    "line": action_node.line,
+                    "direction": direction,
+                    "beforeRequireCount": before_require,
+                    "beforeEnsureCount": before_ensure,
+                    "afterRequireCount": after_require,
+                    "afterEnsureCount": after_ensure,
+                    "assumeCount": assume_count,
+                    "assertCount": assert_count,
+                    "totalRequirements": len(reqs),
+                    "stateVarsRead": len(vars_read_ids),
+                    "stateVarsWritten": len(vars_written),
+                    "rfcTagsCovered": sorted(rfc_tags),
+                    "rfcCoverageCount": len(rfc_tags),
+                }
+            )
+
+        coverage = snap.get_coverage_stats()
+        result = {
+            "rows": rows,
+            "totals": {
+                "actions": len(snap.actions),
+                "requirements": total_reqs,
+                "stateVars": len(snap.state_vars),
+                "rfcTagsCovered": coverage.get("covered", 0),
+                "rfcTagsTotal": coverage.get("total", 0),
+            },
+            "scopeInfo": {
+                "testFile": scope_info.get("testFile"),
+                "scoped": scope_info.get("scoped", False),
+            },
+        }
+        logger.info(
+            "handle_model_summary_table: total %.1fms (snapshot %.1fms)",
+            (time.monotonic() - t0) * 1000,
+            (t_snap - t0) * 1000,
+        )
+        return _cap_response(result, "rows")
+    except Exception as exc:
+        logger.exception("handle_model_summary_table failed")
+        _not_ready["error"] = f"{type(exc).__name__}: {exc}"
+        return _not_ready
+
+
+# ---------------------------------------------------------------------------
+# LSP wiring
+# ---------------------------------------------------------------------------
+
+
+def register(server: Any) -> None:
+    """Register visualization request handlers on the server."""
+    # Deferred imports: these modules import from this file, so importing
+    # them at module level creates a circular dependency.
+    from ivy_lsp.lsp.viz_coverage import handle_coverage_gaps
+    from ivy_lsp.lsp.viz_graphs import (
+        handle_action_dependency_graph,
+        handle_layered_overview,
+        handle_state_machine_view,
+    )
+    from ivy_lsp.lsp.viz_suggestions import handle_smart_suggestions
+
+    @server.feature("ivy/actionRequirements")
+    async def on_action_requirements(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_action_requirements,
+            server,
+            params if isinstance(params, dict) else {},
+        )
+
+    @server.feature("ivy/modelSummaryTable")
+    async def on_model_summary_table(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_model_summary_table,
+            server,
+            params if isinstance(params, dict) else {},
+        )
+
+    @server.feature("ivy/coverageGaps")
+    async def on_coverage_gaps(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_coverage_gaps,
+            server,
+            params if isinstance(params, dict) else {},
+        )
+
+    @server.feature("ivy/actionDependencyGraph")
+    async def on_action_dependency_graph(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_action_dependency_graph,
+            server,
+            params if isinstance(params, dict) else {},
+        )
+
+    @server.feature("ivy/stateMachineView")
+    async def on_state_machine_view(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_state_machine_view,
+            server,
+            params if isinstance(params, dict) else {},
+        )
+
+    @server.feature("ivy/layeredOverview")
+    async def on_layered_overview(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_layered_overview,
+            server,
+            params if isinstance(params, dict) else {},
+        )
+
+    @server.feature("ivy/smartSuggestions")
+    async def on_smart_suggestions(params: Any = None) -> Dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            handle_smart_suggestions,
+            server,
+            params if isinstance(params, dict) else {},
+        )

@@ -1,0 +1,279 @@
+"""Symbol representations and lookup structures for Ivy source analysis.
+
+Provides the core data types used throughout the LSP server to represent
+parsed Ivy symbols, their hierarchical scopes, and inter-file include
+relationships.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from typing import Dict, List, Literal, Optional, Set, Tuple
+
+from lsprotocol.types import SymbolKind
+
+
+@dataclass
+class IvySymbol:
+    """A single symbol extracted from an Ivy source file.
+
+    Attributes:
+        name: The symbol's identifier (e.g., ``"cid"``, ``"send"``).
+        kind: LSP symbol kind (Class, Function, Variable, etc.).
+        range: 0-based ``(start_line, start_col, end_line, end_col)`` span.
+        children: Nested symbols (e.g., fields inside an object).
+        detail: Optional human-readable signature or type string.
+        file_path: Optional originating file path.
+        synthetic: Whether this symbol has a compiler-generated name.
+    """
+
+    name: str
+    kind: SymbolKind
+    range: Tuple[int, int, int, int]
+    children: List[IvySymbol] = field(default_factory=list)
+    detail: Optional[str] = None
+    file_path: Optional[str] = None
+    synthetic: bool = False
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain dictionary for cross-process transfer."""
+        return {
+            "name": self.name,
+            "kind": int(self.kind),
+            "range": list(self.range),
+            "children": [c.to_dict() for c in self.children],
+            "detail": self.detail,
+            "file_path": self.file_path,
+            "synthetic": self.synthetic,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "IvySymbol":
+        """Deserialize from a plain dictionary."""
+        return cls(
+            name=d["name"],
+            kind=SymbolKind(d["kind"]),
+            range=tuple(d["range"]),
+            children=[cls.from_dict(c) for c in d.get("children", [])],
+            detail=d.get("detail"),
+            file_path=d.get("file_path"),
+            synthetic=d["synthetic"],
+        )
+
+
+@dataclass
+class SymbolReference:
+    """A reference from one symbol's scope to another symbol."""
+
+    source_name: str  # Qualified name of the containing symbol
+    target_name: str  # Name of the referenced symbol (may be unqualified)
+    kind: Literal["call", "instance", "monitor"]
+    line: int  # 0-based line number
+    col: int = 0
+    file_path: Optional[str] = None
+
+
+@dataclass
+class IvyScope:
+    """A named scope that holds symbols and links to parent/child scopes.
+
+    Attributes:
+        name: Scope identifier (e.g., ``"global"``, ``"bit"``).
+        symbols: Mapping of symbol name to ``IvySymbol`` within this scope.
+        parent: Enclosing scope, or ``None`` for the root.
+        children: Nested child scopes.
+    """
+
+    name: str
+    symbols: Dict[str, IvySymbol] = field(default_factory=dict)
+    parent: Optional[IvyScope] = None
+    children: List[IvyScope] = field(default_factory=list)
+
+
+class SymbolTable:
+    """Indexed collection of ``IvySymbol`` instances with fast lookup.
+
+    Supports lookup by plain name, qualified dotted path (walking the
+    ``children`` hierarchy), file path, and enumeration of all symbols.
+    """
+
+    def __init__(self) -> None:
+        """Initialize empty name, file, kind, and flat symbol indices."""
+        self._by_name: Dict[str, List[IvySymbol]] = defaultdict(list)
+        self._by_file: Dict[str, List[IvySymbol]] = defaultdict(list)
+        self._by_kind: Dict[SymbolKind, List[IvySymbol]] = defaultdict(list)
+        self._all: List[IvySymbol] = []
+
+    def add_symbol(self, sym: IvySymbol) -> None:
+        """Register *sym* in all internal indices."""
+        self._by_name[sym.name].append(sym)
+        if sym.file_path is not None:
+            self._by_file[sym.file_path].append(sym)
+        self._by_kind[sym.kind].append(sym)
+        self._all.append(sym)
+
+    def lookup(self, name: str) -> List[IvySymbol]:
+        """Return all top-level symbols whose name matches *name*."""
+        return list(self._by_name.get(name, []))
+
+    def lookup_qualified(self, qualified_name: str) -> List[IvySymbol]:
+        """Walk the ``children`` hierarchy along a dotted path.
+
+        For ``"frame.ack.range"``, first find all top-level symbols named
+        ``"frame"``, then look for ``"ack"`` among each one's children,
+        then ``"range"`` among *those* children.  Returns the matching
+        leaf symbols.
+        """
+        if not qualified_name:
+            return []
+
+        parts = qualified_name.split(".")
+        candidates: List[IvySymbol] = self.lookup(parts[0])
+
+        for part in parts[1:]:
+            next_candidates: List[IvySymbol] = []
+            for sym in candidates:
+                for child in sym.children:
+                    if child.name == part:
+                        next_candidates.append(child)
+            candidates = next_candidates
+            if not candidates:
+                return []
+
+        return candidates
+
+    def lookup_unqualified(self, name: str) -> List[IvySymbol]:
+        """Search children recursively for a plain name match.
+
+        Falls back to walking the entire symbol tree when ``lookup()``
+        (which only checks top-level names) returns nothing.
+        """
+        direct = self.lookup(name)
+        if direct:
+            return direct
+        results: List[IvySymbol] = []
+        seen: Set[int] = set()
+
+        def _search(symbols: List[IvySymbol]) -> None:
+            for sym in symbols:
+                for child in sym.children:
+                    if child.name == name and id(child) not in seen:
+                        seen.add(id(child))
+                        results.append(child)
+                    _search([child])
+
+        _search(self._all)
+        return results
+
+    def all_symbols(self) -> List[IvySymbol]:
+        """Return every registered symbol."""
+        return list(self._all)
+
+    def symbols_in_file(self, path: str) -> List[IvySymbol]:
+        """Return symbols whose ``file_path`` equals *path*."""
+        return list(self._by_file.get(path, []))
+
+    def symbols_by_kind(self, kind: SymbolKind) -> List[IvySymbol]:
+        """Return all symbols of a given kind."""
+        return list(self._by_kind.get(kind, []))
+
+    def remove_file(self, filepath: str) -> int:
+        """Remove all symbols originating from *filepath* in place.
+
+        Returns the number of symbols removed.
+        """
+        old = self._by_file.pop(filepath, [])
+        if not old:
+            return 0
+        old_set = set(id(s) for s in old)
+        for sym in old:
+            name_list = self._by_name.get(sym.name)
+            if name_list is not None:
+                self._by_name[sym.name] = [s for s in name_list if id(s) not in old_set]
+                if not self._by_name[sym.name]:
+                    del self._by_name[sym.name]
+            kind_list = self._by_kind.get(sym.kind)
+            if kind_list is not None:
+                self._by_kind[sym.kind] = [s for s in kind_list if id(s) not in old_set]
+                if not self._by_kind[sym.kind]:
+                    del self._by_kind[sym.kind]
+        self._all = [s for s in self._all if id(s) not in old_set]
+        return len(old)
+
+
+class IncludeGraph:
+    """Directed graph of Ivy ``include`` relationships between files.
+
+    Tracks both forward (``includes``) and reverse (``included_by``)
+    edges and supports cycle-safe transitive traversal.
+    """
+
+    def __init__(self) -> None:
+        """Initialize empty forward and reverse include mappings."""
+        self._includes: Dict[str, Set[str]] = defaultdict(set)
+        self._included_by: Dict[str, Set[str]] = defaultdict(set)
+
+    def add_edge(self, from_file: str, to_file: str) -> None:
+        """Record that *from_file* includes *to_file*."""
+        self._includes[from_file].add(to_file)
+        self._included_by[to_file].add(from_file)
+
+    def get_includes(self, f: str) -> Set[str]:
+        """Direct includes of *f*."""
+        return set(self._includes.get(f, set()))
+
+    def get_included_by(self, f: str) -> Set[str]:
+        """Files that directly include *f*."""
+        return set(self._included_by.get(f, set()))
+
+    def _bfs_transitive(self, start: str, edge_map: Dict[str, Set[str]]) -> Set[str]:
+        """Cycle-safe BFS reachability from *start* through *edge_map*."""
+        visited: Set[str] = {start}
+        queue: deque[str] = deque(edge_map.get(start, set()))
+        result: Set[str] = set()
+
+        while queue:
+            current = queue.popleft()
+            if current in visited:
+                continue
+            visited.add(current)
+            result.add(current)
+            for neighbor in edge_map.get(current, set()):
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        return result
+
+    def get_transitive_includes(self, f: str) -> Set[str]:
+        """All files transitively included by *f*, with cycle safety."""
+        return self._bfs_transitive(f, self._includes)
+
+    def get_transitive_included_by(self, f: str) -> Set[str]:
+        """All files that transitively include *f*, with cycle safety."""
+        return self._bfs_transitive(f, self._included_by)
+
+    # -- Serialization -----------------------------------------------------
+
+    def to_edges(self) -> Dict[str, List[str]]:
+        """Serialize forward edges as {from_file: sorted([to_files])}."""
+        return {k: sorted(v) for k, v in self._includes.items()}
+
+    @classmethod
+    def from_edges(cls, data: Dict[str, List[str]]) -> "IncludeGraph":
+        """Reconstruct from serialized edge dict."""
+        graph = cls()
+        for from_file, to_files in data.items():
+            for to_file in to_files:
+                graph.add_edge(from_file, to_file)
+        return graph
+
+
+def is_monitor_symbol(detail: str) -> bool:
+    """Check if a symbol detail indicates a monitor (before/after/around).
+
+    The check is case-insensitive and strips leading/trailing whitespace
+    to match how the fallback scanner emits detail strings.
+    """
+    d = detail.strip().lower()
+    return d.startswith("before ") or d.startswith("after ") or d.startswith("around ")

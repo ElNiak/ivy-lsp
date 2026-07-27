@@ -1,162 +1,83 @@
 """Shared fixtures for Ivy LSP tests."""
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-# Try to resolve QUIC_STACK_DIR from the ivy package (if installed),
+from ivy_lsp.infra.config import reset_config
+
+
+@pytest.fixture(autouse=True)
+def _reset_server_config():
+    """Ensure the ServerConfig singleton is fresh for every test.
+
+    Tests that set ``IVY_LSP_*`` env vars via ``monkeypatch`` or
+    ``patch.dict`` would otherwise leak cached values to subsequent tests.
+    """
+    reset_config()
+    yield
+    reset_config()
+
+
+@pytest.fixture(autouse=True)
+def _raw_json_for_legacy_tests(request):
+    """Enable raw JSON output for tests that parse tool results as JSON.
+
+    The markdown formatter layer (ivy_lsp.mcp.tools.formatters) converts tool
+    output from JSON to markdown.  Legacy tests that call ``json.loads``
+    on tool results need the raw JSON.  Set ``IVY_LSP_RAW_JSON=1`` for
+    every test **except** those in ``test_formatters.py`` (which test the
+    formatter layer itself).
+    """
+    module_name = request.module.__name__
+    if "test_formatters" in module_name:
+        # Formatter tests want markdown output — do NOT set the bypass flag
+        os.environ.pop("IVY_LSP_RAW_JSON", None)
+        yield
+    else:
+        os.environ["IVY_LSP_RAW_JSON"] = "1"
+        yield
+        os.environ.pop("IVY_LSP_RAW_JSON", None)
+
+
+# Try to resolve PROTOCOL_TESTING_DIR from the ivy package (if installed),
 # otherwise fall back to a sibling layout (panther_ivy checkout).
 try:
     import ivy
 
-    _IVY_PKG_DIR = Path(ivy.__file__).resolve().parent
+    # Guard against namespace-package `ivy` whose ``__file__`` is None
+    # (the import succeeds but the package has no concrete file path).
+    # Treat that as the no-installed-package case so the sibling-layout
+    # fallback below kicks in.
+    _ivy_file = getattr(ivy, "__file__", None)
+    _IVY_PKG_DIR = Path(_ivy_file).resolve().parent if _ivy_file else None
 except ImportError:
     _IVY_PKG_DIR = None
 
 if _IVY_PKG_DIR is not None:
-    QUIC_STACK_DIR = _IVY_PKG_DIR.parent / "protocol-testing" / "quic" / "quic_stack"
+    PROTOCOL_TESTING_DIR: Path | None = _IVY_PKG_DIR.parent / "protocol-testing"
 else:
     # Fallback: when running from a panther_ivy checkout
-    QUIC_STACK_DIR = (
-        Path(__file__).resolve().parent.parent
-        / "protocol-testing"
-        / "quic"
-        / "quic_stack"
-    )
+    PROTOCOL_TESTING_DIR = Path(__file__).resolve().parent.parent / "protocol-testing"
+
+if not PROTOCOL_TESTING_DIR.exists():
+    PROTOCOL_TESTING_DIR = None
+
+QUIC_STACK_DIR = (
+    PROTOCOL_TESTING_DIR / "quic" / "quic_stack"
+    if PROTOCOL_TESTING_DIR is not None
+    else Path(__file__).resolve().parent.parent
+    / "protocol-testing"
+    / "quic"
+    / "quic_stack"
+)
 
 
 # ---------------------------------------------------------------------------
 # Minimal Ivy source fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def ivy_source_minimal():
-    """Minimal valid Ivy source with a single type declaration."""
-    return "#lang ivy1.7\n\ntype cid\n"
-
-
-@pytest.fixture
-def ivy_source_object():
-    """Ivy source with a nested object containing type and individuals."""
-    return """\
-#lang ivy1.7
-
-object bit = {
-    type this
-    individual zero:bit
-    individual one:bit
-    definition zero = 0
-    definition one = 1
-}
-"""
-
-
-@pytest.fixture
-def ivy_source_complex():
-    """Complex Ivy source with multiple declaration types."""
-    return """\
-#lang ivy1.7
-
-type cid
-type pkt_num
-alias aid = cid
-
-object bit = {
-    type this
-    individual zero:bit
-    individual one:bit
-}
-
-object role = {
-    type this = {client, server}
-}
-
-action send(src:cid, dst:cid, pkt:pkt_num) = {
-    require src ~= dst;
-}
-
-relation connected(X:cid, Y:cid)
-"""
-
-
-@pytest.fixture
-def ivy_source_syntax_error():
-    """Ivy source with a syntax error."""
-    return """\
-#lang ivy1.7
-
-type cid
-object broken = {
-    type this
-    this is not valid ivy syntax !!!
-}
-type pkt_num
-"""
-
-
-@pytest.fixture
-def ivy_source_module():
-    """Ivy source with a module declaration."""
-    return """\
-#lang ivy1.7
-
-module counter(t) = {
-    individual val : t
-
-    action up = {
-        val := val + 1;
-    }
-
-    action down = {
-        val := val - 1;
-    }
-}
-"""
-
-
-@pytest.fixture
-def ivy_source_include():
-    """Ivy source with an include directive."""
-    return """\
-#lang ivy1.7
-
-include quic_types
-
-type my_type
-"""
-
-
-@pytest.fixture
-def ivy_source_isolate():
-    """Ivy source with an isolate declaration."""
-    return """\
-#lang ivy1.7
-
-type node
-
-object protocol = {
-    action step(n:node)
-    action init(n:node)
-}
-
-isolate iso_protocol = protocol
-"""
-
-
-@pytest.fixture
-def ivy_source_property():
-    """Ivy source with property and axiom declarations."""
-    return """\
-#lang ivy1.7
-
-type t
-
-relation r(X:t, Y:t)
-
-axiom [symmetry] r(X,Y) -> r(Y,X)
-property [reflexivity] r(X,X)
-"""
 
 
 @pytest.fixture
@@ -181,41 +102,6 @@ after foo.step {
 """
 
 
-@pytest.fixture
-def ivy_source_instance():
-    """Ivy source with an instance declaration."""
-    return """\
-#lang ivy1.7
-
-module unbounded_sequence = {
-    type this
-    action next(x:this) returns (y:this)
-}
-
-instance idx : unbounded_sequence
-"""
-
-
-@pytest.fixture
-def ivy_source_enum():
-    """Ivy source with enum type."""
-    return """\
-#lang ivy1.7
-
-type stream_kind = {unidir, bidir}
-"""
-
-
-@pytest.fixture
-def ivy_source_variant():
-    """Ivy source with an enumerated type (packet_type)."""
-    return """\
-#lang ivy1.7
-
-type packet_type = {initial, handshake, one_rtt}
-"""
-
-
 # ---------------------------------------------------------------------------
 # Real file path fixtures
 # ---------------------------------------------------------------------------
@@ -237,21 +123,6 @@ def quic_types_source(quic_types_path):
 
 
 @pytest.fixture
-def quic_frame_path():
-    """Path to the real quic_frame.ivy file."""
-    path = QUIC_STACK_DIR / "quic_frame.ivy"
-    if not path.exists():
-        pytest.skip(f"quic_frame.ivy not found at {path}")
-    return path
-
-
-@pytest.fixture
-def quic_frame_source(quic_frame_path):
-    """Source content of quic_frame.ivy."""
-    return quic_frame_path.read_text()
-
-
-@pytest.fixture
 def quic_stack_ivy_files():
     """List of all .ivy files in the QUIC stack directory."""
     if not QUIC_STACK_DIR.exists():
@@ -260,34 +131,101 @@ def quic_stack_ivy_files():
 
 
 # ---------------------------------------------------------------------------
-# Multi-file workspace fixtures (tmp_path-based)
+# MiniP workspace fixtures (self-contained test repo)
 # ---------------------------------------------------------------------------
+
+MINIP_REPO_ROOT = Path(__file__).resolve().parent / "resources" / "repos" / "minip"
+MINIP_DIR = MINIP_REPO_ROOT / "protocol-testing" / "minip"
+MINIP_STACK_DIR = MINIP_DIR / "minip_stack"
+MINIP_TESTS_DIR = MINIP_DIR / "minip_tests"
 
 
 @pytest.fixture
-def multi_file_workspace(tmp_path):
-    """Two-file workspace with include dependency and shared symbols.
+def minip_workspace_dir():
+    """Path to the minip workspace root (protocol-testing/minip/)."""
+    if not MINIP_DIR.exists():
+        pytest.skip(f"minip workspace not found at {MINIP_DIR}")
+    return MINIP_DIR
 
-    Creates:
-      types.ivy  — declares ``type cid`` and ``type pkt_num``
-      conn.ivy   — includes types, declares ``action send(src:cid, dst:cid)``
-                   and uses ``cid`` in a ``relation connected(X:cid, Y:cid)``
+
+@pytest.fixture
+def minip_stack_dir():
+    """Path to the minip_stack/ directory."""
+    if not MINIP_STACK_DIR.exists():
+        pytest.skip(f"minip stack not found at {MINIP_STACK_DIR}")
+    return MINIP_STACK_DIR
+
+
+@pytest.fixture
+def minip_stack_ivy_files():
+    """List of all .ivy files in the minip stack directory."""
+    if not MINIP_STACK_DIR.exists():
+        pytest.skip(f"minip stack not found at {MINIP_STACK_DIR}")
+    return sorted(MINIP_STACK_DIR.glob("*.ivy"))
+
+
+@pytest.fixture
+def minip_all_ivy_files():
+    """List of ALL .ivy files across all minip subdirectories."""
+    if not MINIP_DIR.exists():
+        pytest.skip(f"minip workspace not found at {MINIP_DIR}")
+    return sorted(MINIP_DIR.rglob("*.ivy"))
+
+
+@pytest.fixture
+def minip_test_ivy_files():
+    """List of all .ivy test spec files across minip_tests/."""
+    if not MINIP_TESTS_DIR.exists():
+        pytest.skip(f"minip tests not found at {MINIP_TESTS_DIR}")
+    return sorted(MINIP_TESTS_DIR.rglob("*.ivy"))
+
+
+@pytest.fixture
+def minip_types_path():
+    """Path to ping_types.ivy (richest type file in minip)."""
+    path = MINIP_STACK_DIR / "ping_types.ivy"
+    if not path.exists():
+        pytest.skip(f"ping_types.ivy not found at {path}")
+    return path
+
+
+@pytest.fixture
+def minip_types_source(minip_types_path):
+    """Source content of ping_types.ivy."""
+    return minip_types_path.read_text()
+
+
+@pytest.fixture(scope="module")
+def minip_indexer():
+    """Pre-built WorkspaceIndexer for the full minip workspace (module-scoped).
+
+    Uses MINIP_DIR as workspace root with staging so cross-directory
+    includes resolve via flat symlinks.
+
+    Requires the ``ivy`` package for tokenization — skips when unavailable.
     """
-    types_file = tmp_path / "types.ivy"
-    types_file.write_text("#lang ivy1.7\n" "\n" "type cid\n" "type pkt_num\n")
-    conn_file = tmp_path / "conn.ivy"
-    conn_file.write_text(
-        "#lang ivy1.7\n"
-        "\n"
-        "include types\n"
-        "\n"
-        "action send(src:cid, dst:cid) = {\n"
-        "    require src ~= dst;\n"
-        "}\n"
-        "\n"
-        "relation connected(X:cid, Y:cid)\n"
-    )
-    return tmp_path
+    if not MINIP_DIR.exists():
+        pytest.skip(f"minip workspace not found at {MINIP_DIR}")
+    try:
+        import ivy  # noqa: F401
+    except ImportError:
+        pytest.skip("ivy package not installed (required for indexer)")
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+
+    parser = IvyParserWrapper()
+    resolver = IncludeResolver(str(MINIP_DIR))
+    resolver.create_staging_directory()
+    indexer = WorkspaceIndexer(str(MINIP_DIR), parser, resolver)
+    indexer.index_workspace()
+    yield indexer
+    resolver.cleanup_staging()
+
+
+# ---------------------------------------------------------------------------
+# Multi-file workspace fixtures (tmp_path-based)
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -337,61 +275,66 @@ def annotated_workspace(tmp_path):
     return tmp_path
 
 
-@pytest.fixture
-def syntax_error_workspace(tmp_path):
-    """Workspace with files containing deliberate structural errors.
+# ---------------------------------------------------------------------------
+# Real protocol-testing dir fixtures (propagation integration tests)
+# ---------------------------------------------------------------------------
 
-    Creates:
-      no_header.ivy     — missing #lang header
-      bad_braces.ivy    — unmatched braces
-      bad_include.ivy   — unresolvable include
+# Path to the REAL MiniP protocol files (not the test-resources copy).
+# The propagation tools need actual ser/deser files with C++ impl blocks.
+_REAL_PROTOCOL_TESTING = (
+    PROTOCOL_TESTING_DIR
+    if PROTOCOL_TESTING_DIR is not None
+    else Path(__file__).resolve().parent.parent / "protocol-testing"
+)
+_REAL_MINIP_DIR = _REAL_PROTOCOL_TESTING / "minip"
+
+
+@pytest.fixture(scope="session")
+def minip_protocol_dir():
+    """Path to the REAL MiniP protocol files for propagation tool tests."""
+    env_dir = os.environ.get("PANTHER_IVY_PROTOCOL_DIR")
+    if env_dir and os.path.isdir(env_dir):
+        return env_dir
+    if _REAL_MINIP_DIR.exists():
+        return str(_REAL_MINIP_DIR)
+    pytest.skip(f"Real MiniP protocol dir not found at {_REAL_MINIP_DIR}")
+
+
+@pytest.fixture
+def minip_worktree(tmp_path):
+    """Create an isolated Git worktree copy of MiniP for destructive tests.
+
+    Yields the path to the worktree's minip/ directory.
+    Cleans up the worktree after the test.
     """
-    (tmp_path / "no_header.ivy").write_text("type cid\n")
-    (tmp_path / "bad_braces.ivy").write_text("#lang ivy1.7\n\ntype a = { b\n")
-    (tmp_path / "bad_include.ivy").write_text(
-        "#lang ivy1.7\n\ninclude nonexistent_module\n\ntype x\n"
+    repo_root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True
+    ).strip()
+    worktree_path = str(tmp_path / "propagation-test")
+
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", worktree_path, "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
     )
-    return tmp_path
-
-
-@pytest.fixture
-def large_workspace_source():
-    """Ivy source with 160 symbol declarations for cap testing."""
-    lines = ["#lang ivy1.7\n"]
-    for i in range(80):
-        lines.append(f"type sym_type_{i}")
-    for i in range(80):
-        lines.append(f"action sym_action_{i}")
-    return "\n".join(lines) + "\n"
-
-
-@pytest.fixture
-def ivy_source_test_file():
-    """Ivy source simulating a test file with exports but no _finalize."""
-    return """\
-#lang ivy1.7
-
-type cid
-action send(src:cid, dst:cid)
-export send
-
-before send {
-    require src ~= dst;
-}
-"""
-
-
-@pytest.fixture
-def ivy_source_untagged_assertion():
-    """Ivy source with assertions that lack bracket-tag annotations."""
-    return """\
-#lang ivy1.7
-
-type cid
-action send(src:cid, dst:cid)
-
-before send {
-    require src ~= dst;
-    ensure true;
-}
-"""
+    try:
+        minip_dir = os.path.join(
+            worktree_path,
+            "panther",
+            "plugins",
+            "services",
+            "testers",
+            "panther_ivy",
+            "protocol-testing",
+            "minip",
+        )
+        if not os.path.isdir(minip_dir):
+            pytest.skip(f"MiniP not found in worktree: {minip_dir}")
+        yield minip_dir
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree_path],
+            cwd=repo_root,
+            capture_output=True,
+        )

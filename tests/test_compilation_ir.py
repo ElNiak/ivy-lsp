@@ -11,7 +11,7 @@ import pickle
 
 import pytest
 
-from ivy_lsp.compilation.ir import (
+from ivy_lsp.core.compilation.ir import (
     ActionIR,
     CompiledModuleIR,
     IsolateIR,

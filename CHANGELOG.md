@@ -5,6 +5,140 @@ All notable changes to ivy-lsp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phase 1.5 MCP Diagnostic IR Migration
+
+Closes the three-entry ALLOWLIST that Phase 1 deferred. The MCP-side
+`ivy_diagnostics` tool now constructs `IvyDiagnostic` IR for every
+diagnostic emission and converts at the boundary via `.to_mcp_dict()`,
+matching the LSP path. The audit fence in
+`tests/test_no_raw_dict_diagnostics.py` is now unconditional: no producer
+module under `ivy_lsp/core/`, `ivy_lsp/lsp/diagnostics/`, or
+`ivy_lsp/mcp/tools/` may emit diagnostic-shaped raw dicts.
+
+### Changed
+
+- Migrated five raw-dict emit sites in `ivy_lsp/mcp/tools/diagnostics_tool.py`
+  (lexer error, orphaned RFC tag, missing assertion bracket tag, missing
+  `_finalize`, exported action without monitor) to construct
+  `IvyDiagnostic` and convert via `.to_mcp_dict()`. Source strings now
+  match the registry descriptors (`"ivy-lsp"`, `"ivy-lsp-semantic"`,
+  `"ivy-semantic"`); the coined `"ivy-pattern"` and `"ivy-lsp-lexer"`
+  source values are gone, unifying the LSP and MCP wire contract.
+- MCP `ivy_diagnostics` responses now include `code` and `explanation`
+  fields on each diagnostic (additive — pre-existing fields `line`,
+  `severity`, `message`, `source`, and the envelope-level `by_source`,
+  `error_count`, `warning_count`, `hint_count`, `info_count`,
+  `layer_errors`, `partial`, and scope metadata are unchanged).
+- Tightened `RAW_DICT_PATTERN` in `tests/test_no_raw_dict_diagnostics.py`
+  to require `severity|code|message` (dropped `file` from the alternation).
+  The previous regex caught `(file, line)` location anchors as
+  diagnostic-shaped, producing false positives for coverage and
+  propagation analysis records that legitimately are not diagnostics.
+- Cleared the audit-fence ALLOWLIST. The set is now empty; new
+  transitional entries require an issue link before re-introduction.
+
+### Added
+
+- Two new positive assertions in
+  `test_audit_fence_regex_catches_both_shapes` covering the false-positive
+  shapes that motivated the regex tightening: `(file, line)` location
+  anchors and propagation correlation records carrying nested
+  `(file, line)` instances must not match.
+- Five parametrized MCP wire-shape tests in
+  `tests/test_diagnostic_schema_compliance.py` pinning the
+  `IvyDiagnostic.to_mcp_dict()` contract for each migrated emit site:
+  `code`, `message`, 1-based `line`, `severity` string, `source`, and
+  `explanation` (registry-injected) must all be present.
+- A codebase-wide source-consistency guard
+  (`test_every_emit_site_source_matches_registry` in
+  `tests/test_diagnostic_registry_completeness.py`) scans every
+  `IvyDiagnostic(...)` constructor under `ivy_lsp/`, extracts the
+  `(code, source)` pair via paren-balance walk + kwarg regex, and
+  asserts `source == DIAGNOSTIC_REGISTRY[code].source`. Closes the
+  recurring source-string-mismatch failure class for *every* emit
+  site, not just MCP. A future edit drifting any source — e.g.
+  reintroducing `"ivy-pattern"` or `"ivy-lsp-lexer"` — fails this
+  fence loudly. Supersedes a transitional table-driven check that
+  walked a hand-maintained signature table inside the schema-compliance
+  test.
+
+### Fixed
+
+- `ivy_lsp/core/structural_lint.py`: the `ivy.action.unguardedWrite`
+  emit site used `source="ivy-lint"` while the registry and the
+  matching emit sites in `ivy_lsp/core/coverage_hints.py` use
+  `source="ivy-semantic"`. Drift surfaced by the codebase-wide
+  source-consistency guard added in this phase. Aligned to the
+  registry; existing tests pass without changes (none assert on
+  `source == "ivy-lint"` for this code).
+
+## [Unreleased] — Phase 1 Diagnostic IR Migration
+
+Phase 1 of the diagnostic redesign. Every diagnostic producer in ivy-lsp now
+constructs `IvyDiagnostic` IR objects (with construction-time validation) and
+converts to the LSP / MCP wire shape only at the boundary via `.to_lsp()` /
+`.to_mcp_dict()`. This eliminates raw-dict emissions, unifies the source of
+truth for diagnostic codes, and ensures every published `lsp.Diagnostic`
+carries the full LSP 3.17 schema (range, code, codeDescription.href, source,
+severity, related-information, tags).
+
+### Added
+
+- **`IvyDiagnostic.__post_init__` validation** rejects empty/whitespace-only
+  messages, negative lines, `severity=None`, and codes not in
+  `DIAGNOSTIC_REGISTRY`. All raise `ValueError`.
+- **`IvyDiagnostic.from_dict()`** boundary helper for converting legacy raw-dict
+  emissions to validated IR. Handles 1-based → 0-based line conversion,
+  case-insensitive severity strings, `severity=None` degradation to Hint.
+- **`DIAGNOSTIC_REGISTRY` namespaced backfill**: every emit-site `ivy.*` code
+  has a registered descriptor with `source` matching the runtime wire value.
+- **Migration tests per emit cluster** (`test_structural_lint_migration`,
+  `test_compute_requirement_migration`, `test_compute_semantic_migration`,
+  `test_compute_pattern_migration`, `test_compute_coverage_migration`,
+  `test_parse_ivy_check_output_migration`).
+- **`tests/test_no_raw_dict_diagnostics.py`** CI fence forbidding raw-dict
+  diagnostic emissions in `ivy_lsp/core/`, `ivy_lsp/lsp/diagnostics/`, and
+  `ivy_lsp/mcp/tools/`. The fence ships with three transitional ALLOWLIST
+  entries deferred to Phase 1.5 (`mcp/tools/diagnostics_tool.py`,
+  `propagation.py`, `traceability.py`); Phase 1.5 closed all three.
+- **`tests/test_diagnostic_schema_compliance.py`** integration test asserting
+  every published `lsp.Diagnostic` carries the LSP 3.17 schema fields.
+- **`tests/test_diagnostic_boundary_methods.py`** round-trip tests for
+  `IvyDiagnostic.to_lsp()` and `to_mcp_dict()`.
+- **`DiagnosticTag.Unnecessary`** is propagated through the IR (`data["tags"]`)
+  and serialized in `to_mcp_dict()` so MCP consumers can filter coverage hints.
+
+### Changed
+
+- `check_structural_issues` (renamed from `check_structural_issues_raw`),
+  `compute_requirement_diagnostics`, `compute_semantic_diagnostics`,
+  `compute_coverage_hints`, the inline pattern checks in
+  `compute_full_diagnostics`, and `parse_ivy_check_output` all return
+  `List[IvyDiagnostic]` (was `List[Dict]` or `List[lsp.Diagnostic]`).
+- Internal callers convert via `.to_lsp()` / `.to_mcp_dict()` at the LSP and
+  MCP boundaries.
+- Diagnostic-code synonyms consolidated. Removed `ivy.action.unguardedAction`,
+  `ivy.unguarded-write`, `ivy.no-monitor` in favour of canonical
+  `ivy.action.unguardedWrite`, `ivy.invariant.unguardedWrite`,
+  `ivy.action.noMonitor`. Source strings on emit sites now match the registry
+  descriptor for every code (no coined alternatives).
+- Hyphenated legacy codes (`missing-lang-header`, `param-name-style`,
+  `unguarded-action`, `missing-init`, `empty-init`, `duplicate-decl`,
+  `unresolved-include`) renamed to canonical namespaced forms during their
+  emit-site migrations.
+
+### Fixed
+
+- `IvyDiagnostic.to_mcp_dict()` previously did not serialize `tags`; now does.
+- Several emit sites in `structural_lint.py` (`check_lowercase_params`,
+  `check_duplicate_tags`, `check_commented_out_requires`,
+  `check_unresolved_includes_raw`) bypassed `IvyDiagnostic.to_lsp()` and lost
+  `code_description.href` on the wire. All migrated to construct
+  `IvyDiagnostic` and convert at the boundary.
+- `publisher.py:_convert_error_to_diagnostic` and the lexer-error fallback in
+  `compute.py` no longer build raw `lsp.Diagnostic` directly; both go through
+  `IvyDiagnostic.to_lsp()`.
+
 ## [0.11.0] - 2026-03-03
 
 This is a collapsed entry covering all changes from v0.7.1 through v0.11.0.

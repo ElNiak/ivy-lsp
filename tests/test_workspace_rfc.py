@@ -14,8 +14,8 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import EdgeType, RequirementGraph
-from ivy_lsp.semantic.nodes import RfcRequirement
+from ivy_lsp.core.analysis.requirement_graph import EdgeType, RequirementGraph
+from ivy_lsp.core.semantic.nodes import RfcRequirement
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -103,7 +103,7 @@ class TestRequirementGraphRfcCoverage:
         assert graph.rfc_requirements == {}
 
     def test_wire_coverage_edges_creates_covers_edges(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         graph = RequirementGraph()
 
@@ -144,7 +144,7 @@ class TestRequirementGraphRfcCoverage:
         assert ("/test/file.ivy:8", "rfc9000:8.1") in covers_edges
 
     def test_wire_coverage_edges_ignores_unknown_tags(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         graph = RequirementGraph()
 
@@ -167,7 +167,7 @@ class TestRequirementGraphRfcCoverage:
         assert len(covers_edges) == 0
 
     def test_get_coverage_stats(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         graph = RequirementGraph()
 
@@ -212,7 +212,7 @@ class TestRequirementGraphRfcCoverage:
         assert stats == {"total": 0, "covered": 0, "uncovered": 0}
 
     def test_get_uncovered_requirements(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         graph = RequirementGraph()
 
@@ -259,7 +259,7 @@ class TestRequirementGraphRfcCoverage:
         assert uncovered_ids == {"rfc9000:8.1", "rfc9000:17.2"}
 
     def test_wire_coverage_edges_idempotent(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         graph = RequirementGraph()
 
@@ -296,7 +296,7 @@ class TestRequirementGraphRfcCoverage:
         assert len(covers_after_second) == 1
 
     def test_get_uncovered_requirements_all_covered(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
         graph = RequirementGraph()
 
@@ -353,9 +353,9 @@ class TestWorkspaceRfcIntegration:
         return tmp_path
 
     def test_manifests_loaded_into_graph(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         ws = self._setup_workspace(tmp_path)
         parser = IvyParserWrapper()
@@ -370,9 +370,9 @@ class TestWorkspaceRfcIntegration:
         assert "rfc9000:17.2" in rfc_reqs
 
     def test_coverage_edges_wired(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         ws = self._setup_workspace(tmp_path)
         parser = IvyParserWrapper()
@@ -391,9 +391,9 @@ class TestWorkspaceRfcIntegration:
         assert "rfc9000:17.2" not in covered_targets
 
     def test_coverage_stats(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         ws = self._setup_workspace(tmp_path)
         parser = IvyParserWrapper()
@@ -407,9 +407,9 @@ class TestWorkspaceRfcIntegration:
         assert stats["uncovered"] == 1  # rfc9000:17.2
 
     def test_uncovered_requirements(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         ws = self._setup_workspace(tmp_path)
         parser = IvyParserWrapper()
@@ -424,9 +424,9 @@ class TestWorkspaceRfcIntegration:
 
     def test_no_manifest_directory_no_crash(self, tmp_path):
         """Workspace without protocol-testing/ dir should not crash."""
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "simple.ivy").write_text("#lang ivy1.7\ntype t\n")
 
@@ -440,9 +440,9 @@ class TestWorkspaceRfcIntegration:
         assert stats == {"total": 0, "covered": 0, "uncovered": 0}
 
     def test_rfc_requirement_fields_loaded_correctly(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         ws = self._setup_workspace(tmp_path)
         parser = IvyParserWrapper()

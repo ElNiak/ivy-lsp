@@ -13,9 +13,9 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import RequirementGraph
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
-from ivy_lsp.features.commands import register
+from ivy_lsp.core.analysis.requirement_graph import RequirementGraph
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
+from ivy_lsp.lsp.commands import register
 
 # ---------------------------------------------------------------------------
 # Helpers (duplicated from test_commands.py -- small, self-contained)
@@ -463,7 +463,7 @@ class TestSetActiveTestDiagnosticRefresh:
         server.workspace.text_documents = {mock_doc.uri: mock_doc}
 
         with patch(
-            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            "ivy_lsp.lsp.diagnostics.publisher.compute_diagnostics",
             return_value=[],
         ):
             params = _make_namedtuple_params(
@@ -488,7 +488,7 @@ class TestSetActiveTestDiagnosticRefresh:
         server.workspace.text_documents = {mock_doc.uri: mock_doc}
 
         with patch(
-            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            "ivy_lsp.lsp.diagnostics.publisher.compute_diagnostics",
             return_value=[],
         ):
             params = _make_namedtuple_params({"testFile": None})
@@ -517,10 +517,12 @@ class TestSetActiveTestDiagnosticRefresh:
         mock_ivy = MagicMock()
         mock_ivy.uri = "file:///workspace/quic_stack.ivy"
         mock_ivy.source = "action quic.send(x:t)\n"
+        mock_ivy.version = 1
 
         mock_untitled = MagicMock()
         mock_untitled.uri = "untitled:Untitled-1"
         mock_untitled.source = "some text"
+        mock_untitled.version = 1
 
         server.workspace.text_documents = {
             mock_ivy.uri: mock_ivy,
@@ -528,7 +530,7 @@ class TestSetActiveTestDiagnosticRefresh:
         }
 
         with patch(
-            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            "ivy_lsp.lsp.diagnostics.compute.compute_diagnostics",
             return_value=[],
         ) as mock_compute:
             params = _make_namedtuple_params(
@@ -571,7 +573,7 @@ class TestSetActiveTestDiagnosticRefresh:
         server.workspace.text_documents = docs
 
         with patch(
-            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            "ivy_lsp.lsp.diagnostics.publisher.compute_diagnostics",
             return_value=[],
         ):
             params = _make_namedtuple_params(
@@ -677,7 +679,7 @@ class TestActiveDocumentChanged:
         server.workspace.text_documents = {mock_doc.uri: mock_doc}
 
         with patch(
-            "ivy_lsp.features.diagnostics.compute_diagnostics",
+            "ivy_lsp.lsp.diagnostics.publisher.compute_diagnostics",
             return_value=[],
         ):
             params = _make_namedtuple_params(

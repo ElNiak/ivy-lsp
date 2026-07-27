@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestDiagnosticsImport:
     def test_import(self):
-        from ivy_lsp.features.diagnostics import (
+        from ivy_lsp.lsp.diagnostics.compute import (
             check_structural_issues,
             compute_diagnostics,
         )
@@ -24,8 +24,8 @@ class TestDiagnosticsImport:
 
 class TestParseDiagnostics:
     def test_valid_file_no_diagnostics(self, tmp_path):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\n\ntype cid\n"
@@ -34,8 +34,8 @@ class TestParseDiagnostics:
         assert len(errors) == 0
 
     def test_syntax_error_produces_diagnostic(self):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\n\ntype cid\nobject broken = {\n    this is not valid !!!\n}\n"
@@ -44,8 +44,8 @@ class TestParseDiagnostics:
         assert len(errors) > 0
 
     def test_diagnostic_has_message(self):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         source = "#lang ivy1.7\nobject x = { @@@ }\n"
@@ -57,7 +57,7 @@ class TestParseDiagnostics:
 
 class TestStructuralDiagnostics:
     def test_missing_lang_header(self):
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         diags = check_structural_issues("type cid\n", "a.ivy")
         assert any(
@@ -65,7 +65,7 @@ class TestStructuralDiagnostics:
         )
 
     def test_valid_header_no_warning(self):
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         diags = check_structural_issues("#lang ivy1.7\ntype cid\n", "a.ivy")
         lang_warnings = [
@@ -76,21 +76,21 @@ class TestStructuralDiagnostics:
         assert len(lang_warnings) == 0
 
     def test_unmatched_open_brace(self):
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         diags = check_structural_issues("#lang ivy1.7\nobject x = {\ntype t\n", "a.ivy")
         brace_diags = [d for d in diags if "brace" in d.message.lower()]
         assert len(brace_diags) > 0
 
     def test_unmatched_close_brace(self):
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         diags = check_structural_issues("#lang ivy1.7\n}\n", "a.ivy")
         brace_diags = [d for d in diags if "brace" in d.message.lower()]
         assert len(brace_diags) > 0
 
     def test_balanced_braces_no_diagnostic(self):
-        from ivy_lsp.features.diagnostics import check_structural_issues
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         diags = check_structural_issues(
             "#lang ivy1.7\nobject x = {\ntype t\n}\n", "a.ivy"
@@ -99,10 +99,10 @@ class TestStructuralDiagnostics:
         assert len(brace_diags) == 0
 
     def test_unresolved_include(self, tmp_path):
-        from ivy_lsp.features.diagnostics import check_structural_issues
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ninclude nonexistent\n")
         parser = IvyParserWrapper()
@@ -119,10 +119,10 @@ class TestStructuralDiagnostics:
         assert len(include_diags) > 0
 
     def test_resolved_include_no_diagnostic(self, tmp_path):
-        from ivy_lsp.features.diagnostics import check_structural_issues
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype t\n")
         (tmp_path / "main.ivy").write_text("#lang ivy1.7\ninclude types\n")
@@ -149,8 +149,8 @@ class TestFallbackScannerDiagnostics:
         When the parser fails and the fallback scanner encounters the error,
         a diagnostic is emitted.
         """
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         # Smart quote (U+2019) is an illegal character for the Ivy lexer
@@ -167,8 +167,8 @@ class TestFallbackScannerDiagnostics:
 
 class TestComputeDiagnostics:
     def test_full_pipeline_valid(self):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         diags = compute_diagnostics(parser, "#lang ivy1.7\ntype cid\n", "a.ivy")
@@ -176,7 +176,7 @@ class TestComputeDiagnostics:
         assert len(errors) == 0
 
     def test_no_parser_graceful(self):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         diags = compute_diagnostics(None, "#lang ivy1.7\ntype cid\n", "a.ivy")
         # Should not crash; structural-only diagnostics
@@ -192,7 +192,7 @@ class TestDidCloseHandler:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         # Collect registered features
@@ -218,7 +218,7 @@ class TestDidCloseHandler:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -251,7 +251,7 @@ class TestDidCloseHandler:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -310,7 +310,7 @@ class TestDeepTaskTracking:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -360,7 +360,7 @@ class TestDeepTaskTracking:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -414,8 +414,8 @@ class TestDiagnosticEndPosition:
         """Coverage hint diagnostics should not use magic 999."""
         from unittest.mock import MagicMock
 
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         graph = RequirementGraph()
         graph.add_action(
@@ -448,19 +448,32 @@ class TestDiagnosticEndPosition:
             parse_result=fake_result,
         )
 
-        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        # After IvyDiagnostic migration, coverage hints carry DiagnosticTag.Unnecessary
+        # instead of a uniform source="ivy-lsp-coverage". Filter by that tag.
+        from lsprotocol import types as _lsp
+
+        coverage_diags = [
+            d for d in diags if d.tags and _lsp.DiagnosticTag.Unnecessary in d.tags
+        ]
         assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
         for d in coverage_diags:
             assert (
                 d.range.end.character != 999
             ), "Coverage diagnostic uses magic 999 instead of actual line length"
 
-    def test_coverage_hint_end_matches_line_length(self):
-        """Coverage hint end character should match the actual line length."""
+    def test_coverage_hint_range_uses_node_column_data(self):
+        """Coverage hint range comes from ActionNode.start_col/end_col (Phase 5.2b).
+
+        Pre-Phase 5.2b, the LSP boundary in compute_diagnostics overwrote
+        coverage-hint ranges with full-line spans. Phase 5.2b populates
+        start_col/end_col on graph nodes and the LSP boundary now passes
+        them through unmodified, so the squiggle aligns with the action
+        name token instead of the full line.
+        """
         from unittest.mock import MagicMock
 
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         graph = RequirementGraph()
         graph.add_action(
@@ -470,6 +483,8 @@ class TestDiagnosticEndPosition:
                 qualified_name="q.foo",
                 file="/tmp/test.ivy",
                 line=2,
+                start_col=7,  # column of "foo" inside "action foo(x:cid)"
+                end_col=10,  # one past "foo"
             )
         )
         indexer = MagicMock()
@@ -482,7 +497,6 @@ class TestDiagnosticEndPosition:
         fake_result.errors = []
 
         source = "#lang ivy1.7\n\naction foo(x:cid)\n"
-        # Line 2 is "action foo(x:cid)" which has length 17
         diags = compute_diagnostics(
             None,
             source,
@@ -491,35 +505,37 @@ class TestDiagnosticEndPosition:
             parse_result=fake_result,
         )
 
-        coverage_diags = [d for d in diags if d.source == "ivy-lsp-coverage"]
+        # Coverage hints carry DiagnosticTag.Unnecessary; filter by that tag
+        # to isolate them from compute_requirement_diagnostics emissions.
+        from lsprotocol import types as _lsp
+
+        coverage_diags = [
+            d for d in diags if d.tags and _lsp.DiagnosticTag.Unnecessary in d.tags
+        ]
         assert len(coverage_diags) > 0, "Expected at least one coverage diagnostic"
         for d in coverage_diags:
-            line_idx = d.range.start.line
-            lines = source.split("\n")
-            expected_len = len(lines[line_idx]) if line_idx < len(lines) else 0
-            assert d.range.end.character == expected_len, (
-                f"Expected end character {expected_len} for line {line_idx}, "
-                f"got {d.range.end.character}"
-            )
+            assert (
+                d.range.start.character == 7
+            ), f"Expected start.character=7 (start_col), got {d.range.start.character}"
 
     def test_ivy_check_output_end_character_not_999(self):
         """parse_ivy_check_output should not use magic 999."""
-        from ivy_lsp.features.diagnostics import parse_ivy_check_output
+        from ivy_lsp.lsp.diagnostics.compute import parse_ivy_check_output
 
         # Format matches regex: "file:linenum: severity: message"
         output = "test.ivy:5: error: something went wrong"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1, "Expected one diagnostic from ivy_check output"
         for d in diags:
             assert d.range.end.character != 999, "ivy_check diagnostic uses magic 999"
 
     def test_ivy_check_output_uses_next_line_convention(self):
         """parse_ivy_check_output should use lineno+1, char=0 for full-line span."""
-        from ivy_lsp.features.diagnostics import parse_ivy_check_output
+        from ivy_lsp.lsp.diagnostics.compute import parse_ivy_check_output
 
         # Format: "file:line: severity: message"
         output = "test.ivy:5: error: something went wrong"
-        diags = parse_ivy_check_output(output)
+        diags = [d.to_lsp() for d in parse_ivy_check_output(output)]
         assert len(diags) == 1
         d = diags[0]
         # lineno = max(0, 5 - 1) = 4, so end should be line 5, char 0
@@ -532,7 +548,7 @@ class TestDiagnosticEndPosition:
 class TestDeepDiagnostics:
     @pytest.mark.asyncio
     async def test_missing_ivyc_handled(self):
-        from ivy_lsp.features.diagnostics import run_deep_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import run_deep_diagnostics
 
         result = await run_deep_diagnostics(
             "nonexistent.ivy", ivy_check_cmd="nonexistent_binary_12345"
@@ -550,7 +566,7 @@ class TestDiagnosticVersion:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -601,7 +617,7 @@ class TestDiagnosticVersion:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -634,7 +650,7 @@ class TestDiagnosticVersion:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -690,7 +706,7 @@ class TestHandlerConsistency:
 
         from lsprotocol import types as lsp
 
-        from ivy_lsp.features.diagnostics import register
+        from ivy_lsp.lsp.diagnostics.publisher import register
 
         server = MagicMock()
         handlers = {}
@@ -719,7 +735,7 @@ class TestFallbackScanDeduplication:
         """If parse result carries lexer_errors, skip redundant fallback_scan."""
         from unittest.mock import MagicMock, patch
 
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         result = MagicMock()
         result.success = False
@@ -727,7 +743,7 @@ class TestFallbackScanDeduplication:
         # Indicate the result already includes lexer diagnostics
         result.lexer_errors = [{"line": 1, "message": "bad char"}]
 
-        with patch("ivy_lsp.parsing.fallback_scanner.fallback_scan") as mock_scan:
+        with patch("ivy_lsp.core.parsing.fallback_scanner.fallback_scan") as mock_scan:
             mock_scan.return_value = ([], None)
             compute_diagnostics(
                 parser=None,
@@ -741,7 +757,7 @@ class TestFallbackScanDeduplication:
         """If parse result does not have lexer_errors, fallback_scan should run."""
         from unittest.mock import MagicMock, patch
 
-        from ivy_lsp.features.diagnostics import compute_diagnostics
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         result = MagicMock()
         result.success = False
@@ -749,7 +765,7 @@ class TestFallbackScanDeduplication:
         # No lexer_errors attribute (standard ParseResult)
         del result.lexer_errors
 
-        with patch("ivy_lsp.parsing.fallback_scanner.fallback_scan") as mock_scan:
+        with patch("ivy_lsp.core.parsing.fallback_scanner.fallback_scan") as mock_scan:
             mock_scan.return_value = ([], None)
             compute_diagnostics(
                 parser=None,

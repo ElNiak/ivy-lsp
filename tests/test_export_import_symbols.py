@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 # ---------------------------------------------------------------------------
 # Fake AST types for mocking ivy.ivy_ast
@@ -69,14 +69,22 @@ def _make_fake_ia_module() -> SimpleNamespace:
         IsolateDecl=_Sentinel,
         ModuleDecl=_Sentinel,
         AliasDecl=_Sentinel,
+        DerivedDecl=_Sentinel,
+        InterpretDecl=_Sentinel,
+        SchemaDecl=_Sentinel,
+        TheoremDecl=_Sentinel,
         DestructorDecl=_Sentinel,
         ConstructorDecl=_Sentinel,
         ConstantDecl=_Sentinel,
         InstantiateDecl=_Sentinel,
         MixinDecl=_Sentinel,
         VariantDecl=_Sentinel,
+        NativeDecl=_Sentinel,
+        AttributeDecl=_Sentinel,
         ExportDecl=_FakeExportDecl,
         ImportDecl=_FakeImportDecl,
+        MixinAfterDef=_Sentinel,
+        MixinImplementDef=_Sentinel,
     )
 
 
@@ -151,11 +159,11 @@ class TestExportSymbolExtraction:
         source = "\n".join([""] * 4 + ["export quic.send"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "export quic.send")
+        sym = _find_symbol(symbols, "quic.send")
         assert (
             sym is not None
         ), f"Expected 'export quic.send', got {[s.name for s in symbols]}"
@@ -168,11 +176,11 @@ class TestExportSymbolExtraction:
         source = "\n".join([""] * 4 + ["export quic.send"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "export quic.send")
+        sym = _find_symbol(symbols, "quic.send")
         assert sym is not None
         # Line 5 (1-based) -> line 4 (0-based)
         assert sym.range[0] == 4, f"Expected start line 4, got {sym.range[0]}"
@@ -183,11 +191,11 @@ class TestExportSymbolExtraction:
         source = "\n\n\nexport quic.send"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "export quic.send")
+        sym = _find_symbol(symbols, "quic.send")
         assert sym is not None
         assert sym.detail == "export quic.send"
 
@@ -197,12 +205,12 @@ class TestExportSymbolExtraction:
         source = "\n\nexport quic.send, quic.recv"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        assert _find_symbol(symbols, "export quic.send") is not None
-        assert _find_symbol(symbols, "export quic.recv") is not None
+        assert _find_symbol(symbols, "quic.send") is not None
+        assert _find_symbol(symbols, "quic.recv") is not None
 
     def test_export_with_rep_fallback(self):
         """When relname is absent, fall back to rep."""
@@ -215,11 +223,11 @@ class TestExportSymbolExtraction:
         source = "\nexport quic.alt_send"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "export quic.alt_send")
+        sym = _find_symbol(symbols, "quic.alt_send")
         assert sym is not None
 
     def test_export_no_lineno_defaults_to_zero(self):
@@ -231,11 +239,11 @@ class TestExportSymbolExtraction:
         ast = _make_ast(decl)
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", "export quic.send")
 
-        sym = _find_symbol(symbols, "export quic.send")
+        sym = _find_symbol(symbols, "quic.send")
         assert sym is not None
         assert sym.range[0] == 0
 
@@ -246,7 +254,7 @@ class TestExportSymbolExtraction:
         ast = _make_ast(decl)
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", "")
 
@@ -261,7 +269,7 @@ class TestExportSymbolExtraction:
         ast = _make_ast(decl)
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", "")
 
@@ -282,11 +290,11 @@ class TestImportSymbolExtraction:
         source = "\n".join([""] * 6 + ["import tls.handshake"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "import tls.handshake")
+        sym = _find_symbol(symbols, "tls.handshake")
         assert sym is not None
         assert sym.kind == SymbolKind.Event
         assert sym.file_path == "test.ivy"
@@ -297,11 +305,11 @@ class TestImportSymbolExtraction:
         source = "\n".join([""] * 6 + ["import tls.handshake"])
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "import tls.handshake")
+        sym = _find_symbol(symbols, "tls.handshake")
         assert sym is not None
         # Line 7 (1-based) -> line 6 (0-based)
         assert sym.range[0] == 6
@@ -312,11 +320,11 @@ class TestImportSymbolExtraction:
         source = "\n\nimport tls.handshake"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        sym = _find_symbol(symbols, "import tls.handshake")
+        sym = _find_symbol(symbols, "tls.handshake")
         assert sym is not None
         assert sym.detail == "import tls.handshake"
 
@@ -326,12 +334,12 @@ class TestImportSymbolExtraction:
         source = "\n\nimport tls.handshake, tls.close"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        assert _find_symbol(symbols, "import tls.handshake") is not None
-        assert _find_symbol(symbols, "import tls.close") is not None
+        assert _find_symbol(symbols, "tls.handshake") is not None
+        assert _find_symbol(symbols, "tls.close") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -349,12 +357,12 @@ class TestMixedExportImport:
         source = "\n\nexport quic.send\n\nimport tls.handshake"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
-        assert _find_symbol(symbols, "export quic.send") is not None
-        assert _find_symbol(symbols, "import tls.handshake") is not None
+        assert _find_symbol(symbols, "quic.send") is not None
+        assert _find_symbol(symbols, "tls.handshake") is not None
 
     def test_mixin_variant_still_skipped(self):
         """MixinDecl and VariantDecl must still produce no symbols."""
@@ -364,13 +372,13 @@ class TestMixedExportImport:
         source = "\n\nexport quic.send"
 
         with _patch_ivy_ast():
-            from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
+            from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
 
             symbols = ast_to_symbols(ast, "test.ivy", source)
 
         # MixinDecl (_Sentinel instance) produces no symbols
         # Only the export should appear
         names = [s.name for s in symbols]
-        assert "export quic.send" in names
+        assert "quic.send" in names
         # No other symbols from the mixin
         assert len(symbols) == 1

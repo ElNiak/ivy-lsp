@@ -4,7 +4,7 @@ import multiprocessing
 
 import pytest
 
-from ivy_lsp.compilation.ir import CompiledModuleIR
+from ivy_lsp.core.compilation.ir import CompiledModuleIR
 
 
 class TestCompilerWorker:
@@ -13,7 +13,7 @@ class TestCompilerWorker:
 
         It must not crash the subprocess.
         """
-        from ivy_lsp.compilation.worker import compiler_worker
+        from ivy_lsp.core.compilation.worker import compiler_worker
 
         parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
         ctx = multiprocessing.get_context("spawn")
@@ -40,7 +40,7 @@ class TestCompilerWorker:
 
     def test_worker_handles_empty_source(self):
         """Worker should handle empty source without crashing."""
-        from ivy_lsp.compilation.worker import compiler_worker
+        from ivy_lsp.core.compilation.worker import compiler_worker
 
         parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
         ctx = multiprocessing.get_context("spawn")

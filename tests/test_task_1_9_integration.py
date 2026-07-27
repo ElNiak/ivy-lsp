@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.features.document_symbols import get_document_symbols
-from ivy_lsp.features.workspace_symbols import flatten_symbols, search_symbols
-from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-from ivy_lsp.parsing.fallback_scanner import fallback_scan
-from ivy_lsp.parsing.parser_session import IvyParserWrapper
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+from ivy_lsp.core.parsing.fallback_scanner import fallback_scan
+from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.lsp.document_symbols import get_document_symbols
+from ivy_lsp.lsp.workspace_symbols import flatten_symbols, search_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ action next(e:cid) returns (r:cid) = {
         symbols = _full_pipeline(source)
         sym = _find_symbol(symbols, "next")
         assert sym is not None, "Expected symbol 'next'"
-        assert sym.kind == SymbolKind.Function
+        assert sym.kind == SymbolKind.Method
         assert sym.detail is not None, "Action should have param detail"
         assert "e" in sym.detail
 

@@ -2,14 +2,14 @@
 
 import pytest
 
-from ivy_lsp.analysis.requirement_graph import (
+from ivy_lsp.core.analysis.requirement_graph import (
     ActionNode,
     EdgeType,
     RequirementGraph,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.analysis.test_scope import (
+from ivy_lsp.core.analysis.test_scope import (
     ExportImportInfo,
     ScopedRequirementModel,
     TestScope,

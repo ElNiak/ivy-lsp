@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestSelectionRangeImport:
     def test_import(self):
-        from ivy_lsp.features.selection_range import compute_selection_ranges
+        from ivy_lsp.lsp.ui.selection_range import compute_selection_ranges
 
         assert compute_selection_ranges is not None
 
@@ -21,7 +21,7 @@ class TestSelectionRangeImport:
 class TestSelectionChain:
     def test_word_then_line_then_block(self):
         """Selection expands: word -> line -> brace block -> file."""
-        from ivy_lsp.features.selection_range import compute_selection_ranges
+        from ivy_lsp.lsp.ui.selection_range import compute_selection_ranges
 
         source = "#lang ivy1.7\n" "object foo = {\n" "    type this\n" "}\n"
         lines = source.split("\n")
@@ -52,7 +52,7 @@ class TestSelectionChain:
 
     def test_cursor_on_whitespace(self):
         """Cursor on empty line: line -> file."""
-        from ivy_lsp.features.selection_range import compute_selection_ranges
+        from ivy_lsp.lsp.ui.selection_range import compute_selection_ranges
 
         lines = ["#lang ivy1.7", "", "type cid"]
         results = compute_selection_ranges(lines, [Position(line=1, character=0)])
@@ -66,7 +66,7 @@ class TestSelectionChain:
 
     def test_multiple_positions(self):
         """Multiple positions return one SelectionRange each."""
-        from ivy_lsp.features.selection_range import compute_selection_ranges
+        from ivy_lsp.lsp.ui.selection_range import compute_selection_ranges
 
         lines = ["#lang ivy1.7", "type cid", "type pkt"]
         results = compute_selection_ranges(
@@ -79,7 +79,7 @@ class TestSelectionChain:
 class TestEdgeCases:
     def test_empty_source_lines(self):
         """Empty source_lines should not crash."""
-        from ivy_lsp.features.selection_range import compute_selection_ranges
+        from ivy_lsp.lsp.ui.selection_range import compute_selection_ranges
 
         results = compute_selection_ranges([], [Position(line=0, character=0)])
         assert len(results) == 1
@@ -88,7 +88,7 @@ class TestEdgeCases:
 
     def test_dotted_identifier(self):
         """Cursor on a dotted identifier highlights the last component."""
-        from ivy_lsp.features.selection_range import compute_selection_ranges
+        from ivy_lsp.lsp.ui.selection_range import compute_selection_ranges
 
         lines = ["#lang ivy1.7", "relation frame.ack"]
         results = compute_selection_ranges(lines, [Position(line=1, character=15)])

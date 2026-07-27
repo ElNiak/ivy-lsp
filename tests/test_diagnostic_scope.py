@@ -1,0 +1,185 @@
+"""Tests for workspace-scoped diagnostic filtering."""
+
+import pytest
+from lsprotocol import types as lsp
+
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import SymbolNode
+
+
+@pytest.mark.unit
+class TestShadowDiagnosticScoping:
+    """Bug 3: Shadow diagnostics must not cross workspace boundaries."""
+
+    def _make_model(self, nodes):
+        model = SemanticModel()
+        for n in nodes:
+            model.add_node(n)
+        return model
+
+    def test_cross_protocol_shadow_suppressed(self):
+        """Two symbols with same name in different protocols produce no shadow diagnostic."""
+        from ivy_lsp.lsp.diagnostics.compute import compute_semantic_diagnostics
+
+        model = self._make_model(
+            [
+                SymbolNode(
+                    id="/ws/protocol-testing/bgp/bgp_shims/bgp_shim.ivy:61:show_connected",
+                    name="show_connected",
+                    qualified_name="show_connected",
+                    kind="action",
+                    file="/ws/protocol-testing/bgp/bgp_shims/bgp_shim.ivy",
+                    line=60,
+                ),
+                SymbolNode(
+                    id="/ws/protocol-testing/quic/quic_tests/quic_test.ivy:256:show_connected",
+                    name="show_connected",
+                    qualified_name="show_connected",
+                    kind="action",
+                    file="/ws/protocol-testing/quic/quic_tests/quic_test.ivy",
+                    line=255,
+                ),
+            ]
+        )
+
+        source = "#lang ivy1.7\n" + "\n" * 60 + "action show_connected\n"
+        filepath = "/ws/protocol-testing/bgp/bgp_shims/bgp_shim.ivy"
+
+        diags = compute_semantic_diagnostics(model, filepath, source)
+        shadow_diags = [d for d in diags if d.code == "ivy.include.shadowDeclaration"]
+        assert len(shadow_diags) == 0
+
+    def test_same_protocol_shadow_reported(self):
+        """Two symbols with same name in the same protocol produce a shadow diagnostic."""
+        from ivy_lsp.lsp.diagnostics.compute import compute_semantic_diagnostics
+
+        model = self._make_model(
+            [
+                SymbolNode(
+                    id="/ws/protocol-testing/bgp/bgp_shims/bgp_shim.ivy:61:show_connected",
+                    name="show_connected",
+                    qualified_name="show_connected",
+                    kind="action",
+                    file="/ws/protocol-testing/bgp/bgp_shims/bgp_shim.ivy",
+                    line=60,
+                ),
+                SymbolNode(
+                    id="/ws/protocol-testing/bgp/bgp_utils/helpers.ivy:10:show_connected",
+                    name="show_connected",
+                    qualified_name="show_connected",
+                    kind="action",
+                    file="/ws/protocol-testing/bgp/bgp_utils/helpers.ivy",
+                    line=9,
+                ),
+            ]
+        )
+
+        source = "#lang ivy1.7\n" + "\n" * 60 + "action show_connected\n"
+        filepath = "/ws/protocol-testing/bgp/bgp_shims/bgp_shim.ivy"
+
+        diags = compute_semantic_diagnostics(model, filepath, source)
+        shadow_diags = [d for d in diags if d.code == "ivy.include.shadowDeclaration"]
+        assert len(shadow_diags) == 1
+
+
+from unittest.mock import MagicMock
+
+
+@pytest.mark.unit
+class TestIncludeResolutionFallback:
+    """Bug 1: Partitioned resolver must fall back to full resolver."""
+
+    def test_fallback_when_partitioned_returns_none(self):
+        """If resolve_partitioned returns None, fallback to resolve."""
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
+
+        source = "#lang ivy1.7\n\ninclude quic_types\n"
+        filepath = "/ws/protocol-testing/quic/quic_stack/test.ivy"
+
+        indexer = MagicMock()
+        resolver = MagicMock()
+        resolver.resolve_partitioned.return_value = None
+        resolver.resolve.return_value = (
+            "/ws/protocol-testing/quic/quic_stack/quic_types.ivy"
+        )
+        resolver._partition_staging = {"some_partition": ["file"]}
+        indexer.resolver = resolver
+
+        diags = check_structural_issues(source, filepath, indexer=indexer)
+        unresolved = [d for d in diags if "Unresolved include" in d.message]
+        assert len(unresolved) == 0
+
+    def test_no_fallback_when_partitioned_resolves(self):
+        """If resolve_partitioned succeeds, don't call fallback."""
+        from ivy_lsp.lsp.diagnostics.compute import check_structural_issues
+
+        source = "#lang ivy1.7\n\ninclude quic_types\n"
+        filepath = "/ws/protocol-testing/quic/quic_stack/test.ivy"
+
+        indexer = MagicMock()
+        resolver = MagicMock()
+        resolver.resolve_partitioned.return_value = "/ws/quic_types.ivy"
+        resolver._partition_staging = {"some_partition": ["file"]}
+        indexer.resolver = resolver
+
+        diags = check_structural_issues(source, filepath, indexer=indexer)
+        unresolved = [d for d in diags if "Unresolved include" in d.message]
+        assert len(unresolved) == 0
+
+
+@pytest.mark.unit
+class TestCollisionCountFiltering:
+    """Bug 2: Collision count must only count within active layers."""
+
+    def _make_ctx(self, resolver):
+        from ivy_lsp.mcp.context import ToolContext
+
+        ctx = ToolContext.__new__(ToolContext)
+        ctx.workspace_root = "/ws"
+        ctx.workspace_config = MagicMock()
+        ctx.workspace_config.workspace_layers = []
+        ctx.include_resolver = resolver
+
+        ws = MagicMock()
+        ws.active_group = "test-group"
+        ws.active_layers = list(resolver._active_layers)
+        ws.set_by = "test"
+        ctx.active_workspace = ws
+
+        return ctx
+
+    def test_cross_protocol_collisions_excluded(self):
+        """Collisions between files in different protocols should not be counted."""
+        resolver = MagicMock()
+        resolver._file_to_layer = {
+            "/ws/protocol-testing/bgp/bgp_stack/types.ivy": "bgp",
+            "/ws/protocol-testing/quic/quic_stack/types.ivy": "quic",
+        }
+        resolver._active_layers = {"bgp"}
+        resolver._collision_map = {
+            "types.ivy": [
+                "/ws/protocol-testing/bgp/bgp_stack/types.ivy",
+                "/ws/protocol-testing/quic/quic_stack/types.ivy",
+            ]
+        }
+
+        result = self._make_ctx(resolver).build_context_metadata()
+        assert result["collisions_in_scope"] == 0
+
+    def test_same_protocol_collisions_counted(self):
+        """Collisions between files in the same protocol should be counted."""
+        resolver = MagicMock()
+        resolver._file_to_layer = {
+            "/ws/protocol-testing/quic/quic_stack/types.ivy": "quic",
+            "/ws/protocol-testing/quic/quic_utils/types.ivy": "quic",
+        }
+        resolver._active_layers = {"quic"}
+        resolver._collision_map = {
+            "types.ivy": [
+                "/ws/protocol-testing/quic/quic_stack/types.ivy",
+                "/ws/protocol-testing/quic/quic_utils/types.ivy",
+            ]
+        }
+
+        result = self._make_ctx(resolver).build_context_metadata()
+        assert result["collisions_in_scope"] == 1

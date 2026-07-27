@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.indexer.workspace_indexer import IndexerStats, WorkspaceIndexer
-from ivy_lsp.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
+from ivy_lsp.core.indexer.workspace_indexer import IndexerStats, WorkspaceIndexer
+from ivy_lsp.core.parsing.symbols import IncludeGraph, IvySymbol, SymbolTable
 
 
 def _make_indexer(workspace_root="/tmp/test"):

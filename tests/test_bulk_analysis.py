@@ -5,13 +5,14 @@ import tempfile
 import threading
 from unittest.mock import patch
 
-from ivy_lsp.adapters.null_adapter import (
+from ivy_lsp.core.adapters.null_adapter import (
     NullAstEnrichmentAdapter,
     NullCompilerAdapter,
     NullParserAdapter,
 )
-from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
-from ivy_lsp.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline, BulkAnalysisResult
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.infra.config import reset_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -231,7 +232,7 @@ class TestBulkPipelineState:
 class TestBulkAnalysisEnvVars:
     def test_env_disable_bulk_analysis(self):
         """IVY_LSP_BULK_ANALYSIS=0 should prevent _start_bulk_analysis from running."""
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer.__new__(IvyLanguageServer)
         server._analysis_pipeline = object()  # non-None sentinel
@@ -245,6 +246,7 @@ class TestBulkAnalysisEnvVars:
         server._bulk_analysis_cancel = threading.Event()
 
         with patch.dict(os.environ, {"IVY_LSP_BULK_ANALYSIS": "0"}):
+            reset_config()
             # Should return early without spawning a thread
             server._start_bulk_analysis()
 

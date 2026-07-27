@@ -3,8 +3,8 @@
 import os
 import tempfile
 
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
-from ivy_lsp.semantic.rfc_annotations import (
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
+from ivy_lsp.core.semantic.rfc_annotations import (
     CoverageStats,
     compute_coverage,
     find_manifests,
@@ -13,6 +13,7 @@ from ivy_lsp.semantic.rfc_annotations import (
     parse_file_rfc_annotations,
     parse_rfc_tags,
 )
+from ivy_lsp.mcp.tools._helpers import infer_protocol_from_path
 
 
 class TestParseRfcTags:
@@ -55,6 +56,55 @@ class TestParseRfcTags:
         result = parse_rfc_tags("    require x; # [a, b, c]")
         assert result == ["a", "b", "c"]
 
+    # -- C2: commented-out code filtering --
+
+    def test_commented_out_code_skipped(self):
+        """C2: Tags on commented-out code lines must not be extracted."""
+        assert parse_rfc_tags("#require foo # [11]") == []
+
+    def test_commented_out_code_with_leading_space(self):
+        assert parse_rfc_tags("    #require foo # [8]") == []
+
+    def test_pure_tag_comment_parsed(self):
+        """C2: A standalone tag comment like '# [8]' should still be parsed."""
+        assert parse_rfc_tags("# [8]") == ["8"]
+
+    def test_pure_tag_comment_with_leading_space(self):
+        assert parse_rfc_tags("    # [rfc9000:4.1]") == ["rfc9000:4.1"]
+
+    def test_pure_tag_comment_multi(self):
+        assert parse_rfc_tags("  # [a, b]") == ["a", "b"]
+
+    def test_struct_field_tag_still_parsed(self):
+        """C2: Tags on struct fields are parsed (filtering happens elsewhere)."""
+        assert parse_rfc_tags("payload : frame.arr # [8]") == ["8"]
+
+    def test_live_code_tag_still_parsed(self):
+        assert parse_rfc_tags("require foo # [8]") == ["8"]
+
+    # -- Descriptive comment annotations --
+
+    def test_descriptive_comment_with_qualified_tag(self):
+        """Descriptive comments like '# Description [rfc4271:8]' are parsed."""
+        assert parse_rfc_tags("# BGP Connection FSM [rfc4271:8]") == ["rfc4271:8"]
+
+    def test_descriptive_comment_with_subsection_tag(self):
+        assert parse_rfc_tags("# Per-speaker state [rfc4271:8.2.1]") == [
+            "rfc4271:8.2.1"
+        ]
+
+    def test_descriptive_comment_with_multi_tags(self):
+        result = parse_rfc_tags("# Error handling [rfc4271:6.1, rfc4271:6.2]")
+        assert result == ["rfc4271:6.1", "rfc4271:6.2"]
+
+    def test_descriptive_comment_bare_numeric_still_extracted(self):
+        """parse_rfc_tags extracts bare numerics; _is_rfc_annotation filters them."""
+        assert parse_rfc_tags("# Some description [8]") == ["8"]
+
+    def test_markdown_heading_with_tag_rejected(self):
+        """## headings have a second '#' which triggers the commented-out code guard."""
+        assert parse_rfc_tags("## Section [rfc4271:8]") == []
+
 
 class TestParseFileRfcAnnotations:
     def test_single_annotation(self):
@@ -72,10 +122,50 @@ class TestParseFileRfcAnnotations:
         assert anns[0].tags == ["a"]
         assert anns[1].tags == ["b", "c"]
 
+    def test_descriptive_comment_annotations(self):
+        """Descriptive comment annotations are parsed into RfcAnnotation nodes."""
+        source = (
+            "# BGP Connection FSM [rfc4271:8]\n"
+            "# Per-speaker state [rfc4271:8.2.1]\n"
+            "action connect = {\n"
+            "    require connected # [rfc4271:4.2]\n"
+            "}\n"
+        )
+        anns = parse_file_rfc_annotations(source, "bgp.ivy")
+        assert len(anns) == 3
+        assert anns[0].tags == ["rfc4271:8"]
+        assert anns[1].tags == ["rfc4271:8.2.1"]
+        assert anns[2].tags == ["rfc4271:4.2"]
+
     def test_no_annotations(self):
         source = "require x > 0;\nrequire y > 0;"
         anns = parse_file_rfc_annotations(source, "test.ivy")
         assert len(anns) == 0
+
+
+class TestInferProtocolFromPath:
+    def test_protocol_testing_prefix(self):
+        assert (
+            infer_protocol_from_path("protocol-testing/bgp/bgp_stack/foo.ivy") == "bgp"
+        )
+
+    def test_protocol_testing_quic(self):
+        assert (
+            infer_protocol_from_path("protocol-testing/quic/quic_stack/bar.ivy")
+            == "quic"
+        )
+
+    def test_relative_known_protocol(self):
+        assert infer_protocol_from_path("bgp/bgp_tests/speaker_tests/test.ivy") == "bgp"
+
+    def test_unknown_first_component_returns_none(self):
+        assert infer_protocol_from_path("tests/unit/foo.ivy") is None
+
+    def test_empty_path_returns_none(self):
+        assert infer_protocol_from_path("") is None
+
+    def test_dot_prefixed_returns_none(self):
+        assert infer_protocol_from_path(".hidden/something") is None
 
 
 class TestLoadRequirementManifest:
@@ -134,6 +224,20 @@ class TestFindManifests:
     def test_no_protocol_testing_dir(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             assert find_manifests(tmpdir) == []
+
+    def test_finds_manifests_in_protocol_dir_directly(self):
+        """IndexBuilder passes protocol_dir (e.g. protocol-testing/quic).
+
+        Which has no protocol-testing/ child.  find_manifests should fall
+        back to searching the root itself.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest = os.path.join(tmpdir, "rfc9000_requirements.yaml")
+            with open(manifest, "w") as f:
+                f.write("rfc: RFC9000\nrequirements: {}\n")
+            results = find_manifests(tmpdir)
+            assert len(results) == 1
+            assert results[0] == manifest
 
 
 class TestComputeCoverage:

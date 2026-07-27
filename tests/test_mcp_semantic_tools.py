@@ -53,8 +53,8 @@ class TestTraceabilityMatrix:
     """Test traceability matrix computation logic."""
 
     def test_matrix_structure(self):
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         req = RfcRequirement(
@@ -84,8 +84,8 @@ class TestTraceabilityMatrix:
         assert req.id in covered_tags
 
     def test_uncovered_requirement(self):
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcRequirement
 
         model = SemanticModel()
         req = RfcRequirement(
@@ -106,8 +106,8 @@ class TestCoverageStats:
     """Test coverage statistics computation."""
 
     def test_by_level_grouping(self):
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         reqs = [
@@ -142,9 +142,9 @@ class TestImpactAnalysis:
     """Test impact analysis query logic."""
 
     def test_find_symbol_edges(self):
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         sn = SymbolNode(
@@ -172,9 +172,9 @@ class TestCrossReferences:
     """Test cross-reference graph query."""
 
     def test_node_neighborhood(self):
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         sn1 = SymbolNode(
@@ -207,8 +207,8 @@ class TestQuerySymbol:
     """Test rich symbol query."""
 
     def test_symbol_info_returned(self):
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode
 
         model = SemanticModel()
         sn = SymbolNode(
@@ -234,9 +234,9 @@ class TestSemanticEdgeWiring:
 
     def test_covers_edges(self):
         """COVERS edges wire RfcAnnotation → RfcRequirement via matching tags."""
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation, RfcRequirement
 
         model = SemanticModel()
         req = RfcRequirement(
@@ -273,9 +273,9 @@ class TestSemanticEdgeWiring:
 
     def test_has_param_edges(self):
         """HAS_PARAM edges wire action → type based on param declarations."""
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
         model = SemanticModel()
         tn = TypeNode(
@@ -317,9 +317,9 @@ class TestSemanticEdgeWiring:
 
     def test_returns_type_edges(self):
         """RETURNS_TYPE edges wire function → type based on return sort."""
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import SymbolNode, TypeNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import SymbolNode, TypeNode
 
         model = SemanticModel()
         tn = TypeNode(
@@ -357,9 +357,9 @@ class TestSemanticEdgeWiring:
 
     def test_includes_edges(self, tmp_path):
         """INCLUDES edges wire nodes across files based on include directives."""
-        from ivy_lsp.semantic.edges import SemanticEdgeType
-        from ivy_lsp.semantic.model import SemanticModel
-        from ivy_lsp.semantic.nodes import TypeNode
+        from ivy_lsp.core.semantic.edges import SemanticEdgeType
+        from ivy_lsp.core.semantic.model import SemanticModel
+        from ivy_lsp.core.semantic.nodes import TypeNode
 
         # Create two files: one includes the other
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
@@ -447,7 +447,7 @@ class TestSemanticEdgeWiring:
 
         env_patch = {"IVY_LSP_INCLUDE_PATHS": "", "IVY_LSP_EXCLUDE_PATHS": ""}
         with patch.dict(os.environ, env_patch, clear=False):
-            from ivy_lsp.mcp_server import start_mcp
+            from ivy_lsp.mcp.startup import start_mcp
 
             app = start_mcp(workspace_root=str(tmp_path), _return_app=True)
 

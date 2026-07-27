@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ivy_lsp.features.monitoring import (
+from ivy_lsp.lsp.ui.monitoring import (
     handle_analysis_pipeline_detail,
     handle_clear_cache,
     handle_feature_status,
@@ -14,7 +14,7 @@ from ivy_lsp.features.monitoring import (
     handle_reindex,
     handle_server_status,
 )
-from ivy_lsp.features.status import ServerStateTracker
+from ivy_lsp.lsp.ui.status import ServerStateTracker
 
 
 @pytest.fixture

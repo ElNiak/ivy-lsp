@@ -9,6 +9,19 @@ build/
 .venv/
 .DS_Store
 pytest-of-elniak/
+tmp*/
 .pre-commit-cache/
 *.coverage*
 coverage.xml
+.observability/
+.ivy-index/
+*.log
+
+# --- dev scaffolding (untracked 2026-07-23, kept on disk) ---
+docs/superpowers/
+docs/architecture/
+docs/audit-report-sprint1.md
+tests/MANUAL_QA_REPORT.md
+REVIEW.md
+.ivy-cache/
+.pre-commit-cache/

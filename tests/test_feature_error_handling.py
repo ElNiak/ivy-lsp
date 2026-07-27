@@ -8,12 +8,12 @@ import pytest
 @pytest.mark.parametrize(
     "module_path,handler_name",
     [
-        ("ivy_lsp.features.hover", "hover"),
-        ("ivy_lsp.features.definition", "definition"),
-        ("ivy_lsp.features.signature_help", "signature_help"),
-        ("ivy_lsp.features.folding_range", "folding_range"),
-        ("ivy_lsp.features.document_symbols", "document_symbol"),
-        ("ivy_lsp.features.code_action", "code_action"),
+        ("ivy_lsp.lsp.navigation.hover", "hover"),
+        ("ivy_lsp.lsp.navigation.definition", "definition"),
+        ("ivy_lsp.lsp.signature_help", "signature_help"),
+        ("ivy_lsp.lsp.ui.folding_range", "folding_range"),
+        ("ivy_lsp.lsp.document_symbols", "document_symbol"),
+        ("ivy_lsp.lsp.code_action", "code_action"),
     ],
 )
 def test_handler_has_try_except(module_path, handler_name):

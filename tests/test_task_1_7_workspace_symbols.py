@@ -9,14 +9,15 @@ substring matching, respects result limits, and converts to LSP
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.features.workspace_symbols import (
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.lsp.workspace_symbols import (
     MAX_RESULTS,
     FlatSymbol,
+    compute_workspace_symbols,
     flatten_symbols,
     search_symbols,
     to_workspace_symbol,
 )
-from ivy_lsp.parsing.symbols import IvySymbol
 
 
 class TestFlatSymbolDataclass:
@@ -132,10 +133,12 @@ class TestSearchSymbols:
         assert result == []
 
     def test_result_limit(self):
-        """Results are capped at MAX_RESULTS when more symbols match."""
-        flat = [self._make_flat(f"sym_{i}") for i in range(150)]
+        """Results are capped at _SEARCH_INTERNAL_LIMIT, not MAX_RESULTS."""
+        from ivy_lsp.lsp.workspace_symbols import _SEARCH_INTERNAL_LIMIT
+
+        flat = [self._make_flat(f"sym_{i}") for i in range(1500)]
         result = search_symbols(flat, "sym")
-        assert len(result) == MAX_RESULTS
+        assert len(result) == _SEARCH_INTERNAL_LIMIT
 
     def test_substring_match(self):
         """Substring matching works: 'ack' matches 'frame.ack.range'."""
@@ -192,11 +195,206 @@ class TestToWorkspaceSymbol:
         assert ws.location.uri == ""
 
 
+class TestComputeWorkspaceSymbols:
+    """Verify compute_workspace_symbols with scope-aware ranking."""
+
+    class _MockIndexer:
+        """Minimal indexer returning pre-defined symbols with optional scope."""
+
+        def __init__(self, symbols, scope_files=None):
+            self._symbols = symbols
+            self._scope_files = scope_files
+
+        def lookup_all_symbols(self):
+            return self._symbols
+
+        def get_scope_files_for_file(self, filepath):
+            return self._scope_files
+
+    def _make_sym(self, name, file_path):
+        return IvySymbol(
+            name=name,
+            kind=lsp.SymbolKind.Variable,
+            range=(0, 0, 0, len(name)),
+            file_path=file_path,
+        )
+
+    def test_empty_query_with_active_filepath_ranks_active_file_first(self):
+        """Empty query + active_filepath promotes active-file symbols."""
+        syms = [
+            self._make_sym("alpha", "/ws/apt/apt_entities/a.ivy"),
+            self._make_sym("beta", "/ws/apt/apt_entities/b.ivy"),
+            self._make_sym("cid", "/ws/quic_types.ivy"),
+            self._make_sym("delta", "/ws/apt/apt_entities/d.ivy"),
+        ]
+        scope_files = {"/ws/quic_types.ivy"}
+        indexer = self._MockIndexer(syms, scope_files)
+
+        results = compute_workspace_symbols(
+            indexer, query="", active_filepath="/ws/quic_types.ivy"
+        )
+
+        assert len(results) == 4
+        # cid from quic_types.ivy should be ranked first (in-scope)
+        assert results[0].name == "cid"
+
+    def test_empty_query_without_active_filepath_returns_insertion_order(self):
+        """Empty query without active_filepath returns symbols in flat order."""
+        syms = [
+            self._make_sym("alpha", "/ws/apt/a.ivy"),
+            self._make_sym("beta", "/ws/apt/b.ivy"),
+            self._make_sym("cid", "/ws/quic_types.ivy"),
+        ]
+        indexer = self._MockIndexer(syms, scope_files=None)
+
+        results = compute_workspace_symbols(indexer, query="")
+
+        assert len(results) == 3
+        # No scope ranking, original order preserved
+        assert results[0].name == "alpha"
+        assert results[1].name == "beta"
+        assert results[2].name == "cid"
+
+    def test_empty_query_scope_ranking_caps_at_max_results(self):
+        """Scope-ranked results still respect MAX_RESULTS limit."""
+        syms = [self._make_sym(f"sym_{i}", "/ws/other.ivy") for i in range(150)]
+        scope_files = {"/ws/active.ivy"}
+        indexer = self._MockIndexer(syms, scope_files)
+
+        results = compute_workspace_symbols(
+            indexer, query="", active_filepath="/ws/active.ivy"
+        )
+
+        assert len(results) == MAX_RESULTS
+
+    def test_nonempty_query_with_scope_still_filters(self):
+        """Non-empty query filters first, then scope-ranks."""
+        syms = [
+            self._make_sym("alpha", "/ws/other.ivy"),
+            self._make_sym("cid", "/ws/quic_types.ivy"),
+            self._make_sym("acid", "/ws/apt/apt_entities/a.ivy"),
+        ]
+        scope_files = {"/ws/quic_types.ivy"}
+        indexer = self._MockIndexer(syms, scope_files)
+
+        results = compute_workspace_symbols(
+            indexer, query="cid", active_filepath="/ws/quic_types.ivy"
+        )
+
+        assert len(results) == 2
+        # cid (in scope) should rank before acid (out of scope)
+        assert results[0].name == "cid"
+        assert results[1].name == "acid"
+
+
+class TestSearchSymbolsRanking:
+    """Verify that exact-name definitions rank above substring matches."""
+
+    def _make_flat(
+        self, name: str, kind=lsp.SymbolKind.Variable, file_path="/tmp/test.ivy"
+    ) -> FlatSymbol:
+        return FlatSymbol(
+            qualified_name=name,
+            kind=kind,
+            file_path=file_path,
+            range=(0, 0, 0, 0),
+        )
+
+    def test_exact_match_not_lost_when_many_substring_matches(self):
+        """Exact match 'cid' must survive when >100 substring matches exist."""
+        # 150 APT entity symbols with "cid" in their qualified name
+        noise = [self._make_flat(f"apt.entity{i}.acidic_thing") for i in range(150)]
+        # The actual cid type definition
+        target = self._make_flat(
+            "cid", kind=lsp.SymbolKind.Class, file_path="/tmp/quic_types.ivy"
+        )
+        flat = noise + [target]
+
+        # Use compute_workspace_symbols to test the full pipeline
+        class _FakeIndexer:
+            def __init__(self, syms):
+                self._syms = syms
+
+            def lookup_all_symbols(self):
+                return self._syms
+
+            def get_scope_files_for_file(self, path):
+                return None
+
+        # Build IvySymbol objects for the indexer
+        ivy_syms = []
+        for f in flat:
+            ivy_syms.append(
+                IvySymbol(
+                    name=f.qualified_name,
+                    kind=f.kind,
+                    range=f.range,
+                    file_path=f.file_path,
+                )
+            )
+
+        indexer = _FakeIndexer(ivy_syms)
+        results = compute_workspace_symbols(indexer, "cid")
+        names = [r.name for r in results]
+        assert "cid" in names, "Exact match 'cid' must not be lost to substring matches"
+        # It should be ranked first (definition boost)
+        assert names[0] == "cid"
+
+
+class TestSearchSymbolsRelevanceSorting:
+    """Verify relevance sorting in search_symbols (L6 fix)."""
+
+    def _make_flat(
+        self, name: str, kind=lsp.SymbolKind.Variable, file_path="/tmp/test.ivy"
+    ) -> FlatSymbol:
+        return FlatSymbol(
+            qualified_name=name,
+            kind=kind,
+            file_path=file_path,
+            range=(0, 0, 0, 0),
+        )
+
+    def test_exact_match_first(self):
+        """Query 'cid' returns exact leaf match before substring matches."""
+        flat = [
+            self._make_flat("acid_test"),
+            self._make_flat("apt.entity.acidic"),
+            self._make_flat("cid"),
+            self._make_flat("cid_generator"),
+        ]
+        result = search_symbols(flat, "cid")
+        assert result[0].qualified_name == "cid"
+
+    def test_prefix_before_substring(self):
+        """Query 'frame' returns 'frame_type' (prefix) before 'quic_frame' (substring)."""
+        flat = [
+            self._make_flat("quic_frame"),
+            self._make_flat("frame_type"),
+            self._make_flat("frame"),
+            self._make_flat("quic.sub.frame_handler"),
+        ]
+        result = search_symbols(flat, "frame")
+        names = [r.qualified_name for r in result]
+        # Exact match first
+        assert names[0] == "frame"
+        # Prefix match before substring
+        frame_type_idx = names.index("frame_type")
+        quic_frame_idx = names.index("quic_frame")
+        assert frame_type_idx < quic_frame_idx
+
+    def test_relevance_sorting_does_not_drop_results(self):
+        """All matches are preserved after sorting."""
+        flat = [self._make_flat(f"x_{i}_cid") for i in range(50)]
+        flat.append(self._make_flat("cid"))
+        result = search_symbols(flat, "cid")
+        assert len(result) == 51
+
+
 class TestRegister:
     """Verify that the register function is importable."""
 
     def test_register_importable(self):
         """The register function can be imported from the module."""
-        from ivy_lsp.features.workspace_symbols import register
+        from ivy_lsp.lsp.workspace_symbols import register
 
         assert callable(register)

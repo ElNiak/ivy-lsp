@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestFileCacheImport:
     def test_import(self):
-        from ivy_lsp.indexer.file_cache import CachedFile, FileCache
+        from ivy_lsp.core.indexer.file_cache import CachedFile, FileCache
 
         assert FileCache is not None
         assert CachedFile is not None
@@ -21,7 +21,7 @@ class TestFileCacheImport:
 
 class TestFileCachePutGet:
     def test_put_and_get_returns_cached(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "a.ivy"
         f.write_text("#lang ivy1.7\ntype t\n")
@@ -33,7 +33,7 @@ class TestFileCachePutGet:
         assert entry.symbols == ["sym_a"]
 
     def test_get_nonexistent_returns_none(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         cache = FileCache()
         assert cache.get(str(tmp_path / "nope.ivy")) is None
@@ -41,7 +41,7 @@ class TestFileCachePutGet:
 
 class TestFileCacheMtimeInvalidation:
     def test_stale_mtime_returns_none(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "a.ivy"
         f.write_text("v1")
@@ -55,7 +55,7 @@ class TestFileCacheMtimeInvalidation:
 
 class TestFileCacheInvalidate:
     def test_invalidate_removes_entry(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "a.ivy"
         f.write_text("v1")
@@ -65,7 +65,7 @@ class TestFileCacheInvalidate:
         assert cache.get(str(f)) is None
 
     def test_invalidate_nonexistent_no_error(self):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         cache = FileCache()
         cache.invalidate("/no/such/file.ivy")
@@ -73,8 +73,8 @@ class TestFileCacheInvalidate:
 
 class TestFileCacheInvalidateDependents:
     def test_invalidate_cascades_to_dependents(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
-        from ivy_lsp.parsing.symbols import IncludeGraph
+        from ivy_lsp.core.indexer.file_cache import FileCache
+        from ivy_lsp.core.parsing.symbols import IncludeGraph
 
         a, b, c = (tmp_path / f for f in ("a.ivy", "b.ivy", "c.ivy"))
         for f in (a, b, c):
@@ -93,7 +93,7 @@ class TestFileCacheInvalidateDependents:
 
 class TestFileCacheLRU:
     def test_lru_eviction_at_max_size(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         cache = FileCache(max_size=3)
         files = []
@@ -107,7 +107,7 @@ class TestFileCacheLRU:
         assert cache.get(str(files[3])) is not None
 
     def test_get_refreshes_lru_order(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         cache = FileCache(max_size=3)
         files = []
@@ -126,7 +126,7 @@ class TestFileCacheLRU:
 
 class TestFileCacheIncludes:
     def test_cached_file_stores_includes(self, tmp_path):
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "a.ivy"
         f.write_text("#lang ivy1.7\n")
@@ -149,7 +149,7 @@ class TestFileCacheStatUnderLock:
         import threading
         import unittest.mock
 
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "test.ivy"
         f.write_text("#lang ivy1.7")
@@ -188,7 +188,7 @@ class TestFileCacheStatUnderLock:
 
         cache._lock = OrderTrackingLock(threading.Lock())
         with unittest.mock.patch(
-            "ivy_lsp.indexer.file_cache.os.path.getmtime", tracked_getmtime
+            "ivy_lsp.core.indexer.file_cache.os.path.getmtime", tracked_getmtime
         ):
             cache.put(str(f), None, [])
 
@@ -206,8 +206,8 @@ class TestCachedFileExtended:
 
     def test_cache_stores_requirements(self):
         """CachedFile should store requirements alongside symbols."""
-        from ivy_lsp.analysis.requirement_graph import RequirementNode
-        from ivy_lsp.indexer.file_cache import CachedFile
+        from ivy_lsp.core.analysis.requirement_graph import RequirementNode
+        from ivy_lsp.core.indexer.file_cache import CachedFile
 
         req = RequirementNode(
             id="test:5",
@@ -236,7 +236,7 @@ class TestCachedFileExtended:
 
     def test_cache_defaults_empty(self):
         """New fields default to empty when not provided."""
-        from ivy_lsp.indexer.file_cache import CachedFile
+        from ivy_lsp.core.indexer.file_cache import CachedFile
 
         entry = CachedFile(
             filepath="test.ivy",
@@ -250,7 +250,7 @@ class TestCachedFileExtended:
 
     def test_put_stores_requirements(self, tmp_path):
         """FileCache.put should accept and store requirement data."""
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "a.ivy"
         f.write_text("#lang ivy1.7\ntype t\n")
@@ -274,7 +274,7 @@ class TestCachedFileExtended:
 
     def test_put_defaults_requirements_empty(self, tmp_path):
         """FileCache.put without new params still works, defaults empty."""
-        from ivy_lsp.indexer.file_cache import FileCache
+        from ivy_lsp.core.indexer.file_cache import FileCache
 
         f = tmp_path / "a.ivy"
         f.write_text("#lang ivy1.7\n")

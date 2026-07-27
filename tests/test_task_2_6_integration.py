@@ -11,7 +11,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-QUIC_STACK_DIR = IVY_ROOT / "protocol-testing" / "quic" / "quic_stack"
+from tests.conftest import QUIC_STACK_DIR
 
 
 class TestPhase2FullPipeline:
@@ -19,9 +19,9 @@ class TestPhase2FullPipeline:
     def quic_indexer(self):
         if not QUIC_STACK_DIR.exists():
             pytest.skip("quic_stack not found")
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         parser = IvyParserWrapper()
         resolver = IncludeResolver(str(QUIC_STACK_DIR))
@@ -30,7 +30,7 @@ class TestPhase2FullPipeline:
         return indexer
 
     def test_include_resolution_all_files(self, quic_indexer):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
 
         resolver = IncludeResolver(str(QUIC_STACK_DIR))
         unresolved = []
@@ -50,6 +50,7 @@ class TestPhase2FullPipeline:
                 "quic_fsm_sending",
                 "quic_fsm_receiving",
                 "quic_ack_frequency_extension",
+                "quic_time",
                 "ip",
                 "ipv6",
             }, f"Unexpected unresolved: {fname} -> {inc_name}"
@@ -64,7 +65,7 @@ class TestPhase2FullPipeline:
         assert len(scope) >= 10
 
     def test_goto_definition_from_frame(self, quic_indexer):
-        from ivy_lsp.features.definition import goto_definition
+        from ivy_lsp.lsp.navigation.definition import goto_definition
 
         frame_file = QUIC_STACK_DIR / "quic_frame.ivy"
         if not frame_file.exists():
@@ -80,7 +81,7 @@ class TestPhase2FullPipeline:
                     break
 
     def test_server_can_instantiate_with_features(self):
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
         assert server.indexer is None  # not initialized yet
@@ -88,7 +89,7 @@ class TestPhase2FullPipeline:
 
 class TestIndexerPackageImports:
     def test_import_from_package(self):
-        from ivy_lsp.indexer import (
+        from ivy_lsp.core.indexer import (
             CachedFile,
             FileCache,
             IncludeResolver,

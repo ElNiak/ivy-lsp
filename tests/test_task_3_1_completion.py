@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 class TestCompletionImport:
     def test_import(self):
-        from ivy_lsp.features.completion import (
+        from ivy_lsp.lsp.completion import (
             CompletionContext,
             detect_context,
             get_completions,
@@ -26,7 +26,7 @@ class TestCompletionImport:
 
 class TestDetectCompletionContext:
     def test_after_dot(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("frame.", 6)
         assert ctx == CompletionContext.DOT_ACCESS
@@ -34,7 +34,7 @@ class TestDetectCompletionContext:
         assert prefix == ""
 
     def test_after_dot_with_prefix(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("frame.ac", 8)
         assert ctx == CompletionContext.DOT_ACCESS
@@ -42,41 +42,41 @@ class TestDetectCompletionContext:
         assert prefix == "ac"
 
     def test_nested_dot(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("frame.ack.", 10)
         assert ctx == CompletionContext.DOT_ACCESS
         assert scope == "frame.ack"
 
     def test_after_include(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("include ", 8)
         assert ctx == CompletionContext.INCLUDE
         assert prefix == ""
 
     def test_include_partial(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("include qu", 10)
         assert ctx == CompletionContext.INCLUDE
         assert prefix == "qu"
 
     def test_general_empty(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("", 0)
         assert ctx == CompletionContext.GENERAL
 
     def test_general_mid_identifier(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("ci", 2)
         assert ctx == CompletionContext.GENERAL
         assert prefix == "ci"
 
     def test_indented_include(self):
-        from ivy_lsp.features.completion import CompletionContext, detect_context
+        from ivy_lsp.lsp.completion import CompletionContext, detect_context
 
         ctx, prefix, scope = detect_context("    include ", 12)
         assert ctx == CompletionContext.INCLUDE
@@ -84,10 +84,10 @@ class TestDetectCompletionContext:
 
 class TestDotAccessCompletion:
     def test_object_children(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         src = "#lang ivy1.7\nobject bit = {\n    type this\n    individual zero:bit\n    individual one:bit\n}\n"
         (tmp_path / "a.ivy").write_text(src)
@@ -104,10 +104,10 @@ class TestDotAccessCompletion:
         assert "this" in labels or "zero" in labels or "one" in labels
 
     def test_unknown_scope_returns_empty(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype cid\n")
         parser = IvyParserWrapper()
@@ -123,10 +123,10 @@ class TestDotAccessCompletion:
 
 class TestIncludeCompletion:
     def test_lists_ivy_files(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype t\n")
         (tmp_path / "utils.ivy").write_text("#lang ivy1.7\ntype u\n")
@@ -144,10 +144,10 @@ class TestIncludeCompletion:
         assert "utils" in labels
 
     def test_excludes_self(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "main.ivy").write_text("#lang ivy1.7\ninclude \n")
         parser = IvyParserWrapper()
@@ -162,10 +162,10 @@ class TestIncludeCompletion:
         assert "main" not in labels
 
     def test_partial_filter(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype t\n")
         (tmp_path / "utils.ivy").write_text("#lang ivy1.7\ntype u\n")
@@ -185,10 +185,10 @@ class TestIncludeCompletion:
 
 class TestGeneralCompletion:
     def test_symbols_in_scope(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype cid\ntype pkt_num\n")
         parser = IvyParserWrapper()
@@ -204,10 +204,10 @@ class TestGeneralCompletion:
         assert "pkt_num" in labels
 
     def test_keywords_included(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype t\n")
         parser = IvyParserWrapper()
@@ -224,10 +224,10 @@ class TestGeneralCompletion:
         assert "object" in labels
 
     def test_prefix_filters(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype cid\ntype pkt_num\n")
         parser = IvyParserWrapper()
@@ -244,10 +244,10 @@ class TestGeneralCompletion:
         assert "pkt_num" not in labels
 
     def test_no_duplicates(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype cid\n")
         parser = IvyParserWrapper()
@@ -264,7 +264,7 @@ class TestGeneralCompletion:
 
 class TestCompletionItemKindMapping:
     def test_symbol_to_completion_kind(self):
-        from ivy_lsp.features.completion import _symbol_kind_to_completion_kind
+        from ivy_lsp.lsp.completion import _symbol_kind_to_completion_kind
 
         assert (
             _symbol_kind_to_completion_kind(SymbolKind.Class)

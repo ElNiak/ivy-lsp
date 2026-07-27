@@ -13,9 +13,9 @@ if str(IVY_ROOT) not in sys.path:
 
 def _build_indexer(tmp_path, files: dict):
     """Helper: create .ivy files and build an indexer."""
-    from ivy_lsp.indexer.include_resolver import IncludeResolver
-    from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-    from ivy_lsp.parsing.parser_session import IvyParserWrapper
+    from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+    from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+    from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
     for name, content in files.items():
         (tmp_path / name).write_text(content)
@@ -28,7 +28,7 @@ def _build_indexer(tmp_path, files: dict):
 
 class TestPhase3Pipeline:
     def test_completion_general(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
+        from ivy_lsp.lsp.completion import get_completions
 
         indexer, _ = _build_indexer(
             tmp_path,
@@ -42,7 +42,7 @@ class TestPhase3Pipeline:
         assert "action" in labels  # keyword
 
     def test_completion_dot_access(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
+        from ivy_lsp.lsp.completion import get_completions
 
         indexer, _ = _build_indexer(
             tmp_path,
@@ -69,7 +69,7 @@ class TestPhase3Pipeline:
         assert len(labels) > 0
 
     def test_completion_include(self, tmp_path):
-        from ivy_lsp.features.completion import get_completions
+        from ivy_lsp.lsp.completion import get_completions
 
         indexer, _ = _build_indexer(
             tmp_path,
@@ -86,7 +86,7 @@ class TestPhase3Pipeline:
         assert "types" in labels
 
     def test_hover_on_type(self, tmp_path):
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         indexer, _ = _build_indexer(tmp_path, {"a.ivy": "#lang ivy1.7\ntype cid\n"})
         lines = ["#lang ivy1.7", "type cid"]
@@ -95,7 +95,7 @@ class TestPhase3Pipeline:
         assert "cid" in result.contents.value
 
     def test_hover_on_action(self, tmp_path):
-        from ivy_lsp.features.hover import get_hover_info
+        from ivy_lsp.lsp.navigation.hover import get_hover_info
 
         indexer, _ = _build_indexer(
             tmp_path,
@@ -107,8 +107,8 @@ class TestPhase3Pipeline:
         assert "foo" in result.contents.value
 
     def test_diagnostics_valid_file(self, tmp_path):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         diags = compute_diagnostics(
@@ -118,8 +118,8 @@ class TestPhase3Pipeline:
         assert len(errors) == 0
 
     def test_diagnostics_broken_file(self):
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         parser = IvyParserWrapper()
         diags = compute_diagnostics(
@@ -131,7 +131,7 @@ class TestPhase3Pipeline:
 
 class TestServerRegistration:
     def test_server_instantiation_with_phase3(self):
-        from ivy_lsp.server import IvyLanguageServer
+        from ivy_lsp.lsp.server import IvyLanguageServer
 
         server = IvyLanguageServer()
         assert server is not None
@@ -140,9 +140,9 @@ class TestServerRegistration:
 class TestFeatureInteraction:
     def test_diagnostics_then_completion(self, tmp_path):
         """File with errors still provides completions."""
-        from ivy_lsp.features.completion import get_completions
-        from ivy_lsp.features.diagnostics import compute_diagnostics
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.lsp.completion import get_completions
+        from ivy_lsp.lsp.diagnostics.compute import compute_diagnostics
 
         source = "#lang ivy1.7\ntype cid\nobject broken = { @@@ }\n"
         (tmp_path / "a.ivy").write_text(source)

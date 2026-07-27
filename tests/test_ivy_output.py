@@ -1,10 +1,11 @@
 """Tests for shared ivy_check output parser and unified error extraction."""
 
-from ivy_lsp.utils.ivy_output import (
+from ivy_lsp.infra.utils.ivy_output import (
     extract_error_summary,
     find_ivy_files,
     format_ivy_error,
     format_ivy_errors,
+    parse_check_results,
     parse_ivy_check_lines,
     parse_ivy_output,
 )
@@ -185,6 +186,87 @@ def test_parse_ivy_output_full_traceback():
     assert result[0]["source"] == "ivy_error"
     assert result[0]["line"] == 51
     assert "milliseconds to microseconds" in result[0]["message"]
+
+
+# --- FM-D: absolute path / MCP staging mode tests ---
+
+
+def test_parse_ivy_output_absolute_path_standard():
+    """Standard format with absolute staging path is parsed correctly."""
+    output = (
+        "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy:42: error: type mismatch"
+    )
+    result = parse_ivy_output(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy"
+    assert result[0]["line"] == 42
+    assert result[0]["severity"] == "error"
+    assert result[0]["source"] == "ivy_check"
+
+
+def test_parse_ivy_output_absolute_path_verbose():
+    """Verbose format with absolute staging path (FM-D scenario)."""
+    output = (
+        "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy: "
+        "line 42: error: type mismatch"
+    )
+    result = parse_ivy_output(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/var/folders/T5/xyz/ivy-lsp-stage-abc/quic_types.ivy"
+    assert result[0]["line"] == 42
+    assert result[0]["severity"] == "error"
+    assert result[0]["source"] == "ivy_check"
+
+
+def test_parse_ivy_output_staging_mixed_formats():
+    """Multiple errors from staging dir in different formats."""
+    output = (
+        "Checking quic_client_test.ivy...\n"
+        "/tmp/ivy-lsp-stage-x1/quic_types.ivy:10: error: undeclared\n"
+        "/tmp/ivy-lsp-stage-x1/quic_frame.ivy: line 25: warning: shadowed\n"
+        "ivy.ivy_utils.IvyError: "
+        "/tmp/ivy-lsp-stage-x1/quic_packet.ivy: line 33: "
+        "error: cannot convert\n"
+        "OK\n"
+    )
+    result = parse_ivy_output(output)
+    assert len(result) == 3
+    sources = [d["source"] for d in result]
+    assert "ivy_check" in sources
+    assert "ivy_error" in sources
+    files = [d["file"] for d in result]
+    assert any("quic_types.ivy" in f for f in files)
+    assert any("quic_frame.ivy" in f for f in files)
+    assert any("quic_packet.ivy" in f for f in files)
+
+
+def test_parse_ivy_check_lines_verbose_format():
+    """parse_ivy_check_lines now handles verbose format via delegation."""
+    output = "/tmp/ivy-lsp-stage-abc/quic_types.ivy: " "line 42: error: type mismatch"
+    result = parse_ivy_check_lines(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/tmp/ivy-lsp-stage-abc/quic_types.ivy"
+    assert result[0]["line"] == 42
+    assert result[0]["severity"] == "error"
+    # parse_ivy_check_lines strips the 'source' key
+    assert "source" not in result[0]
+
+
+def test_parse_ivy_check_lines_absolute_path():
+    """parse_ivy_check_lines handles absolute staging paths."""
+    output = "/var/folders/T5/xyz/ivy-lsp-stage-abc/test.ivy:10: error: bad"
+    result = parse_ivy_check_lines(output)
+    assert len(result) == 1
+    assert result[0]["file"] == "/var/folders/T5/xyz/ivy-lsp-stage-abc/test.ivy"
+    assert result[0]["line"] == 10
+
+
+def test_parse_ivy_check_lines_backward_compat():
+    """Existing callers get the same schema (no 'source' key)."""
+    output = "test.ivy:10: error: type mismatch"
+    result = parse_ivy_check_lines(output)
+    assert len(result) == 1
+    assert set(result[0].keys()) == {"file", "line", "severity", "message"}
 
 
 # --- extract_error_summary tests ---
@@ -375,3 +457,280 @@ def test_format_ivy_errors_large_list_truncates_samples():
     assert "sym_4" in result
     # sym_5 and beyond should not appear in samples
     assert "sym_5" not in result
+
+
+# --- Test fixtures for check result parsing ---
+
+_SAMPLE_IVY_CHECK_OUTPUT = """\
+starting ivy_check...
+
+Isolate foo.idx.iso:
+
+    The following definitions are used:
+        order.ivy: line 49: foo.idx.impl.def12
+
+    The following properties are to be checked:
+        order.ivy: line 28: foo.idx.spec.prop2 ... PASS
+        order.ivy: line 4: foo.idx.spec.transitivity ... PASS
+
+Isolate bar.iso:
+
+Isolate this:
+
+    The following properties are to be checked:
+        order.ivy: line 28: idx.spec.prop2  [assumed]
+        order.ivy: line 4: idx.spec.transitivity  [assumed]
+
+    The following action implementations are present:
+        model.ivy: line 50: implementation of _finalize
+
+    The following program assertions are treated as assumptions:
+        in action msg_event when called from the environment:
+            behavior.ivy: line 72: assumption
+
+    The following program assertions are treated as guarantees:
+        in action msg_event when called from behavior:
+            behavior.ivy: line 72: guarantee ... FAIL
+            behavior.ivy: line 73: guarantee ... FAIL
+            behavior.ivy: line 74: guarantee ... PASS
+        in action timer_expired when called from the environment:
+            timer.ivy: line 45: guarantee ... PASS
+
+error: failed checks: 2
+"""
+
+
+# --- parse_check_results tests ---
+
+
+def test_parse_check_results_counts():
+    """Total, passed, and failed counts are correct."""
+    result = parse_check_results(_SAMPLE_IVY_CHECK_OUTPUT)
+    assert result["total"] == 6
+    assert result["passed"] == 4
+    assert result["failed"] == 2
+
+
+def test_parse_check_results_isolate_summary():
+    """Each isolate has correct per-type pass/fail breakdown."""
+    result = parse_check_results(_SAMPLE_IVY_CHECK_OUTPUT)
+    summary = {iso["name"]: iso for iso in result["isolate_summary"]}
+
+    foo = summary["foo.idx.iso"]
+    assert foo["passed"] == 2
+    assert foo["failed"] == 0
+    assert foo["by_type"] == {"property": {"passed": 2, "failed": 0}}
+
+    assert "bar.iso" in summary
+    assert summary["bar.iso"]["passed"] == 0
+    assert summary["bar.iso"]["failed"] == 0
+
+    this = summary["this"]
+    assert this["passed"] == 2
+    assert this["failed"] == 2
+    assert this["by_type"] == {"guarantee": {"passed": 2, "failed": 2}}
+
+
+def test_parse_check_results_failed_checks_grouping():
+    """Failed checks are grouped by isolate and action context."""
+    result = parse_check_results(_SAMPLE_IVY_CHECK_OUTPUT)
+    assert len(result["failed_checks"]) == 1
+
+    group = result["failed_checks"][0]
+    assert group["isolate"] == "this"
+    assert group["action_context"] == "msg_event when called from behavior"
+    assert len(group["checks"]) == 2
+    assert group["checks"][0] == {
+        "file": "behavior.ivy",
+        "line": 72,
+        "type": "guarantee",
+        "result": "FAIL",
+    }
+    assert group["checks"][1] == {
+        "file": "behavior.ivy",
+        "line": 73,
+        "type": "guarantee",
+        "result": "FAIL",
+    }
+
+
+def test_parse_check_results_skips_assumed():
+    """[assumed] lines are not counted as checks."""
+    result = parse_check_results(_SAMPLE_IVY_CHECK_OUTPUT)
+    assert result["total"] == 6
+
+
+def test_parse_check_results_empty_output():
+    """Empty output returns zeroed structure."""
+    result = parse_check_results("")
+    assert result["total"] == 0
+    assert result["passed"] == 0
+    assert result["failed"] == 0
+    assert result["isolate_summary"] == []
+    assert result["failed_checks"] == []
+
+
+def test_parse_check_results_all_pass():
+    """Output with only passing checks has no failed_checks."""
+    output = """\
+Isolate foo.iso:
+
+    The following properties are to be checked:
+        order.ivy: line 4: foo.spec.prop ... PASS
+"""
+    result = parse_check_results(output)
+    assert result["total"] == 1
+    assert result["passed"] == 1
+    assert result["failed"] == 0
+    assert result["failed_checks"] == []
+
+
+def test_parse_check_results_property_no_action_context():
+    """Property checks without action context have null action_context when failed."""
+    output = """\
+Isolate this:
+
+    The following properties are to be checked:
+        order.ivy: line 4: spec.prop ... FAIL
+"""
+    result = parse_check_results(output)
+    assert result["failed"] == 1
+    group = result["failed_checks"][0]
+    assert group["action_context"] is None
+    assert group["checks"][0]["type"] == "property"
+
+
+# --- extract_error_summary with check_results tests ---
+
+
+def test_extract_error_summary_check_failures_single_isolate():
+    """Check failures produce descriptive summary with isolate name."""
+    check_results = {
+        "total": 100,
+        "passed": 68,
+        "failed": 32,
+        "isolate_summary": [
+            {
+                "name": "foo.iso",
+                "passed": 5,
+                "failed": 0,
+                "by_type": {"property": {"passed": 5, "failed": 0}},
+            },
+            {
+                "name": "this",
+                "passed": 36,
+                "failed": 32,
+                "by_type": {"guarantee": {"passed": 36, "failed": 32}},
+            },
+        ],
+        "failed_checks": [],
+    }
+    summary = extract_error_summary("", [], check_results)
+    assert summary == "32/100 checks failed (all guarantees) in Isolate this"
+
+
+def test_extract_error_summary_check_failures_multiple_isolates():
+    """Multiple failing isolates listed with counts."""
+    check_results = {
+        "total": 50,
+        "passed": 40,
+        "failed": 10,
+        "isolate_summary": [
+            {
+                "name": "a.iso",
+                "passed": 5,
+                "failed": 7,
+                "by_type": {"guarantee": {"passed": 5, "failed": 7}},
+            },
+            {
+                "name": "b.iso",
+                "passed": 5,
+                "failed": 3,
+                "by_type": {"property": {"passed": 5, "failed": 3}},
+            },
+        ],
+        "failed_checks": [],
+    }
+    summary = extract_error_summary("", [], check_results)
+    assert "10/50 checks failed" in summary
+    assert "across 2 isolates" in summary
+    assert "a.iso: 7" in summary
+    assert "b.iso: 3" in summary
+
+
+def test_extract_error_summary_check_failures_mixed_types():
+    """Mixed check types are listed individually."""
+    check_results = {
+        "total": 40,
+        "passed": 15,
+        "failed": 25,
+        "isolate_summary": [
+            {
+                "name": "this",
+                "passed": 15,
+                "failed": 25,
+                "by_type": {
+                    "guarantee": {"passed": 10, "failed": 18},
+                    "property": {"passed": 5, "failed": 7},
+                },
+            },
+        ],
+        "failed_checks": [],
+    }
+    summary = extract_error_summary("", [], check_results)
+    assert "25/40 checks failed" in summary
+    assert "18 guarantees" in summary
+    assert "7 properties" in summary
+
+
+def test_extract_error_summary_all_checks_pass():
+    """All checks passing produces positive summary."""
+    check_results = {
+        "total": 50,
+        "passed": 50,
+        "failed": 0,
+        "isolate_summary": [
+            {
+                "name": "a.iso",
+                "passed": 25,
+                "failed": 0,
+                "by_type": {"property": {"passed": 25, "failed": 0}},
+            },
+            {
+                "name": "b.iso",
+                "passed": 25,
+                "failed": 0,
+                "by_type": {"property": {"passed": 25, "failed": 0}},
+            },
+        ],
+        "failed_checks": [],
+    }
+    summary = extract_error_summary("", [], check_results)
+    assert summary == "50/50 checks passed across 2 isolates"
+
+
+def test_extract_error_summary_diagnostics_override_all_pass():
+    """Error diagnostics take priority over all-checks-pass."""
+    check_results = {
+        "total": 5,
+        "passed": 5,
+        "failed": 0,
+        "isolate_summary": [],
+        "failed_checks": [],
+    }
+    diagnostics = [
+        {
+            "file": "model.ivy",
+            "line": 42,
+            "severity": "error",
+            "message": "type mismatch",
+        },
+    ]
+    summary = extract_error_summary("", diagnostics, check_results)
+    assert summary == "model.ivy:42: type mismatch"
+
+
+def test_extract_error_summary_no_check_results_unchanged():
+    """Without check_results, existing behavior is preserved."""
+    summary = extract_error_summary("last line\n", [])
+    assert summary == "last line"

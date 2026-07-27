@@ -13,7 +13,7 @@ if str(IVY_ROOT) not in sys.path:
 
 def _register_commands(server_mock=None):
     """Register command handlers and return (server, features, commands)."""
-    from ivy_lsp.features.commands import register
+    from ivy_lsp.lsp.commands import register
 
     server = server_mock or MagicMock()
     features = {}

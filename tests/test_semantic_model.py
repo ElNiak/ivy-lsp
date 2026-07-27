@@ -2,9 +2,14 @@
 
 import threading
 
-from ivy_lsp.semantic.edges import SemanticEdgeType
-from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import RfcAnnotation, RfcRequirement, SymbolNode, TypeNode
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import (
+    RfcAnnotation,
+    RfcRequirement,
+    SymbolNode,
+    TypeNode,
+)
 
 
 class TestSemanticModelCRUD:
@@ -426,7 +431,7 @@ class TestSemanticModelDomainQueries:
     """Tests for RequirementGraph-compatible domain query methods."""
 
     def test_get_requirements_for_action(self):
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementNode
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementNode
 
         model = SemanticModel()
         action = ActionNode(
@@ -464,7 +469,10 @@ class TestSemanticModelDomainQueries:
         assert model.get_requirements_for_action("s1") == []
 
     def test_get_state_vars_read_by(self):
-        from ivy_lsp.analysis.requirement_graph import RequirementNode, StateVarNode
+        from ivy_lsp.core.analysis.requirement_graph import (
+            RequirementNode,
+            StateVarNode,
+        )
 
         model = SemanticModel()
         req = RequirementNode(
@@ -500,3 +508,215 @@ class TestSemanticModelDomainQueries:
         assert stats["total_requirements"] == 0
         assert stats["covered"] == 0
         assert stats["uncovered"] == 0
+
+
+class TestNodesByNameIndex:
+    """Tests for the _nodes_by_name O(1) lookup index."""
+
+    def _make_node(self, node_id, name, file=None, tier=None):
+        """Create a minimal node with required attributes."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=node_id, name=name, file=file, tier=tier)
+
+    def test_get_nodes_by_name_returns_matching(self):
+        model = SemanticModel()
+        n1 = self._make_node("n1", "send", file="a.ivy")
+        n2 = self._make_node("n2", "recv", file="a.ivy")
+        n3 = self._make_node("n3", "send", file="b.ivy")
+        model.add_node(n1)
+        model.add_node(n2)
+        model.add_node(n3)
+        result = model.get_nodes_by_name("send")
+        assert len(result) == 2
+        assert {r.id for r in result} == {"n1", "n3"}
+
+    def test_get_nodes_by_name_empty_for_missing(self):
+        model = SemanticModel()
+        assert model.get_nodes_by_name("nonexistent") == []
+
+    def test_remove_file_cleans_name_index(self):
+        model = SemanticModel()
+        n1 = self._make_node("n1", "send", file="a.ivy")
+        n2 = self._make_node("n2", "send", file="b.ivy")
+        model.add_node(n1)
+        model.add_node(n2)
+        model.remove_file("a.ivy")
+        result = model.get_nodes_by_name("send")
+        assert len(result) == 1
+        assert result[0].id == "n2"
+
+    def test_add_node_replace_updates_name_index(self):
+        """Replacing a node with a different name must clean old name entry."""
+        model = SemanticModel()
+        n1 = self._make_node("n1", "old_name", file="a.ivy")
+        model.add_node(n1)
+        assert len(model.get_nodes_by_name("old_name")) == 1
+
+        n1_updated = self._make_node("n1", "new_name", file="a.ivy")
+        model.add_node(n1_updated)
+        assert model.get_nodes_by_name("old_name") == []
+        assert len(model.get_nodes_by_name("new_name")) == 1
+
+    def test_update_file_maintains_name_index(self):
+        """update_file should keep name index consistent."""
+        model = SemanticModel()
+        n1 = self._make_node("n1", "send", file="a.ivy", tier="tier1")
+        model.update_file("a.ivy", [n1], [], "tier1")
+        assert len(model.get_nodes_by_name("send")) == 1
+
+        # Replace at tier2
+        n1_v2 = self._make_node("n1", "send_v2", file="a.ivy", tier="tier2")
+        model.update_file("a.ivy", [n1_v2], [], "tier2")
+        assert model.get_nodes_by_name("send") == []
+        assert len(model.get_nodes_by_name("send_v2")) == 1
+
+    def test_merge_from_populates_name_index(self):
+        """merge_from should index names from the other model."""
+        m1 = SemanticModel()
+        m2 = SemanticModel()
+        n1 = self._make_node("n1", "action_a", file="a.ivy")
+        m2.add_node(n1)
+
+        m1.merge_from(m2)
+        assert len(m1.get_nodes_by_name("action_a")) == 1
+
+
+class TestSemanticModelFilesProperty:
+    def test_empty_model_returns_empty_set(self):
+        model = SemanticModel()
+        assert model.files == set()
+
+    def test_files_after_update_file(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
+        model.update_file("a.ivy", [s1], [], "tier1")
+        model.update_file("b.ivy", [s2], [], "tier1")
+        assert model.files == {"a.ivy", "b.ivy"}
+
+    def test_files_after_remove_file(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1", name="a", qualified_name="a", kind="action", file="a.ivy", line=1
+        )
+        s2 = SymbolNode(
+            id="s2", name="b", qualified_name="b", kind="action", file="b.ivy", line=1
+        )
+        model.update_file("a.ivy", [s1], [], "tier1")
+        model.update_file("b.ivy", [s2], [], "tier1")
+        model.remove_file("a.ivy")
+        assert model.files == {"b.ivy"}
+
+
+class TestVersionCounter:
+    def _make_node(self, node_id, name, file=None, tier=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=node_id, name=name, file=file, tier=tier)
+
+    def test_version_starts_at_zero(self):
+        assert SemanticModel().version == 0
+
+    def test_add_node_increments_version(self):
+        m = SemanticModel()
+        m.add_node(self._make_node("n1", "a"))
+        assert m.version == 1
+        m.add_node(self._make_node("n2", "b"))
+        assert m.version == 2
+
+    def test_remove_file_increments_version(self):
+        m = SemanticModel()
+        m.add_node(self._make_node("n1", "a", file="f.ivy"))
+        v = m.version
+        m.remove_file("f.ivy")
+        assert m.version == v + 1
+
+    def test_version_survives_pickle(self):
+        import pickle
+
+        m = SemanticModel()
+        m.add_node(self._make_node("n1", "a"))
+        data = pickle.dumps(m)
+        m2 = pickle.loads(data)
+        assert m2.version == 1
+
+
+class TestSemanticModelReferenceEdges:
+    """Test CALLS, USES, MONITORS, and CONTAINS edge wiring."""
+
+    def test_calls_edge_from_references(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="process",
+            qualified_name="process",
+            kind="action",
+            file="f",
+            line=1,
+        )
+        s2 = SymbolNode(
+            id="s2",
+            name="connect",
+            qualified_name="connect",
+            kind="action",
+            file="f",
+            line=5,
+        )
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_edge("s1", SemanticEdgeType.CALLS, "s2")
+        outgoing = model.get_outgoing("s1")
+        assert (SemanticEdgeType.CALLS, "s2") in outgoing
+
+    def test_uses_edge_from_references(self):
+        model = SemanticModel()
+        s1 = SymbolNode(
+            id="s1",
+            name="net",
+            qualified_name="net",
+            kind="instance",
+            file="f",
+            line=1,
+        )
+        s2 = SymbolNode(
+            id="s2",
+            name="endpoint",
+            qualified_name="endpoint",
+            kind="module",
+            file="f",
+            line=5,
+        )
+        model.add_node(s1)
+        model.add_node(s2)
+        model.add_edge("s1", SemanticEdgeType.USES, "s2")
+        outgoing = model.get_outgoing("s1")
+        assert (SemanticEdgeType.USES, "s2") in outgoing
+
+    def test_contains_edge_from_qualified_names(self):
+        model = SemanticModel()
+        parent = SymbolNode(
+            id="p1",
+            name="frame",
+            qualified_name="frame",
+            kind="module",
+            file="f",
+            line=1,
+        )
+        child = SymbolNode(
+            id="c1",
+            name="ack",
+            qualified_name="frame.ack",
+            kind="action",
+            file="f",
+            line=5,
+        )
+        model.add_node(parent)
+        model.add_node(child)
+        model.add_edge("p1", SemanticEdgeType.CONTAINS, "c1")
+        outgoing = model.get_outgoing("p1")
+        assert (SemanticEdgeType.CONTAINS, "c1") in outgoing

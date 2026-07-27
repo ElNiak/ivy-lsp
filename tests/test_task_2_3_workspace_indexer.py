@@ -12,12 +12,15 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-QUIC_STACK_DIR = IVY_ROOT / "protocol-testing" / "quic" / "quic_stack"
+from tests.conftest import QUIC_STACK_DIR
 
 
 class TestWorkspaceIndexerImport:
     def test_import(self):
-        from ivy_lsp.indexer.workspace_indexer import SymbolLocation, WorkspaceIndexer
+        from ivy_lsp.core.indexer.workspace_indexer import (
+            SymbolLocation,
+            WorkspaceIndexer,
+        )
 
         assert WorkspaceIndexer is not None
         assert SymbolLocation is not None
@@ -25,9 +28,9 @@ class TestWorkspaceIndexerImport:
 
 class TestIndexWorkspace:
     def test_index_workspace_parses_all_files(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype a_type\n")
         (tmp_path / "b.ivy").write_text("#lang ivy1.7\ntype b_type\n")
@@ -45,9 +48,9 @@ class TestIndexWorkspace:
 
 class TestReindexFile:
     def test_reindex_updates_symbols(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         f = tmp_path / "a.ivy"
         f.write_text("#lang ivy1.7\ntype old_type\n")
@@ -66,9 +69,9 @@ class TestReindexFile:
 
 class TestLookupSymbol:
     def test_lookup_finds_symbol_across_files(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "types.ivy").write_text("#lang ivy1.7\ntype cid\n")
         (tmp_path / "frame.ivy").write_text(
@@ -84,9 +87,9 @@ class TestLookupSymbol:
         assert str(tmp_path / "types.ivy") in filepaths
 
     def test_lookup_qualified_name(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         source = "#lang ivy1.7\n\nobject frame = {\n    type this\n}\n"
         (tmp_path / "a.ivy").write_text(source)
@@ -100,9 +103,9 @@ class TestLookupSymbol:
 
 class TestGetSymbolsInScope:
     def test_includes_own_and_transitive_symbols(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "base.ivy").write_text("#lang ivy1.7\ntype base_t\n")
         (tmp_path / "mid.ivy").write_text("#lang ivy1.7\ninclude base\ntype mid_t\n")
@@ -119,9 +122,9 @@ class TestGetSymbolsInScope:
         assert "base_t" in names
 
     def test_file_without_includes_only_own_symbols(self, tmp_path):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         (tmp_path / "a.ivy").write_text("#lang ivy1.7\ntype a_t\n")
         (tmp_path / "b.ivy").write_text("#lang ivy1.7\ntype b_t\n")
@@ -137,9 +140,9 @@ class TestGetSymbolsInScope:
 
 class TestWorkspaceIndexerQuicStack:
     def test_index_quic_stack(self):
-        from ivy_lsp.indexer.include_resolver import IncludeResolver
-        from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
-        from ivy_lsp.parsing.parser_session import IvyParserWrapper
+        from ivy_lsp.core.indexer.include_resolver import IncludeResolver
+        from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
+        from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
 
         if not QUIC_STACK_DIR.exists():
             pytest.skip("quic_stack not found")
@@ -161,29 +164,29 @@ class TestTryTokenize:
     """Tests for _try_tokenize exception handling (H-SF1 fix)."""
 
     def test_import_error_returns_none_silently(self):
-        from ivy_lsp.indexer.workspace_indexer import _try_tokenize
+        from ivy_lsp.core.indexer.workspace_indexer import _try_tokenize
 
         # Setting a module to None in sys.modules makes `from X import Y` raise ImportError
-        saved = sys.modules.get("ivy_lsp.parsing.token_stream")
-        sys.modules["ivy_lsp.parsing.token_stream"] = None  # type: ignore[assignment]
+        saved = sys.modules.get("ivy_lsp.core.parsing.token_stream")
+        sys.modules["ivy_lsp.core.parsing.token_stream"] = None  # type: ignore[assignment]
         try:
             result = _try_tokenize("type foo", "test.ivy")
         finally:
             if saved is not None:
-                sys.modules["ivy_lsp.parsing.token_stream"] = saved
+                sys.modules["ivy_lsp.core.parsing.token_stream"] = saved
             else:
-                sys.modules.pop("ivy_lsp.parsing.token_stream", None)
+                sys.modules.pop("ivy_lsp.core.parsing.token_stream", None)
         assert result is None
 
     def test_unexpected_error_logs_and_returns_none(self, caplog):
-        from ivy_lsp.indexer.workspace_indexer import _try_tokenize
+        from ivy_lsp.core.indexer.workspace_indexer import _try_tokenize
 
         with mock.patch(
-            "ivy_lsp.parsing.token_stream.tokenize_ivy",
+            "ivy_lsp.core.parsing.token_stream.tokenize_ivy",
             side_effect=RuntimeError("tokenizer bug"),
         ):
             with caplog.at_level(
-                logging.DEBUG, logger="ivy_lsp.indexer.workspace_indexer"
+                logging.DEBUG, logger="ivy_lsp.core.indexer.workspace_indexer"
             ):
                 result = _try_tokenize("type foo", "test.ivy")
         assert result is None

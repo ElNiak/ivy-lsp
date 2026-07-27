@@ -7,13 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ivy_lsp.analysis.requirement_graph import RequirementGraph
-from ivy_lsp.analysis.test_scope import (
+from ivy_lsp.core.analysis.requirement_graph import RequirementGraph
+from ivy_lsp.core.analysis.test_scope import (
     ExportImportInfo,
     ScopedRequirementModel,
     TestScope,
 )
-from ivy_lsp.indexer.workspace_indexer import WorkspaceIndexer
+from ivy_lsp.core.indexer.workspace_indexer import WorkspaceIndexer
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -104,7 +104,7 @@ class TestExportImportExtraction:
         expected = _make_export_import_info(filepath, exports=["quic.send"])
 
         with patch(
-            "ivy_lsp.indexer.workspace_indexer.extract_exports_imports_full",
+            "ivy_lsp.core.indexer.scope_manager.extract_exports_imports_full",
             return_value=expected,
         ) as mock_full:
             indexer._extract_file_exports_imports(filepath, result, source)
@@ -120,7 +120,7 @@ class TestExportImportExtraction:
         expected = _make_export_import_info(filepath, exports=["quic.send"])
 
         with patch(
-            "ivy_lsp.indexer.workspace_indexer.extract_exports_imports_light",
+            "ivy_lsp.core.indexer.scope_manager.extract_exports_imports_light",
             return_value=expected,
         ) as mock_light:
             indexer._extract_file_exports_imports(filepath, result, source)
@@ -133,7 +133,7 @@ class TestExportImportExtraction:
         result = _make_parse_result(success=False)
 
         with patch(
-            "ivy_lsp.indexer.workspace_indexer.extract_exports_imports_light",
+            "ivy_lsp.core.indexer.scope_manager.extract_exports_imports_light",
             side_effect=RuntimeError("boom"),
         ):
             with caplog.at_level(logging.WARNING):

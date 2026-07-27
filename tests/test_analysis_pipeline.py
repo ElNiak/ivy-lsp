@@ -2,17 +2,17 @@
 
 import unittest.mock as mock
 
-from ivy_lsp.adapters.null_adapter import (
+from ivy_lsp.core.adapters.null_adapter import (
     NullAstEnrichmentAdapter,
     NullCompilerAdapter,
     NullParserAdapter,
 )
-from ivy_lsp.adapters.protocols import TypeAnnotation
-from ivy_lsp.parsing.parser_session import ParseResult
-from ivy_lsp.semantic.analysis_pipeline import AnalysisPipeline
-from ivy_lsp.semantic.edges import SemanticEdgeType
-from ivy_lsp.semantic.model import SemanticModel
-from ivy_lsp.semantic.nodes import RfcAnnotation, SymbolNode, TypeNode
+from ivy_lsp.core.adapters.protocols import TypeAnnotation
+from ivy_lsp.core.parsing.parser_session import ParseResult
+from ivy_lsp.core.semantic.analysis_pipeline import AnalysisPipeline
+from ivy_lsp.core.semantic.edges import SemanticEdgeType
+from ivy_lsp.core.semantic.model import SemanticModel
+from ivy_lsp.core.semantic.nodes import RfcAnnotation, SymbolNode, TypeNode
 
 # ---------------------------------------------------------------------------
 # Helper: stub adapters that return controllable data
@@ -355,7 +355,7 @@ class StubCompilerAdapter:
         self._callback_called = False
 
     def compile(self, source: str, filename: str):
-        from ivy_lsp.adapters.protocols import CompileResult
+        from ivy_lsp.core.adapters.protocols import CompileResult
 
         return CompileResult(success=self._success)
 
@@ -462,7 +462,7 @@ class TestTier3:
     def test_tier3_callback_on_failure_does_not_update_model(self):
         model = SemanticModel()
         # Pre-populate with tier1 data
-        from ivy_lsp.semantic.nodes import RfcAnnotation
+        from ivy_lsp.core.semantic.nodes import RfcAnnotation
 
         model.add_node(
             RfcAnnotation(id="test.ivy:0:0", file="test.ivy", line=0, tags=["x"])
@@ -564,7 +564,7 @@ class TestPipelineState:
     """Tests for get_pipeline_state() tier tracking."""
 
     def _make_pipeline(self, model=None, compiler=None):
-        from ivy_lsp.adapters.null_adapter import (
+        from ivy_lsp.core.adapters.null_adapter import (
             NullAstEnrichmentAdapter,
             NullCompilerAdapter,
             NullParserAdapter,
@@ -711,7 +711,7 @@ class TestPipelineState:
                 captured_pending.clear()
                 captured_pending.append(state["tier3Pending"])
                 # Now call back
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 callback(CompileResult(success=True))
 
@@ -868,7 +868,7 @@ class TestT3TestFileRedirection:
         class RecordingCompiler:
             def compile(self, source, filename):
                 t3_calls.append((source, filename))
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 return CompileResult(success=True, errors=[])
 
@@ -900,7 +900,7 @@ class TestT3TestFileRedirection:
         class RecordingCompiler:
             def compile(self, source, filename):
                 t3_calls.append((source, filename))
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 return CompileResult(success=True, errors=[])
 
@@ -927,7 +927,7 @@ class TestT3TestFileRedirection:
         class RecordingCompiler:
             def compile(self, source, filename):
                 t3_calls.append((source, filename))
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 return CompileResult(success=True, errors=[])
 
@@ -972,7 +972,7 @@ class TestT3TestFileRedirection:
         class RecordingCompiler:
             def compile(self, source, filename):
                 t3_calls.append((source, filename))
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 return CompileResult(success=True, errors=[])
 
@@ -1010,7 +1010,7 @@ class TestBulkCompilationThreadSafety:
 
     def test_concurrent_add_action(self):
         """Multiple threads adding actions concurrently should not lose data."""
-        from ivy_lsp.analysis.requirement_graph import ActionNode, RequirementGraph
+        from ivy_lsp.core.analysis.requirement_graph import ActionNode, RequirementGraph
 
         graph = RequirementGraph()
         errors = []
@@ -1048,7 +1048,7 @@ class TestBulkCompilationThreadSafety:
         def add_nodes(prefix, count):
             try:
                 for i in range(count):
-                    from ivy_lsp.semantic.nodes import RfcAnnotation
+                    from ivy_lsp.core.semantic.nodes import RfcAnnotation
 
                     node = RfcAnnotation(
                         id=f"{prefix}:{i}",
@@ -1091,7 +1091,7 @@ class TestTier3DoubleDecrement:
             """Compiler without compile_background; triggers sync fallback."""
 
             def compile(self, source, filepath):
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 return CompileResult(success=True, errors=[])
 
@@ -1131,7 +1131,7 @@ class TestTier3DoubleDecrement:
 
         class SyncOnlyCompiler:
             def compile(self, source, filepath):
-                from ivy_lsp.adapters.protocols import CompileResult
+                from ivy_lsp.core.adapters.protocols import CompileResult
 
                 return CompileResult(success=True, errors=[])
 
@@ -1242,7 +1242,7 @@ class TestRequirementGraphEnrichmentInT3:
         )
 
         # Pre-populate the cache so _on_result finds the IR
-        from ivy_lsp.compilation.ir import ActionIR, CompiledModuleIR
+        from ivy_lsp.core.compilation.ir import ActionIR, CompiledModuleIR
 
         ir = CompiledModuleIR(
             source_file="test.ivy",
@@ -1474,7 +1474,7 @@ class TestTier2ReusesAnnotations:
         ]
 
         with mock.patch(
-            "ivy_lsp.semantic.analysis_pipeline.parse_file_rfc_annotations"
+            "ivy_lsp.core.semantic.analysis_pipeline.parse_file_rfc_annotations"
         ) as mock_parse:
             pipeline.run_tier2(source, "test.ivy", rfc_annotations=pre_annotations)
             mock_parse.assert_not_called()
@@ -1616,7 +1616,7 @@ class TestStaleGenerationDiscard:
         assert pipeline._file_generation[filepath] == 2
 
         # T3 callback fires with stale gen=1 result
-        from ivy_lsp.adapters.protocols import CompileResult
+        from ivy_lsp.core.adapters.protocols import CompileResult
 
         stale_result = CompileResult(success=True, errors=[])
         captured_callback[0](stale_result)

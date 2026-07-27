@@ -10,19 +10,19 @@ from pathlib import Path
 import pytest
 from lsprotocol import types as lsp
 
-from ivy_lsp.features.document_symbols import (
+from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+from ivy_lsp.core.parsing.symbols import IvySymbol
+from ivy_lsp.lsp.document_symbols import (
     get_document_symbols,
     ivy_symbol_to_document_symbol,
 )
-from ivy_lsp.features.workspace_symbols import (
+from ivy_lsp.lsp.workspace_symbols import (
     FlatSymbol,
     flatten_symbols,
     search_symbols,
     to_workspace_symbol,
 )
-from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-from ivy_lsp.parsing.parser_session import IvyParserWrapper
-from ivy_lsp.parsing.symbols import IvySymbol
 
 # ---------------------------------------------------------------------------
 # Helpers

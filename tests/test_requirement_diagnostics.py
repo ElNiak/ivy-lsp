@@ -1,4 +1,4 @@
-"""Tests for requirement diagnostics (ivy_lsp.features.diagnostics)."""
+"""Tests for requirement diagnostics (ivy_lsp.lsp.diagnostics.publisher)."""
 
 import os
 import sys
@@ -13,13 +13,13 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (
+from ivy_lsp.core.analysis.requirement_graph import (
     EdgeType,
     RequirementGraph,
     RequirementNode,
     StateVarNode,
 )
-from ivy_lsp.features.diagnostics import (
+from ivy_lsp.lsp.diagnostics.compute import (
     compute_diagnostics,
     compute_requirement_diagnostics,
 )
@@ -120,7 +120,7 @@ class TestIncludeChainPropagation:
         assert len(include_diags) >= 1
         diag = include_diags[0]
         assert diag.severity == DiagnosticSeverity.Information
-        assert diag.source == "ivy-lsp-reqs"
+        assert diag.source == "ivy-semantic"
         assert "1" in diag.message  # 1 inherited requirement
 
     def test_include_with_no_inherited_requirements(self):
@@ -177,10 +177,10 @@ class TestIncludeChainPropagation:
         include_diags = [d for d in diags if "brings" in d.message.lower()]
         assert len(include_diags) >= 1
         diag = include_diags[0]
-        assert diag.related_information is not None
-        assert len(diag.related_information) >= 1
-        related = diag.related_information[0]
-        assert other_file in related.location.uri
+        assert diag.related is not None
+        assert len(diag.related) >= 1
+        related = diag.related[0]
+        assert other_file in related.file
 
     def test_no_include_graph_skips_propagation(self):
         """Without an include graph, no propagation diagnostics are emitted."""
@@ -351,7 +351,7 @@ class TestUnmonitoredAction:
         assert len(action_diags) >= 1
         diag = action_diags[0]
         assert diag.severity == DiagnosticSeverity.Hint
-        assert diag.source == "ivy-lsp-reqs"
+        assert diag.source == "ivy-semantic"
         assert "send" in diag.message
 
     def test_monitored_action_no_hint(self):
@@ -442,8 +442,9 @@ class TestHighImpactStateVariable:
         assert len(impact_diags) >= 1
         diag = impact_diags[0]
         assert diag.severity == DiagnosticSeverity.Information
-        assert diag.source == "ivy-lsp-reqs"
+        assert diag.source == "ivy-semantic"
         assert "6" in diag.message  # 6 requirements
+        assert "'connected'" in diag.message  # variable name included
 
     def test_below_threshold_no_diagnostic(self):
         """A relation read by fewer than 5 requirements emits no diagnostic."""
@@ -534,6 +535,7 @@ class TestHighImpactStateVariable:
         impact_diags = [d for d in diags if "high-impact" in d.message.lower()]
         assert len(impact_diags) >= 1
         assert "5 files" in impact_diags[0].message
+        assert "'data'" in impact_diags[0].message  # variable name included
 
 
 class TestComputeDiagnosticsIntegration:
@@ -630,7 +632,7 @@ class TestComputeDiagnosticsIntegration:
 
         # Should have at least one include propagation diag and one unmonitored action diag
         sources = {d.source for d in diags}
-        assert "ivy-lsp-reqs" in sources
+        assert "ivy-semantic" in sources
 
         severities = {d.severity for d in diags}
         assert (

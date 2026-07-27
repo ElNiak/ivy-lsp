@@ -5,8 +5,8 @@ Mirrors test_light_mode_extractor.py test cases to verify parity.
 
 import pytest
 
-from ivy_lsp.analysis.lexer_requirement_extractor import extract_requirements_lexer
-from ivy_lsp.analysis.requirement_graph import RequirementNode
+from ivy_lsp.core.analysis.lexer_requirement_extractor import extract_requirements_lexer
+from ivy_lsp.core.analysis.requirement_graph import RequirementNode
 
 FILEPATH = "test_monitor.ivy"
 
@@ -430,7 +430,7 @@ class TestNativeBlockLexer:
 
 class TestExportsImportsLexer:
     def test_export_extraction(self):
-        from ivy_lsp.analysis.lexer_requirement_extractor import (
+        from ivy_lsp.core.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
 
@@ -440,7 +440,7 @@ class TestExportsImportsLexer:
         assert "bar.baz" in info.exports
 
     def test_import_extraction(self):
-        from ivy_lsp.analysis.lexer_requirement_extractor import (
+        from ivy_lsp.core.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
 
@@ -450,7 +450,7 @@ class TestExportsImportsLexer:
         assert "packet.send" in info.imports
 
     def test_empty_source(self):
-        from ivy_lsp.analysis.lexer_requirement_extractor import (
+        from ivy_lsp.core.analysis.lexer_requirement_extractor import (
             extract_exports_imports_lexer,
         )
 

@@ -1,13 +1,17 @@
-"""Tests for ivy_lsp.workspace_detection module."""
+"""Tests for ivy_lsp.core.workspace.detection module."""
 
 import json
 import os
+import shutil
 import tempfile
+from pathlib import Path
 
 import pytest
 
-from ivy_lsp.workspace_detection import (
+from ivy_lsp.core.workspace.detection import (
     WorkspaceConfig,
+    WorkspaceLayer,
+    _discover_protocols,
     _panther_heuristic,
     _read_marker,
     _resolve_git_worktree,
@@ -15,6 +19,7 @@ from ivy_lsp.workspace_detection import (
     _walk_up_for_marker,
     detect_ivy_workspace,
 )
+from ivy_lsp.infra.config import reset_config
 
 
 @pytest.fixture
@@ -24,11 +29,30 @@ def tmp_workspace(tmp_path):
 
 
 @pytest.fixture
+def isolated_tmp():
+    """Temp dir outside the workspace tree (avoids TMPDIR leakage).
+
+    When TMPDIR points inside the ivy-lsp directory (e.g. Claude Code sandbox),
+    pytest tmp_path creates dirs inside the workspace tree. The walk-up marker
+    search then finds the real .ivyworkspace marker, breaking isolation.
+    Tries /tmp first; falls back to default tempdir if /tmp is not writable.
+    """
+    try:
+        d = Path(tempfile.mkdtemp(prefix="ivy-ws-test-", dir="/tmp"))
+    except OSError:
+        d = Path(tempfile.mkdtemp(prefix="ivy-ws-test-"))
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.fixture
 def ivyworkspace_marker(tmp_workspace):
-    """Create a .ivyworkspace marker file in the tmp workspace."""
+    """Create a v3 .ivyworkspace marker file in the tmp workspace."""
     marker = {
-        "version": 1,
-        "include_paths": ["protocol-testing"],
+        "version": 3,
+        "workspace_layers": [{"id": "default", "include_paths": ["protocol-testing"]}],
         "exclude_paths": ["test", "doc"],
     }
     marker_path = tmp_workspace / ".ivyworkspace"
@@ -40,8 +64,8 @@ class TestReadMarker:
     def test_valid_marker(self, ivyworkspace_marker):
         data = _read_marker(str(ivyworkspace_marker))
         assert data is not None
-        assert data["version"] == 1
-        assert data["include_paths"] == ["protocol-testing"]
+        assert data["version"] == 3
+        assert len(data["workspace_layers"]) == 1
 
     def test_missing_file(self, tmp_workspace):
         data = _read_marker(str(tmp_workspace / "nonexistent"))
@@ -84,7 +108,10 @@ class TestWalkDownForMarker:
     def test_marker_in_subdirectory(self, tmp_workspace):
         sub = tmp_workspace / "project" / "ivy"
         sub.mkdir(parents=True)
-        marker = {"version": 1, "include_paths": ["src"]}
+        marker = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["src"]}],
+        }
         (sub / ".ivyworkspace").write_text(json.dumps(marker))
         config = _walk_down_for_marker(str(tmp_workspace))
         assert config is not None
@@ -94,12 +121,32 @@ class TestWalkDownForMarker:
     def test_marker_too_deep(self, tmp_workspace):
         deep = tmp_workspace / "a" / "b" / "c" / "d"
         deep.mkdir(parents=True)
-        (deep / ".ivyworkspace").write_text('{"version": 1}')
+        (deep / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_layers": []})
+        )
         config = _walk_down_for_marker(str(tmp_workspace), max_depth=2)
         assert config is None
 
     def test_no_marker(self, tmp_workspace):
         config = _walk_down_for_marker(str(tmp_workspace))
+        assert config is None
+
+    def test_skips_sub_workspace_marker(self, tmp_path):
+        """Walk-down skips markers whose resolved root differs from start_dir."""
+        parent = tmp_path / "walk_root"
+        project = parent / "project"
+        sub = project / "protocol-testing" / "quic"
+        sub.mkdir(parents=True)
+        marker = {
+            "version": 3,
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {"id": "quic", "include_paths": ["protocol-testing/quic"]}
+            ],
+        }
+        (sub / ".ivyworkspace").write_text(json.dumps(marker))
+        parent.mkdir(parents=True, exist_ok=True)
+        config = _walk_down_for_marker(str(parent))
         assert config is None
 
 
@@ -113,22 +160,68 @@ class TestPantherHeuristic:
             / "testers"
             / "panther_ivy"
         )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps(
+                {
+                    "version": 3,
+                    "workspace_root_offset": "../..",
+                    "workspace_layers": [
+                        {"id": "quic", "include_paths": ["protocol-testing/quic"]}
+                    ],
+                }
+            )
+        )
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
         assert config.project_type == "panther"
-        assert config.detected_by == "heuristic"
-        assert "protocol-testing" in config.include_paths
+        assert config.detected_by == "heuristic+marker"
+        assert any("protocol-testing" in p for p in config.include_paths)
 
     def test_inside_panther_ivy(self, tmp_workspace):
         # Simulate CWD being panther_ivy itself
-        (tmp_workspace / "protocol-testing").mkdir()
+        pt = tmp_workspace / "protocol-testing"
+        pt.mkdir()
         (tmp_workspace / "panther_ivy.py").write_text("# marker")
+
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         config = _panther_heuristic(str(tmp_workspace))
         assert config is not None
         assert config.project_type == "panther"
 
-    def test_no_panther_structure(self, tmp_workspace):
+    def test_no_panther_structure(self, isolated_tmp, monkeypatch):
+        # Prevent walk-up from escaping the temp dir by making dirname
+        # return the same path (simulates hitting filesystem root).
+        _real_dirname = os.path.dirname
+        root = str(isolated_tmp)
+
+        def _capped_dirname(p):
+            result = _real_dirname(p)
+            if not result.startswith(root):
+                return p  # stop walk
+            return result
+
+        monkeypatch.setattr(os.path, "dirname", _capped_dirname)
+        config = _panther_heuristic(root)
+        assert config is None
+
+    def test_no_markers_returns_none(self, tmp_workspace):
+        """PANTHER structure without per-protocol markers returns None."""
+        panther_ivy = (
+            tmp_workspace
+            / "panther"
+            / "plugins"
+            / "services"
+            / "testers"
+            / "panther_ivy"
+        )
+        (panther_ivy / "protocol-testing").mkdir(parents=True)
         config = _panther_heuristic(str(tmp_workspace))
         assert config is None
 
@@ -144,6 +237,7 @@ class TestDetectIvyWorkspace:
 
     def test_env_workspace_overrides(self, tmp_workspace, monkeypatch):
         monkeypatch.setenv("IVY_LSP_WORKSPACE", str(tmp_workspace / "env_ws"))
+        reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "explicit"
         assert config.workspace_root == str(tmp_workspace / "env_ws")
@@ -153,9 +247,13 @@ class TestDetectIvyWorkspace:
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         sub = tmp_workspace / "ivy-project"
         sub.mkdir()
-        marker = {"version": 1, "include_paths": ["models"]}
+        marker = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["models"]}],
+        }
         (sub / ".ivyworkspace").write_text(json.dumps(marker))
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", "ivy-project")
+        reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "hint"
         assert config.workspace_root == str(sub)
@@ -169,13 +267,15 @@ class TestDetectIvyWorkspace:
         assert config.detected_by == "marker"
         assert config.workspace_root == str(tmp_workspace)
 
-    def test_fallback_to_start_dir(self, monkeypatch):
+    def test_fallback_to_start_dir(self, isolated_tmp, monkeypatch):
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
-        with tempfile.TemporaryDirectory() as td:
-            config = detect_ivy_workspace(start_dir=td)
-            assert config.detected_by == "fallback"
-            assert config.workspace_root == os.path.abspath(td)
+        # Skip if TMPDIR fallback landed inside a real workspace tree
+        if _walk_up_for_marker(str(isolated_tmp)):
+            pytest.skip("TMPDIR is inside a workspace tree")
+        config = detect_ivy_workspace(start_dir=str(isolated_tmp))
+        assert config.detected_by == "fallback"
+        assert config.workspace_root == str(isolated_tmp.resolve())
 
     def test_explicit_include_exclude_paths(self, tmp_workspace):
         config = detect_ivy_workspace(
@@ -187,20 +287,29 @@ class TestDetectIvyWorkspace:
         assert config.include_paths == ["src"]
         assert config.exclude_paths == ["vendor"]
 
-    def test_panther_heuristic_detected(self, tmp_workspace, monkeypatch):
+    def test_panther_heuristic_detected(self, isolated_tmp, monkeypatch):
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        # Skip if TMPDIR fallback landed inside a real workspace tree
+        if _walk_up_for_marker(str(isolated_tmp)):
+            pytest.skip("TMPDIR is inside a workspace tree")
         panther_ivy = (
-            tmp_workspace
+            isolated_tmp
             / "panther"
             / "plugins"
             / "services"
             / "testers"
             / "panther_ivy"
         )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
-        config = detect_ivy_workspace(start_dir=str(tmp_workspace))
-        assert config.detected_by == "heuristic"
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
+        config = detect_ivy_workspace(start_dir=str(isolated_tmp))
+        assert config.detected_by == "heuristic+marker"
         assert config.project_type == "panther"
 
 
@@ -238,22 +347,31 @@ class TestResolveGitWorktree:
 
 
 class TestWorktreeWorkspaceDetection:
-    def test_worktree_detects_panther_via_main_tree(self, tmp_workspace, monkeypatch):
+    def test_worktree_detects_panther_via_main_tree(self, isolated_tmp, monkeypatch):
         """detect_ivy_workspace should follow worktree link to find PANTHER structure."""
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        # Skip if TMPDIR fallback landed inside a real workspace tree
+        if _walk_up_for_marker(str(isolated_tmp)):
+            pytest.skip("TMPDIR is inside a workspace tree")
 
         # Main repo with panther_ivy
-        main_repo = tmp_workspace / "main"
+        main_repo = isolated_tmp / "main"
         main_git = main_repo / ".git"
         main_git.mkdir(parents=True)
         panther_ivy = (
             main_repo / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
         )
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
 
         # Worktree with empty panther_ivy (simulates uninitialized submodule)
-        worktree = tmp_workspace / "worktree"
+        worktree = isolated_tmp / "worktree"
         worktree.mkdir()
         (
             worktree / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
@@ -266,20 +384,88 @@ class TestWorktreeWorkspaceDetection:
         config = detect_ivy_workspace(start_dir=str(worktree))
         assert "worktree" in config.detected_by
         assert config.project_type == "panther"
-        assert config.workspace_root == str(panther_ivy)
+        assert config.workspace_root == str(panther_ivy.resolve())
 
 
 class TestHintWithHeuristic:
-    def test_hint_with_panther_structure_no_marker(self, tmp_workspace, monkeypatch):
-        """Hint pointing to a dir with PANTHER structure but no marker should work."""
+    def test_hint_with_panther_structure_and_markers(self, tmp_workspace, monkeypatch):
+        """Hint pointing to a dir with PANTHER structure and protocol markers should work."""
         monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
         panther_ivy = tmp_workspace / "panther_ivy"
-        (panther_ivy / "protocol-testing").mkdir(parents=True)
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
         (panther_ivy / "panther_ivy.py").write_text("# marker")
+
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
         monkeypatch.setenv("IVY_LSP_WORKSPACE_HINT", str(panther_ivy))
+        reset_config()
         config = detect_ivy_workspace(start_dir=str(tmp_workspace))
         assert config.detected_by == "hint"
         assert config.project_type == "panther"
+
+
+class TestExplicitWorkspaceWithMarker:
+    def test_explicit_workspace_reads_marker(self, tmp_workspace):
+        """Explicit workspace with .ivyworkspace should read marker (MCP mode fix)."""
+        marker = {
+            "version": 3,
+            "workspace_layers": [
+                {
+                    "id": "standard",
+                    "include_paths": [
+                        "protocol-testing/quic",
+                        "protocol-testing/minip",
+                    ],
+                },
+                {"id": "apt", "include_paths": ["protocol-testing/apt"], "priority": 2},
+            ],
+            "exclude_paths": ["test", "doc"],
+        }
+        (tmp_workspace / ".ivyworkspace").write_text(json.dumps(marker))
+        config = detect_ivy_workspace(
+            start_dir="/tmp",
+            explicit_workspace=str(tmp_workspace),
+        )
+        assert config.detected_by == "explicit+marker"
+        assert "protocol-testing/quic" in config.include_paths
+        assert "protocol-testing/minip" in config.include_paths
+        assert "protocol-testing/apt" in config.include_paths
+        assert config.exclude_paths == ["test", "doc"]
+        assert len(config.workspace_layers) == 2
+        assert config.workspace_layers[0].id == "standard"
+
+    def test_explicit_workspace_no_marker_falls_back(self, tmp_workspace):
+        """Explicit workspace without .ivyworkspace should return empty paths (existing behavior)."""
+        config = detect_ivy_workspace(
+            start_dir="/tmp",
+            explicit_workspace=str(tmp_workspace),
+        )
+        assert config.detected_by == "explicit"
+        assert config.include_paths == []
+        assert config.exclude_paths == []
+
+    def test_explicit_cli_paths_override_marker(self, tmp_workspace):
+        """Explicit CLI include/exclude paths should override marker-derived ones."""
+        marker = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["from-marker"]}],
+            "exclude_paths": ["marker-exclude"],
+        }
+        (tmp_workspace / ".ivyworkspace").write_text(json.dumps(marker))
+        config = detect_ivy_workspace(
+            start_dir="/tmp",
+            explicit_workspace=str(tmp_workspace),
+            explicit_include_paths=["cli-include"],
+            explicit_exclude_paths=["cli-exclude"],
+        )
+        assert config.detected_by == "explicit+marker"
+        assert config.include_paths == ["cli-include"]
+        assert config.exclude_paths == ["cli-exclude"]
+        # Layers should still be populated from marker
+        assert len(config.workspace_layers) == 1
 
 
 class TestWorkspaceConfig:
@@ -289,3 +475,449 @@ class TestWorkspaceConfig:
         assert config.exclude_paths == []
         assert config.detected_by == "fallback"
         assert config.project_type is None
+
+
+class TestV2Rejection:
+    def test_v2_marker_returns_none(self, isolated_tmp):
+        """v2 .ivyworkspace should be gracefully ignored (return None)."""
+        marker = {"version": 2, "include_paths": ["protocol-testing"]}
+        marker_path = isolated_tmp / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        result = _walk_up_for_marker(str(isolated_tmp), max_depth=1)
+        assert result is None
+
+    def test_v1_marker_returns_none(self, isolated_tmp):
+        """v1 .ivyworkspace should be gracefully ignored (return None)."""
+        marker = {"version": 1}
+        marker_path = isolated_tmp / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        result = _walk_up_for_marker(str(isolated_tmp), max_depth=1)
+        assert result is None
+
+
+class TestV3LayerParsing:
+    def test_v3_layers_parsed(self, tmp_workspace):
+        """v3 .ivyworkspace should parse workspace_layers correctly."""
+        marker = {
+            "version": 3,
+            "workspace_layers": [
+                {"id": "standard", "include_paths": ["quic", "minip"], "priority": 1},
+                {"id": "apt", "include_paths": ["apt"], "priority": 2},
+            ],
+            "exclude_paths": ["test"],
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        config = _walk_up_for_marker(str(tmp_workspace))
+        assert config is not None
+        assert len(config.workspace_layers) == 2
+        assert config.workspace_layers[0].id == "standard"
+        assert config.workspace_layers[0].include_paths == ["quic", "minip"]
+        assert config.workspace_layers[1].id == "apt"
+        assert config.workspace_layers[1].priority == 2
+        # Flattened include_paths from all layers
+        assert "quic" in config.include_paths
+        assert "minip" in config.include_paths
+        assert "apt" in config.include_paths
+
+    def test_v3_empty_layers(self, tmp_workspace):
+        """v3 with empty workspace_layers should still work."""
+        marker = {"version": 3, "workspace_layers": []}
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker))
+        config = _walk_up_for_marker(str(tmp_workspace))
+        assert config is not None
+        assert config.workspace_layers == []
+
+
+class TestPantherHeuristicV3:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Task 2: workspace_groups, protocol_id, workspace_root_offset
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceConfigNewFields:
+    def test_workspace_config_has_workspace_groups(self):
+        """WorkspaceConfig must have workspace_groups defaulting to empty dict."""
+        config = WorkspaceConfig(workspace_root="/tmp/test")
+        assert hasattr(config, "workspace_groups")
+        assert config.workspace_groups == {}
+
+    def test_workspace_config_has_protocol_id(self):
+        """WorkspaceConfig must have protocol_id defaulting to None."""
+        config = WorkspaceConfig(workspace_root="/tmp/test")
+        assert hasattr(config, "protocol_id")
+        assert config.protocol_id is None
+
+    def test_workspace_config_has_workspace_root_offset(self):
+        """WorkspaceConfig must have workspace_root_offset defaulting to None."""
+        config = WorkspaceConfig(workspace_root="/tmp/test")
+        assert hasattr(config, "workspace_root_offset")
+        assert config.workspace_root_offset is None
+
+
+class TestApplyMarkerNewFields:
+    def test_apply_marker_parses_workspace_groups(self, tmp_workspace):
+        """_apply_marker must parse workspace_groups from JSON."""
+        from ivy_lsp.core.workspace.detection import _apply_marker
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["src"]}],
+            "workspace_groups": {
+                "quic": ["protocol-testing/quic"],
+                "minip": ["protocol-testing/minip"],
+            },
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.workspace_groups == {
+            "quic": ["protocol-testing/quic"],
+            "minip": ["protocol-testing/minip"],
+        }
+
+    def test_apply_marker_parses_protocol_id(self, tmp_workspace):
+        """_apply_marker must parse protocol_id from JSON."""
+        from ivy_lsp.core.workspace.detection import _apply_marker
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [{"id": "default", "include_paths": ["src"]}],
+            "protocol_id": "quic",
+            "workspace_root_offset": "../..",
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.protocol_id == "quic"
+
+    def test_workspace_root_offset_resolves_correctly(self, tmp_workspace):
+        """workspace_root_offset must shift workspace_root relative to marker dir."""
+        import os
+
+        from ivy_lsp.core.workspace.detection import _apply_marker
+
+        # Simulate: marker lives at tmp/protocol-testing/quic/.ivyworkspace
+        # offset "../.." should resolve to tmp/ (the panther_ivy root)
+        protocol_dir = tmp_workspace / "protocol-testing" / "quic"
+        protocol_dir.mkdir(parents=True)
+        offset = "../.."
+        expected_root = os.path.normpath(str(protocol_dir) + "/" + offset)
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [{"id": "quic", "include_paths": ["."]}],
+            "protocol_id": "quic",
+            "workspace_root_offset": offset,
+        }
+        marker_path = protocol_dir / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.workspace_root == expected_root
+        assert config.workspace_root_offset == offset
+
+    def test_apply_marker_optional_fields(self, tmp_workspace):
+        """Existing markers without optional fields must parse correctly with defaults."""
+        from ivy_lsp.core.workspace.detection import _apply_marker
+
+        marker_data = {
+            "version": 3,
+            "workspace_layers": [
+                {"id": "standard", "include_paths": ["protocol-testing/quic"]}
+            ],
+            "exclude_paths": ["test"],
+        }
+        marker_path = tmp_workspace / ".ivyworkspace"
+        marker_path.write_text(json.dumps(marker_data))
+
+        config = _apply_marker(str(marker_path), marker_data)
+
+        assert config is not None
+        assert config.workspace_groups == {}
+        assert config.protocol_id is None
+        assert config.workspace_root_offset is None
+        # Existing fields unaffected
+        assert config.workspace_root == str(tmp_workspace)
+        assert "protocol-testing/quic" in config.include_paths
+        assert config.exclude_paths == ["test"]
+
+
+# ---------------------------------------------------------------------------
+# Task 13: _discover_protocols dynamic discovery
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverProtocols:
+    def test_discover_protocols_from_markers(self, tmp_path):
+        """Protocols with .ivyworkspace markers are discovered; those without are not."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "apt").mkdir()
+        (pt / "apt" / ".ivyworkspace").write_text('{"version": 3}')
+        (pt / "no_marker").mkdir()  # No marker — should not be discovered
+
+        protocols = _discover_protocols(str(pt))
+        assert "quic" in protocols
+        assert "apt" in protocols
+        assert "no_marker" not in protocols
+
+    def test_discover_protocols_sorted(self, tmp_path):
+        """Discovered protocol list is sorted alphabetically."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        for name in ["zzz", "aaa", "mmm"]:
+            (pt / name).mkdir()
+            (pt / name / ".ivyworkspace").write_text('{"version": 3}')
+
+        protocols = _discover_protocols(str(pt))
+        assert protocols == sorted(protocols)
+
+    def test_discover_protocols_nonexistent_dir(self, tmp_path):
+        """Non-existent protocol-testing dir returns empty list."""
+        protocols = _discover_protocols(str(tmp_path / "no-such-dir"))
+        assert protocols == []
+
+    def test_discover_protocols_empty_dir(self, tmp_path):
+        """Empty protocol-testing dir returns empty list."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        protocols = _discover_protocols(str(pt))
+        assert protocols == []
+
+    def test_discover_protocols_files_ignored(self, tmp_path):
+        """Regular files (not dirs) are not returned, even if named like protocols."""
+        pt = tmp_path / "protocol-testing"
+        pt.mkdir()
+        (pt / "README.md").write_text("not a protocol dir")
+        protocols = _discover_protocols(str(pt))
+        assert protocols == []
+
+
+class TestPantherHeuristicDynamicDiscovery:
+    def test_heuristic_uses_discovered_protocols(self, tmp_path):
+        """PANTHER heuristic discovers protocols via per-protocol markers."""
+        panther_ivy = (
+            tmp_path / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        )
+        pt = panther_ivy / "protocol-testing"
+        pt.mkdir(parents=True)
+        (pt / "quic").mkdir()
+        (pt / "quic" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
+        (pt / "bgp").mkdir()
+        (pt / "bgp" / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
+        (pt / "no_marker").mkdir()  # No marker — must be excluded
+
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.project_type == "panther"
+        assert config.include_paths == []
+        assert not any("no_marker" in p for p in config.include_paths)
+
+
+# ---------------------------------------------------------------------------
+# Task 4: marker-merge for _build_panther_workspace
+# ---------------------------------------------------------------------------
+
+
+class TestPantherHeuristicMarkerMerge:
+    def _make_panther_workspace(self, tmp_path):
+        """Helper: create a PANTHER workspace with quic and minip markers."""
+        panther_ivy = (
+            tmp_path / "panther" / "plugins" / "services" / "testers" / "panther_ivy"
+        )
+        pt = panther_ivy / "protocol-testing"
+        quic_dir = pt / "quic"
+        (quic_dir / "quic_stack").mkdir(parents=True)
+        (quic_dir / "quic_utils").mkdir(parents=True)
+        (quic_dir / "quic_tests").mkdir(parents=True)
+        (quic_dir / "quic_stack" / "quic_connection.ivy").write_text("# quic conn")
+        (quic_dir / "quic_utils" / "byte_stream.ivy").write_text("# quic byte_stream")
+        quic_marker = {
+            "version": 3,
+            "standard_library": "ivy/include/1.7",
+            "protocol_id": "quic",
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {
+                    "id": "quic",
+                    "include_paths": [
+                        "protocol-testing/quic/quic_stack",
+                        "protocol-testing/quic/quic_utils",
+                    ],
+                    "priority": 1,
+                },
+                {
+                    "id": "quic_tests",
+                    "include_paths": ["protocol-testing/quic/quic_tests"],
+                    "priority": 2,
+                    "depends_on": ["quic"],
+                },
+            ],
+            "exclude_paths": ["doc", "test", "submodules"],
+        }
+        (quic_dir / ".ivyworkspace").write_text(json.dumps(quic_marker))
+
+        minip_dir = pt / "minip"
+        minip_dir.mkdir(parents=True)
+        (minip_dir / "ping_types.ivy").write_text("# minip types")
+        minip_marker = {
+            "version": 3,
+            "standard_library": "ivy/include/1.7",
+            "protocol_id": "minip",
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {
+                    "id": "minip",
+                    "include_paths": ["protocol-testing/minip"],
+                    "priority": 3,
+                },
+            ],
+            "exclude_paths": ["doc", "test", "submodules"],
+        }
+        (minip_dir / ".ivyworkspace").write_text(json.dumps(minip_marker))
+        return panther_ivy, pt
+
+    def test_merges_layers_from_all_markers(self, tmp_path):
+        """Heuristic merges layers from per-protocol markers, not coarse dirs."""
+        panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.detected_by == "heuristic+marker"
+        assert config.project_type == "panther"
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert layer_ids == {"quic", "quic_tests", "minip"}
+        quic_layer = next(l for l in config.workspace_layers if l.id == "quic")
+        assert "protocol-testing/quic/quic_stack" in quic_layer.include_paths
+        assert "protocol-testing/quic/quic_utils" in quic_layer.include_paths
+        assert "protocol-testing/quic" not in quic_layer.include_paths
+        quic_tests = next(l for l in config.workspace_layers if l.id == "quic_tests")
+        assert quic_tests.depends_on == ["quic"]
+
+    def test_standard_library_from_first_marker(self, tmp_path):
+        _panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert config.standard_library == "ivy/include/1.7"
+
+    def test_exclude_paths_union(self, tmp_path):
+        _panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert "doc" in config.exclude_paths
+        assert "test" in config.exclude_paths
+        assert "submodules" in config.exclude_paths
+
+    def test_include_paths_from_layers(self, tmp_path):
+        _panther_ivy, _pt = self._make_panther_workspace(tmp_path)
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        assert "protocol-testing/quic/quic_stack" in config.include_paths
+        assert "protocol-testing/quic/quic_utils" in config.include_paths
+        assert "protocol-testing/quic/quic_tests" in config.include_paths
+        assert "protocol-testing/minip" in config.include_paths
+
+    def test_skips_non_v3_marker(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        bgp_dir = pt / "bgp"
+        bgp_dir.mkdir(parents=True)
+        (bgp_dir / ".ivyworkspace").write_text('{"version": 1}')
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert "bgp" not in layer_ids
+
+    def test_skips_conflicting_workspace_root(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        bad_dir = pt / "bad"
+        bad_dir.mkdir(parents=True)
+        bad_marker = {
+            "version": 3,
+            "workspace_root_offset": "../../..",
+            "workspace_layers": [{"id": "bad", "include_paths": ["something"]}],
+        }
+        (bad_dir / ".ivyworkspace").write_text(json.dumps(bad_marker))
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert "bad" not in layer_ids
+
+    def test_layer_id_collision_raises(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        dup_dir = pt / "dup"
+        dup_dir.mkdir(parents=True)
+        dup_marker = {
+            "version": 3,
+            "workspace_root_offset": "../..",
+            "workspace_layers": [
+                {"id": "quic", "include_paths": ["protocol-testing/dup"]}
+            ],
+        }
+        (dup_dir / ".ivyworkspace").write_text(json.dumps(dup_marker))
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = [l.id for l in config.workspace_layers]
+        assert layer_ids.count("quic") == 1
+
+    def test_empty_v3_marker_harmless(self, tmp_path):
+        panther_ivy, pt = self._make_panther_workspace(tmp_path)
+        empty_dir = pt / "empty"
+        empty_dir.mkdir(parents=True)
+        (empty_dir / ".ivyworkspace").write_text(
+            json.dumps({"version": 3, "workspace_root_offset": "../.."})
+        )
+        config = _panther_heuristic(str(tmp_path))
+        assert config is not None
+        layer_ids = {l.id for l in config.workspace_layers}
+        assert layer_ids == {"quic", "quic_tests", "minip"}
+
+
+# ---------------------------------------------------------------------------
+# Task 3: symlink canonicalization via os.path.realpath
+# ---------------------------------------------------------------------------
+
+
+class TestSymlinkCanonicalization:
+    def test_detect_ivy_workspace_resolves_symlinks(self, tmp_path, monkeypatch):
+        """Verify detect_ivy_workspace returns canonical path when given a symlink."""
+        monkeypatch.delenv("IVY_LSP_WORKSPACE", raising=False)
+        monkeypatch.delenv("IVY_LSP_WORKSPACE_HINT", raising=False)
+        reset_config()
+
+        real_dir = tmp_path / "real_workspace"
+        real_dir.mkdir()
+        (real_dir / ".ivyworkspace").write_text(
+            json.dumps(
+                {
+                    "version": 3,
+                    "workspace_layers": [
+                        {"id": "main", "include_paths": ["."], "priority": 1}
+                    ],
+                }
+            )
+        )
+        link = tmp_path / "symlink_workspace"
+        link.symlink_to(real_dir)
+
+        config = detect_ivy_workspace(str(link))
+        assert config.workspace_root == str(
+            real_dir.resolve()
+        ), f"Expected canonical path {real_dir.resolve()}, got {config.workspace_root}"

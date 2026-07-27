@@ -4,7 +4,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from ivy_lsp.indexer.workspace_indexer import (
+from ivy_lsp.core.indexer.workspace_indexer import (
     DeepIndexProgress,
     FileIndexStatus,
     WorkspaceIndexer,
@@ -106,14 +106,16 @@ class TestWorkspaceIndexerProgressTracking:
         resolver.resolve.return_value = None
 
         idx = WorkspaceIndexer(str(tmp_path), parser, resolver)
-        from ivy_lsp.analysis.test_scope import ExportImportInfo
+        from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
         idx._file_export_imports[str(f)] = ExportImportInfo(
             file=str(f),
             exports=["foo"],
         )
 
-        with patch("ivy_lsp.parsing.ast_to_symbols.ast_to_symbols", return_value=[]):
+        with patch(
+            "ivy_lsp.core.parsing.ast_to_symbols.ast_to_symbols", return_value=[]
+        ):
             idx._deep_index_from_tests()
 
         progress = idx._deep_index_progress

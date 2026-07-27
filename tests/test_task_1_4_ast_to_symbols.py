@@ -3,9 +3,9 @@
 import pytest
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.ast_to_symbols import ast_to_symbols
-from ivy_lsp.parsing.parser_session import IvyParserWrapper
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.ast_to_symbols import ast_to_symbols
+from ivy_lsp.core.parsing.parser_session import IvyParserWrapper
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -133,9 +133,9 @@ object bit = {
 
 
 class TestActionDecl:
-    """Action declarations produce SymbolKind.Function with detail."""
+    """Action declarations produce SymbolKind.Method (stateful procedures)."""
 
-    def test_action_is_function(self):
+    def test_action_is_method(self):
         source = """\
 #lang ivy1.7
 
@@ -148,7 +148,7 @@ action send(src:cid, dst:cid) returns (result:cid) = {
         symbols = _parse_and_convert(source)
         sym = _find_symbol(symbols, "send")
         assert sym is not None
-        assert sym.kind == SymbolKind.Function
+        assert sym.kind == SymbolKind.Method
 
     def test_action_detail_contains_params(self):
         source = """\
@@ -204,6 +204,31 @@ relation connected(X:cid, Y:cid)
         sym = _find_symbol(symbols, "connected")
         assert sym is not None
         assert sym.kind == SymbolKind.Function
+
+
+# ---------------------------------------------------------------------------
+# Test: Function keyword (pure function, not action)
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionKeyword:
+    """function keyword produces pure Function, distinct from action Method."""
+
+    def test_function_is_function_not_method(self):
+        source = """\
+#lang ivy1.7
+
+type t
+function f(X:t) : t
+"""
+        symbols = _parse_and_convert(source)
+        # function keyword parses as ConstantDecl or DerivedDecl, not ActionDecl
+        # It should be Variable (ConstantDecl) or Function (if has args), NOT Method
+        sym = _find_symbol(symbols, "f")
+        assert sym is not None
+        assert (
+            sym.kind != SymbolKind.Method
+        ), f"Pure function should NOT be Method (that's for actions), got {sym.kind}"
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +388,67 @@ object frame = {
             "largest_acked" in child_names
         ), f"Expected 'largest_acked' in ack children, got {child_names}"
 
+    def test_four_level_nesting(self):
+        """Four levels of nested objects are correctly reconstructed."""
+        source = """\
+#lang ivy1.7
+
+object a = {
+    object b = {
+        object c = {
+            type this
+        }
+    }
+}
+"""
+        symbols = _parse_and_convert(source)
+        a_sym = _find_symbol(symbols, "a", SymbolKind.Module)
+        assert a_sym is not None
+        b_sym = _find_symbol(a_sym.children, "b", SymbolKind.Module)
+        assert (
+            b_sym is not None
+        ), f"Expected 'b' as child of 'a', got: {[c.name for c in a_sym.children]}"
+        c_sym = _find_symbol(b_sym.children, "c", SymbolKind.Module)
+        assert (
+            c_sym is not None
+        ), f"Expected 'c' as child of 'b', got: {[c.name for c in b_sym.children]}"
+        # 'type this' should be child of c
+        this_sym = _find_symbol(c_sym.children, "this", SymbolKind.Class)
+        assert (
+            this_sym is not None or len(c_sym.children) >= 1
+        ), f"Expected 'this' in c's children, got: {[c.name for c in c_sym.children]}"
+
+    def test_duplicate_name_object_plus_type(self):
+        """Object and inner 'type this' sharing name 'bit': type nests under object.
+
+        The parser expands ``type this`` inside ``object bit`` to a TypeDecl
+        named ``"bit"``, so both the ObjectDecl and the TypeDecl share the
+        same name.  The Module (object) should win as the root symbol and
+        the Class (type) should be nested as its child.
+        """
+        source = """\
+#lang ivy1.7
+
+object bit = {
+    type this
+    individual zero:bit
+}
+"""
+        symbols = _parse_and_convert(source)
+        # 'bit' Module should be at root
+        bit_module = _find_symbol(symbols, "bit", SymbolKind.Module)
+        assert bit_module is not None, "Expected Module 'bit' at root"
+        # The type 'bit' (from 'type this') should be a Class child of the Module
+        type_child = None
+        for c in bit_module.children:
+            if c.kind == SymbolKind.Class:
+                type_child = c
+                break
+        assert type_child is not None, (
+            f"Expected a Class child (from 'type this') under 'bit' Module, got: "
+            f"{[(c.name, c.kind) for c in bit_module.children]}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test: File path propagation
@@ -499,7 +585,7 @@ class TestRobustness:
         for sym in symbols:
             assert isinstance(sym, IvySymbol)
 
-    def test_mixin_declarations_skipped(self):
+    def test_mixin_declarations_produce_method(self):
         source = """\
 #lang ivy1.7
 
@@ -514,12 +600,15 @@ before foo.step {
 }
 """
         symbols = _parse_and_convert(source)
-        # Mixins should not produce symbols
-        # The before/after decls should be skipped
         sym_names = [s.name for s in symbols]
-        # Should have 't' and 'foo' but not a mixin symbol
+        # Should have 't', 'foo', and the mixin target 'foo.step'
         assert "t" in sym_names
         assert "foo" in sym_names
+        # Mixin should produce a Method symbol for the mixee (action monitor)
+        mixin_sym = _find_symbol(symbols, "step", SymbolKind.Method)
+        assert (
+            mixin_sym is not None
+        ), f"Expected mixin Method symbol, got: {[(s.name, s.kind) for s in symbols]}"
 
 
 # ---------------------------------------------------------------------------
@@ -603,3 +692,175 @@ class TestQuicTypesIntegration:
                 check_file_path(sym.children, path_str)
 
         check_file_path(symbols, str(quic_types_path))
+
+
+# ---------------------------------------------------------------------------
+# Test: Export declaration name without prefix
+# ---------------------------------------------------------------------------
+
+
+class TestExportDecl:
+    """Export declarations produce SymbolKind.Event with clean name."""
+
+    def test_export_name_without_prefix(self):
+        source = """\
+#lang ivy1.7
+
+type t
+
+action send(x:t)
+
+export send
+"""
+        symbols = _parse_and_convert(source)
+        export_syms = [s for s in symbols if s.kind == SymbolKind.Event]
+        assert (
+            len(export_syms) >= 1
+        ), f"Expected at least 1 Event symbol, got: {[(s.name, s.kind) for s in symbols]}"
+        # Name should be 'send', not 'export send'
+        assert (
+            export_syms[0].name == "send"
+        ), f"Expected name='send', got name='{export_syms[0].name}'"
+        # Detail should carry the export prefix
+        assert export_syms[0].detail is not None
+        assert "export" in export_syms[0].detail
+
+
+# ---------------------------------------------------------------------------
+# Test: Alias has correct range (not matching comment)
+# ---------------------------------------------------------------------------
+
+
+class TestAliasRange:
+    """Alias declarations should point to the actual declaration line."""
+
+    def test_alias_has_correct_range(self):
+        source = """\
+#lang ivy1.7
+
+type cid
+# alias aid mentioned in a comment
+alias aid = cid
+"""
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "aid")
+        assert sym is not None
+        # 'alias aid = cid' is on line 5 (1-based), so line_idx=4 (0-based)
+        assert (
+            sym.range[0] == 4
+        ), f"Expected alias on line 4 (0-based), got {sym.range[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Test: Module has non-zero range
+# ---------------------------------------------------------------------------
+
+
+class TestModuleRange:
+    """Module declarations should have non-zero ranges."""
+
+    def test_module_has_nonzero_range(self):
+        source = """\
+#lang ivy1.7
+
+module counter(t) = {
+    individual val : t
+}
+"""
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "counter")
+        assert sym is not None
+        # Should not be all zeros
+        assert sym.range != (
+            0,
+            0,
+            0,
+            0,
+        ), f"Expected non-zero range for module, got {sym.range}"
+
+
+# ---------------------------------------------------------------------------
+# Test: Attribute declaration
+# ---------------------------------------------------------------------------
+
+
+class TestAttributeDecl:
+    """Attribute declarations produce SymbolKind.Constant."""
+
+    def test_attribute_produces_constant_symbol(self):
+        source = "#lang ivy1.7\n\nattribute radix = 16\n"
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
+        assert (
+            sym is not None
+        ), f"Expected Constant symbol 'radix', got: {[(s.name, s.kind) for s in symbols]}"
+        assert sym.kind == SymbolKind.Constant
+
+    def test_attribute_detail_contains_value(self):
+        source = "#lang ivy1.7\n\nattribute radix = 16\n"
+        symbols = _parse_and_convert(source)
+        sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
+        assert sym is not None
+        assert sym.detail is not None
+        assert "attribute radix = 16" in sym.detail
+
+    def test_attribute_file_path(self):
+        source = "#lang ivy1.7\n\nattribute radix = 16\n"
+        symbols = _parse_and_convert(source, "my_file.ivy")
+        sym = _find_symbol(symbols, "radix", SymbolKind.Constant)
+        assert sym is not None
+        assert sym.file_path == "my_file.ivy"
+
+    def test_dotted_attribute_stays_at_root(self):
+        """Dotted attribute names are callatom references, not nested scopes."""
+        source = """\
+#lang ivy1.7
+
+type stream_pos
+attribute stream_pos.cardinality = 4
+"""
+        symbols = _parse_and_convert(source)
+        # The attribute should be at root level with its full dotted name,
+        # NOT nested under the 'stream_pos' type.
+        attr = None
+        for s in symbols:
+            if s.kind == SymbolKind.Constant and "stream_pos" in s.name:
+                attr = s
+                break
+        assert attr is not None, (
+            f"Expected Constant attribute with 'stream_pos' in name at root, "
+            f"got: {[(s.name, s.kind) for s in symbols]}"
+        )
+        # Verify it was NOT nested under stream_pos type
+        stream_type = _find_symbol(symbols, "stream_pos", SymbolKind.Class)
+        if stream_type is not None:
+            child_kinds = [c.kind for c in stream_type.children]
+            assert (
+                SymbolKind.Constant not in child_kinds
+            ), "Dotted attribute should NOT be nested under the type"
+
+    def test_deeply_dotted_attribute(self):
+        """Deeply dotted attribute names stay at root level."""
+        source = """\
+#lang ivy1.7
+
+object frame = {
+    type this
+}
+attribute frame.rst_stream.handle.weight = "0.02"
+"""
+        symbols = _parse_and_convert(source)
+        # The attribute should be at root, not nested under frame
+        frame_sym = _find_symbol(symbols, "frame", SymbolKind.Module)
+        assert frame_sym is not None
+        # No Constant children should exist on frame
+        const_children = [
+            c for c in frame_sym.children if c.kind == SymbolKind.Constant
+        ]
+        assert len(const_children) == 0, (
+            f"Deeply dotted attribute should NOT be nested under 'frame', "
+            f"found: {[(c.name, c.kind) for c in const_children]}"
+        )
+        # Should be findable at root level
+        root_constants = [s for s in symbols if s.kind == SymbolKind.Constant]
+        assert len(root_constants) >= 1, "Expected at least one root-level Constant"

@@ -16,7 +16,7 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.utils.counterexample_parser import parse_counterexample
+from ivy_lsp.infra.utils.counterexample_parser import parse_counterexample
 
 
 class TestParseCounterexample:

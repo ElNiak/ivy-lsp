@@ -14,13 +14,13 @@ IVY_ROOT = Path(__file__).resolve().parent.parent
 if str(IVY_ROOT) not in sys.path:
     sys.path.insert(0, str(IVY_ROOT))
 
-from ivy_lsp.analysis.requirement_graph import (
+from ivy_lsp.core.analysis.requirement_graph import (
     EdgeType,
     RequirementGraph,
     RequirementNode,
 )
-from ivy_lsp.analysis.test_scope import ScopedRequirementModel, TestScope
-from ivy_lsp.features.diagnostics import compute_requirement_diagnostics
+from ivy_lsp.core.analysis.test_scope import ScopedRequirementModel, TestScope
+from ivy_lsp.lsp.diagnostics.compute import compute_requirement_diagnostics
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -364,4 +364,4 @@ class TestScopedDiagnosticProperties:
         source = "    action quic.send(x:t)\n"
         diags = compute_requirement_diagnostics(source, _abs("f.ivy"), indexer)
         hints = _unmonitored_diags(diags)
-        assert hints[0].source == "ivy-lsp-reqs"
+        assert hints[0].source == "ivy-semantic"

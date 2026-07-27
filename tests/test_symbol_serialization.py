@@ -2,7 +2,7 @@
 
 from lsprotocol.types import SymbolKind
 
-from ivy_lsp.parsing.symbols import IvySymbol
+from ivy_lsp.core.parsing.symbols import IvySymbol
 
 
 class TestIvySymbolSerialization:
@@ -30,6 +30,7 @@ class TestIvySymbolSerialization:
             "detail": "action foo",
             "file_path": "/tmp/a.ivy",
             "children": [],
+            "synthetic": False,
         }
         sym = IvySymbol.from_dict(d)
         assert sym.name == "foo"
@@ -62,7 +63,7 @@ class TestIvySymbolSerialization:
         assert restored.file_path is None
 
 
-from ivy_lsp.analysis.test_scope import ExportImportInfo
+from ivy_lsp.core.analysis.test_scope import ExportImportInfo
 
 
 class TestExportImportInfoSerialization:
