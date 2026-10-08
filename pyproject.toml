@@ -33,7 +33,9 @@ dependencies = [
 
 [project.optional-dependencies]
 full = []
-mcp = ["mcp>=1.26.0", "anyio>=4.13.0", "docker>=7.0", "pyyaml>=6.0", "uvicorn>=0.30"]
+# mcp 2 removed mcp.server.fastmcp, which the engine imports. Keep the upper
+# bound until the engine uses mcp 2's interface.
+mcp = ["mcp>=1.26.0,<2", "anyio>=4.13.0", "docker>=7.0", "pyyaml>=6.0", "uvicorn>=0.30"]
 dev = [
     "pytest",
     "pytest-asyncio",
